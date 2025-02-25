@@ -1,0 +1,40 @@
+Running log of event transactions
+Every transaction has an index and a (multi-part) time
+
+513 1.5.3.9 player/body/arm/strength +1
+514 1.5.3.10 player/fear/goo +1
+515 1.5.3.10 player/history + "seen goo"
+516 1.5.3.10 player/inventory + "goo bits"
+  
+e.g. inventory is "sum" of items
+stats are sum of updates
+
+some form of ECS like system
+attribute sets => attribute sets or entities
+
+player/body/arm/strength
+
+Queries over time, including past and future, with PROLOG style place-holders
+Future queries answered via constraints and/or probabilities
+
+Postulated futures? (e.g. "player escapes in next turn)
+Future-hinting structure? Inc. dynamic hints.
+
+Some form of simple query language
+
+Type checking on compile all transactions
+Reachability/coverage testing
+(inc. dynamically in game while testing)
+
+Standardised randomisation, including manual control, exhaustive searching
+
+"Fresh state" schema + defaults
+
+
+* `set_time('+1.0.0.0')` set the time. Relative adjustments are given with `+n`. Travelling to the past (or the exact present) will revert state and branch the world. Returns the old branch.
+
+* `can(query)` return True if query can happen, False otherwise
+* `when(query)` return the soonest time that query can happen, if it can happen, or None, if it can't
+* `likely(query)` how likely query is to happen
+
+`(can be-in? player house)`
