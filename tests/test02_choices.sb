@@ -1,0 +1,75 @@
+
+# test02_choices.sb
+#
+# Choices, scene navigation, conditional narration, and a simple
+# transaction function with a precondition.
+#
+# Tests:
+#   - Scene choices: * sigil
+#   - Choice guards: * [condition] text
+#   - Conditional narration: [condition] text
+#   - Unconditional goto: -> name
+#   - Transaction function: fn with pre: and set!
+#   - Boolean state field
+#   - if/else in narration body
+#   - post: with simple assertion
+#
+# Expected behaviour:
+#   The player starts in a room with a key on the floor.
+#   "Pick up the key" choice is hidden once the key is held.
+#   The north room text changes depending on whether the player holds the key.
+#   Visiting the north room without the key and then returning still works.
+#
+# Reachable states:
+#   player/has-key = false, location = room
+#   player/has-key = false, location = north-room
+#   player/has-key = true,  location = room
+#   player/has-key = true,  location = north-room
+
+module test-choices
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: room
+
+# ── State ──────────────────────────────────────────────────────────────────
+
+state player:
+  has-key:  Bool = false
+  location: Bool = false   # used only so we have >1 field; real location
+                            # is tracked by scene navigation in this example
+
+# ── Functions ──────────────────────────────────────────────────────────────
+
+fn pickup-key:
+  pre:  not player/has-key
+  post: player/has-key = true
+  set!  player/has-key true
+
+# ── Scenes ─────────────────────────────────────────────────────────────────
+
+scene room:
+  You are in a dusty room. Weak light filters through a crack in the ceiling.
+
+  [not player/has-key] A rusty key lies on the floor.
+  [player/has-key]     You are holding the rusty key.
+
+  * [not player/has-key] Pick up the key
+    pickup-key
+    -> room
+
+  * Go north
+    -> north-room
+
+scene north-room:
+  You are in the north room.
+
+  if player/has-key:
+    The padlock on the chest springs open. Inside you find nothing of value.
+  else:
+    A heavy chest sits against the wall. Its padlock looks sturdy.
+
+  * Go back
+    -> room

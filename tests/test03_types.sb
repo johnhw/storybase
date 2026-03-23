@@ -1,0 +1,152 @@
+
+# test03_types.sb
+#
+# Type system: enums, bounded integers, records, record mixins, variants,
+# pure functions, the discrete/superficial boundary, and compile-time errors.
+#
+# Tests:
+#   - Enum type declaration
+#   - Bounded integer type alias
+#   - Record type with field defaults
+#   - Record mixin: `with` splicing fields from another record
+#   - Default override in mixin (not type override)
+#   - Variant type declaration
+#   - SymbolOf family alias (NpcId)
+#   - Pure functions reading discrete state
+#   - match as an expression returning a value
+#   - Superficial field (String, Float) present but not used in conditions
+#   - Compiler correctly allows: discrete → condition, superficial → assignment
+#   - State-space computation implied by bounded types
+#
+# Expected behaviour:
+#   storybase compile test03_types.sb  →  no errors, no warnings
+#   Running shows player class, base damage, and effective damage range.
+#
+# Compiler MUST reject (kept as comments to document the boundary):
+#
+#   if player/title = "Sir":   # ERROR: String in condition
+#     inc! player/gold 10
+#
+#   set! player/class (random-choice ['warrior, 'rogue, 'mage])
+#                              # OK: random-choice on a list of symbols is fine
+#                              # (all discrete)
+#
+#   set! player/title (random-choice ["Knight", "Squire"])
+#                              # ERROR: random source producing superficial
+
+module test-types
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: start
+
+# ── Types ──────────────────────────────────────────────────────────────────
+
+type Status    = alive | dead | unconscious
+type CharClass = warrior | rogue | mage
+type Location  = village | forest | dungeon
+
+type Health = Int(0, 100)
+type Gold   = Int(0, 9999)
+type Damage = Int(0, 50)
+
+# Base entity — shared fields used as a mixin
+type Entity:
+  health:   Health   = 50
+  status:   Status   = 'alive
+  location: Location = 'village
+  name:     String   = "Unknown"    # superficial — display only
+
+# Player extends Entity, overriding the health default
+type Player:
+  with Entity
+  health:   Health    = 100         # override default; type stays Health
+  gold:     Gold      = 30
+  class:    CharClass = 'warrior
+  title:    String    = "Adventurer" # superficial — display only
+
+# Variant: different message shapes share one type
+type EventMsg:
+  | damage-taken:  amount: Damage, source: Status
+  | gold-gained:   amount: Gold
+  | status-change: old: Status, new: Status
+
+# Family key alias — resolves the NpcId gap from the main spec
+type NpcId = SymbolOf(npcs)
+
+type Npc:
+  with Entity
+  disposition: Status = 'alive     # reusing Status here for simplicity
+
+# ── State ──────────────────────────────────────────────────────────────────
+
+state player: Player = Player(name: "Aldric", class: 'warrior)
+
+state npcs/{npc}: Npc  max: 10
+
+# ── Pure functions ─────────────────────────────────────────────────────────
+
+fn base-damage:
+  # match as expression — returns an Int
+  match player/class:
+    'warrior: 20
+    'rogue:   14
+    'mage:    8
+
+fn max-damage:
+  base-damage + 10
+
+fn min-damage:
+  base-damage - 5
+
+fn alive?:
+  player/status = 'alive
+
+fn can-afford? price:
+  player/gold >= price
+
+# Superficial value computed from discrete — this is allowed
+fn status-label:
+  match player/status:
+    'alive:       "alive and well"
+    'dead:        "dead"
+    'unconscious: "unconscious"
+
+# ── Transaction functions ───────────────────────────────────────────────────
+
+fn take-damage amount:
+  pre:
+    amount > 0
+    player/status = 'alive
+  post:
+    player/health >= 0
+  dec!  player/health amount
+  when  player/health <= 0:
+    set!  player/status 'dead
+    set!  player/name (str player/name " (fallen)")   # superficial update OK
+
+fn heal amount:
+  pre:  player/status = 'alive
+  inc!  player/health (min amount (100 - player/health))
+
+# ── Scenes ─────────────────────────────────────────────────────────────────
+
+scene start:
+  {player/title} {player/name} stands ready.
+  Class: {player/class}.  Health: {player/health}.  Gold: {player/gold}.
+  Status: {status-label}.
+  Base damage: {base-damage}.  Range: {min-damage}–{max-damage}.
+
+  * Take 15 damage
+    take-damage 15
+    -> start
+
+  * Heal 25
+    heal 25
+    -> start
+
+  * [can-afford? 10] Spend 10 gold
+    dec! player/gold 10
+    -> start

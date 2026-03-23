@@ -1,0 +1,169 @@
+
+# test05_log_and_time.sb
+#
+# Transaction log, time model, path@before, checkpoint/undo, and scheduling.
+#
+# Tests:
+#   - time-model declaration (axes + wrap)
+#   - time-inc! with named axis and explicit value
+#   - Absolute vs relative time literals
+#   - post: with path@before reference
+#   - checkpoint function tag
+#   - undo! (revert to last checkpoint)
+#   - undo! steps: N (revert N checkpoints)
+#   - schedule with every: and offset:
+#   - query-history (read-only; result surfaced in narration)
+#   - schema-version with migration readiness
+#
+# Expected behaviour:
+#   "Spend gold" deducts exactly the stated amount (verified by post:).
+#   "Undo" reverts to the state before the last checkpointed action.
+#   The daily tax schedule fires each day, deducting 5 gold automatically.
+#   After several actions the log grows; query-history surfaces in narration.
+#
+# Verify blocks (run with: storybase verify test05_log_and_time.sb):
+#   "gold never goes negative"  — always holds because Gold clamps to 0
+#   "spend reduces gold by exactly the price"
+
+module test-log-and-time
+  version: 1.0
+
+schema-version: 1
+
+time-model:
+  axes: [day, hour, tick]
+  wrap: [none, 24, none]
+
+engine-config:
+  entry-scene:          ledger
+  debug-port:           7373
+
+# ── Types ──────────────────────────────────────────────────────────────────
+
+type Gold    = Int(0, 9999)
+type Chapter = intro | mid | finale
+
+# ── State ──────────────────────────────────────────────────────────────────
+
+state player:
+  gold:    Gold    = 200
+  chapter: Chapter = 'intro
+  moves:   Int(0, 9999) = 0
+
+state world:
+  day:     Int(0, 9999) = 0
+  tick:    Int(0, 9999) = 0
+  tax-due: Gold         = 0
+
+# ── Scheduling ─────────────────────────────────────────────────────────────
+
+"Collect a 5-gold daily tax each morning."
+schedule daily-tax:
+  every:  [day: +1]
+  offset: [hour: 6]
+  fn:
+    dec!  player/gold 5
+    inc!  world/tax-due 5
+
+"Advance the chapter at fixed tick milestones."
+schedule mid-point:
+  at: [tick: +20]
+  fn:
+    when player/chapter = 'intro:
+      set! player/chapter 'mid
+
+schedule finale:
+  at: [tick: +50]
+  fn:
+    when player/chapter = 'mid:
+      set! player/chapter 'finale
+
+# ── Pure functions ──────────────────────────────────────────────────────────
+
+fn can-afford? price:
+  player/gold >= price
+
+# ── Transaction functions ───────────────────────────────────────────────────
+
+fn spend amount:
+  tags:  [checkpoint]
+  pre:   can-afford? amount
+  post:  player/gold = player/gold@before - amount
+  dec!   player/gold amount
+  inc!   player/moves 1
+  time-inc! tick: 1
+
+fn earn amount:
+  tags:  [checkpoint]
+  pre:   amount > 0
+  post:  player/gold >= player/gold@before     # gold is >= before (it grew or clamped)
+  inc!   player/gold amount
+  inc!   player/moves 1
+  time-inc! tick: 1
+
+fn rest:
+  tags:  [checkpoint]
+  inc!   player/moves 1
+  time-inc! hour: 8    # advance 8 hours (wraps within the day axis)
+
+fn advance-day:
+  tags:  [checkpoint]
+  inc!   world/day 1
+  time-inc! day: 1
+
+# ── Scenes ─────────────────────────────────────────────────────────────────
+
+scene ledger:
+  Day {world/day}, tick {world/tick}.  Chapter: {player/chapter}.
+  Gold: {player/gold}.  Moves made: {player/moves}.  Tax collected: {world/tax-due}.
+
+  * [can-afford? 30] Spend 30 gold
+    spend 30
+    -> ledger
+
+  * [can-afford? 75] Spend 75 gold
+    spend 75
+    -> ledger
+
+  * Earn 50 gold
+    earn 50
+    -> ledger
+
+  * Rest (advance 8 hours)
+    rest
+    -> ledger
+
+  * Advance one full day (triggers tax schedule)
+    advance-day
+    -> ledger
+
+  * Undo last action
+    undo!
+    -> ledger
+
+  * Undo last two actions
+    undo! steps: 2
+    -> ledger
+
+# ── Watches ────────────────────────────────────────────────────────────────
+
+watch player/gold    "Gold"
+watch world/day      "Day"
+watch world/tick     "Tick"
+watch player/chapter "Chapter"
+watch-when player/gold <= 20  "Gold running low — tick {world/tick}"
+
+# ── Verification ───────────────────────────────────────────────────────────
+
+verify "gold never goes negative":
+  verify-always player/gold >= 0
+
+verify "spend reduces gold by exactly the stated amount":
+  requires player/gold >= 30
+  after (spend 30):
+    player/gold = player/gold@before - 30
+
+verify "earn increases gold (or clamps at ceiling)":
+  requires player/gold < 9999
+  after (earn 50):
+    player/gold >= player/gold@before

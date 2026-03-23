@@ -1,0 +1,8 @@
+- the lua binary is called lua5.4. busted is installed as `busted` in the path. `lpeg` is installed. 
+- After writing or revising a significant semantic chunk (say the lexer) and the tests, make a commit with a message that describes what was done. 
+- Follow the style guidelines in implementation.md
+- The plan for the project is in idea.md, and specifies the entire project in detail. You should follow the plan as closely as possible, but if you find that it is not feasible or that there are better ways to implement certain features, you can deviate from the plan. However, you must document any deviations from the plan in todo.md, including the reasoning behind the deviation and any implications it might have for future work on the project.
+- Every time you make a change to the code, add a test case that covers the change. If you are fixing a bug, add a test case that fails before the fix and passes after the fix.
+- You must record progress in todo.md, including what has been completed, any new tasks, and any context that might be required for a future agent picking up the project. 
+- At the top of todo.md, write and update a plan for what needs to be completed next, and update it as you go. This should provide sufficient context for a future agent to pick up the project and continue working on it without needing to read through all of the commit history.
+- Write documentation as you go.

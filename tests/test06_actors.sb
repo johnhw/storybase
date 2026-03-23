@@ -1,0 +1,267 @@
+
+# test06_actors.sb
+#
+# Actors, perception snapshots, behavior functions, actor messaging,
+# deferred mutations, spawn/despawn, and autonomous turns.
+#
+# Tests:
+#   - Actor declaration: state:, perceives:, inbox:, behavior:, priority:
+#   - Perception snapshot enforcement (compiler rejects reads outside perceives:)
+#   - Behavior functions as transaction functions called by the engine
+#   - Variant pattern matching for inbox messages (destructuring)
+#   - Deferred mutation: actor writes applied after all behaviors complete
+#   - Conflict resolution: higher-priority actor wins (guard priority 20 > smith 10)
+#   - send! enqueuing a typed ActorMsg
+#   - Autonomous turns: turns with no player input (actors + schedule only)
+#   - spawn! and despawn! for entity families
+#   - NpcId as SymbolOf(npcs) alias
+#   - perceives: compiler rejection illustrated in comments
+#
+# Expected behaviour:
+#   Player arrives in village → blacksmith becomes friendly (behavior fires).
+#   "Alert guard" → guard disposition becomes hostile next turn.
+#   "Offer trade" → blacksmith deducts gold and adds item if player can afford.
+#   "Wander" triggers an autonomous turn (no player action, actors still run).
+#   Spawning a wanderer adds an NPC; despawning removes it.
+#
+# Autonomous turn demo:
+#   The "tick forward" option advances time without player interaction,
+#   letting the morning-reset schedule eventually fire.
+#
+# Compiler MUST reject (shown as comments):
+#
+#   fn blacksmith-behavior:
+#     when player/gold >= 100:   # ERROR: player/gold not in perceives:
+#       ...
+
+module test-actors
+  version: 1.0
+
+schema-version: 1
+
+time-model:
+  axes: [day, tick]
+  wrap: [none, none]
+
+engine-config:
+  entry-scene:      village
+  scene-stack-max:  8
+  debug-port:       7373
+
+# ── Types ──────────────────────────────────────────────────────────────────
+
+type Disposition = friendly | neutral | hostile
+type Location    = village | forest
+type ItemKind    = bread | sword | potion
+type NpcId       = SymbolOf(npcs)
+
+type Health = Int(0, 100)
+type Gold   = Int(0, 999)
+
+type Npc:
+  disposition: Disposition = 'neutral
+  location:    Location    = 'village
+  health:      Health      = 60
+  name:        String      = "Unknown"
+
+# All actor messages in the game share this variant type
+type ActorMsg:
+  | alert:       threat: NpcId, location: Location
+  | trade-offer: item: ItemKind, price: Gold
+  | dismiss:     reason: Disposition
+
+# ── State ──────────────────────────────────────────────────────────────────
+
+state player:
+  location:  Location         = 'village
+  gold:      Gold             = 80
+  inventory: Set(ItemKind, 6) = (set)
+
+state npcs/{npc}: Npc  max: 8
+
+state world:
+  tick: Int(0, 9999) = 0
+  day:  Int(0, 9999) = 0
+
+# ── Actors ─────────────────────────────────────────────────────────────────
+
+"The village blacksmith. Trades goods and relays alerts to the guard."
+actor blacksmith:
+  state:     npcs/blacksmith
+  perceives: [player/location, player/inventory, npcs/blacksmith/*]
+  inbox:     List(ActorMsg, 4)
+  behavior:  blacksmith-behavior
+  priority:  10
+
+"The village gate guard. Responds to alerts by becoming hostile."
+actor guard:
+  state:     npcs/guard
+  perceives: [player/location, npcs/*/location, npcs/guard/*]
+  inbox:     List(ActorMsg, 4)
+  behavior:  guard-behavior
+  priority:  20     # higher priority — guard's writes win on conflict
+
+# ── Scheduling ─────────────────────────────────────────────────────────────
+
+"Reset all NPC dispositions to neutral every morning."
+schedule morning-reset:
+  every:  [day: +1]
+  offset: [tick: 0]
+  fn:
+    for npc in (path-list npcs):
+      set! npcs/{npc}/disposition 'neutral
+
+# ── Behavior functions ─────────────────────────────────────────────────────
+
+fn blacksmith-behavior:
+  # Become friendly when player is in the village
+  when player/location = 'village:
+    set! npcs/blacksmith/disposition 'friendly
+  # Process inbox
+  for msg in npcs/blacksmith/inbox:
+    match msg:
+      trade-offer {item, price}:
+        # player/gold is NOT in perceives: — the compiler must reject this
+        # if we tried to read it here. We check inventory instead.
+        when not (contains? player/inventory item):
+          add! player/inventory item   # deferred; applied after all actors
+      dismiss {reason}:
+        set! npcs/blacksmith/disposition 'neutral
+      _: pass
+
+fn guard-behavior:
+  for msg in npcs/guard/inbox:
+    match msg:
+      alert {threat, location}:
+        set! npcs/guard/disposition 'hostile
+      dismiss {reason}:
+        set! npcs/guard/disposition 'neutral
+      _: pass
+
+# ── Pure functions ──────────────────────────────────────────────────────────
+
+fn can-afford? price:
+  player/gold >= price
+
+fn blacksmith-present?:
+  path-exists? npcs/blacksmith/health
+
+fn guard-present?:
+  path-exists? npcs/guard/health
+
+# ── Transaction functions ───────────────────────────────────────────────────
+
+fn setup-village:
+  pre: not blacksmith-present?
+  spawn! npcs 'blacksmith Npc(name: "Aldric",  health: 80, location: 'village)
+  spawn! npcs 'guard      Npc(name: "Brennan", health: 90, location: 'village)
+
+fn move-to loc:
+  pre: player/location != loc
+  set! player/location loc
+  time-inc! tick: 1
+
+fn offer-trade item price:
+  pre:  can-afford? price
+  dec!  player/gold price
+  send! blacksmith (ActorMsg/trade-offer item: item, price: price)
+
+fn alert-guard:
+  send! guard (ActorMsg/alert threat: 'wanderer, location: player/location)
+
+fn dismiss-guard:
+  send! guard (ActorMsg/dismiss reason: 'neutral)
+
+fn spawn-wanderer:
+  pre: not (path-exists? npcs/wanderer/health)
+  spawn! npcs 'wanderer Npc(name: "Wanderer", health: 40,
+                            disposition: 'hostile, location: 'forest)
+
+fn despawn-wanderer:
+  pre: path-exists? npcs/wanderer/health
+  despawn! npcs 'wanderer
+
+fn tick-forward:
+  # Advance time — no player action; actors and schedules will still run
+  time-inc! tick: 1
+
+fn advance-day:
+  time-inc! day: 1
+
+# ── Scenes ─────────────────────────────────────────────────────────────────
+
+scene village:
+  Village — tick {world/tick}, day {world/day}.
+  Your gold: {player/gold}.
+
+  [blacksmith-present?] Blacksmith {npcs/blacksmith/name}: {npcs/blacksmith/disposition}.
+  [guard-present?]      Guard {npcs/guard/name}: {npcs/guard/disposition}.
+
+  * [not blacksmith-present?] Set up the village (spawn NPCs)
+    setup-village
+    -> village
+
+  * [blacksmith-present?  and  can-afford? 20] Buy bread (20 gold)
+    offer-trade 'bread 20
+    -> village
+
+  * [blacksmith-present?  and  can-afford? 50] Buy sword (50 gold)
+    offer-trade 'sword 50
+    -> village
+
+  * Alert the guard
+    alert-guard
+    -> village
+
+  * Dismiss the guard
+    dismiss-guard
+    -> village
+
+  * Go to the forest
+    move-to 'forest
+    -> forest
+
+  * Advance one tick (autonomous turn)
+    tick-forward
+    -> village
+
+  * Advance one day (triggers morning-reset schedule)
+    advance-day
+    -> village
+
+scene forest:
+  The forest is dark and still. Tick: {world/tick}.
+
+  [path-exists? npcs/wanderer/health] A wanderer lurks nearby. HP: {npcs/wanderer/health}.
+
+  * [not (path-exists? npcs/wanderer/health)] Spawn a wanderer
+    spawn-wanderer
+    -> forest
+
+  * [path-exists? npcs/wanderer/health] Despawn the wanderer
+    despawn-wanderer
+    -> forest
+
+  * Return to village
+    move-to 'village
+    -> village
+
+# ── Watches ────────────────────────────────────────────────────────────────
+
+watch player/gold               "Gold"
+watch world/tick                "Tick"
+watch-when guard-present?  and  npcs/guard/disposition = 'hostile
+  "Guard is hostile — tick {world/tick}"
+
+# ── Verification ───────────────────────────────────────────────────────────
+
+verify "guard can always be made hostile":
+  from-any-state:
+    can-reach? npcs/guard/disposition = 'hostile  depth: 5
+
+verify "guard can always be dismissed":
+  when npcs/guard/disposition = 'hostile:
+    can-reach? npcs/guard/disposition = 'neutral  depth: 5
+
+verify "player gold never goes negative":
+  verify-always player/gold >= 0

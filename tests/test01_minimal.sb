@@ -1,0 +1,46 @@
+
+# test01_minimal.sb
+#
+# The absolute minimum viable StoryBase program.
+#
+# Tests:
+#   - Module header and schema-version
+#   - engine-config with entry-scene
+#   - One enum type declaration
+#   - One record type declaration
+#   - State declaration with record type and constructor default
+#   - A scene with narration only (no choices)
+#   - Inline expression interpolation in narration: {path}
+#
+# Expected behaviour:
+#   storybase compile test01_minimal.sb  →  no errors, no warnings
+#   storybase run    test01_minimal.sb   →  displays narration and halts
+#     (no choices means the game ends after the first scene renders)
+#
+# Expected output:
+#   You are Hero. You are alive. The world awaits.
+
+module test-minimal
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: start
+
+# ── Types ──────────────────────────────────────────────────────────────────
+
+type Status = alive | dead
+
+type Character:
+  name:   String = "Hero"
+  status: Status = 'alive
+
+# ── State ──────────────────────────────────────────────────────────────────
+
+state player: Character = Character(name: "Hero")
+
+# ── Scenes ─────────────────────────────────────────────────────────────────
+
+scene start:
+  You are {player/name}. You are {player/status}. The world awaits.
