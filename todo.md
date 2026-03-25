@@ -46,27 +46,31 @@ Milestone goals are marked **M**.
 - [ ] Error: illegal character
 - [ ] Error: mixed tabs and spaces
 
-### Parser (`compiler/parser.lua`) — declarations only
+### Parser (`compiler/parser.lua`) — declarations only  ✅ DONE (2026-03-25)
 
-- [ ] Module header: `module name version: N`
-- [ ] `import "file"` (flat)
-- [ ] `import "file" as Alias` (namespaced)
-- [ ] Import cycle detection (compile error)
-- [ ] `schema-version: N`
-- [ ] `engine-config:` block with all known keys
-- [ ] `time-model:` block (`axes:`, `wrap:`)
-- [ ] `type Name = val | val | ...` (enum)
-- [ ] `type Name = TypeExpr` (range alias)
-- [ ] `type Name:` record with `field: Type = default` lines
-- [ ] `with OtherRecord` mixin inside record
-- [ ] `type Name:` variant with `| branch: fields` lines
-- [ ] `state path: Type` (scalar)
-- [ ] `state path: Type = Constructor(...)` (with default)
-- [ ] `state path:` inline record block
-- [ ] `state family/{var}: Type  max: N` (entity family)
-- [ ] `relation name: T -> Set(T, N):` with optional static data block
-- [ ] Doc string (string literal immediately before any declaration)
-- [ ] Error recovery: parser continues after a bad declaration
+- [x] Module header: `module name version: N`
+- [x] `import "file"` (flat)
+- [x] `import "file" as Alias` (namespaced)
+- [ ] Import cycle detection (compile error) — deferred to checker
+- [x] `schema-version: N`
+- [x] `engine-config:` block with all known keys
+- [x] `time-model:` block (`axes:`, `wrap:`)
+- [x] `type Name = val | val | ...` (enum)
+- [x] `type Name = TypeExpr` (range alias)
+- [x] `type Name:` record with `field: Type = default` lines
+- [x] `with OtherRecord` mixin inside record
+- [x] `type Name:` variant with `| branch: fields` lines
+- [x] `state path: Type` (scalar)
+- [x] `state path: Type = Constructor(...)` (with default)
+- [x] `state path:` inline record block
+- [x] `state family/{var}: Type  max: N` (entity family)
+- [x] `relation name: T -> Set(T, N):` with optional static data block
+- [x] Doc string (string literal immediately before any declaration)
+- [x] Error recovery: parser continues after a bad declaration
+
+Note: type expressions (Bool, Int, Enum, Option, Set, List, Symbol, SymbolOf,
+String, Float, UList, UMap, named, function) are parsed directly in parser.lua.
+A separate types.lua is not needed for Phase 1.
 
 ### Type Expressions (`compiler/types.lua`)
 
