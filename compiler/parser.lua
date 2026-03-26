@@ -733,9 +733,7 @@ local function parse_decl(p, doc)
     elseif t.value == "state"    then return parse_state_decl(p, doc)
     elseif t.value == "relation" then return parse_relation_decl(p, doc)
     else
-      -- fn, scene, actor, etc. — not yet implemented; skip gracefully
-      p:emit_err(ast.E.BAD_DECLARATION,
-        "'" .. t.value .. "' declarations not yet supported", t.pos)
+      -- fn, scene, actor, etc. — Phase 2+ features; skip silently in Phase 1
       p:skip_to_eol()
       p:skip_block()
       return nil

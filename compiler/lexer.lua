@@ -73,7 +73,7 @@ function M.tokenize(source, filename)
   filename = filename or "?"
   local tokens = {}
   local diags  = {}
-  local s      = source
+  local s      = source:gsub("\r\n", "\n"):gsub("\r", "\n")  -- normalise CRLF
   local slen   = #s
 
   -- ── Position tracking ────────────────────────────────────────────────
@@ -452,6 +452,7 @@ function M.tokenize(source, filename)
       elseif c == '|'   then emit("OP", "|",  tok_line, tok_col); adv()
       elseif c == ','   then emit("OP", ",",  tok_line, tok_col); adv()
       elseif c == ':'   then emit("OP", ":",  tok_line, tok_col); adv()
+      elseif c == '.'   then emit("OP", ".",  tok_line, tok_col); adv()
       elseif c == '@'   then emit("OP", "@",  tok_line, tok_col); adv()
       else
         err("ILLEGAL_CHAR", "Illegal character: " .. c, tok_line, tok_col)

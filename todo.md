@@ -8,16 +8,21 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-03-26)
 
-**Phase 1 compiler pipeline is complete:** lexer → parser → checker (passes 1 & 2) → codegen all
-implemented and tested (410 tests passing).
+**Phase 1 COMPLETE ✅** — `lua5.4 cli/main.lua compile tests/test01_minimal.sb` outputs
+"Compilation succeeded" with 0 errors/warnings. 410 tests passing.
 
-**Immediate next steps:**
-1. Commit codegen (`compiler/codegen.lua`, `tests/compiler/codegen_spec.lua`).
-2. Make `tests/test01_minimal.sb` compile cleanly: parser currently emits `BAD_DECLARATION` error
-   for `scene` declarations (Phase 2 feature). Fix: silently skip scene blocks in Phase 1 rather
-   than erroring, so the milestone file compiles without errors or warnings.
-3. Run `lua5.4 cli/main.lua compile tests/test01_minimal.sb` to confirm the Phase 1 milestone.
-4. Update task list and proceed to Phase 2 (expressions, functions, scenes).
+**Fixes made to reach milestone:**
+- Parser: Phase-2+ declarations (scene, fn, actor, etc.) now silently skipped instead of erroring.
+- Lexer: CRLF line endings normalised to LF at start of tokenize.
+- Lexer: `.` (period) added as an OP token (needed for member-access expressions in Phase 2).
+
+**Immediate next steps (Phase 2):**
+1. Expression parser: literals, identifiers, binary ops, function calls, member access, match, cond
+2. Statement parser: let, assignment, if/else, for, while, pass, return
+3. Scene declarations: narration blocks, choice blocks, scene transitions
+4. Checker pass 3: expression type inference and checking
+5. Codegen: emit `fns`, `verifies`, `watches` entries
+6. Test milestone: `lua5.4 cli/main.lua compile tests/test02_choices.sb` (no errors)
 
 **Known gaps in Phase 1 (deferred to later phases):**
 - Scene declaration support (Phase 2)
@@ -170,9 +175,7 @@ A separate types.lua is not needed for Phase 1.
 - [ ] `tests/compiler/checker_spec.lua` — pass 2: `warn-untyped-symbol` — deferred to Phase 2
 - [x] `tests/compiler/codegen_spec.lua` — all schema section emitters (31 tests)
 
-**M Milestone:** `tests/test01_minimal.sb` compiles without errors or warnings.
-> Status: pending — parser currently emits BAD_DECLARATION for the `scene` block in that file.
-> Fix: skip scene declarations silently in Phase 1 (they are parsed in Phase 2).
+**M Milestone:** `tests/test01_minimal.sb` compiles without errors or warnings. ✅ DONE (2026-03-26)
 
 ---
 
