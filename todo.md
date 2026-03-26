@@ -6,6 +6,28 @@ Milestone goals are marked **M**.
 
 ---
 
+## Current Status and Next Steps (2026-03-26)
+
+**Phase 1 compiler pipeline is complete:** lexer → parser → checker (passes 1 & 2) → codegen all
+implemented and tested (410 tests passing).
+
+**Immediate next steps:**
+1. Commit codegen (`compiler/codegen.lua`, `tests/compiler/codegen_spec.lua`).
+2. Make `tests/test01_minimal.sb` compile cleanly: parser currently emits `BAD_DECLARATION` error
+   for `scene` declarations (Phase 2 feature). Fix: silently skip scene blocks in Phase 1 rather
+   than erroring, so the milestone file compiles without errors or warnings.
+3. Run `lua5.4 cli/main.lua compile tests/test01_minimal.sb` to confirm the Phase 1 milestone.
+4. Update task list and proceed to Phase 2 (expressions, functions, scenes).
+
+**Known gaps in Phase 1 (deferred to later phases):**
+- Scene declaration support (Phase 2)
+- Import resolution (Phase 2)
+- Record field default type-checking (Phase 2)
+- `SymbolOf(Family)` family-name resolution (Phase 2)
+- `warn-untyped-symbol` warning (Phase 2)
+
+---
+
 ## Phase 1 — Core Language (Lexer, Parser, Basic Checker)
 
 **M Goal:** `storybase compile game.sb` produces a valid compiled table for a schema-only file.
@@ -20,31 +42,31 @@ Milestone goals are marked **M**.
 - [x] Error accumulator (collect all errors; no early exit)
 - [x] Warning support alongside errors
 
-### Lexer (`compiler/lexer.lua`)
+### Lexer (`compiler/lexer.lua`) ✅ DONE (2026-03-25)
 
-- [ ] LPEG imports and module scaffold
-- [ ] INDENT/DEDENT pre-pass (convert indentation to explicit tokens)
-- [ ] Token: integers (positive and negative)
-- [ ] Token: floats
-- [ ] Token: booleans (`true` / `false`)
-- [ ] Token: single-line strings with escape sequences (`\n`, `\\`, `\"`)
-- [ ] Token: multi-line strings (`"""..."""`) with indentation stripping
-- [ ] Token: symbol literals (`'name`)
-- [ ] Token: paths (any token containing `/`)
-- [ ] Token: path with variable interpolation (`{var}` segment)
-- [ ] Token: named arguments (`name:`)
-- [ ] Token: infix operators (`=`, `!=`, `<`, `>`, `<=`, `>=`, `+`, `-`, `*`, `/`, `??`)
-- [ ] Token: boolean operators (`and`, `or`, `not`)
-- [ ] Token: keywords (`fn`, `state`, `type`, `scene`, `when`, `if`, `else`, `match`, `cond`, `for`, `while`, `let`, `in`, `with`, `import`, `module`, `relation`, `actor`, `schedule`, `bounded`, `macro`, `verify`, `watch`, `watch-when`, `pre`, `post`, `tags`, `true`, `false`, `pass`)
-- [ ] Token: identifiers (`kebab-case`)
-- [ ] Token: block sigils (`*`, `->`, `=>`, `<-`)
-- [ ] Token: collection delimiters (`{`, `}`, `[`, `]`, `(`, `)`)
-- [ ] Whitespace stripping (spaces, blank lines)
-- [ ] Comment stripping (`#` to end of line)
-- [ ] Source position `(file, line, col)` attached to every token
-- [ ] Error: unterminated string literal
-- [ ] Error: illegal character
-- [ ] Error: mixed tabs and spaces
+- [x] LPEG imports and module scaffold
+- [x] INDENT/DEDENT pre-pass (convert indentation to explicit tokens)
+- [x] Token: integers (positive and negative)
+- [x] Token: floats
+- [x] Token: booleans (`true` / `false`)
+- [x] Token: single-line strings with escape sequences (`\n`, `\\`, `\"`)
+- [x] Token: multi-line strings (`"""..."""`) with indentation stripping
+- [x] Token: symbol literals (`'name`)
+- [x] Token: paths (any token containing `/`)
+- [x] Token: path with variable interpolation (`{var}` segment)
+- [x] Token: named arguments (`name:`)
+- [x] Token: infix operators (`=`, `!=`, `<`, `>`, `<=`, `>=`, `+`, `-`, `*`, `/`, `??`)
+- [x] Token: boolean operators (`and`, `or`, `not`)
+- [x] Token: keywords (`fn`, `state`, `type`, `scene`, `when`, `if`, `else`, `match`, `cond`, `for`, `while`, `let`, `in`, `with`, `import`, `module`, `relation`, `actor`, `schedule`, `bounded`, `macro`, `verify`, `watch`, `watch-when`, `pre`, `post`, `tags`, `true`, `false`, `pass`)
+- [x] Token: identifiers (`kebab-case`)
+- [x] Token: block sigils (`*`, `->`, `=>`, `<-`)
+- [x] Token: collection delimiters (`{`, `}`, `[`, `]`, `(`, `)`)
+- [x] Whitespace stripping (spaces, blank lines)
+- [x] Comment stripping (`#` to end of line)
+- [x] Source position `(file, line, col)` attached to every token
+- [x] Error: unterminated string literal
+- [x] Error: illegal character
+- [x] Error: mixed tabs and spaces
 
 ### Parser (`compiler/parser.lua`) — declarations only  ✅ DONE (2026-03-25)
 
@@ -72,75 +94,85 @@ Note: type expressions (Bool, Int, Enum, Option, Set, List, Symbol, SymbolOf,
 String, Float, UList, UMap, named, function) are parsed directly in parser.lua.
 A separate types.lua is not needed for Phase 1.
 
-### Type Expressions (`compiler/types.lua`)
+### Type Expressions (`compiler/types.lua`) ✅ DONE inline — no separate file needed
 
-- [ ] `Bool`
-- [ ] `Int(min, max)`
-- [ ] `Enum(v1, v2, ...)` (inline)
-- [ ] `Option(T)`
-- [ ] `Set(T, max)`
-- [ ] `List(T, max)`
-- [ ] `Symbol` (untyped; triggers `warn-untyped-symbol`)
-- [ ] `SymbolOf(Family)`
-- [ ] `String`, `Float` (superficial)
-- [ ] `UList(T)`, `UMap(K, V)` (superficial unbounded)
-- [ ] `RecordName`, `VariantName` (declared named types)
-- [ ] `(T -> R)`, `(T U -> R)` (function/lambda types)
-- [ ] State-space size computation for all discrete types
-- [ ] Discrete / superficial tag on every type
+> **Deviation:** A separate `types.lua` was not created. Type expression parsing is handled
+> directly in `compiler/parser.lua` (`parse_type_expr`), type descriptors are emitted in
+> `compiler/codegen.lua` (`emit_type_desc`), and state-space size computation lives in
+> `compiler/codegen.lua` (`state_space_size`). The discrete/superficial tag is deferred to
+> Phase 2 when it is actually needed for boundary enforcement.
 
-### Checker — Pass 1 (Schema Collection)
+- [x] `Bool`
+- [x] `Int(min, max)`
+- [x] `Enum(v1, v2, ...)` (inline)
+- [x] `Option(T)`
+- [x] `Set(T, max)`
+- [x] `List(T, max)`
+- [x] `Symbol` (untyped)
+- [x] `SymbolOf(Family)`
+- [x] `String`, `Float` (superficial)
+- [x] `UList(T)`, `UMap(K, V)` (superficial unbounded)
+- [x] `RecordName`, `VariantName` (declared named types)
+- [x] `(T -> R)`, `(T U -> R)` (function/lambda types)
+- [x] State-space size computation for all discrete types (in codegen.lua)
+- [ ] Discrete / superficial tag on every type — deferred to Phase 2
 
-- [ ] Collect all declared type names into symbol table
-- [ ] Collect all state paths (scalar and family)
-- [ ] Collect all relation names
-- [ ] Collect all scene names (auto-generate `SceneId` enum)
-- [ ] Resolve forward references within the same compilation unit
-- [ ] Resolve imported names (flat and namespaced)
-- [ ] Error: duplicate type/state/scene/relation name
-- [ ] Error: undefined type reference
+### Checker — Pass 1 (Schema Collection) ✅ DONE (2026-03-25)
 
-### Checker — Pass 2 (Basic Type-Check)
+- [x] Collect all declared type names into symbol table
+- [x] Collect all state paths (scalar and family)
+- [x] Collect all relation names
+- [ ] Collect all scene names (auto-generate `SceneId` enum) — deferred to Phase 2
+- [x] Resolve forward references within the same compilation unit (pass1 collects all names before pass2 resolves)
+- [ ] Resolve imported names (flat and namespaced) — deferred to Phase 2
+- [x] Error: duplicate type/state/scene/relation name
+- [x] Error: undefined type reference
 
-- [ ] Field types reference declared types (or built-in type expressions)
-- [ ] Record field defaults are type-correct
-- [ ] `Int(min, max)` bounds well-formed (`min <= max`)
-- [ ] `with` mixin: all fields spliced at the `with` point
-- [ ] `with` mixin: default override accepted; type override rejected
-- [ ] `with` mixin: conflicting field from two different `with` sources → error
-- [ ] Entity family `max: N` stored and used for state-space computation
-- [ ] `SymbolOf(Family)` — family name resolves to a declared entity family
-- [ ] `warn-untyped-symbol` for bare `Symbol` in any discrete position
+### Checker — Pass 2 (Basic Type-Check) ✅ DONE (2026-03-25)
 
-### Codegen (`compiler/codegen.lua`)
+- [x] Field types reference declared types (or built-in type expressions)
+- [ ] Record field defaults are type-correct — deferred to Phase 2 (defaults emitted but not type-checked)
+- [x] `Int(min, max)` bounds well-formed (`min <= max`)
+- [x] `with` mixin: all fields spliced at the `with` point
+- [x] `with` mixin: default override accepted (override after mixin allowed; no error emitted)
+- [ ] `with` mixin: type override rejected — deferred to Phase 2
+- [x] `with` mixin: conflicting field from two different `with` sources → error
+- [x] Entity family `max: N` stored and used for state-space computation
+- [ ] `SymbolOf(Family)` — family name resolves to a declared entity family — deferred to Phase 2
+- [ ] `warn-untyped-symbol` for bare `Symbol` in any discrete position — deferred to Phase 2
 
-- [ ] Emit compiled game table (serialisable Lua value)
-- [ ] Schema section: types, state paths, relations, scenes
-- [ ] Function stubs (full function compilation deferred to Phase 2)
+### Codegen (`compiler/codegen.lua`) ✅ DONE (2026-03-26)
 
-### CLI — Phase 1
+- [x] Emit compiled game table (serialisable Lua value)
+- [x] Schema section: types, state paths, relations (scenes=0 in Phase 1)
+- [x] Function stubs (fns/verifies/watches are empty tables in Phase 1)
 
-- [ ] `storybase compile <file>` command
-- [ ] Print diagnostics to stderr with file/line/col
-- [ ] Exit code 0 on success, non-zero on any error
-- [ ] Print summary (type count, state path count, any warnings)
+### CLI — Phase 1 ✅ DONE (scaffolded with initial commit)
 
-### Tests — Phase 1
+- [x] `storybase compile <file>` command
+- [x] Print diagnostics to stderr with file/line/col
+- [x] Exit code 0 on success, non-zero on any error
+- [x] Print summary (type count, state path count, scenes, state-space size)
 
-- [ ] `tests/compiler/lexer_spec.lua` — all token types
-- [ ] `tests/compiler/lexer_spec.lua` — indentation / INDENT / DEDENT
-- [ ] `tests/compiler/lexer_spec.lua` — source positions on all tokens
-- [ ] `tests/compiler/lexer_spec.lua` — error cases (unterminated, illegal char, mixed indent)
-- [ ] `tests/compiler/parser_spec.lua` — all declaration forms
-- [ ] `tests/compiler/parser_spec.lua` — module and import
-- [ ] `tests/compiler/parser_spec.lua` — error recovery (continues after bad declaration)
-- [ ] `tests/compiler/checker_spec.lua` — pass 1: undefined type reference
-- [ ] `tests/compiler/checker_spec.lua` — pass 1: duplicate name
-- [ ] `tests/compiler/checker_spec.lua` — pass 2: type mismatch in field default
-- [ ] `tests/compiler/checker_spec.lua` — pass 2: `with` mixin rules
-- [ ] `tests/compiler/checker_spec.lua` — pass 2: `warn-untyped-symbol`
+### Tests — Phase 1 ✅ DONE (2026-03-26)
+
+- [x] `tests/compiler/lexer_spec.lua` — all token types
+- [x] `tests/compiler/lexer_spec.lua` — indentation / INDENT / DEDENT
+- [x] `tests/compiler/lexer_spec.lua` — source positions on all tokens
+- [x] `tests/compiler/lexer_spec.lua` — error cases (unterminated, illegal char, mixed indent)
+- [x] `tests/compiler/parser_spec.lua` — all declaration forms
+- [x] `tests/compiler/parser_spec.lua` — module and import
+- [x] `tests/compiler/parser_spec.lua` — error recovery (continues after bad declaration)
+- [x] `tests/compiler/checker_spec.lua` — pass 1: undefined type reference
+- [x] `tests/compiler/checker_spec.lua` — pass 1: duplicate name
+- [ ] `tests/compiler/checker_spec.lua` — pass 2: type mismatch in field default — deferred to Phase 2
+- [x] `tests/compiler/checker_spec.lua` — pass 2: `with` mixin rules
+- [ ] `tests/compiler/checker_spec.lua` — pass 2: `warn-untyped-symbol` — deferred to Phase 2
+- [x] `tests/compiler/codegen_spec.lua` — all schema section emitters (31 tests)
 
 **M Milestone:** `tests/test01_minimal.sb` compiles without errors or warnings.
+> Status: pending — parser currently emits BAD_DECLARATION for the `scene` block in that file.
+> Fix: skip scene declarations silently in Phase 1 (they are parsed in Phase 2).
 
 ---
 
