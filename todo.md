@@ -6,30 +6,37 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-03-26)
+## Current Status and Next Steps (2026-03-30)
 
-**Phase 1 COMPLETE ✅** — `lua5.4 cli/main.lua compile tests/test01_minimal.sb` outputs
-"Compilation succeeded" with 0 errors/warnings. 410 tests passing.
+**Phase 2 MILESTONE MET ✅** — Both `test02_choices.sb` and `test03_types.sb` compile without
+errors. 483 tests passing. Scene count now accurate.
 
-**Fixes made to reach milestone:**
-- Parser: Phase-2+ declarations (scene, fn, actor, etc.) now silently skipped instead of erroring.
-- Lexer: CRLF line endings normalised to LF at start of tokenize.
-- Lexer: `.` (period) added as an OP token (needed for member-access expressions in Phase 2).
+**Phase 2 work completed:**
+- Parser: full expression parser (binary ops, fn calls, path exprs, match, if/else, when, literals)
+- Parser: fn declarations with pre:/post:/tags: blocks and body statements
+- Parser: scene declarations (narration, conditional narration, choices with guards, goto/enter/exit)
+- Parser: all mutation primitives (set!, inc!, dec!, add!, remove!, clear!, push!, pop!, spawn!, despawn!, relate!, unrelate!, send!, undo!)
+- Lexer: `_` added to `is_alpha` (required for wildcard `_` in match arms)
+- Parser: `match` subject with bare `ident:` form (NAMED_ARG handling in parse_match_expr)
+- Parser: `_:` wildcard match arm (NAMED_ARG `_` handling)
+- Checker pass 3: pure/transaction inference — annotates each fn_decl with `is_transaction`
+- Checker pass 3: PURE_CALLS_MUT error for mutations in pre:/post: blocks
+- Codegen: scene_count now correctly counted from AST
 
-**Immediate next steps (Phase 2):**
-1. Expression parser: literals, identifiers, binary ops, function calls, member access, match, cond
-2. Statement parser: let, assignment, if/else, for, while, pass, return
-3. Scene declarations: narration blocks, choice blocks, scene transitions
-4. Checker pass 3: expression type inference and checking
-5. Codegen: emit `fns`, `verifies`, `watches` entries
-6. Test milestone: `lua5.4 cli/main.lua compile tests/test02_choices.sb` (no errors)
+**Immediate next steps (Phase 2 remaining / Phase 3 prep):**
+1. Checker: discrete/superficial boundary enforcement (requires expression type inference)
+2. Checker: write-set analysis (pass 4)
+3. Checker: `warn-untyped-symbol` warning
+4. Codegen: emit fn stubs with body for runtime
+5. Phase 3: Runtime state store and engine
 
-**Known gaps in Phase 1 (deferred to later phases):**
-- Scene declaration support (Phase 2)
-- Import resolution (Phase 2)
-- Record field default type-checking (Phase 2)
-- `SymbolOf(Family)` family-name resolution (Phase 2)
-- `warn-untyped-symbol` warning (Phase 2)
+**Known remaining Phase 2 gaps:**
+- `cond:`, `let`, `for`, `while` expressions — parser stubs emit errors (deferred)
+- Discrete/superficial boundary: NOT enforced (requires type inference over expressions)
+- Write-set analysis: NOT done
+- Import resolution: NOT done
+- Record field default type-checking: deferred to Phase 3
+- `SymbolOf(Family)` family-name resolution: deferred
 
 ---
 
@@ -183,107 +190,96 @@ A separate types.lua is not needed for Phase 1.
 
 **M Goal:** All function declarations type-check; the discrete/superficial boundary is enforced.
 
-### Parser Extensions
+### Parser Extensions ✅ DONE (2026-03-30)
 
-- [ ] Infix comparisons with correct precedence (`*`/`/` > `+`/`-` > comparisons > `not` > `and` > `or` > `??`)
-- [ ] Prefix function calls (multi-argument, unbounded arity)
-- [ ] Nil-coalescing `??` (right side lazy)
-- [ ] Arithmetic operators (infix)
-- [ ] Inline path interpolation `{varname}` within a path segment
-- [ ] Collection literal: set `{'a, 'b}` / `(set)` (empty)
-- [ ] Collection literal: list `['a, 'b]` / `[]` (empty)
-- [ ] Collection literal: map `{k: v, ...}` / `{}` (empty)
-- [ ] Collection literal disambiguation rule (first element followed by `:` → map)
-- [ ] `match expr: arm1: val, arm2: val, _: val` (expression and statement forms)
-- [ ] `cond: cond1: body, cond2: body, _: body`
-- [ ] `if cond: body` / `if cond: body else: body`
-- [ ] `when cond: body` (no else)
-- [ ] `for var in expr: body`
-- [ ] `while cond: body`
-- [ ] `let name = expr ...: body` (sequential bindings)
-- [ ] Lambda expression `fn(params): single-expr`
-- [ ] Lambda expression `fn(params):` multi-line body block
-- [ ] Function declaration `fn name args: body`
-- [ ] `pre:` and `post:` blocks inside function declarations
-- [ ] `tags: [name, ...]` inside function declarations
-- [ ] `path@before` expression in `post:` blocks
-- [ ] All mutation primitives: `set!`, `inc!`, `dec!`, `add!`, `remove!`, `clear!`, `push!`, `pop!`
-- [ ] Relation mutations: `relate!`, `unrelate!`
-- [ ] `spawn!`, `despawn!`
-- [ ] `send!`
-- [ ] `time-inc!`
-- [ ] `undo!`, `undo! steps: N`
-- [ ] Scene navigation primitives: `goto-scene!`, `enter-scene!`, `exit-scene!`
-- [ ] Scene navigation sigils in scene bodies: `->`, `->()`, `=>`, `<-`
-- [ ] Indexed path access: `path[n]`, `path[-n]`, `path[a:b]`
-- [ ] Narration inline expressions: `{expr}` inside scene text lines
+- [x] Infix comparisons with correct precedence (`*`/`/` > `+`/`-` > comparisons > `not` > `and` > `or` > `??`)
+- [x] Prefix function calls (multi-argument, unbounded arity)
+- [x] Nil-coalescing `??` (right side lazy)
+- [x] Arithmetic operators (infix)
+- [x] Inline path interpolation `{varname}` within a path segment
+- [x] Collection literal: set `(set)` (empty), `[]` empty list
+- [x] Collection literal: list `['a, 'b]`
+- [ ] Collection literal: set `{'a, 'b}` — NOT done (map/set disambiguation complex; deferred)
+- [ ] Collection literal: map `{k: v, ...}` — NOT done (deferred)
+- [x] `match expr: arm1: val, arm2: val, _: val` (expression and statement forms)
+- [ ] `cond: cond1: body, cond2: body, _: body` — parser stub; emits error (deferred)
+- [x] `if cond: body` / `if cond: body else: body`
+- [x] `when cond: body` (no else)
+- [ ] `for var in expr: body` — parser stub; emits error (deferred)
+- [ ] `while cond: body` — parser stub; emits error (deferred)
+- [ ] `let name = expr ...: body` — parser stub; emits error (deferred)
+- [ ] Lambda expression `fn(params): body` — NOT done (deferred)
+- [x] Function declaration `fn name args: body`
+- [x] `pre:` and `post:` blocks inside function declarations
+- [x] `tags: [name, ...]` inside function declarations (parsed/skipped)
+- [ ] `path@before` expression in `post:` blocks — NOT done (deferred)
+- [x] All mutation primitives: `set!`, `inc!`, `dec!`, `add!`, `remove!`, `clear!`, `push!`, `pop!`
+- [x] Relation mutations: `relate!`, `unrelate!`
+- [x] `spawn!`, `despawn!`
+- [x] `send!`
+- [ ] `time-inc!` — NOT done (deferred)
+- [x] `undo!`, `undo! steps: N`
+- [x] Scene navigation sigils in scene bodies: `->`, `->()`, `=>`, `<-`
+- [ ] Indexed path access: `path[n]`, `path[-n]`, `path[a:b]` — NOT done (deferred)
+- [x] Narration inline expressions: `{expr}` inside scene text lines
 
-### Checker — Pass 3 (Pure/Transaction Inference)
+**Deviation:** `_` added to lexer `is_alpha` (required for wildcard in match arms; previously illegal char).
+**Deviation:** `match subject:` where `subject` is a bare identifier: the lexer tokenises `name:` as `NAMED_ARG`; `parse_match_expr` now handles both forms.
 
-- [ ] Classify every function as pure or transaction (no annotation required)
-- [ ] Pure: calls no mutation primitives directly or transitively
-- [ ] Transaction: calls any mutation primitive directly or transitively
-- [ ] Error: pure function calls mutation primitive
-- [ ] Error: pure function called from write position
-- [ ] Error: transaction function called inside `find where` clause
-- [ ] Error: transaction function called inside `verify` condition
-- [ ] Lambda purity: lambdas are always pure; error if lambda body calls mutation
-- [ ] `uses-bounded` tag auto-applied to any function calling a `bounded` computation
+### Checker — Pass 3 (Pure/Transaction Inference) ✅ DONE (2026-03-30)
+
+- [x] Classify every function as pure or transaction — annotated on fn_decl as `is_transaction`
+- [x] Pure: calls no mutation primitives directly (transitive call-graph deferred)
+- [x] Transaction: calls any mutation primitive directly
+- [x] Error (PURE_CALLS_MUT): mutation primitive in `pre:` or `post:` block
+- [ ] Error: pure function called from write position — deferred
+- [ ] Error: transaction function called inside `find where` clause — deferred
+- [ ] Error: transaction function called inside `verify` condition — deferred
+- [ ] Lambda purity rule — deferred (lambdas not yet parsed)
+- [ ] `uses-bounded` tag — deferred
 
 ### Checker — Pass 4 (Write-Set Analysis)
 
-- [ ] Compute static write-set for every transaction function
-- [ ] Static paths always legal in write position
-- [ ] `{var}` interpolation legal in write position only if `var` has a declared `SymbolOf` type
-- [ ] Error: untyped variable in write position
-- [ ] Error: dynamic path construction (`path-join` etc.) in write position
+- [ ] Compute static write-set for every transaction function — NOT done
+- [ ] `{var}` interpolation legal in write position — NOT done
+- [ ] Error: untyped variable in write position — NOT done
 
 ### Checker — Pass 5 (State-Space Computation)
 
-- [ ] Compute state-space size for all discrete types
-- [ ] Correct formula for `List(T, max)`: Σ |T|^i for i = 0..max
-- [ ] Total game state-space size reported in compile summary
-- [ ] `warn-untyped-symbol` for `Symbol` in any logic position (search precision warning)
+- [x] Compute state-space size for all discrete types (done in Phase 1 codegen)
+- [x] Total game state-space size reported in compile summary
+- [ ] `warn-untyped-symbol` for `Symbol` in any logic position — NOT done
 
-### Checker — Pass 6 (Contract Validation)
+### Checker — Pass 6 (Contract Validation) — NOT done
 
-- [ ] `pre:` conditions are pure boolean expressions
-- [ ] `post:` conditions are pure boolean expressions
-- [ ] `path@before` references are valid paths present in the enclosing function's write-set
-- [ ] `perceives:` enforcement: error if behavior function reads a path not covered by perceives patterns
+- [ ] All items deferred to later phase
 
-### Compiler Boundary Enforcement
+### Compiler Boundary Enforcement — NOT done (requires expression type inference)
 
-- [ ] Error: superficial value in any conditional (`if`, `when`, `cond`, `match`)
-- [ ] Error: superficial value passed where discrete type expected
-- [ ] Error: random source producing a superficial value
-- [ ] Allowed: superficial value computed from discrete (e.g. `match` → `String`)
+- [ ] Error: superficial value in any conditional — NOT done
+- [ ] Error: superficial value passed where discrete type expected — NOT done
+- [ ] Error: random source producing a superficial value — NOT done
 
-### Codegen — Full Functions
+### Codegen — Full Functions — NOT done
 
-- [ ] Emit all function declarations with typed AST
-- [ ] Emit scene declarations with narration, choices, guards, sigils
-- [ ] Emit actor declarations, behavior references, perceives patterns
-- [ ] Emit schedule declarations
-- [ ] Emit verify blocks
-- [ ] Emit watch declarations (tagged `debug-only`)
+- [x] scene_count now correctly computed from AST (2026-03-30)
+- [ ] Emit fn body stubs with params and purity tag — NOT done
+- [ ] Emit scene declarations — NOT done
+- [ ] Emit verify/watch/actor/schedule — deferred
 
-### Tests — Phase 2
+### Tests — Phase 2 ✅ DONE (2026-03-30)
 
-- [ ] `tests/compiler/parser_spec.lua` — all expression forms and operator precedence
-- [ ] `tests/compiler/parser_spec.lua` — all control flow forms (when/if/match/cond/for/while/let)
-- [ ] `tests/compiler/parser_spec.lua` — lambda (single-expr, multi-line)
-- [ ] `tests/compiler/parser_spec.lua` — collection literals and disambiguation rule
-- [ ] `tests/compiler/parser_spec.lua` — all mutation primitives
-- [ ] `tests/compiler/parser_spec.lua` — pre:/post:/tags: in function declarations
-- [ ] `tests/compiler/checker_spec.lua` — discrete/superficial boundary (all positive and negative cases)
-- [ ] `tests/compiler/checker_spec.lua` — pure/transaction inference (all cases)
-- [ ] `tests/compiler/checker_spec.lua` — write-set analysis and restrictions
-- [ ] `tests/compiler/checker_spec.lua` — `perceives:` enforcement
-- [ ] `tests/compiler/checker_spec.lua` — lambda purity rule
-- [ ] `tests/compiler/checker_spec.lua` — import cycles
+- [x] `tests/compiler/parser_spec.lua` — expression forms and operator precedence (63 tests added)
+- [x] `tests/compiler/parser_spec.lua` — control flow: when/if/match (with wildcard)
+- [x] `tests/compiler/parser_spec.lua` — all mutation primitives
+- [x] `tests/compiler/parser_spec.lua` — fn declarations: params, pre:, post:, body
+- [x] `tests/compiler/parser_spec.lua` — scene declarations: narration, choices, guards, goto, enter, exit
+- [x] `tests/compiler/parser_spec.lua` — integration: test02/test03 parse without errors
+- [x] `tests/compiler/checker_spec.lua` — pure/transaction inference (10 tests)
+- [ ] `tests/compiler/checker_spec.lua` — discrete/superficial boundary — deferred
+- [ ] `tests/compiler/checker_spec.lua` — write-set analysis — deferred
 
-**M Milestone:** `tests/test02_choices.sb` and `tests/test03_types.sb` compile without errors.
+**M Milestone:** `tests/test02_choices.sb` and `tests/test03_types.sb` compile without errors. ✅ DONE (2026-03-30)
 
 ---
 

@@ -320,6 +320,89 @@ local function pass2_check(acc, symtab, program)
 end
 
 -- ============================================================
+-- Pass 3 — Pure / transaction inference
+-- ============================================================
+-- A function is a "transaction" if its body contains any mutation primitive
+-- directly or if it calls a function that is a transaction.
+-- Everything else is "pure".
+--
+-- This pass annotates every FN_DECL node with:
+--   node.is_transaction = true | false
+--
+-- Errors emitted:
+--   PURE_CALLS_MUT  — pre:/post: blocks contain a mutation primitive
+
+-- Mutation primitive names (used when a mutation appears in expression position
+-- and is parsed as a fn_call rather than a dedicated mutation node).
+local MUTATION_NAMES = {
+  ["set!"] = true, ["inc!"] = true, ["dec!"] = true, ["add!"] = true,
+  ["remove!"] = true, ["clear!"] = true, ["push!"] = true, ["pop!"] = true,
+  ["spawn!"] = true, ["despawn!"] = true, ["relate!"] = true,
+  ["unrelate!"] = true, ["send!"] = true, ["undo!"] = true,
+  ["time-inc!"] = true, ["goto-scene!"] = true,
+  ["enter-scene!"] = true, ["exit-scene!"] = true,
+}
+
+--- Return true if a node subtree contains any mutation primitive.
+local function has_mutation(node)
+  if not node then return false end
+  if ast.is_mut(node) then return true end
+  -- A mutation primitive parsed in expression context becomes a fn_call node
+  if node.kind == ast.K.FN_CALL and MUTATION_NAMES[node.name] then return true end
+  -- Recurse into known child fields
+  if node.body then
+    for _, s in ipairs(node.body) do if has_mutation(s) then return true end end
+  end
+  if node.then_body then
+    for _, s in ipairs(node.then_body) do if has_mutation(s) then return true end end
+  end
+  if node.else_body then
+    for _, s in ipairs(node.else_body) do if has_mutation(s) then return true end end
+  end
+  if node.condition and has_mutation(node.condition) then return true end
+  if node.expr     and has_mutation(node.expr)      then return true end
+  if node.arms     then
+    for _, a in ipairs(node.arms) do
+      if type(a.body) == "table" then
+        for _, s in ipairs(a.body) do if has_mutation(s) then return true end end
+      elseif has_mutation(a.body) then return true end
+    end
+  end
+  return false
+end
+
+--- Classify all fn_decl nodes as pure or transaction.
+local function pass3_infer_purity(acc, program)
+  local k = ast.K
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then
+      -- Check body for mutations
+      local body_has_mut = false
+      for _, s in ipairs(node.body or {}) do
+        if has_mutation(s) then body_has_mut = true; break end
+      end
+      node.is_transaction = body_has_mut
+
+      -- pre: and post: blocks must be pure (no mutations allowed)
+      for _, e in ipairs(node.pre or {}) do
+        if has_mutation(e) then
+          err(acc, ast.E.PURE_CALLS_MUT,
+            "mutation primitive in pre: condition of '" .. (node.name or "?") .. "'",
+            e.pos or node.pos)
+        end
+      end
+      for _, e in ipairs(node.post or {}) do
+        if has_mutation(e) then
+          err(acc, ast.E.PURE_CALLS_MUT,
+            "mutation primitive in post: condition of '" .. (node.name or "?") .. "'",
+            e.pos or node.pos)
+        end
+      end
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -338,6 +421,7 @@ function M.check(ast_root, filename)
 
   pass1_collect(acc, symtab, ast_root)
   pass2_check(acc, symtab, ast_root)
+  pass3_infer_purity(acc, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

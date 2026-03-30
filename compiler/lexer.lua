@@ -35,7 +35,7 @@ local ESCAPES = { n = "\n", t = "\t", r = "\r", ["\\"] = "\\", ['"'] = '"' }
 
 -- ── Character helpers ──────────────────────────────────────────────────────
 local function is_alpha(c)
-  return c ~= nil and ((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z'))
+  return c ~= nil and ((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_')
 end
 
 local function is_digit(c)
@@ -454,6 +454,8 @@ function M.tokenize(source, filename)
       elseif c == ':'   then emit("OP", ":",  tok_line, tok_col); adv()
       elseif c == '.'   then emit("OP", ".",  tok_line, tok_col); adv()
       elseif c == '@'   then emit("OP", "@",  tok_line, tok_col); adv()
+      elseif c:byte() > 127 then
+        adv()  -- silently skip non-ASCII bytes (UTF-8 in narration text)
       else
         err("ILLEGAL_CHAR", "Illegal character: " .. c, tok_line, tok_col)
         adv()

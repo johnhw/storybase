@@ -447,13 +447,17 @@ function M.emit(typed_ast)
   for _ in pairs(symtab.states)    do path_count     = path_count     + 1 end
   local relation_count = 0
   for _ in pairs(symtab.relations) do relation_count = relation_count + 1 end
+  local scene_count = 0
+  for _, d in ipairs(decls) do
+    if d.kind == ast.K.SCENE_DECL then scene_count = scene_count + 1 end
+  end
 
   local game_table = {
     schema = {
       version          = schema_v,
       type_count       = type_count,
       path_count       = path_count,
-      scene_count      = 0,     -- populated in Phase 2
+      scene_count      = scene_count,
       relation_count   = relation_count,
       state_space_size = ss_size == math.huge and "unbounded" or ss_size,
       types            = types,

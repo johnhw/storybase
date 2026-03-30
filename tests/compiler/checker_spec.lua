@@ -299,3 +299,83 @@ relation exits: Location -> Set(Location, 6)
     assert.is_not_nil(typed.symtab.relations)
   end)
 end)
+
+-- ============================================================
+-- Pass 3 — Pure / transaction inference
+-- ============================================================
+
+-- Helper: get the first fn_decl from a compiled snippet
+local function first_fn(src)
+  local typed, _ = compile(src)
+  for _, d in ipairs(typed.decls) do
+    if d.kind == ast.K.FN_DECL then return d end
+  end
+  return nil
+end
+
+describe("checker pass 3 — purity inference", function()
+  it("classifies a no-mutation fn as pure (is_transaction=false)", function()
+    local fn = first_fn("fn compute:\n  42")
+    assert.is_not_nil(fn)
+    assert.is_false(fn.is_transaction)
+  end)
+
+  it("classifies a fn with set! as a transaction", function()
+    local fn = first_fn("fn update:\n  set! player/health 100")
+    assert.is_not_nil(fn)
+    assert.is_true(fn.is_transaction)
+  end)
+
+  it("classifies a fn with inc! as a transaction", function()
+    local fn = first_fn("fn add-gold:\n  inc! player/gold 10")
+    assert.is_true(fn.is_transaction)
+  end)
+
+  it("classifies a fn with dec! as a transaction", function()
+    local fn = first_fn("fn spend:\n  dec! player/gold 5")
+    assert.is_true(fn.is_transaction)
+  end)
+
+  it("classifies a fn with only path reads as pure", function()
+    local fn = first_fn("fn alive?:\n  player/status")
+    assert.is_false(fn.is_transaction)
+  end)
+
+  it("classifies a fn with mutation inside when-block as transaction", function()
+    local fn = first_fn([[
+fn update:
+  when player/health <= 0:
+    set! player/status 'dead]])
+    assert.is_true(fn.is_transaction)
+  end)
+
+  it("classifies a fn with mutation inside if-block as transaction", function()
+    local fn = first_fn([[
+fn maybe-heal:
+  if player/alive:
+    inc! player/health 10]])
+    assert.is_true(fn.is_transaction)
+  end)
+
+  it("emits PURE_CALLS_MUT if pre: contains a mutation", function()
+    check_err([[
+fn bad:
+  pre: set! player/health 100
+  pass]], ast.E.PURE_CALLS_MUT)
+  end)
+
+  it("emits PURE_CALLS_MUT if post: contains a mutation", function()
+    check_err([[
+fn bad:
+  post: set! player/health 100
+  pass]], ast.E.PURE_CALLS_MUT)
+  end)
+
+  it("does not emit errors for valid pre:/post: expressions", function()
+    check_ok([[
+fn take-damage amount:
+  pre: player/health > 0
+  post: player/health >= 0
+  dec! player/health amount]])
+  end)
+end)

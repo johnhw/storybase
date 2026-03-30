@@ -720,6 +720,669 @@ local function parse_relation_decl(p, doc)
 end
 
 -- ============================================================
+-- Phase 2 — Expressions, statements, fn/scene declarations
+-- ============================================================
+
+-- Convert "player/health" PATH token string → path_expr node
+local function make_path_expr(path_str, pos)
+  local segs = {}
+  for seg in path_str:gmatch("[^/]+") do table.insert(segs, seg) end
+  return ast.path_expr(segs, pos)
+end
+
+-- Convert "npcs/{npc}/hp" INTERP_PATH token string → interp_path node
+local function make_interp_path(path_str, pos)
+  local segs = {}
+  for seg in path_str:gmatch("[^/]+") do
+    if seg:sub(1,1) == '{' then
+      table.insert(segs, { interp = seg:sub(2, -2) })
+    else
+      table.insert(segs, seg)
+    end
+  end
+  return ast.interp_path(segs, pos)
+end
+
+-- Can the next token begin an argument atom (for function application)?
+local function can_start_arg(p)
+  local t = p:cur()
+  local k = t.kind
+  return k == "INTEGER" or k == "FLOAT" or k == "BOOL"
+      or k == "STRING"  or k == "MULTILINE_STRING"
+      or k == "SYMBOL"  or k == "PATH" or k == "INTERP_PATH"
+      or k == "IDENT"
+      or (k == "OP" and (t.value == "(" or t.value == "["))
+end
+
+-- Forward declarations (mutual recursion)
+local parse_expr, parse_stmt, parse_body_items
+
+-- ── Atom (no application argument collection) ──────────────────────────────
+-- Used for collecting function-call arguments so we don't recurse infinitely.
+local function parse_atom(p)
+  local t = p:cur()
+  local tpos = t.pos
+
+  if t.kind == "INTEGER" then
+    p:adv(); return ast.int_lit(t.value, tpos)
+  elseif t.kind == "FLOAT" then
+    p:adv(); return ast.float_lit(t.value, tpos)
+  elseif t.kind == "BOOL" then
+    p:adv(); return ast.bool_lit(t.value, tpos)
+  elseif t.kind == "STRING" then
+    p:adv(); return ast.string_lit(t.value, tpos)
+  elseif t.kind == "MULTILINE_STRING" then
+    p:adv(); return ast.multiline_string(t.value, tpos)
+  elseif t.kind == "SYMBOL" then
+    p:adv(); return ast.symbol_lit(t.value, tpos)
+  elseif t.kind == "PATH" then
+    p:adv(); return make_path_expr(t.value, tpos)
+  elseif t.kind == "INTERP_PATH" then
+    p:adv(); return make_interp_path(t.value, tpos)
+  elseif t.kind == "IDENT" then
+    -- 0-arg function call (no further argument collection in atom context)
+    p:adv(); return ast.fn_call(t.value, {}, tpos)
+  elseif t.kind == "OP" and t.value == "(" then
+    p:adv()
+    -- (set) → empty set literal
+    if p:at("IDENT", "set") and p:peek().kind == "OP" and p:peek().value == ")" then
+      p:adv(); p:adv()
+      return ast.empty_set(tpos)
+    end
+    local e = parse_expr(p)
+    p:expect("OP", ")", "expected ')'")
+    return e
+  elseif t.kind == "OP" and t.value == "[" then
+    p:adv()
+    if p:at("OP", "]") then p:adv(); return ast.empty_list(tpos) end
+    local elems = {}
+    while not p:at("OP", "]") and not p:at("NEWLINE") and not p:at("EOF") do
+      table.insert(elems, parse_expr(p))
+      if not p:match("OP", ",") then break end
+    end
+    p:expect("OP", "]", "expected ']' to close list literal")
+    return ast.list_lit(elems, tpos)
+  end
+  return nil
+end
+
+-- ── Match / cond / if expressions (forward-declared bodies) ────────────────
+
+local function parse_match_expr(p)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "match"
+  -- The lexer tokenises bare 'name:' as NAMED_ARG; handle that case so
+  -- `match foo:` works even when `foo` is a simple identifier.
+  local subject
+  if p:at("NAMED_ARG") then
+    local nt = p:adv()
+    subject = ast.fn_call(nt.value, {}, nt.pos)
+    -- colon was already consumed as part of the NAMED_ARG token
+  else
+    subject = parse_expr(p)
+    p:expect("OP", ":", "expected ':' after match expression")
+  end
+  p:match("NEWLINE")
+  local arms = {}
+  p:skip_newlines()
+  if p:at("INDENT") then
+    p:adv()
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+      local apos = p:cur().pos
+      local pattern
+      local colon_consumed = false
+      if p:at("NAMED_ARG", "_") then
+        -- '_:' is lexed as NAMED_ARG "_"; colon already consumed
+        p:adv(); pattern = "_"; colon_consumed = true
+      elseif p:at("NAMED_ARG") then
+        -- bare 'ident:' arm (identifier followed by colon, colon already consumed)
+        local nt = p:adv()
+        pattern = ast.fn_call(nt.value, {}, nt.pos); colon_consumed = true
+      elseif p:at("SYMBOL") then
+        local s = p:adv(); pattern = ast.symbol_lit(s.value, s.pos)
+      elseif p:at("IDENT", "_") then
+        pattern = "_"; p:adv()
+      elseif p:at("BOOL") then
+        local b = p:adv(); pattern = ast.bool_lit(b.value, b.pos)
+      elseif p:at("INTEGER") then
+        local n = p:adv(); pattern = ast.int_lit(n.value, n.pos)
+      else
+        p:emit_err(ast.E.BAD_EXPRESSION, "expected match arm pattern", p:cur().pos)
+        p:skip_to_eol(); pattern = nil
+      end
+      if pattern ~= nil then
+        if not colon_consumed then
+          p:expect("OP", ":", "expected ':' after match arm pattern")
+        end
+        local body
+        if p:at("NEWLINE") or p:at("DEDENT") or p:at("EOF") then
+          p:match("NEWLINE")
+          if p:at("INDENT") then body = parse_body_items(p, false) end
+        else
+          body = parse_expr(p); p:skip_to_eol()
+        end
+        table.insert(arms, ast.match_arm(pattern, nil, body, apos))
+      end
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+  return ast.match_expr(subject, arms, tpos)
+end
+
+local function parse_if_expr(p, is_scene)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "if"
+  local cond = parse_expr(p)
+  p:expect("OP", ":", "expected ':' after if condition")
+  p:match("NEWLINE")
+  local then_body = parse_body_items(p, is_scene or false)
+  local else_body = nil
+  p:skip_newlines()
+  if p:at("NAMED_ARG", "else") then
+    p:adv()
+    p:match("NEWLINE")
+    else_body = parse_body_items(p, is_scene or false)
+  end
+  return ast.if_expr(cond, then_body, else_body, tpos)
+end
+
+local function parse_when_stmt(p, is_scene)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "when"
+  local cond = parse_expr(p)
+  p:expect("OP", ":", "expected ':' after when condition")
+  p:match("NEWLINE")
+  local body = parse_body_items(p, is_scene or false)
+  return ast.when_stmt(cond, body, tpos)
+end
+
+-- ── Primary expression (with function application argument collection) ──────
+
+local function parse_primary(p)
+  local t = p:cur()
+  local tpos = t.pos
+
+  if t.kind == "KEYWORD" then
+    if t.value == "match" then return parse_match_expr(p) end
+    if t.value == "if"    then return parse_if_expr(p)    end
+    if t.value == "when"  then return parse_when_stmt(p)  end
+    -- cond / let / for / while / fn (lambda): stubs
+    if t.value == "cond" or t.value == "let" or t.value == "for"
+        or t.value == "while" then
+      p:emit_err(ast.E.BAD_EXPRESSION,
+        "'" .. t.value .. "' expressions not yet implemented", tpos)
+      p:skip_to_eol()
+      return ast.int_lit(0, tpos)
+    end
+    p:emit_err(ast.E.BAD_EXPRESSION,
+      "unexpected keyword '" .. t.value .. "' in expression", tpos)
+    p:adv(); return ast.int_lit(0, tpos)
+  end
+
+  -- For IDENT: function application with argument collection
+  if t.kind == "IDENT" then
+    local name = t.value
+    p:adv()
+    local args = {}
+    while can_start_arg(p) do
+      local arg = parse_atom(p)
+      if not arg then break end
+      table.insert(args, arg)
+    end
+    return ast.fn_call(name, args, tpos)
+  end
+
+  -- Non-IDENT atoms (no argument collection)
+  local a = parse_atom(p)
+  if a then return a end
+
+  p:emit_err(ast.E.BAD_EXPRESSION,
+    "unexpected token in expression: " .. t.kind, tpos)
+  p:adv()
+  return ast.int_lit(0, tpos)
+end
+
+-- ── Precedence-climbing expression parser ───────────────────────────────────
+
+local function parse_mul(p)
+  local left = parse_primary(p)
+  while p:at("OP") and (p:cur().value == "*" or p:cur().value == "/") do
+    local op_pos = p:cur().pos; local op = p:adv().value
+    local right = parse_primary(p)
+    left = ast.binary_op(op, left, right, op_pos)
+  end
+  return left
+end
+
+local function parse_add(p)
+  local left = parse_mul(p)
+  while p:at("OP") and (p:cur().value == "+" or p:cur().value == "-") do
+    local op_pos = p:cur().pos; local op = p:adv().value
+    local right = parse_mul(p)
+    left = ast.binary_op(op, left, right, op_pos)
+  end
+  return left
+end
+
+local CMP_OPS = { ["="]  = true, ["!="] = true, ["<"] = true,
+                  [">"]  = true, ["<="] = true, [">="] = true }
+
+local function parse_cmp(p)
+  local left = parse_add(p)
+  if p:at("OP") and CMP_OPS[p:cur().value] then
+    local op_pos = p:cur().pos; local op = p:adv().value
+    local right = parse_add(p)
+    left = ast.binary_op(op, left, right, op_pos)
+  end
+  return left
+end
+
+local function parse_coalesce(p)
+  local left = parse_cmp(p)
+  while p:at("OP", "??") do
+    local op_pos = p:cur().pos; p:adv()
+    local right = parse_cmp(p)
+    left = ast.nil_coalesce(left, right, op_pos)
+  end
+  return left
+end
+
+local function parse_not(p)
+  if p:at("KEYWORD", "not") then
+    local op_pos = p:cur().pos; p:adv()
+    return ast.unary_op("not", parse_not(p), op_pos)
+  end
+  return parse_coalesce(p)
+end
+
+local function parse_and_expr(p)
+  local left = parse_not(p)
+  while p:at("KEYWORD", "and") do
+    local op_pos = p:cur().pos; p:adv()
+    local right = parse_not(p)
+    left = ast.binary_op("and", left, right, op_pos)
+  end
+  return left
+end
+
+local function parse_or_expr(p)
+  local left = parse_and_expr(p)
+  while p:at("KEYWORD", "or") do
+    local op_pos = p:cur().pos; p:adv()
+    local right = parse_and_expr(p)
+    left = ast.binary_op("or", left, right, op_pos)
+  end
+  return left
+end
+
+parse_expr = function(p) return parse_or_expr(p) end
+
+-- ── Mutation path ────────────────────────────────────────────────────────────
+
+local function parse_mut_path(p)
+  local t = p:cur()
+  if t.kind == "PATH" then
+    p:adv(); return make_path_expr(t.value, t.pos)
+  elseif t.kind == "INTERP_PATH" then
+    p:adv(); return make_interp_path(t.value, t.pos)
+  elseif t.kind == "IDENT" then
+    -- Single-segment path (no slash) used in mutation position
+    local v = p:adv(); return ast.path_expr({v.value}, v.pos)
+  end
+  p:emit_err(ast.E.BAD_EXPRESSION, "expected state path", t.pos)
+  return ast.path_expr({}, t.pos)
+end
+
+-- ── Mutation primitives ──────────────────────────────────────────────────────
+
+local MUTATION_TABLE = {
+  ["set!"]     = function(p, pos)
+    local path = parse_mut_path(p); local val = parse_expr(p)
+    p:skip_to_eol(); return ast.set_mut(path, val, pos)
+  end,
+  ["inc!"]     = function(p, pos)
+    local path = parse_mut_path(p); local amt = parse_expr(p)
+    p:skip_to_eol(); return ast.inc_mut(path, amt, pos)
+  end,
+  ["dec!"]     = function(p, pos)
+    local path = parse_mut_path(p); local amt = parse_expr(p)
+    p:skip_to_eol(); return ast.dec_mut(path, amt, pos)
+  end,
+  ["add!"]     = function(p, pos)
+    local path = parse_mut_path(p); local val = parse_expr(p)
+    p:skip_to_eol(); return ast.add_mut(path, val, pos)
+  end,
+  ["remove!"]  = function(p, pos)
+    local path = parse_mut_path(p); local val = parse_expr(p)
+    p:skip_to_eol(); return ast.remove_mut(path, val, pos)
+  end,
+  ["clear!"]   = function(p, pos)
+    local path = parse_mut_path(p)
+    p:skip_to_eol(); return ast.clear_mut(path, pos)
+  end,
+  ["push!"]    = function(p, pos)
+    local path = parse_mut_path(p); local val = parse_expr(p)
+    p:skip_to_eol(); return ast.push_mut(path, val, pos)
+  end,
+  ["pop!"]     = function(p, pos)
+    local path = parse_mut_path(p)
+    p:skip_to_eol(); return ast.pop_mut(path, pos)
+  end,
+  ["spawn!"]   = function(p, pos)
+    local fam = p:at("IDENT") and p:adv().value or "?"
+    local key = parse_expr(p); local rec = parse_expr(p)
+    p:skip_to_eol(); return ast.spawn_mut(fam, key, rec, pos)
+  end,
+  ["despawn!"] = function(p, pos)
+    local fam = p:at("IDENT") and p:adv().value or "?"
+    local key = parse_expr(p)
+    p:skip_to_eol(); return ast.despawn_mut(fam, key, pos)
+  end,
+  ["relate!"]  = function(p, pos)
+    local rel = p:at("IDENT") and p:adv().value or "?"
+    local a = parse_expr(p); local b = parse_expr(p)
+    p:skip_to_eol(); return ast.relate_mut(rel, a, b, pos)
+  end,
+  ["unrelate!"] = function(p, pos)
+    local rel = p:at("IDENT") and p:adv().value or "?"
+    local a = parse_expr(p); local b = parse_expr(p)
+    p:skip_to_eol(); return ast.unrelate_mut(rel, a, b, pos)
+  end,
+  ["send!"]    = function(p, pos)
+    local actor = parse_expr(p); local msg = parse_expr(p)
+    p:skip_to_eol(); return ast.send_mut(actor, msg, pos)
+  end,
+  ["undo!"]    = function(p, pos)
+    local steps = nil
+    if p:at("NAMED_ARG", "steps") then p:adv(); steps = parse_expr(p) end
+    p:skip_to_eol(); return ast.undo_mut(steps, pos)
+  end,
+}
+
+-- ── Scene navigation ─────────────────────────────────────────────────────────
+
+local function parse_scene_goto(p)
+  local tpos = p:cur().pos
+  p:adv()  -- consume "->"
+  local target
+  if p:at("OP", "(") then
+    p:adv(); target = parse_expr(p); p:expect("OP", ")")
+  elseif p:at("IDENT") or p:at("PATH") then
+    target = p:adv().value
+  else
+    p:emit_err(ast.E.BAD_EXPRESSION, "expected scene name after '->'", p:cur().pos)
+    target = "?"
+  end
+  p:skip_to_eol()
+  return ast.scene_goto(target, tpos)
+end
+
+local function parse_scene_enter(p)
+  local tpos = p:cur().pos
+  p:adv()  -- consume "=>"
+  local target
+  if p:at("IDENT") or p:at("PATH") then target = p:adv().value
+  else p:emit_err(ast.E.BAD_EXPRESSION, "expected scene name after '=>'", p:cur().pos); target = "?"
+  end
+  p:skip_to_eol()
+  return ast.scene_enter(target, tpos)
+end
+
+-- ── Statement parser (code context) ─────────────────────────────────────────
+
+parse_stmt = function(p)
+  local t  = p:cur()
+  local tpos = t.pos
+
+  -- Mutation primitives (IDENTs ending in '!')
+  if t.kind == "IDENT" and MUTATION_TABLE[t.value] then
+    p:adv()
+    return MUTATION_TABLE[t.value](p, tpos)
+  end
+
+  -- Control flow
+  if t.kind == "KEYWORD" then
+    if t.value == "when"  then return parse_when_stmt(p, false) end
+    if t.value == "if"    then return parse_if_expr(p, false)   end
+    if t.value == "match" then
+      local e = parse_match_expr(p); return ast.expr_stmt(e, tpos)
+    end
+    if t.value == "for" or t.value == "while" or t.value == "let" then
+      -- Stub: skip block
+      p:skip_to_eol(); p:skip_block(); return nil
+    end
+    if t.value == "pass" then p:adv(); p:skip_to_eol(); return ast.pass_stmt(tpos) end
+  end
+
+  -- Scene navigation in fn/choice bodies
+  if t.kind == "OP" then
+    if t.value == "->" then return parse_scene_goto(p)  end
+    if t.value == "=>" then return parse_scene_enter(p) end
+    if t.value == "<-" then
+      p:adv(); p:skip_to_eol(); return ast.scene_exit(tpos)
+    end
+  end
+
+  -- Expression as statement (function call, path reference, etc.)
+  local e = parse_expr(p)
+  p:skip_to_eol()
+  return ast.expr_stmt(e, tpos)
+end
+
+-- ── Body items (INDENT block, scene or code mode) ────────────────────────────
+
+-- Collect tokens as a narration text list (strings + inline_expr nodes).
+-- Consumes up to and including the NEWLINE.
+local function parse_narration_text(p)
+  local text = {}
+  local text_parts = {}
+  while not p:at("NEWLINE") and not p:at("DEDENT") and not p:at("EOF") do
+    if p:at("OP", "{") then
+      if #text_parts > 0 then
+        table.insert(text, table.concat(text_parts, " "))
+        text_parts = {}
+      end
+      local epos = p:cur().pos
+      p:adv()  -- consume "{"
+      local e = parse_expr(p)
+      p:expect("OP", "}", "expected '}' to close inline expression")
+      table.insert(text, ast.inline_expr(e, epos))
+    else
+      local tok = p:adv()
+      table.insert(text_parts, tostring(tok.value))
+    end
+  end
+  if #text_parts > 0 then table.insert(text, table.concat(text_parts, " ")) end
+  p:match("NEWLINE")
+  return text
+end
+
+parse_body_items = function(p, is_scene)
+  local items = {}
+  p:skip_newlines()
+  if not p:at("INDENT") then
+    p:emit_err(ast.E.EXPECTED_TOKEN, "expected indented block")
+    return items
+  end
+  p:adv()  -- consume INDENT
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    local t = p:cur()
+    local tpos = t.pos
+    local item
+
+    if is_scene then
+      -- Scene body: choices, conditional narration, navigation, control flow, narration
+      if t.kind == "OP" and t.value == "*" then
+        -- Choice
+        p:adv()  -- consume "*"
+        local guard = nil
+        if p:at("OP", "[") then
+          p:adv(); guard = parse_expr(p); p:expect("OP", "]")
+        end
+        local label = parse_narration_text(p)
+        local body = {}
+        if p:at("INDENT") then
+          body = parse_body_items(p, false)  -- choice body = code mode
+        end
+        item = ast.choice(guard, label, body, tpos)
+
+      elseif t.kind == "OP" and t.value == "[" then
+        -- Conditional narration
+        p:adv(); local cond = parse_expr(p); p:expect("OP", "]")
+        local text = parse_narration_text(p)
+        item = ast.cond_narration(cond, text, tpos)
+
+      elseif t.kind == "OP" and t.value == "->" then
+        item = parse_scene_goto(p)
+      elseif t.kind == "OP" and t.value == "=>" then
+        item = parse_scene_enter(p)
+      elseif t.kind == "OP" and t.value == "<-" then
+        p:adv(); p:skip_to_eol(); item = ast.scene_exit(tpos)
+
+      elseif t.kind == "KEYWORD" and t.value == "if" then
+        item = parse_if_expr(p, true)   -- scene mode
+      elseif t.kind == "KEYWORD" and t.value == "when" then
+        item = parse_when_stmt(p, true) -- scene mode
+      elseif t.kind == "KEYWORD" and t.value == "match" then
+        local e = parse_match_expr(p); item = ast.expr_stmt(e, tpos)
+
+      else
+        -- Narration line: collect remaining tokens as text
+        local text = parse_narration_text(p)
+        item = ast.narration_line(text, tpos)
+      end
+
+    else
+      -- Code body: statements only
+      item = parse_stmt(p)
+    end
+
+    if item then table.insert(items, item) end
+  end
+  if p:at("DEDENT") then p:adv() end
+  return items
+end
+
+-- ── Function declaration ─────────────────────────────────────────────────────
+
+local function parse_fn_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "fn"
+
+  -- Parse function name (and parameters)
+  local fn_name, params = nil, {}
+  if p:at("NAMED_ARG") then
+    -- fn name:  (no parameters)
+    fn_name = p:adv().value
+  elseif p:at("IDENT") then
+    fn_name = p:adv().value
+    -- Collect intermediate IDENT params, last one is NAMED_ARG
+    while p:at("IDENT") do
+      table.insert(params, p:adv().value)
+    end
+    if p:at("NAMED_ARG") then
+      table.insert(params, p:adv().value)
+    else
+      p:emit_err(ast.E.EXPECTED_TOKEN, "expected ':' after function parameters", p:cur().pos)
+    end
+  else
+    p:emit_err(ast.E.EXPECTED_TOKEN, "expected function name after 'fn'", p:cur().pos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  end
+
+  p:match("NEWLINE")
+
+  -- Function body block
+  local pre_exprs = {}
+  local post_exprs = {}
+  local tags = {}
+  local body_stmts = {}
+
+  if not p:at("INDENT") then
+    -- Zero-line function body (unusual but possible with pass)
+    return ast.fn_decl(fn_name, params, pre_exprs, post_exprs, tags, body_stmts, doc, tpos)
+  end
+  p:adv()  -- consume INDENT
+
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+
+    local bt = p:cur()
+
+    if bt.kind == "NAMED_ARG" and bt.value == "pre" then
+      p:adv()
+      if p:at("NEWLINE") or p:at("INDENT") then
+        p:match("NEWLINE")
+        if p:at("INDENT") then
+          local es = parse_body_items(p, false)
+          for _, e in ipairs(es) do table.insert(pre_exprs, e) end
+        end
+      else
+        local e = parse_expr(p); p:skip_to_eol()
+        table.insert(pre_exprs, e)
+      end
+
+    elseif bt.kind == "NAMED_ARG" and bt.value == "post" then
+      p:adv()
+      if p:at("NEWLINE") or p:at("INDENT") then
+        p:match("NEWLINE")
+        if p:at("INDENT") then
+          local es = parse_body_items(p, false)
+          for _, e in ipairs(es) do table.insert(post_exprs, e) end
+        end
+      else
+        local e = parse_expr(p); p:skip_to_eol()
+        table.insert(post_exprs, e)
+      end
+
+    elseif bt.kind == "NAMED_ARG" and bt.value == "tags" then
+      -- tags: [name, ...]  — skip for now
+      p:skip_to_eol()
+
+    else
+      local stmt = parse_stmt(p)
+      if stmt then table.insert(body_stmts, stmt) end
+    end
+  end
+
+  if p:at("DEDENT") then p:adv() end
+  return ast.fn_decl(fn_name, params, pre_exprs, post_exprs, tags, body_stmts, doc, tpos)
+end
+
+-- ── Scene declaration ────────────────────────────────────────────────────────
+
+local function parse_scene_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "scene"
+
+  local scene_name
+  if p:at("NAMED_ARG") then
+    scene_name = p:adv().value
+  elseif p:at("IDENT") then
+    -- scene name without colon? Shouldn't happen but handle gracefully
+    scene_name = p:adv().value
+    p:match("OP", ":")
+  else
+    p:emit_err(ast.E.EXPECTED_TOKEN, "expected scene name after 'scene'", p:cur().pos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  end
+
+  p:match("NEWLINE")
+
+  local body = {}
+  if p:at("INDENT") then
+    body = parse_body_items(p, true)  -- scene mode
+  end
+
+  return ast.scene_decl(scene_name, body, doc, tpos)
+end
+
+-- ============================================================
 -- Top-level dispatch
 -- ============================================================
 
@@ -732,8 +1395,10 @@ local function parse_decl(p, doc)
     elseif t.value == "type"     then return parse_type_decl(p, doc)
     elseif t.value == "state"    then return parse_state_decl(p, doc)
     elseif t.value == "relation" then return parse_relation_decl(p, doc)
+    elseif t.value == "fn"       then return parse_fn_decl(p, doc)
+    elseif t.value == "scene"    then return parse_scene_decl(p, doc)
     else
-      -- fn, scene, actor, etc. — Phase 2+ features; skip silently in Phase 1
+      -- actor, schedule, bounded, verify, watch, macro, migration — later phases
       p:skip_to_eol()
       p:skip_block()
       return nil
