@@ -19,8 +19,10 @@ local function make_schema()
         kind   = "record",
         name   = "Member",
         fields = {
-          { name = "health", type_desc = { tag = "int", min = 0, max = 100 } },
-          { name = "status", type_desc = { tag = "named", name = "Status" } },
+          { name = "health", type_desc = { tag = "int", min = 0, max = 100 },
+            default = { tag = "int", value = 60 } },
+          { name = "status", type_desc = { tag = "named", name = "Status" },
+            default = { tag = "symbol", name = "alive" } },
         },
       },
     },
@@ -253,6 +255,21 @@ describe("state store: spawn / despawn", function()
     local keys = s:path_list("party")
     table.sort(keys)
     assert.same({ "fighter", "scout" }, keys)
+  end)
+
+  it("spawn applies type field defaults for omitted fields", function()
+    local s = new_store()
+    -- Only specify health; status should default to "alive" from Member type
+    s:spawn("party", "fighter", { health = 80 })
+    assert.equal(80,      s:get("party/fighter/health"))
+    assert.equal("alive", s:get("party/fighter/status"))
+  end)
+
+  it("spawn does not override explicitly provided fields with defaults", function()
+    local s = new_store()
+    s:spawn("party", "ghost", { health = 1, status = "dead" })
+    assert.equal(1,      s:get("party/ghost/health"))
+    assert.equal("dead", s:get("party/ghost/status"))
   end)
 
   it("path_list returns empty for uninstantiated family", function()

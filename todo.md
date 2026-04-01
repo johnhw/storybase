@@ -43,12 +43,11 @@ Milestone goals are marked **M**.
 - `path@before` in post: conditions — NOT done
 - Checker: discrete/superficial boundary enforcement — NOT done
 - Checker: write-set analysis — NOT done
-- `spawn!` / family member tracking: party members exist in state but `living-count` returns 0
-  (path_list likely not returning spawned members; needs investigation)
+- `spawn!` / family member tracking: ✅ FIXED — `store:spawn` now applies type field defaults
+  for any fields not explicitly provided in the record constructor (e.g. `status = 'alive`)
 
 **Immediate next steps (Phase 4 prep):**
-1. Investigate spawn!/path_list: party members spawned but not returned by path-list
-2. Log serialization: JSON or Lua table format for save/load
+1. Log serialization: JSON or Lua table format for save/load
 3. Time model: implement `time-inc!` and axis declarations in engine
 4. Phase 4: actors, messaging, scheduling
 
