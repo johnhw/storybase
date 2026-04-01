@@ -116,6 +116,7 @@ function M.tokenize(source, filename)
   local indent_stack   = { 0 }   -- stack of indentation column-widths
   local at_line_start  = true    -- are we at the start of a new line?
   local line_has_tok   = false   -- has the current logical line emitted any tokens?
+  local paren_depth    = 0       -- nesting depth inside (), [], {} — suppresses INDENT/DEDENT
 
   -- ── Helpers ──────────────────────────────────────────────────────────
 
@@ -275,23 +276,25 @@ function M.tokenize(source, filename)
         -- (the \n will be consumed in the next iteration)
 
       else
-        -- Real content: resolve INDENT/DEDENT
+        -- Real content: resolve INDENT/DEDENT (suppressed inside parens/brackets)
         local cur_ind = indent_stack[#indent_stack]
-        if ind_len > cur_ind then
-          table.insert(indent_stack, ind_len)
-          emit("INDENT", nil, cur_line, 1)
-        elseif ind_len < cur_ind then
-          while #indent_stack > 1 and indent_stack[#indent_stack] > ind_len do
-            table.remove(indent_stack)
-            emit("DEDENT", nil, cur_line, 1)
+        if paren_depth == 0 then
+          if ind_len > cur_ind then
+            table.insert(indent_stack, ind_len)
+            emit("INDENT", nil, cur_line, 1)
+          elseif ind_len < cur_ind then
+            while #indent_stack > 1 and indent_stack[#indent_stack] > ind_len do
+              table.remove(indent_stack)
+              emit("DEDENT", nil, cur_line, 1)
+            end
+            if indent_stack[#indent_stack] ~= ind_len then
+              err("MIXED_INDENT",
+                  "Indentation does not match any enclosing block level",
+                  cur_line, 1)
+            end
           end
-          if indent_stack[#indent_stack] ~= ind_len then
-            err("MIXED_INDENT",
-                "Indentation does not match any enclosing block level",
-                cur_line, 1)
-          end
+          -- ind_len == cur_ind: no change
         end
-        -- ind_len == cur_ind: no change
       end
 
     -- ── Spaces / tabs within a line ──────────────────────────────────
@@ -443,12 +446,12 @@ function M.tokenize(source, filename)
       elseif c == '-'   then emit("OP", "-",  tok_line, tok_col); adv()
       elseif c == '*'   then emit("OP", "*",  tok_line, tok_col); adv()
       elseif c == '/'   then emit("OP", "/",  tok_line, tok_col); adv()
-      elseif c == '{'   then emit("OP", "{",  tok_line, tok_col); adv()
-      elseif c == '}'   then emit("OP", "}",  tok_line, tok_col); adv()
-      elseif c == '['   then emit("OP", "[",  tok_line, tok_col); adv()
-      elseif c == ']'   then emit("OP", "]",  tok_line, tok_col); adv()
-      elseif c == '('   then emit("OP", "(",  tok_line, tok_col); adv()
-      elseif c == ')'   then emit("OP", ")",  tok_line, tok_col); adv()
+      elseif c == '{'   then paren_depth = paren_depth + 1; emit("OP", "{",  tok_line, tok_col); adv()
+      elseif c == '}'   then paren_depth = paren_depth - 1; emit("OP", "}",  tok_line, tok_col); adv()
+      elseif c == '['   then paren_depth = paren_depth + 1; emit("OP", "[",  tok_line, tok_col); adv()
+      elseif c == ']'   then paren_depth = paren_depth - 1; emit("OP", "]",  tok_line, tok_col); adv()
+      elseif c == '('   then paren_depth = paren_depth + 1; emit("OP", "(",  tok_line, tok_col); adv()
+      elseif c == ')'   then paren_depth = paren_depth - 1; emit("OP", ")",  tok_line, tok_col); adv()
       elseif c == '|'   then emit("OP", "|",  tok_line, tok_col); adv()
       elseif c == ','   then emit("OP", ",",  tok_line, tok_col); adv()
       elseif c == ':'   then emit("OP", ":",  tok_line, tok_col); adv()

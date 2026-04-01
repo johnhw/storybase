@@ -825,49 +825,53 @@ local function parse_match_expr(p)
   p:match("NEWLINE")
   local arms = {}
   p:skip_newlines()
-  if p:at("INDENT") then
-    p:adv()
-    while not p:at("DEDENT") and not p:at("EOF") do
-      p:skip_newlines()
-      if p:at("DEDENT") or p:at("EOF") then break end
-      local apos = p:cur().pos
-      local pattern
-      local colon_consumed = false
-      if p:at("NAMED_ARG", "_") then
-        -- '_:' is lexed as NAMED_ARG "_"; colon already consumed
-        p:adv(); pattern = "_"; colon_consumed = true
-      elseif p:at("NAMED_ARG") then
-        -- bare 'ident:' arm (identifier followed by colon, colon already consumed)
-        local nt = p:adv()
-        pattern = ast.fn_call(nt.value, {}, nt.pos); colon_consumed = true
-      elseif p:at("SYMBOL") then
-        local s = p:adv(); pattern = ast.symbol_lit(s.value, s.pos)
-      elseif p:at("IDENT", "_") then
-        pattern = "_"; p:adv()
-      elseif p:at("BOOL") then
-        local b = p:adv(); pattern = ast.bool_lit(b.value, b.pos)
-      elseif p:at("INTEGER") then
-        local n = p:adv(); pattern = ast.int_lit(n.value, n.pos)
-      else
-        p:emit_err(ast.E.BAD_EXPRESSION, "expected match arm pattern", p:cur().pos)
-        p:skip_to_eol(); pattern = nil
-      end
-      if pattern ~= nil then
-        if not colon_consumed then
-          p:expect("OP", ":", "expected ':' after match arm pattern")
-        end
-        local body
-        if p:at("NEWLINE") or p:at("DEDENT") or p:at("EOF") then
-          p:match("NEWLINE")
-          if p:at("INDENT") then body = parse_body_items(p, false) end
-        else
-          body = parse_expr(p); p:skip_to_eol()
-        end
-        table.insert(arms, ast.match_arm(pattern, nil, body, apos))
-      end
+  -- Parse arms: either inside an INDENT block, or inline (paren context, no INDENT/DEDENT)
+  local in_indent = p:at("INDENT")
+  if in_indent then p:adv() end
+  while true do
+    p:skip_newlines()
+    -- Stop conditions
+    if p:at("EOF") then break end
+    if in_indent and p:at("DEDENT") then break end
+    if p:at("OP", ")") then break end
+    -- Try to parse an arm pattern
+    local apos = p:cur().pos
+    local pattern
+    local colon_consumed = false
+    if p:at("NAMED_ARG", "_") then
+      p:adv(); pattern = "_"; colon_consumed = true
+    elseif p:at("NAMED_ARG") then
+      local nt = p:adv()
+      pattern = ast.fn_call(nt.value, {}, nt.pos); colon_consumed = true
+    elseif p:at("SYMBOL") then
+      local s = p:adv(); pattern = ast.symbol_lit(s.value, s.pos)
+    elseif p:at("IDENT", "_") then
+      pattern = "_"; p:adv()
+    elseif p:at("BOOL") then
+      local b = p:adv(); pattern = ast.bool_lit(b.value, b.pos)
+    elseif p:at("INTEGER") then
+      local n = p:adv(); pattern = ast.int_lit(n.value, n.pos)
+    else
+      p:emit_err(ast.E.BAD_EXPRESSION, "expected match arm pattern", p:cur().pos)
+      p:skip_to_eol(); break
     end
-    if p:at("DEDENT") then p:adv() end
+    if pattern ~= nil then
+      if not colon_consumed then
+        p:expect("OP", ":", "expected ':' after match arm pattern")
+      end
+      local body
+      if p:at("NEWLINE") or p:at("DEDENT") or p:at("EOF") then
+        p:match("NEWLINE")
+        if p:at("INDENT") then body = parse_body_items(p, false) end
+      else
+        body = parse_expr(p)
+        if not p:at("OP", ")") and not p:at("NEWLINE") then p:skip_to_eol() end
+        p:match("NEWLINE")
+      end
+      table.insert(arms, ast.match_arm(pattern, nil, body, apos))
+    end
   end
+  if in_indent and p:at("DEDENT") then p:adv() end
   return ast.match_expr(subject, arms, tpos)
 end
 
@@ -898,21 +902,192 @@ local function parse_when_stmt(p, is_scene)
   return ast.when_stmt(cond, body, tpos)
 end
 
+-- ── cond / for / while / let / lambda parsers ────────────────────────────────
+
+--- Parse a cond: expression.
+--- cond:
+---   condition1: result1
+---   condition2: result2
+---   _: default
+--- Note: 'cond:' may be tokenized as NAMED_ARG "cond" (lexer eats the ':')
+--- or as KEYWORD "cond" + OP ":".  Both forms are handled.
+local function parse_cond_expr(p)
+  local tpos = p:cur().pos
+  if p:at("KEYWORD", "cond") then
+    p:adv()  -- consume KEYWORD "cond"
+    p:expect("OP", ":", "expected ':' after cond")
+  else
+    -- NAMED_ARG "cond" — lexer already consumed the ':'
+    p:adv()
+  end
+  p:match("NEWLINE")
+  local arms = {}
+  p:skip_newlines()
+  if p:at("INDENT") then
+    p:adv()
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+      local apos = p:cur().pos
+      local condition
+      if p:at("NAMED_ARG", "_") then
+        p:adv(); condition = "_"
+      elseif p:at("IDENT", "_") then
+        p:adv()
+        p:expect("OP", ":", "expected ':' after '_'")
+        condition = "_"
+      else
+        condition = parse_expr(p)
+        p:expect("OP", ":", "expected ':' after cond arm condition")
+      end
+      local body
+      if p:at("NEWLINE") or p:at("DEDENT") or p:at("EOF") then
+        p:match("NEWLINE")
+        if p:at("INDENT") then body = parse_body_items(p, false) end
+      else
+        body = parse_expr(p)
+        if not p:at("OP", ")") then p:skip_to_eol() end
+      end
+      arms[#arms + 1] = ast.cond_arm(condition, body, apos)
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+  return ast.cond_expr(arms, tpos)
+end
+
+--- Parse a for loop statement: for var in expr: body
+local function parse_for_stmt(p)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "for"
+  local var_name = p:at("IDENT") and p:adv().value or "?"
+  if p:at("KEYWORD", "in") then
+    p:adv()
+  else
+    p:emit_err(ast.E.EXPECTED_TOKEN, "expected 'in' after for variable", p:cur().pos)
+  end
+  local iter = parse_expr(p)
+  p:expect("OP", ":", "expected ':' after for expression")
+  p:skip_to_eol()
+  local body = parse_body_items(p, false)
+  return ast.for_stmt(var_name, iter, body, tpos)
+end
+
+--- Parse a while loop statement: while cond: body
+local function parse_while_stmt(p)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "while"
+  local cond = parse_expr(p)
+  p:expect("OP", ":", "expected ':' after while condition")
+  p:skip_to_eol()
+  local body = parse_body_items(p, false)
+  return ast.while_stmt(cond, body, tpos)
+end
+
+--- Parse a let statement: let name = expr: body  (single binding form)
+--- Multi-binding form with continuation lines (name = expr on subsequent lines,
+--- last one ending with :) is also supported.
+--- Parse a let binding value.
+--- Returns (expr, colon_consumed).
+--- colon_consumed is true when the value was a NAMED_ARG (lexer ate the ':').
+local function parse_let_value(p)
+  if p:at("NAMED_ARG") then
+    -- 'name:' tokenized as one unit — the ':' is already gone
+    local nt = p:adv()
+    return ast.fn_call(nt.value, {}, nt.pos), true
+  end
+  return parse_expr(p), false
+end
+
+local function parse_let_stmt(p)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "let"
+  local bindings = {}
+  -- Parse first binding on the same line
+  local bpos = p:cur().pos
+  local bname = p:at("IDENT") and p:adv().value or "?"
+  p:expect("OP", "=", "expected '=' in let binding")
+  local bexpr, colon_done = parse_let_value(p)
+  bindings[#bindings + 1] = ast.let_binding(bname, bexpr, bpos)
+  if colon_done or p:at("OP", ":") then
+    if not colon_done then p:adv() end  -- consume ":" if not already done
+    p:skip_to_eol()
+    local body = parse_body_items(p, false)
+    return ast.let_stmt(bindings, body, tpos)
+  end
+  -- Otherwise: newline then possible INDENT block with more bindings
+  p:match("NEWLINE")
+  if p:at("INDENT") then
+    p:adv()  -- consume INDENT (bindings continuation block)
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+      if not p:at("IDENT") then break end
+      local bpos2 = p:cur().pos
+      local bname2 = p:adv().value
+      if not p:at("OP", "=") then
+        p:emit_err(ast.E.EXPECTED_TOKEN, "expected '=' in let binding continuation", p:cur().pos)
+        break
+      end
+      p:adv()  -- consume "="
+      local bexpr2, colon_done2 = parse_let_value(p)
+      bindings[#bindings + 1] = ast.let_binding(bname2, bexpr2, bpos2)
+      if colon_done2 or p:at("OP", ":") then
+        if not colon_done2 then p:adv() end
+        p:skip_to_eol()
+        local body = parse_body_items(p, false)
+        if p:at("DEDENT") then p:adv() end
+        return ast.let_stmt(bindings, body, tpos)
+      end
+      p:match("NEWLINE")
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+  return ast.let_stmt(bindings, {}, tpos)
+end
+
+--- Parse a lambda expression: fn(params): body_expr
+local function parse_lambda(p)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "fn"
+  local params = {}
+  if p:at("OP", "(") then
+    p:adv()
+    while p:at("IDENT") do
+      params[#params + 1] = p:adv().value
+      if not p:match("OP", ",") then break end
+    end
+    p:expect("OP", ")", "expected ')' to close lambda params")
+  end
+  p:expect("OP", ":", "expected ':' after lambda params")
+  local body = parse_expr(p)
+  return ast.lambda_expr(params, body, tpos)
+end
+
 -- ── Primary expression (with function application argument collection) ──────
 
 local function parse_primary(p)
   local t = p:cur()
   local tpos = t.pos
 
+  -- NAMED_ARG in expression context: 'name:' — the lexer ate the ':'.
+  -- 'cond:' → parse as cond expression.
+  -- Any other NAMED_ARG → treat as 0-arg fn_call (name is the callee).
+  if t.kind == "NAMED_ARG" then
+    if t.value == "cond" then return parse_cond_expr(p) end
+    p:adv()
+    return ast.fn_call(t.value, {}, tpos)
+  end
+
   if t.kind == "KEYWORD" then
-    if t.value == "match" then return parse_match_expr(p) end
-    if t.value == "if"    then return parse_if_expr(p)    end
-    if t.value == "when"  then return parse_when_stmt(p)  end
-    -- cond / let / for / while / fn (lambda): stubs
-    if t.value == "cond" or t.value == "let" or t.value == "for"
-        or t.value == "while" then
+    if t.value == "match"  then return parse_match_expr(p) end
+    if t.value == "if"     then return parse_if_expr(p)    end
+    if t.value == "when"   then return parse_when_stmt(p)  end
+    if t.value == "cond"   then return parse_cond_expr(p)  end
+    if t.value == "fn"     then return parse_lambda(p)     end
+    -- for / while / let: not valid as inline expressions
+    if t.value == "for" or t.value == "while" or t.value == "let" then
       p:emit_err(ast.E.BAD_EXPRESSION,
-        "'" .. t.value .. "' expressions not yet implemented", tpos)
+        "'" .. t.value .. "' not valid as inline expression", tpos)
       p:skip_to_eol()
       return ast.int_lit(0, tpos)
     end
@@ -925,11 +1100,33 @@ local function parse_primary(p)
   if t.kind == "IDENT" then
     local name = t.value
     p:adv()
+    -- Check for record constructor: Name(field: val, ...)
+    if p:at("OP", "(") and p:peek() and p:peek().kind == "NAMED_ARG" then
+      p:adv()  -- consume "("
+      local fields = {}
+      while not p:at("OP", ")") and not p:at("EOF") do
+        if p:at("NAMED_ARG") then
+          local nt = p:adv()
+          local val = parse_expr(p)
+          fields[#fields + 1] = ast.named_arg(nt.value, val, nt.pos)
+          p:match("OP", ",")
+        else
+          break
+        end
+      end
+      p:expect("OP", ")", "expected ')' to close record constructor")
+      return ast.record_constructor(name, fields, tpos)
+    end
     local args = {}
     while can_start_arg(p) do
       local arg = parse_atom(p)
       if not arg then break end
-      table.insert(args, arg)
+      args[#args + 1] = arg
+    end
+    -- Check for trailing lambda argument: fn(params): expr
+    if p:at("KEYWORD", "fn") then
+      local lam = parse_lambda(p)
+      if lam then args[#args + 1] = lam end
     end
     return ast.fn_call(name, args, tpos)
   end
@@ -1099,6 +1296,16 @@ local MUTATION_TABLE = {
     if p:at("NAMED_ARG", "steps") then p:adv(); steps = parse_expr(p) end
     p:skip_to_eol(); return ast.undo_mut(steps, pos)
   end,
+  ["time-inc!"] = function(p, pos)
+    -- Parse optional axis: value pairs, e.g. time-inc! tick: 1  hour: 8
+    local axes = {}
+    while p:at("NAMED_ARG") do
+      local nt = p:adv()
+      local val = parse_expr(p)
+      axes[#axes + 1] = { axis = nt.value, value = val }
+    end
+    p:skip_to_eol(); return ast.time_inc_mut(axes, pos)
+  end,
 }
 
 -- ── Scene navigation ─────────────────────────────────────────────────────────
@@ -1149,10 +1356,18 @@ parse_stmt = function(p)
     if t.value == "match" then
       local e = parse_match_expr(p); return ast.expr_stmt(e, tpos)
     end
-    if t.value == "for" or t.value == "while" or t.value == "let" then
-      -- Stub: skip block
-      p:skip_to_eol(); p:skip_block(); return nil
+    if t.value == "for"   then return parse_for_stmt(p)   end
+    if t.value == "while" then return parse_while_stmt(p) end
+    if t.value == "let"   then return parse_let_stmt(p)   end
+    if t.value == "cond" then
+      local e = parse_cond_expr(p); return ast.expr_stmt(e, tpos)
     end
+  end
+  -- NAMED_ARG "cond" — 'cond:' with colon eaten by lexer
+  if t.kind == "NAMED_ARG" and t.value == "cond" then
+    local e = parse_cond_expr(p); return ast.expr_stmt(e, tpos)
+  end
+  if t.kind == "KEYWORD" then
     if t.value == "pass" then p:adv(); p:skip_to_eol(); return ast.pass_stmt(tpos) end
   end
 

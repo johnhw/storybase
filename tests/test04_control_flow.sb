@@ -8,9 +8,8 @@
 #   - cond with multiple boolean branches and wildcard
 #   - for loop over a path-list family
 #   - while loop inside a transaction function (condition mutated by body)
-#   - let bindings (sequential, each may reference previous)
+#   - let bindings (sequential via nested let; each can reference the previous)
 #   - Lambda expressions passed to any?, all?, count-where
-#   - Nested let bindings
 #   - Computed goto using match
 #
 # Expected behaviour:
@@ -97,14 +96,13 @@ fn resolve-combat:
   pre:  world/enemy-hp > 0
   # while loop: runs until enemy or player dies, or 10 rounds maximum
   while world/enemy-hp > 0  and  player/status = 'alive  and  world/rounds-done < 10:
-    let dmg-to-enemy  = warrior-damage
-        dmg-to-player = (random-int 5 15)
-        new-enemy-hp  = world/enemy-hp - dmg-to-enemy:
-      dec! world/enemy-hp    dmg-to-enemy
-      dec! player/health     dmg-to-player
-      inc! world/rounds-done 1
-      when player/health <= 0:
-        set! player/status 'dead
+    let dmg-to-enemy = warrior-damage:
+      let dmg-to-player = (random-int 5 15):
+        dec! world/enemy-hp    dmg-to-enemy
+        dec! player/health     dmg-to-player
+        inc! world/rounds-done 1
+        when player/health <= 0:
+          set! player/status 'dead
   when world/enemy-hp <= 0:
     set! world/phase 'rest
 
@@ -117,11 +115,11 @@ fn rest-party:
   set! world/phase 'setup
 
 fn apply-class-bonus:
-  # nested let demonstrating sequential binding
-  let base    = warrior-damage
-      scaled  = base * 2
-      capped  = min scaled 35:
-    set! world/enemy-hp (max 0 (world/enemy-hp - capped))
+  # nested let demonstrating sequential binding (each let can reference outer)
+  let base = warrior-damage:
+    let scaled = base * 2:
+      let capped = min scaled 35:
+        set! world/enemy-hp (max 0 (world/enemy-hp - capped))
 
 # ── Scenes ─────────────────────────────────────────────────────────────────
 

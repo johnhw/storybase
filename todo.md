@@ -8,44 +8,48 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-01)
 
-**Phase 3 MILESTONE MET ✅** — `test02_choices.sb` runs end-to-end with correct transaction log.
-574 tests passing (0 failures). CLI `storybase run` fully functional.
+**Phase 3+ MILESTONE MET ✅** — test02, test04, test05 all run interactively. 585 tests passing.
 
-**Phase 3 work completed:**
-- `runtime/eval.lua` (NEW — tree-walking AST evaluator): all literals, path/interp_path reads,
-  binary/unary ops, nil_coalesce, fn_call (user + built-ins), if_expr, match_expr, when_stmt,
-  for_stmt, while_stmt, let_stmt, all mutation primitives, scene navigation signals
-- `runtime/state.lua` (REWRITTEN): full state store with get/set/inc/dec/add/remove/clear/push/pop/
-  spawn/despawn/path_exists/path_list/init_defaults; clamping against type index; entity family
-  sentinel keys; append-only transaction log
-- `runtime/engine.lua` (REWRITTEN): scene stack (push/pop/goto/enter/exit + overflow guard),
-  render_scene (narration + conditional narration + choice guards + inline exprs), do_choice
-  (visible-index dispatch + signal return), init (defaults + entry scene), step (full turn),
-  M.run (text REPL)
-- `compiler/codegen.lua` extended: emit_fns (body/pre/post as raw AST trees, is_transaction),
-  emit_scenes (scene body as AST list)
-- `tests/runtime/state_spec.lua`, `tests/runtime/eval_spec.lua`, `tests/runtime/engine_spec.lua` added
+**Phase 3 work completed (original):**
+- `runtime/eval.lua`: all literals, path/interp_path reads, binary/unary ops, nil_coalesce,
+  fn_call (user + built-ins), if_expr, match_expr, when_stmt, for_stmt, while_stmt, let_stmt,
+  all mutation primitives, scene navigation signals
+- `runtime/state.lua`: full state store with get/set/inc/dec/add/remove/clear/push/pop/spawn/
+  despawn/path_exists/path_list/init_defaults; type clamping; append-only transaction log
+- `runtime/engine.lua`: scene stack, render_scene, do_choice, init, step, M.run (text REPL)
+- `tests/runtime/state_spec.lua`, `tests/runtime/eval_spec.lua`, `tests/runtime/engine_spec.lua`
 
-**Deviation:** `runtime/eval.lua` added as a separate module (not in original plan). It cleanly
-separates the tree-walking evaluator from the engine's turn-loop concerns, and makes eval_spec.lua
-independent of the engine. Scene navigation uses `ctx.signal` (not Lua exceptions) so eval_stmts
-stops cleanly after a scene transition.
+**Phase 3 extras completed (2026-04-01):**
+- Parser: `cond:`, `for`, `while`, `let`, lambda, record constructors fully implemented
+- Lexer: paren/bracket depth tracking suppresses INDENT/DEDENT inside `()`, `[]`, `{}`
+  (like Python); fixes computed gotos: `-> (match expr: arms...)` now parses correctly
+- Parser: match_expr now handles both INDENT-block and paren-inline arm lists
+- Eval: `eval_match` / `eval_cond` forward-declared to fix nil reference issue
+- Eval: 0-arg fn_call fallback returns name as string (for bare family names in path-list etc.)
+- Engine: `render_scene` returns third value `nav_signal` for scene-body `scene_goto` items
+- Engine: `step()` follows nav_signal before prompting for player input (enables computed gotos)
+- Tests: match_expr, cond_expr, for_stmt, while_stmt, let_stmt, computed goto engine tests added
+- test04_control_flow.sb: compiles and runs interactively (while loop, cond, let, match goto)
+- test05_log_and_time.sb: compiles and runs interactively
 
-**Known Phase 3 gaps (deferred):**
+**Known gaps (deferred to later phases):**
 - Log serialization / deserialization to file — NOT done
 - Log snapshot + delta replay — NOT done
 - Indexed list access (`path[n]`, `path[a:b]`) — NOT done
 - `clamp-event` debug hook — NOT done
-- Time model (`time-inc!`, axes, wrap) — NOT done
+- Time model (`time-inc!`, axes, wrap) — stub only (no-op)
 - Save/load (`--save`/`--load` CLI flags) — NOT done
-- `for`, `while`, `let`, `cond` — parser stubs emit errors at runtime (deferred)
+- `undo!` — stub only (no-op)
+- `path@before` in post: conditions — NOT done
 - Checker: discrete/superficial boundary enforcement — NOT done
 - Checker: write-set analysis — NOT done
+- `spawn!` / family member tracking: party members exist in state but `living-count` returns 0
+  (path_list likely not returning spawned members; needs investigation)
 
 **Immediate next steps (Phase 4 prep):**
-1. Log serialization: JSON or Lua table format for save/load
-2. Time model: implement `time-inc!` and axis declarations in engine
-3. Parser stubs: implement `for`/`while`/`let` in evaluator (or unblock parser)
+1. Investigate spawn!/path_list: party members spawned but not returned by path-list
+2. Log serialization: JSON or Lua table format for save/load
+3. Time model: implement `time-inc!` and axis declarations in engine
 4. Phase 4: actors, messaging, scheduling
 
 ---
@@ -788,3 +792,23 @@ A separate types.lua is not needed for Phase 1.
 - [ ] Line length ≤ 120 characters throughout
 - [ ] All error codes use `UPPER_SNAKE` constants defined in `compiler/ast.lua` or `runtime/engine.lua`
 - [ ] `busted tests/` passes with zero failures before each phase milestone is signed off
+
+## Long term tasks (after engine is stable)
+
+- Write documentation, including a public API reference and a guide for writing games.
+  - This should include an API spec (complete), a tutorial-style guide to writing games with the engine, a how-to guide, and a reference for the language syntax and semantics.
+  - Read https://danielsieger.com/blog/2023/04/24/framework-for-better-documentation.html for ideas on structuring the documentation before starting. Write a summary of the key points in this todo list to guide the writing process.
+  - Remember to create todo points for each aspect of the documentation.
+  - The API spec should cover all public functions and their expected inputs, outputs, and side effects. It should also include examples of how to use each function in the context of a game.
+  - The tutorial guide should walk through the process of creating a game from start to finish, demonstrating how to use the various features of the engine. It should start with a simple game and gradually introduce more complex features, showing how they can be used together to create engaging interactive fiction.
+  - The language reference should provide a comprehensive overview of the syntax and semantics of the StoryBase language, including all expression forms, control flow constructs, mutation primitives, and scene declaration features. It should also include examples of each construct in use.
+  - The documentation should be written in a clear and accessible style, with plenty of examples and explanations to help new users understand how to use the engine effectively. It should also be kept up to date with any changes or additions to the engine's features.
+
+- Write a series of example games, from a very basic test toy to a relatively complete (but still basic) adventure with multiple scenes, NPCs, and a complex state machine.
+  - To execute this task, write down specifications for each of the games (say 5), including a list of features that the game demonstrates. 
+  - When designing the games, start with a simple "Hello World" style interactive fiction that demonstrates basic scene navigation and state mutation. Then incrementally add features in subsequent games, such as player choices, guards, transactions, actors with behaviors, scheduled events, and finally a game that uses the search and verify capabilities.
+  - Choose a consistent theme and setting for the games (e.g., a fantasy adventure, a sci-fi exploration, a mystery puzzle) to make them more engaging and cohesive as a suite of examples.
+  - *BEFORE WRITING ANY CODE* write down the specifications and plans for the games in `demo_games.md`, including a breakdown of which features are demonstrated in each game and how they build on each other.
+  - Refine the specifications so that they are clear and detailed enough to guide the implementation phase, but avoid over-specifying to allow for creative freedom during development.
+  - Then implement each game as a `demo*.sb` file, and add any missing features to the compiler/runtime as needed to support the game.
+  - Annotate the game files with comments explaining how the features are implemented in the code, and how they interact with the engine.
