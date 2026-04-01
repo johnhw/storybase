@@ -33,12 +33,14 @@ Milestone goals are marked **M**.
 - test05_log_and_time.sb: compiles and runs interactively
 
 **Known gaps (deferred to later phases):**
-- Log serialization / deserialization to file — NOT done
-- Log snapshot + delta replay — NOT done
+- Log serialization / deserialization to file — ✅ DONE (Lua table literal format)
+- State replay from log — ✅ DONE (state_mod.replay applies entries in order)
+- Save/load CLI flags (`--save`/`--load`) — ✅ DONE (engine.run handles both)
+- Log snapshot + delta replay — NOT done (Phase 8)
 - Indexed list access (`path[n]`, `path[a:b]`) — NOT done
 - `clamp-event` debug hook — NOT done
 - Time model (`time-inc!`, axes, wrap) — stub only (no-op)
-- Save/load (`--save`/`--load` CLI flags) — NOT done
+- Save/load (`--save`/`--load` CLI flags) — ✅ DONE
 - `undo!` — stub only (no-op)
 - `path@before` in post: conditions — NOT done
 - Checker: discrete/superficial boundary enforcement — NOT done
@@ -47,9 +49,8 @@ Milestone goals are marked **M**.
   for any fields not explicitly provided in the record constructor (e.g. `status = 'alive`)
 
 **Immediate next steps (Phase 4 prep):**
-1. Log serialization: JSON or Lua table format for save/load
-3. Time model: implement `time-inc!` and axis declarations in engine
-4. Phase 4: actors, messaging, scheduling
+1. Time model: implement `time-inc!` and axis declarations in engine
+2. Phase 4: actors, messaging, scheduling (test06_actors.sb)
 
 ---
 

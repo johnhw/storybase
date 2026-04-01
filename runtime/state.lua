@@ -418,4 +418,20 @@ function M.new(schema, log)
   return store
 end
 
+-- ============================================================
+-- Log replay: reconstruct cache from a serialised log
+-- ============================================================
+
+--- Replay a deserialized log to reconstruct state on top of defaults.
+--- Call `store:init_defaults()` BEFORE replay to establish baseline.
+---@param store table  state store (already init_defaults'd)
+---@param entries table  list of log entry tables (from log:entries())
+function M.replay(store, entries)
+  for _, e in ipairs(entries) do
+    -- Apply the mutation: set path to the recorded new value.
+    -- e["new"] == nil correctly removes paths (e.g. after despawn).
+    store._cache[e.path] = e["new"]
+  end
+end
+
 return M

@@ -75,12 +75,112 @@ function M.new()
     return result
   end
 
-  --- Serialise the log to a string (simple Lua table format).
+  --- Serialise the log to a self-contained Lua chunk (with `return`).
+  --- Execute with load() to recover the entries list.
   function log:serialise()
-    -- Not yet implemented
-    return ""
+    return "return " .. M.serialise_entries(self._entries)
   end
 
+  return log
+end
+
+-- ============================================================
+-- Module-level serialise / deserialise helpers
+-- ============================================================
+
+--- Render a Lua runtime value as a Lua literal string.
+--- Handles: nil, boolean, number, string, array-table, hash-table.
+---@param v any
+---@return string
+local function ser_val(v)
+  if v == nil then
+    return "nil"
+  elseif type(v) == "boolean" then
+    return tostring(v)
+  elseif type(v) == "number" then
+    -- Use %.14g to preserve precision; avoids scientific notation for integers
+    return string.format("%.14g", v)
+  elseif type(v) == "string" then
+    -- Escape backslash, double-quote, and control characters
+    local escaped = v
+      :gsub("\\", "\\\\")
+      :gsub('"',  '\\"')
+      :gsub("\n", "\\n")
+      :gsub("\r", "\\r")
+      :gsub("\0", "\\0")
+    return '"' .. escaped .. '"'
+  elseif type(v) == "table" then
+    local parts = {}
+    -- Detect array-like tables (integer keys 1..n, no holes)
+    local n = #v
+    local is_array = n > 0
+    if is_array then
+      for i = 1, n do
+        parts[#parts + 1] = ser_val(v[i])
+      end
+    else
+      for k, val in pairs(v) do
+        if type(k) == "string" then
+          parts[#parts + 1] = k .. "=" .. ser_val(val)
+        elseif type(k) == "number" then
+          parts[#parts + 1] = "[" .. k .. "]=" .. ser_val(val)
+        end
+      end
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+  else
+    return "nil"
+  end
+end
+
+--- Serialise a list of log entries to a Lua table literal string (no `return`).
+--- The result is a `{...}` expression suitable for embedding as a value.
+--- To get a self-contained chunk, prefix with "return ".
+---@param entries table  list of log entry tables
+---@return string
+function M.serialise_entries(entries)
+  local lines = { "{" }
+  for _, e in ipairs(entries) do
+    local parts = {
+      "seq="  .. tostring(e.seq),
+      "fn="   .. ser_val(e.fn),
+      "path=" .. ser_val(e.path),
+      "old="  .. ser_val(e.old),
+      '["new"]=' .. ser_val(e.new),  -- 'new' is a keyword in older Lua
+    }
+    if e.time ~= nil then
+      parts[#parts + 1] = "time=" .. ser_val(e.time)
+    end
+    lines[#lines + 1] = "  {" .. table.concat(parts, ", ") .. "},"
+  end
+  lines[#lines + 1] = "}"
+  return table.concat(lines, "\n")
+end
+
+--- Deserialise a log string produced by log:serialise() and return a log instance.
+--- str must be a complete Lua chunk (starts with "return").
+---@param str string  produced by log:serialise()
+---@return table  log instance
+function M.deserialise(str)
+  local fn, err = load(str)  -- str must be "return {...}"
+  if not fn then
+    error("log.deserialise: parse error: " .. tostring(err))
+  end
+  local entries = fn()
+  if type(entries) ~= "table" then
+    error("log.deserialise: expected table, got " .. type(entries))
+  end
+  local log = M.new()
+  for _, e in ipairs(entries) do
+    -- Normalise: "new" may have been stored under the key ["new"]
+    if e["new"] == nil and rawget(e, "new") ~= nil then
+      e["new"] = rawget(e, "new")
+    end
+    log._entries[#log._entries + 1] = e
+    if type(e.seq) == "number" and e.seq > log._seq then
+      log._seq = e.seq
+    end
+  end
   return log
 end
 

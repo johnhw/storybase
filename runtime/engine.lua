@@ -16,6 +16,63 @@ local state_mod = require("runtime.state")
 local log_mod   = require("runtime.log")
 local eval      = require("runtime.eval")
 
+-- ============================================================
+-- Save / load helpers
+-- ============================================================
+
+--- Save format: a Lua table literal containing scene_stack + log entries.
+local SAVE_VERSION = 1
+
+local function write_save(path, scene_stack, log)
+  local log_mod2 = require("runtime.log")
+  local f, err = io.open(path, "w")
+  if not f then
+    io.stderr:write("storybase: cannot write save file: " .. tostring(err) .. "\n")
+    return false
+  end
+  -- Header
+  f:write("-- StoryBase save file (v" .. SAVE_VERSION .. ")\n")
+  f:write("local save = {}\n")
+  f:write("save.version = " .. SAVE_VERSION .. "\n")
+  -- Scene stack
+  f:write("save.scene_stack = {")
+  local parts = {}
+  for _, s in ipairs(scene_stack) do
+    parts[#parts + 1] = string.format("%q", s)
+  end
+  f:write(table.concat(parts, ", ") .. "}\n")
+  -- Log entries (table expression, no "return")
+  f:write("save.entries =\n")
+  f:write(log_mod2.serialise_entries(log:entries()))
+  f:write("\n")
+  -- remove the unused variable warning; we only use log_mod2 here
+  local _ = log_mod2
+  f:write("return save\n")
+  f:close()
+  return true
+end
+
+local function read_save(path)
+  local f, err = io.open(path, "r")
+  if not f then
+    io.stderr:write("storybase: cannot read save file: " .. tostring(err) .. "\n")
+    return nil
+  end
+  local src = f:read("*a")
+  f:close()
+  local fn, perr = load(src)
+  if not fn then
+    io.stderr:write("storybase: save file parse error: " .. tostring(perr) .. "\n")
+    return nil
+  end
+  local ok, data = pcall(fn)
+  if not ok then
+    io.stderr:write("storybase: save file exec error: " .. tostring(data) .. "\n")
+    return nil
+  end
+  return data
+end
+
 local M = {}
 
 local DEFAULT_MAX_STACK = 16
@@ -327,17 +384,39 @@ end
 
 --- Run a compiled game interactively (simple text REPL).
 ---@param game_table table  Compiled game table from codegen
----@param opts       table? Options: seed, max_stack, io_out, io_in
+---@param opts       table? Options: seed, max_stack, io_out, io_in, save_path, load_path
 ---@return integer          Exit code
 function M.run(game_table, opts)
   opts = opts or {}
   if opts.seed then math.randomseed(opts.seed) end
 
   local eng = M.new(game_table, opts)
-  eng:init()
+
+  if opts.load_path then
+    -- Load mode: restore defaults then replay saved log
+    local save_data = read_save(opts.load_path)
+    if not save_data then return 1 end
+    eng._state:init_defaults()
+    state_mod.replay(eng._state, save_data.entries or {})
+    -- Restore scene stack
+    if type(save_data.scene_stack) == "table" and #save_data.scene_stack > 0 then
+      eng._scene_stack = save_data.scene_stack
+    else
+      eng:init()
+    end
+    io.stdout:write("[Loaded from " .. opts.load_path .. "]\n")
+  else
+    eng:init()
+  end
 
   while eng:step() do
     -- loop
+  end
+
+  if opts.save_path then
+    if write_save(opts.save_path, eng._scene_stack, eng._log) then
+      io.stdout:write("[Saved to " .. opts.save_path .. "]\n")
+    end
   end
 
   return 0
