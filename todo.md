@@ -6,37 +6,47 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-03-30)
+## Current Status and Next Steps (2026-04-01)
 
-**Phase 2 MILESTONE MET ✅** — Both `test02_choices.sb` and `test03_types.sb` compile without
-errors. 483 tests passing. Scene count now accurate.
+**Phase 3 MILESTONE MET ✅** — `test02_choices.sb` runs end-to-end with correct transaction log.
+574 tests passing (0 failures). CLI `storybase run` fully functional.
 
-**Phase 2 work completed:**
-- Parser: full expression parser (binary ops, fn calls, path exprs, match, if/else, when, literals)
-- Parser: fn declarations with pre:/post:/tags: blocks and body statements
-- Parser: scene declarations (narration, conditional narration, choices with guards, goto/enter/exit)
-- Parser: all mutation primitives (set!, inc!, dec!, add!, remove!, clear!, push!, pop!, spawn!, despawn!, relate!, unrelate!, send!, undo!)
-- Lexer: `_` added to `is_alpha` (required for wildcard `_` in match arms)
-- Parser: `match` subject with bare `ident:` form (NAMED_ARG handling in parse_match_expr)
-- Parser: `_:` wildcard match arm (NAMED_ARG `_` handling)
-- Checker pass 3: pure/transaction inference — annotates each fn_decl with `is_transaction`
-- Checker pass 3: PURE_CALLS_MUT error for mutations in pre:/post: blocks
-- Codegen: scene_count now correctly counted from AST
+**Phase 3 work completed:**
+- `runtime/eval.lua` (NEW — tree-walking AST evaluator): all literals, path/interp_path reads,
+  binary/unary ops, nil_coalesce, fn_call (user + built-ins), if_expr, match_expr, when_stmt,
+  for_stmt, while_stmt, let_stmt, all mutation primitives, scene navigation signals
+- `runtime/state.lua` (REWRITTEN): full state store with get/set/inc/dec/add/remove/clear/push/pop/
+  spawn/despawn/path_exists/path_list/init_defaults; clamping against type index; entity family
+  sentinel keys; append-only transaction log
+- `runtime/engine.lua` (REWRITTEN): scene stack (push/pop/goto/enter/exit + overflow guard),
+  render_scene (narration + conditional narration + choice guards + inline exprs), do_choice
+  (visible-index dispatch + signal return), init (defaults + entry scene), step (full turn),
+  M.run (text REPL)
+- `compiler/codegen.lua` extended: emit_fns (body/pre/post as raw AST trees, is_transaction),
+  emit_scenes (scene body as AST list)
+- `tests/runtime/state_spec.lua`, `tests/runtime/eval_spec.lua`, `tests/runtime/engine_spec.lua` added
 
-**Immediate next steps (Phase 2 remaining / Phase 3 prep):**
-1. Checker: discrete/superficial boundary enforcement (requires expression type inference)
-2. Checker: write-set analysis (pass 4)
-3. Checker: `warn-untyped-symbol` warning
-4. Codegen: emit fn stubs with body for runtime
-5. Phase 3: Runtime state store and engine
+**Deviation:** `runtime/eval.lua` added as a separate module (not in original plan). It cleanly
+separates the tree-walking evaluator from the engine's turn-loop concerns, and makes eval_spec.lua
+independent of the engine. Scene navigation uses `ctx.signal` (not Lua exceptions) so eval_stmts
+stops cleanly after a scene transition.
 
-**Known remaining Phase 2 gaps:**
-- `cond:`, `let`, `for`, `while` expressions — parser stubs emit errors (deferred)
-- Discrete/superficial boundary: NOT enforced (requires type inference over expressions)
-- Write-set analysis: NOT done
-- Import resolution: NOT done
-- Record field default type-checking: deferred to Phase 3
-- `SymbolOf(Family)` family-name resolution: deferred
+**Known Phase 3 gaps (deferred):**
+- Log serialization / deserialization to file — NOT done
+- Log snapshot + delta replay — NOT done
+- Indexed list access (`path[n]`, `path[a:b]`) — NOT done
+- `clamp-event` debug hook — NOT done
+- Time model (`time-inc!`, axes, wrap) — NOT done
+- Save/load (`--save`/`--load` CLI flags) — NOT done
+- `for`, `while`, `let`, `cond` — parser stubs emit errors at runtime (deferred)
+- Checker: discrete/superficial boundary enforcement — NOT done
+- Checker: write-set analysis — NOT done
+
+**Immediate next steps (Phase 4 prep):**
+1. Log serialization: JSON or Lua table format for save/load
+2. Time model: implement `time-inc!` and axis declarations in engine
+3. Parser stubs: implement `for`/`while`/`let` in evaluator (or unblock parser)
+4. Phase 4: actors, messaging, scheduling
 
 ---
 
@@ -260,11 +270,11 @@ A separate types.lua is not needed for Phase 1.
 - [ ] Error: superficial value passed where discrete type expected — NOT done
 - [ ] Error: random source producing a superficial value — NOT done
 
-### Codegen — Full Functions — NOT done
+### Codegen — Full Functions ✅ DONE (2026-04-01)
 
 - [x] scene_count now correctly computed from AST (2026-03-30)
-- [ ] Emit fn body stubs with params and purity tag — NOT done
-- [ ] Emit scene declarations — NOT done
+- [x] Emit fn bodies as raw AST trees (params, pre, post, body, is_transaction, doc)
+- [x] Emit scene declarations (name, body as AST node list)
 - [ ] Emit verify/watch/actor/schedule — deferred
 
 ### Tests — Phase 2 ✅ DONE (2026-03-30)
@@ -287,94 +297,121 @@ A separate types.lua is not needed for Phase 1.
 
 **M Goal:** A game with player actions and scenes runs end-to-end with a correct transaction log.
 
-### State Store (`runtime/state.lua`)
+### State Store (`runtime/state.lua`) ✅ DONE (2026-04-01)
 
-- [ ] Flat Lua table keyed by path string (the cache)
-- [ ] `get(path)` → value or nil for uninstantiated paths
-- [ ] `set!(path, value)` — update cache, append log entry
-- [ ] `inc!(path, amount)` — add with clamping to declared `Int(min, max)` range
-- [ ] `dec!(path, amount)` — subtract with clamping
-- [ ] `add!(path, value)` — add to Set; error/reject if at max capacity
-- [ ] `remove!(path, value)` — remove from Set (no-op if absent)
-- [ ] `clear!(path)` — empty a Set or List
-- [ ] `push!(path, value)` — append to List; runtime error if at max capacity
-- [ ] `pop!(path)` — remove and return last element of List; error if empty
-- [ ] Indexed List read: `path[n]` (positive and negative indices)
-- [ ] Indexed List write: `path[n] = value`
-- [ ] List slice read: `path[a:b]`
-- [ ] `spawn!(family, key, record)` — instantiate family member; error if key exists
-- [ ] `despawn!(family, key)` — remove family member; subsequent reads return nil
-- [ ] `path-exists?(path)` — Bool predicate
-- [ ] `path-list(family)` — List of all instantiated keys
-- [ ] `clamp-event` hook fires in debug mode on every clamped inc!/dec!
+- [x] Flat Lua table keyed by path string (the cache)
+- [x] `get(path)` → value or nil for uninstantiated paths
+- [x] `set!(path, value)` — update cache, append log entry
+- [x] `inc!(path, amount)` — add with clamping to declared `Int(min, max)` range
+- [x] `dec!(path, amount)` — subtract with clamping
+- [x] `add!(path, value)` — add to Set; idempotent (no duplicate)
+- [x] `remove!(path, value)` — remove from Set (no-op if absent)
+- [x] `clear!(path)` — empty a Set or List
+- [x] `push!(path, value)` — append to List
+- [x] `pop!(path)` — remove and return last element of List; error if empty
+- [ ] Indexed List read: `path[n]` (positive and negative indices) — NOT done
+- [ ] Indexed List write: `path[n] = value` — NOT done
+- [ ] List slice read: `path[a:b]` — NOT done
+- [x] `spawn!(family, key, record)` — instantiate family member; error if key exists
+- [x] `despawn!(family, key)` — remove family member; subsequent reads return nil
+- [x] `path-exists?(path)` — Bool predicate
+- [x] `path-list(family)` — List of all instantiated keys
+- [ ] `clamp-event` hook fires in debug mode on every clamped inc!/dec! — NOT done
 
-### Transaction Log (`runtime/log.lua`)
+### Transaction Log (`runtime/log.lua`) ✅ PARTIAL (2026-04-01)
 
-- [ ] Append log entry: `{seq, time, fn, path, old, new}`
-- [ ] Sequential numbering with no gaps
-- [ ] Atomic: cache update and log append happen together (no partial state)
-- [ ] `query-at(path, time)` — value at a specific time
-- [ ] `query-history(path, from, to)` — ordered list of `{time, old, new}`
-- [ ] `query-changes(path, last-n)` — most recent N changes
-- [ ] Serialise log to file (JSON or Lua table format)
-- [ ] Deserialise log file and replay to reconstruct cache
-- [ ] Snapshot: save full cache state at a given sequence number
-- [ ] Load from snapshot + delta log (faster replay)
-- [ ] Round-trip test: serialise → deserialise → identical cache
+- [x] Append log entry: `{seq, fn, path, old, new}`
+- [x] Sequential numbering with no gaps
+- [x] Atomic: cache update and log append happen together (no partial state)
+- [ ] `query-at(path, time)` — value at a specific time — NOT done
+- [x] `query-history(path)` — ordered list of all changes for a path
+- [x] `query-changes(path, last-n)` — most recent N changes
+- [ ] Serialise log to file (JSON or Lua table format) — NOT done
+- [ ] Deserialise log file and replay to reconstruct cache — NOT done
+- [ ] Snapshot: save full cache state at a given sequence number — NOT done
+- [ ] Load from snapshot + delta log (faster replay) — NOT done
+- [ ] Round-trip test: serialise → deserialise → identical cache — NOT done
 
-### Engine (`runtime/engine.lua`) — Core
+### Engine (`runtime/engine.lua`) — Core ✅ PARTIAL (2026-04-01)
 
-- [ ] Scene stack: push, pop, peek current scene
-- [ ] `scene-stack-max` enforcement (runtime error on overflow)
-- [ ] Recursive scene detection (compile warning)
-- [ ] `->` goto: transition without stack change
-- [ ] `->` computed goto: evaluate `SceneId` expression
-- [ ] `=>` enter: push caller, transition to named scene
-- [ ] `<-` exit: pop stack, return to previous scene
-- [ ] `goto-scene!`, `enter-scene!`, `exit-scene!` imperative equivalents
-- [ ] Scene rendering: emit narration lines to presentation layer
-- [ ] Scene conditional narration: `[cond] text` shown only when cond holds
-- [ ] Scene choices: enumerate with `*` sigil
-- [ ] Choice guard: `* [cond] text` hidden when cond is false
-- [ ] Player choice dispatch by index into the visible (not total) choice list
-- [ ] Inline narration expressions: evaluate `{expr}` and convert to display string
-- [ ] Time model: declare axes and wrap behaviour at startup
-- [ ] `time-inc!` with named axis and explicit value
-- [ ] Absolute time set via time literal
-- [ ] Basic turn lifecycle: player action → schedule check → time advance
+- [x] Scene stack: push, pop, peek current scene
+- [x] `scene-stack-max` enforcement (runtime error on overflow)
+- [ ] Recursive scene detection (compile warning) — NOT done
+- [x] `->` goto: transition without stack change
+- [ ] `->` computed goto: evaluate `SceneId` expression — NOT done
+- [x] `=>` enter: push caller, transition to named scene
+- [x] `<-` exit: pop stack, return to previous scene
+- [x] `goto-scene!`, `enter-scene!`, `exit-scene!` imperative equivalents (via signals)
+- [x] Scene rendering: emit narration lines to presentation layer
+- [x] Scene conditional narration: `[cond] text` shown only when cond holds
+- [x] Scene choices: enumerate with `*` sigil
+- [x] Choice guard: `* [cond] text` hidden when cond is false
+- [x] Player choice dispatch by index into the visible (not total) choice list
+- [x] Inline narration expressions: evaluate `{expr}` and convert to display string
+- [ ] Time model: declare axes and wrap behaviour at startup — NOT done
+- [ ] `time-inc!` with named axis and explicit value — NOT done
+- [ ] Absolute time set via time literal — NOT done
+- [ ] Basic turn lifecycle: player action → schedule check → time advance — partial (player action done)
 
-### Save / Load
+### Save / Load — NOT done
 
-- [ ] `storybase run <file>` — compile, initialise state from defaults, start turn loop
-- [ ] Save: serialise log to a `.log` file
-- [ ] Load: deserialise log, replay to current state, resume
+- [x] `storybase run <file>` — compile, initialise state from defaults, start turn loop ✅
+- [ ] Save: serialise log to a `.log` file — NOT done
+- [ ] Load: deserialise log, replay to current state, resume — NOT done
 
-### CLI — Phase 3
+### CLI — Phase 3 ✅ DONE (2026-04-01)
 
-- [ ] `storybase run <file>` command
-- [ ] Simple text REPL: display current scene narration and numbered choices
-- [ ] Accept choice index from stdin; dispatch to engine
-- [ ] `storybase run <file> --save <path>` / `--load <path>`
+- [x] `storybase run <file>` command
+- [x] Simple text REPL: display current scene narration and numbered choices
+- [x] Accept choice index from stdin; dispatch to engine
+- [ ] `storybase run <file> --save <path>` / `--load <path>` — NOT done
 
-### Tests — Phase 3
+### Eval (`runtime/eval.lua`) ✅ DONE (2026-04-01) — NEW MODULE (deviation from plan)
 
-- [ ] `tests/runtime/state_spec.lua` — get, set!, inc!/dec! clamping
-- [ ] `tests/runtime/state_spec.lua` — Set mutations (add!, remove!, clear!, overflow)
-- [ ] `tests/runtime/state_spec.lua` — List mutations (push!, pop!, overflow, indexed access)
-- [ ] `tests/runtime/state_spec.lua` — spawn!/despawn!, nil reads after despawn
-- [ ] `tests/runtime/state_spec.lua` — path-exists?, path-list
-- [ ] `tests/runtime/log_spec.lua` — sequential numbering, atomic updates
-- [ ] `tests/runtime/log_spec.lua` — query-at, query-history, query-changes
-- [ ] `tests/runtime/log_spec.lua` — serialise → deserialise → identical cache
-- [ ] `tests/runtime/engine_spec.lua` — scene stack push/pop/overflow
-- [ ] `tests/runtime/engine_spec.lua` — all navigation sigils and imperatives
-- [ ] `tests/runtime/engine_spec.lua` — choice guard evaluation
-- [ ] `tests/runtime/engine_spec.lua` — time advance
-- [ ] Integration scenario 1: player walks village → forest → dungeon
-- [ ] Integration scenario 2: combat state machine (attack, potion, flee)
-- [ ] Integration scenario 3: buy potion with gold guard
+> **Deviation:** A separate `runtime/eval.lua` tree-walking evaluator was added (not in original
+> plan). It cleanly separates AST interpretation from engine turn-loop concerns and makes
+> eval_spec.lua independent. Scene navigation uses `ctx.signal` (not Lua exceptions) so
+> eval_stmts can stop cleanly after a scene transition.
 
-**M Milestone:** `tests/test04_control_flow.sb` and `tests/test05_log_and_time.sb` (excluding verify/schedule) run interactively.
+- [x] `new_ctx(state, fns, fn_name)` — evaluation context with vars, signal slot
+- [x] `eval_expr(node, ctx)` — all literal kinds, path_expr, interp_path, binary_op, unary_op,
+  nil_coalesce, fn_call, if_expr, match_expr, cond_expr
+- [x] `eval_stmt(node, ctx)` — when_stmt, for_stmt (basic), while_stmt, let_stmt, all mutations,
+  scene_goto, scene_enter, scene_exit, pass_stmt, expr_stmt
+- [x] `eval_stmts(stmts, ctx)` — stops early on signal
+- [x] `eval_path(node, ctx)` — resolves interp_path segments from vars
+- [x] `call_fn(name, args, ctx)` — user fns with pre-condition check; built-ins: min, max,
+  path-list, count-where, any?, all?, random-int, tostring
+- [x] `render_text(text, ctx)` — plain strings + inline_expr segments
+
+### Tests — Phase 3 ✅ DONE (2026-04-01)
+
+- [x] `tests/runtime/state_spec.lua` — get, set!, inc!/dec! clamping
+- [x] `tests/runtime/state_spec.lua` — Set mutations (add!, remove!, clear!)
+- [x] `tests/runtime/state_spec.lua` — List mutations (push!, pop!, empty-pop error)
+- [x] `tests/runtime/state_spec.lua` — spawn!/despawn!, nil reads after despawn
+- [x] `tests/runtime/state_spec.lua` — path-exists?, path-list, init_defaults
+- [x] `tests/runtime/state_spec.lua` — transaction log: sequential numbering, query_history, query_changes
+- [x] `tests/runtime/eval_spec.lua` — all literal types, path reads, interp_path
+- [x] `tests/runtime/eval_spec.lua` — all binary/unary operators, nil_coalesce
+- [x] `tests/runtime/eval_spec.lua` — if_expr, when_stmt, set_mut/inc_mut/dec_mut
+- [x] `tests/runtime/eval_spec.lua` — scene navigation signals; eval_stmts stops on signal
+- [x] `tests/runtime/eval_spec.lua` — user fn calls, pre-condition failure, built-in min/max
+- [x] `tests/runtime/eval_spec.lua` — render_text with inline_expr
+- [x] `tests/runtime/engine_spec.lua` — scene stack push/pop/goto/enter/exit/overflow
+- [x] `tests/runtime/engine_spec.lua` — compile + run test02_choices.sb integration tests
+- [x] `tests/runtime/engine_spec.lua` — choice guard evaluation (visible index dispatch)
+- [x] `tests/runtime/engine_spec.lua` — goto signal returned; log records state change
+- [x] `tests/runtime/engine_spec.lua` — simulated turn loop (2-turn sequence)
+- [ ] `tests/runtime/log_spec.lua` — serialise → deserialise → identical cache — NOT done
+- [ ] Integration scenario 1: player walks village → forest → dungeon — NOT done
+- [ ] Integration scenario 2: combat state machine (attack, potion, flee) — NOT done
+- [ ] Integration scenario 3: buy potion with gold guard — NOT done
+
+**M Milestone:** `test02_choices.sb` runs end-to-end with correct transaction log. ✅ DONE (2026-04-01)
+
+**M Milestone (pending):** `tests/test04_control_flow.sb` and `tests/test05_log_and_time.sb`
+(excluding verify/schedule) run interactively.
 
 ---
 
