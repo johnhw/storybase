@@ -416,6 +416,48 @@ local function compute_total_state_space(decls, symtab)
 end
 
 -- ============================================================
+-- Function and scene emission
+-- ============================================================
+
+--- Emit the fns table: name → fn descriptor with params, pre, post, body, is_transaction.
+--- The body/pre/post fields are AST node trees that the runtime evaluator interprets.
+local function emit_fns(decls)
+  local fns = {}
+  local k = ast.K
+  for _, node in ipairs(decls) do
+    if node.kind == k.FN_DECL then
+      fns[node.name] = {
+        name           = node.name,
+        params         = node.params or {},
+        pre            = node.pre or {},
+        post           = node.post or {},
+        body           = node.body or {},
+        is_transaction = node.is_transaction or false,
+        doc            = node.doc,
+      }
+    end
+  end
+  return fns
+end
+
+--- Emit the scenes table: name → scene descriptor with body.
+--- The body is a list of scene element AST nodes (narration, choices, gotos).
+local function emit_scenes(decls)
+  local scenes = {}
+  local k = ast.K
+  for _, node in ipairs(decls) do
+    if node.kind == k.SCENE_DECL then
+      scenes[node.name] = {
+        name = node.name,
+        body = node.body or {},
+        doc  = node.doc,
+      }
+    end
+  end
+  return scenes
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -466,7 +508,8 @@ function M.emit(typed_ast)
       engine_config    = eng_cfg,
       time_model       = time_mdl,
     },
-    fns      = {},
+    fns      = emit_fns(decls),
+    scenes   = emit_scenes(decls),
     verifies = {},
     watches  = {},
   }

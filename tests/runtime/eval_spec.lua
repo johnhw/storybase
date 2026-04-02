@@ -464,3 +464,72 @@ describe("eval: render_text", function()
     assert.equal("HP: 42", eval.render_text(text, c))
   end)
 end)
+
+-- ============================================================
+-- time-inc! via eval
+-- ============================================================
+
+describe("eval_stmt: time_inc_mut", function()
+  local log_mod   = require("runtime.log")
+  local state_mod = require("runtime.state")
+  local compiler  = require("compiler.compiler")
+
+  it("advances the engine time clock via time-inc!", function()
+    local gt, diags = compiler.compile([[
+module t
+  version: 1.0
+schema-version: 1
+time-model:
+  axes: [day, tick]
+  wrap: [none, none]
+fn advance:
+  time-inc! tick: 3
+scene start:
+  .
+  * Go
+    advance
+    -> start
+]], "test")
+    assert.equal(0, #diags.errors)
+    local log   = log_mod.new()
+    local store = state_mod.new(gt.schema, log)
+    store:init_defaults(gt.schema)
+    -- time starts at 0
+    assert.equal(0, store:get_time().tick)
+    assert.equal(0, store:get_time().day)
+    -- call advance fn
+    local fn = gt.fns["advance"]
+    local c = eval.new_ctx(store, gt.fns, "advance")
+    eval.eval_stmts(fn.body, c)
+    assert.equal(3, store:get_time().tick)
+    assert.equal(0, store:get_time().day)
+  end)
+
+  it("wraps time axis at configured wrap value", function()
+    local gt, diags = compiler.compile([[
+module t
+  version: 1.0
+schema-version: 1
+time-model:
+  axes: [hour]
+  wrap: [24]
+fn tick:
+  time-inc! hour: 5
+scene start:
+  .
+  * Go
+    tick
+    -> start
+]], "test")
+    assert.equal(0, #diags.errors)
+    local log   = log_mod.new()
+    local store = state_mod.new(gt.schema, log)
+    store:init_defaults(gt.schema)
+    store:inc_time("hour", 22)  -- set to 22
+    local fn = gt.fns["tick"]
+    local c = eval.new_ctx(store, gt.fns, "tick")
+    eval.eval_stmts(fn.body, c)
+    -- 22 + 5 = 27 → wraps to 3
+    assert.equal(3, store:get_time().hour)
+  end)
+end)

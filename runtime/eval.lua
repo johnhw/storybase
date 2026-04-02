@@ -613,7 +613,13 @@ eval_stmt = function(node, ctx)
     -- undo! not yet implemented — no-op
 
   elseif k == K.TIME_INC_MUT then
-    -- time-inc! not yet implemented — no-op
+    -- Advance engine time clock for each named axis
+    for _, ax in ipairs(node.axes or {}) do
+      local amount = eval_expr(ax.value, ctx)
+      if type(amount) == "number" and type(ax.axis) == "string" then
+        ctx.state:inc_time(ax.axis, amount)
+      end
+    end
 
   elseif k == K.PASS_STMT then
     -- no-op

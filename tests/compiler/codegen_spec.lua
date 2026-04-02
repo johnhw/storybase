@@ -369,3 +369,57 @@ relation exits: Location -> Set(Location, 6)
     assert.are.equal("exits", gt.schema.relations[1].name)
   end)
 end)
+
+-- ============================================================
+-- Function and scene emission (Phase 3)
+-- ============================================================
+
+describe("codegen — fn emission", function()
+  it("emits fn descriptor with body nodes", function()
+    local gt = compile([[
+fn pickup-key:
+  pre:  not player/has-key
+  set!  player/has-key true
+state player/has-key: Bool = false
+]])
+    assert.is_table(gt.fns)
+    local fn = gt.fns["pickup-key"]
+    assert.is_not_nil(fn)
+    assert.equal("pickup-key", fn.name)
+    assert.is_table(fn.pre)
+    assert.is_table(fn.body)
+    assert.equal(1, #fn.pre)
+    assert.equal(1, #fn.body)
+    assert.equal("set_mut", fn.body[1].kind)
+  end)
+
+  it("marks transaction fn correctly", function()
+    local gt = compile([[
+fn do-nothing:
+  pass
+]])
+    local fn = gt.fns["do-nothing"]
+    assert.is_not_nil(fn)
+    -- pass stmt means no mutations; is_transaction = false
+    assert.is_false(fn.is_transaction)
+  end)
+end)
+
+describe("codegen — scene emission", function()
+  it("emits scene descriptor with body nodes", function()
+    local gt = compile([[
+engine-config:
+  entry-scene: room
+scene room:
+  You are in a room.
+  * Go north
+    -> north-room
+]])
+    assert.is_table(gt.scenes)
+    local scene = gt.scenes["room"]
+    assert.is_not_nil(scene)
+    assert.equal("room", scene.name)
+    assert.is_table(scene.body)
+    assert.is_true(#scene.body >= 2)  -- narration_line + choice
+  end)
+end)

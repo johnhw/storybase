@@ -6,51 +6,44 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-01)
+## Current Status and Next Steps (2026-04-02)
 
-**Phase 3+ MILESTONE MET ✅** — test02, test04, test05 all run interactively. 585 tests passing.
+**Phase 4 in progress** — 615 tests passing. test06_actors.sb now compiles cleanly.
 
-**Phase 3 work completed (original):**
-- `runtime/eval.lua`: all literals, path/interp_path reads, binary/unary ops, nil_coalesce,
-  fn_call (user + built-ins), if_expr, match_expr, when_stmt, for_stmt, while_stmt, let_stmt,
-  all mutation primitives, scene navigation signals
-- `runtime/state.lua`: full state store with get/set/inc/dec/add/remove/clear/push/pop/spawn/
-  despawn/path_exists/path_list/init_defaults; type clamping; append-only transaction log
-- `runtime/engine.lua`: scene stack, render_scene, do_choice, init, step, M.run (text REPL)
-- `tests/runtime/state_spec.lua`, `tests/runtime/eval_spec.lua`, `tests/runtime/engine_spec.lua`
+**Phase 3 milestones met ✅**
+**Phase 3+ milestones met ✅** — test02, test04, test05 run interactively.
 
-**Phase 3 extras completed (2026-04-01):**
-- Parser: `cond:`, `for`, `while`, `let`, lambda, record constructors fully implemented
-- Lexer: paren/bracket depth tracking suppresses INDENT/DEDENT inside `()`, `[]`, `{}`
-  (like Python); fixes computed gotos: `-> (match expr: arms...)` now parses correctly
-- Parser: match_expr now handles both INDENT-block and paren-inline arm lists
-- Eval: `eval_match` / `eval_cond` forward-declared to fix nil reference issue
-- Eval: 0-arg fn_call fallback returns name as string (for bare family names in path-list etc.)
-- Engine: `render_scene` returns third value `nav_signal` for scene-body `scene_goto` items
-- Engine: `step()` follows nav_signal before prompting for player input (enables computed gotos)
-- Tests: match_expr, cond_expr, for_stmt, while_stmt, let_stmt, computed goto engine tests added
-- test04_control_flow.sb: compiles and runs interactively (while loop, cond, let, match goto)
-- test05_log_and_time.sb: compiles and runs interactively
+**Completed since last session (2026-04-02):**
+- Time model ✅ DONE: `time-inc!` fully implemented end-to-end — parser, AST, eval
+  (`ctx.state:inc_time(axis, amount)`), state.lua (`_time` clock, wrap, log snapshot).
+  Initialized from `schema.time_model.axes` at engine startup.
+- Parser fix: `_: pass` and inline mutation statements now parse correctly in match arm
+  inline bodies (previously only expressions were accepted inline)
+- Parser fix: `(TypeName/variant-name field: val, ...)` now parses as a record constructor
+  in atom context (was failing with "expected ')'")
+- Parser fix: `send! actor (...)` now uses `parse_atom` for actor name so `(` is not
+  collected as a function argument
+- test06_actors.sb compiles without errors (was failing on above parser issues)
+- Tests added: parser_spec — pass-in-match-arm, variant-ctor-in-parens, send!, test06 integration
+- Tests added: eval_spec — time-inc! clock advance, time wrap
 
 **Known gaps (deferred to later phases):**
-- Log serialization / deserialization to file — ✅ DONE (Lua table literal format)
-- State replay from log — ✅ DONE (state_mod.replay applies entries in order)
-- Save/load CLI flags (`--save`/`--load`) — ✅ DONE (engine.run handles both)
 - Log snapshot + delta replay — NOT done (Phase 8)
 - Indexed list access (`path[n]`, `path[a:b]`) — NOT done
 - `clamp-event` debug hook — NOT done
-- Time model (`time-inc!`, axes, wrap) — stub only (no-op)
-- Save/load (`--save`/`--load` CLI flags) — ✅ DONE
 - `undo!` — stub only (no-op)
 - `path@before` in post: conditions — NOT done
 - Checker: discrete/superficial boundary enforcement — NOT done
 - Checker: write-set analysis — NOT done
-- `spawn!` / family member tracking: ✅ FIXED — `store:spawn` now applies type field defaults
-  for any fields not explicitly provided in the record constructor (e.g. `status = 'alive`)
 
-**Immediate next steps (Phase 4 prep):**
-1. Time model: implement `time-inc!` and axis declarations in engine
-2. Phase 4: actors, messaging, scheduling (test06_actors.sb)
+**Immediate next steps (Phase 4):**
+1. ✅ Time model done
+2. Actor declarations: parse `actor name:` block (state/perceives/inbox/behavior/priority)
+   and codegen emit into `game_table.actors`
+3. Schedule declarations: parse `schedule name:` block and codegen emit into `game_table.schedules`
+4. Runtime actors: register actors at load, behavior dispatch, deferred mutations, conflict resolution
+5. Runtime scheduler: check trigger times each turn, fire scheduled fns
+6. Full six-step turn lifecycle in engine.lua
 
 ---
 

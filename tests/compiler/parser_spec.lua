@@ -1174,3 +1174,108 @@ describe("parser — Phase 2 integration", function()
     assert.are.equal(1, scenes)
   end)
 end)
+
+-- ── Phase 4 parser additions ─────────────────────────────────────────────────
+
+describe("parser — match arm with pass body", function()
+  it("parses '_: pass' inline arm without error", function()
+    local src = [[
+fn check msg:
+  match msg:
+    alert {threat}:
+      set! state/x 1
+    _: pass
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+  end)
+
+  it("parses inline mutation in match arm without error", function()
+    local src = [[
+fn check msg:
+  match msg:
+    alert {x}:
+      set! state/x 1
+    dismiss {y}:
+      set! state/x 0
+    _: pass
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+  end)
+end)
+
+describe("parser — variant record constructor in parens", function()
+  it("parses (Type/variant field: val) as record constructor", function()
+    local src = [[
+fn send-alert:
+  send! guard (ActorMsg/alert threat: 'x, location: 'village)
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    -- find the send! in the fn body
+    local fn = tree.decls[1]
+    assert.equal(ast.K.FN_DECL, fn.kind)
+    local stmt = fn.body[1]
+    assert.equal(ast.K.SEND_MUT, stmt.kind)
+    local msg = stmt.msg
+    assert.equal(ast.K.RECORD_CONSTRUCTOR, msg.kind)
+    assert.equal("ActorMsg/alert", msg.type_name)
+  end)
+
+  it("parses (Type/variant) with no fields as record constructor", function()
+    local src = [[
+fn send-dismiss:
+  send! guard (ActorMsg/dismiss reason: 'neutral)
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+  end)
+end)
+
+describe("parser — send! mutation", function()
+  it("parses actor name and message expression", function()
+    local src = [[
+fn notify:
+  send! guard (ActorMsg/alert threat: 'enemy, location: 'forest)
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local fn = tree.decls[1]
+    local stmt = fn.body[1]
+    assert.equal(ast.K.SEND_MUT, stmt.kind)
+    -- actor should be fn_call("guard", [])
+    assert.equal(ast.K.FN_CALL, stmt.actor.kind)
+    assert.equal("guard", stmt.actor.name)
+  end)
+end)
+
+describe("parser — Phase 4 integration: test06_actors.sb", function()
+  it("parses test06_actors.sb without errors", function()
+    local f = io.open("tests/test06_actors.sb", "r")
+    local src = f:read("*a"); f:close()
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+  end)
+
+  it("test05_log_and_time.sb parses without errors", function()
+    local f = io.open("tests/test05_log_and_time.sb", "r")
+    local src = f:read("*a"); f:close()
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+  end)
+end)

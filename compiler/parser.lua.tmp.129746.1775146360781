@@ -1372,9 +1372,7 @@ local MUTATION_TABLE = {
     p:skip_to_eol(); return ast.unrelate_mut(rel, a, b, pos)
   end,
   ["send!"]    = function(p, pos)
-    -- actor is always a bare name; use parse_atom so '(' is not collected as an arg
-    local actor = parse_atom(p)
-    local msg   = parse_expr(p)
+    local actor = parse_expr(p); local msg = parse_expr(p)
     p:skip_to_eol(); return ast.send_mut(actor, msg, pos)
   end,
   ["undo!"]    = function(p, pos)

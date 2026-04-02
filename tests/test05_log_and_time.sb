@@ -91,6 +91,7 @@ fn spend amount:
   post:  player/gold = player/gold@before - amount
   dec!   player/gold amount
   inc!   player/moves 1
+  inc!   world/tick 1
   time-inc! tick: 1
 
 fn earn amount:
@@ -99,6 +100,7 @@ fn earn amount:
   post:  player/gold >= player/gold@before     # gold is >= before (it grew or clamped)
   inc!   player/gold amount
   inc!   player/moves 1
+  inc!   world/tick 1
   time-inc! tick: 1
 
 fn rest:

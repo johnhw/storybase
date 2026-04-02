@@ -1,7 +1,33 @@
 {
   "permissions": {
     "allow": [
-      "Bash(busted:*)"
+      "Bash(lua5.4 *)",
+      "Bash(busted:*)",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, _ = lexer.tokenize\\('fn test:\\\\n  -7', 'test'\\)\nfor _, t in ipairs\\(tokens\\) do\n  print\\(t.kind, t.value\\)\nend\n\")",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, _ = lexer.tokenize\\('set! x -7', 'test'\\)\nfor _, t in ipairs\\(tokens\\) do\n  print\\(t.kind, t.value\\)\nend\n\")",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, _ = lexer.tokenize\\('match x:\\\\n  1: 42', 'test'\\)\nfor _, t in ipairs\\(tokens\\) do\n  print\\(t.kind, repr\\(t.value\\) or tostring\\(t.value\\)\\)\nend\n\")",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, _ = lexer.tokenize\\('match x:\\\\n  1: 42', 'test'\\)\nfor _, t in ipairs\\(tokens\\) do\n  print\\(t.kind, tostring\\(t.value\\)\\)\nend\n\")",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, _ = lexer.tokenize\\('_: value', 'test'\\)\nfor _, t in ipairs\\(tokens\\) do print\\(t.kind, tostring\\(t.value\\)\\) end\n\")",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, _ = lexer.tokenize\\('_ : value', 'test'\\)\nfor _, t in ipairs\\(tokens\\) do print\\(t.kind, tostring\\(t.value\\)\\) end\nprint\\('---'\\)\nlocal tokens2, _ = lexer.tokenize\\('_', 'test'\\)\nfor _, t in ipairs\\(tokens2\\) do print\\(t.kind, tostring\\(t.value\\)\\) end\n\")",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, diags = lexer.tokenize\\('_', 'test'\\)\nfor _, d in ipairs\\(diags\\) do print\\(d.level, d.code, d.message\\) end\n\")",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens, _ = lexer.tokenize\\('set! player/health 100', 'test'\\)\nfor _, t in ipairs\\(tokens\\) do print\\(t.kind, tostring\\(t.value\\)\\) end\n\")",
+      "Bash(lua5.4 cli/main.lua compile tests/test02_choices.sb)",
+      "Bash(lua5.4 cli/main.lua compile tests/test03_types.sb)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(lua5.4 -e \"\nlocal compiler = require\\('compiler.compiler'\\)\nlocal result, diags = compiler.compile_file\\('tests/test05_log_and_time.sb'\\)\nfor _, d in ipairs\\(diags or {}\\) do\n  print\\(d.code .. ': ' .. d.message\\)\nend\nprint\\('error count: ' .. #\\(diags or {}\\)\\)\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal compiler = require\\('compiler.compiler'\\)\nlocal result, diags = compiler.compile_file\\('tests/test04_control_flow.sb'\\)\nfor _, d in ipairs\\(diags or {}\\) do\n  print\\(string.format\\('%s L%d: %s', d.code, d.line or 0, d.message\\)\\)\nend\nprint\\('errors: ' .. #\\(diags or {}\\)\\)\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal tokens = lexer.tokenise\\('tests/test04_control_flow.sb', [[\nfn danger-level:\n  cond:\n    player/health <= 10:  true\n]]\\)\nfor _, t in ipairs\\(tokens\\) do\n  if t.kind ~= 'NEWLINE' and t.kind ~= 'INDENT' and t.kind ~= 'DEDENT' and t.kind ~= 'EOF' then\n    print\\(t.kind, t.value\\)\n  end\nend\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal src = 'fn danger-level:\\\\n  cond:\\\\n    player/health <= 10:  true\\\\n'\nlocal tokens = lexer.lex\\('test', src\\)\nfor _, t in ipairs\\(tokens\\) do\n  if t.kind ~= 'NEWLINE' and t.kind ~= 'INDENT' and t.kind ~= 'DEDENT' and t.kind ~= 'EOF' then\n    print\\(t.kind, t.value\\)\n  end\nend\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal src = 'fn danger-level:\\\\n  cond:\\\\n    player/health <= 10:  true\\\\n'\nlocal tokens = lexer.tokenize\\(src, 'test'\\)\nfor _, t in ipairs\\(tokens\\) do\n  if t.kind ~= 'NEWLINE' and t.kind ~= 'INDENT' and t.kind ~= 'DEDENT' and t.kind ~= 'EOF' then\n    print\\(t.kind, t.value\\)\n  end\nend\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal compiler = require\\('compiler.compiler'\\)\nlocal result, diags = compiler.compile_file\\('tests/test04_control_flow.sb'\\)\nprint\\('diags type:', type\\(diags\\), 'len:', diags and #diags or 'nil'\\)\nif diags then\n  for i, d in ipairs\\(diags\\) do\n    print\\(i, d.code, d.line, d.message\\)\n  end\nend\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal compiler = require\\('compiler.compiler'\\)\nlocal result, diags = compiler.compile_file\\('tests/test04_control_flow.sb'\\)\nprint\\('errors:', #diags.errors\\)\nfor _, d in ipairs\\(diags.errors\\) do\n  print\\(d.code, d.line, d.message\\)\nend\nprint\\('warnings:', #diags.warnings\\)\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal src = [[\nwhile world/enemy-hp > 0:\n  let dmg = warrior-damage\n      hp  = world/enemy-hp - dmg:\n    dec! world/enemy-hp dmg\n]]\nlocal tokens = lexer.tokenize\\(src, 'test'\\)\nfor _, t in ipairs\\(tokens\\) do\n  print\\(t.kind, t.value\\)\nend\n\" 2>&1)",
+      "Bash(lua5.4 -e \"\nlocal lexer = require\\('compiler.lexer'\\)\nlocal src = [[\nfn test:\n  while x > 0:\n    let a = b\n        c = d - a:\n      inc! x 1\n]]\nlocal tokens = lexer.tokenize\\(src, 'test'\\)\nfor _, t in ipairs\\(tokens\\) do\n  print\\(t.kind, t.value\\)\nend\n\" 2>&1)",
+      "Bash(/mnt/c/Users/john/Dropbox/devel/storybase/tests/compiler/codegen_spec.lua:*)",
+      "Bash(python3:*)",
+      "Bash(printf \"1\\\\nq\\\\n\")",
+      "Bash(/mnt/c/Users/john/Dropbox/devel/storybase/tests/runtime/state_spec.lua:*)"
     ]
   }
 }

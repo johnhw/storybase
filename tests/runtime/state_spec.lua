@@ -331,3 +331,60 @@ describe("transaction log: query", function()
     assert.equal(30, recent[2].new)
   end)
 end)
+
+-- ============================================================
+-- Time model: inc_time / get_time
+-- ============================================================
+
+describe("state store: time model", function()
+  local function make_timed_store()
+    local schema = {
+      types = {}, states = {},
+      time_model = {
+        axes = { "day", "hour", "tick" },
+        wrap = { "none", 24, "none" },
+      },
+    }
+    local l = log_mod.new()
+    return state_mod.new(schema, l), l
+  end
+
+  it("starts at zero for all declared axes", function()
+    local s = make_timed_store()
+    local t = s:get_time()
+    assert.equal(0, t.day)
+    assert.equal(0, t.hour)
+    assert.equal(0, t.tick)
+  end)
+
+  it("inc_time advances a non-wrapping axis", function()
+    local s = make_timed_store()
+    s:inc_time("tick", 5)
+    assert.equal(5, s:get_time().tick)
+    s:inc_time("tick", 3)
+    assert.equal(8, s:get_time().tick)
+  end)
+
+  it("inc_time wraps the hour axis at 24", function()
+    local s = make_timed_store()
+    s:inc_time("hour", 20)
+    s:inc_time("hour", 6)   -- 20 + 6 = 26 → wraps to 2
+    assert.equal(2, s:get_time().hour)
+  end)
+
+  it("inc_time does not wrap non-wrap axes", function()
+    local s = make_timed_store()
+    s:inc_time("day", 100)
+    assert.equal(100, s:get_time().day)
+  end)
+
+  it("log entries include time snapshot", function()
+    local s, l = make_timed_store()
+    s:inc_time("tick", 5)
+    s:set("player/health", 80, "hurt")
+    local entries = l:entries()
+    local last = entries[#entries]
+    assert.is_table(last.time)
+    assert.equal(5, last.time.tick)
+  end)
+end)

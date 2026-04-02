@@ -135,11 +135,33 @@ end
 function M.new(schema, log)
   local type_index = build_type_index(schema)
 
+  -- Build time-axis index from time_model (axis → wrap_at or nil)
+  local time_wrap = {}  -- e.g. {hour = 24}
+  local tm = schema and schema.time_model
+  if tm and tm.axes then
+    for i, axis in ipairs(tm.axes) do
+      local w = tm.wrap and tm.wrap[i]
+      if type(w) == "number" then
+        time_wrap[axis] = w
+      end
+    end
+  end
+
+  -- Initialise the engine time clock to zero for all declared axes
+  local init_time = {}
+  if tm and tm.axes then
+    for _, axis in ipairs(tm.axes) do
+      init_time[axis] = 0
+    end
+  end
+
   local store = {
     _cache      = {},
     _schema     = schema or {},
     _type_index = type_index,
     _log        = log,
+    _time       = init_time,   -- current engine time (e.g. {day=0, hour=0, tick=0})
+    _time_wrap  = time_wrap,   -- axis → wrap_at (nil = no wrap)
   }
 
   -- ── Read ───────────────────────────────────────────────────
@@ -183,13 +205,43 @@ function M.new(schema, log)
 
   local function _log_entry(self, path, old, new_val, fn_name)
     if self._log then
+      -- Snapshot current time for the log entry
+      local time_snap = nil
+      if next(self._time) ~= nil then
+        time_snap = {}
+        for k, v in pairs(self._time) do time_snap[k] = v end
+      end
       self._log:append({
         path = path,
         old  = old,
         new  = new_val,
         fn   = fn_name or "?",
+        time = time_snap,
       })
     end
+  end
+
+  -- ── Time model ─────────────────────────────────────────────
+
+  --- Return a copy of the current engine time.
+  ---@return table  e.g. {day=0, hour=0, tick=5}
+  function store:get_time()
+    local t = {}
+    for k, v in pairs(self._time) do t[k] = v end
+    return t
+  end
+
+  --- Advance the named time axis by amount, applying wrap if configured.
+  ---@param axis   string  e.g. "tick"
+  ---@param amount number
+  function store:inc_time(axis, amount)
+    local cur = self._time[axis] or 0
+    local new_val = cur + amount
+    local wrap_at = self._time_wrap[axis]
+    if wrap_at then
+      new_val = new_val % wrap_at
+    end
+    self._time[axis] = new_val
   end
 
   -- ── Scalar mutations ───────────────────────────────────────
@@ -424,6 +476,7 @@ end
 
 --- Replay a deserialized log to reconstruct state on top of defaults.
 --- Call `store:init_defaults()` BEFORE replay to establish baseline.
+--- Also restores the engine time clock from the last entry that has a time field.
 ---@param store table  state store (already init_defaults'd)
 ---@param entries table  list of log entry tables (from log:entries())
 function M.replay(store, entries)
@@ -431,6 +484,12 @@ function M.replay(store, entries)
     -- Apply the mutation: set path to the recorded new value.
     -- e["new"] == nil correctly removes paths (e.g. after despawn).
     store._cache[e.path] = e["new"]
+    -- Restore time clock from the most recent entry that has a time field
+    if type(e.time) == "table" then
+      for k, v in pairs(e.time) do
+        store._time[k] = v
+      end
+    end
   end
 end
 
