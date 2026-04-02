@@ -105,6 +105,7 @@ local function child_ctx(parent, fn_name)
     fn_name = fn_name or parent.fn_name,
     signal  = nil,
     retval  = nil,
+    actors  = parent.actors,  -- propagate actor registry for send!
   }
   -- Copy parent vars into child (shadowing allowed)
   for k, v in pairs(parent.vars) do
@@ -267,7 +268,9 @@ eval_expr = function(node, ctx)
 
   -- Record constructor: TypeName(field: val, ...)
   elseif k == K.RECORD_CONSTRUCTOR then
-    local record = {}
+    -- Embed the variant name so match patterns can identify the branch.
+    -- e.g. (ActorMsg/trade-offer item: x, price: y) → {__variant="ActorMsg/trade-offer", item=x, price=y}
+    local record = { __variant = node.type_name }
     for _, f in ipairs(node.fields or {}) do
       if f.kind == K.NAMED_ARG then
         record[f.name] = eval_expr(f.value, ctx)
@@ -294,21 +297,47 @@ eval_match = function(node, ctx)
   local subject = eval_expr(node.expr, ctx)
   for _, arm in ipairs(node.arms or {}) do
     if arm.kind == K.MATCH_ARM then
-      local matched = false
+      local matched  = false
+      local bind_vars = {}  -- field bindings from variant destructuring
       local pat = arm.pattern
+
       if pat == "_" then
         matched = true
+
+      elseif type(pat) == "table" and pat.kind == K.RECORD_CONSTRUCTOR then
+        -- Variant destructuring: match when subject.__variant matches the pattern name.
+        -- Pattern name may be the full "Type/branch" or just "branch" — compare both.
+        if type(subject) == "table" then
+          local variant_name = pat.type_name or ""
+          local subj_tag     = subject.__variant
+          local pat_simple   = variant_name:match("[^/]+$") or variant_name
+          local subj_simple  = subj_tag and (subj_tag:match("[^/]+$") or subj_tag)
+
+          if subj_tag == nil                 -- no tag → always match (plain table)
+          or subj_tag    == variant_name     -- exact full match
+          or subj_simple == pat_simple       -- short name match ("ping" == "ping")
+          then
+            matched = true
+            -- Bind each named field from subject into bind_vars
+            for _, f in ipairs(pat.fields or {}) do
+              if f.kind == K.NAMED_ARG then
+                bind_vars[f.name] = subject[f.name]
+              end
+            end
+          end
+        end
+
       else
         local pval = eval_expr(pat, ctx)
         matched = (pval == subject)
       end
+
       if matched then
+        local sub = child_ctx(ctx)
+        for bk, bv in pairs(bind_vars) do sub.vars[bk] = bv end
         if type(arm.body) == "table" and arm.body.kind then
-          -- body is a single expression
-          return eval_expr(arm.body, ctx)
+          return eval_expr(arm.body, sub)
         else
-          -- body is a list of statements
-          local sub = child_ctx(ctx)
           eval_stmts(arm.body, sub)
           if sub.signal then ctx.signal = sub.signal end
           return nil
@@ -608,6 +637,19 @@ eval_stmt = function(node, ctx)
     end
     eval_stmts(node.body, sub)
     if sub.signal then ctx.signal = sub.signal end
+
+  elseif k == K.SEND_MUT then
+    -- Resolve actor name from the actor node (always a 0-arg fn_call)
+    local actor_name
+    if node.actor and node.actor.kind == K.FN_CALL then
+      actor_name = node.actor.name
+    else
+      actor_name = tostring(eval_expr(node.actor, ctx) or "?")
+    end
+    local msg = eval_expr(node.msg, ctx)
+    if ctx.actors then
+      ctx.actors:send(actor_name, msg)
+    end
 
   elseif k == K.UNDO_MUT then
     -- undo! not yet implemented — no-op

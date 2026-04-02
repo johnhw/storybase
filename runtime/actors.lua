@@ -1,76 +1,258 @@
 -- runtime/actors.lua
--- Actor perception snapshots, deferred mutation queue, and inbox management.
+-- Actor registry: inbox management, behavior dispatch, deferred mutations.
 --
--- Before calling a behavior function the engine builds a perception snapshot —
--- a frozen filtered copy of state containing only the paths matching the
--- actor's perceives: patterns. Mutations from behavior functions are deferred
--- and applied in priority order after all actors have run.
---
--- Phase 4 deliverable. Not yet implemented.
+-- Each actor's behavior function runs against a capture-proxy state store that
+-- records all mutations instead of applying them immediately.  After all actors
+-- have run, deferred mutations are applied to the real state in priority order:
+--   set / clear  — highest-priority actor wins (first write per path)
+--   inc / dec / collection ops — all actors' writes are applied
 
 local M = {}
 
+-- ============================================================
+-- Capture proxy
+-- ============================================================
+
+--- Build a lightweight proxy around the real state store.
+--- Read methods delegate to real_store via __index.
+--- Write methods append a capture record instead of mutating state.
+---@param real_store  table   Runtime state store
+---@param priority    number  Actor priority (higher = wins set conflicts)
+---@param actor_name  string
+---@return table proxy, table captures
+local function make_capture_proxy(real_store, priority, actor_name)
+  local captures = {}
+
+  local proxy = setmetatable({}, { __index = real_store })
+
+  proxy.set = function(_, path, val, _fn)
+    captures[#captures+1] = { op="set",  path=path, value=val,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.inc = function(_, path, amount, _fn)
+    captures[#captures+1] = { op="inc",  path=path, amount=amount,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.dec = function(_, path, amount, _fn)
+    captures[#captures+1] = { op="dec",  path=path, amount=amount,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.add = function(_, path, val, _fn)
+    captures[#captures+1] = { op="add",  path=path, value=val,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.remove = function(_, path, val, _fn)
+    captures[#captures+1] = { op="remove", path=path, value=val,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.push = function(_, path, val, _fn)
+    captures[#captures+1] = { op="push", path=path, value=val,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.pop = function(_, path, _fn)
+    captures[#captures+1] = { op="pop",  path=path,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.clear = function(_, path, _fn)
+    captures[#captures+1] = { op="clear", path=path,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.spawn = function(_, family, key, record, _fn)
+    captures[#captures+1] = { op="spawn", family=family, key=key, record=record,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.despawn = function(_, family, key, _fn)
+    captures[#captures+1] = { op="despawn", family=family, key=key,
+                               priority=priority, actor=actor_name }
+  end
+  proxy.inc_time = function(_, axis, amount)
+    captures[#captures+1] = { op="inc_time", axis=axis, amount=amount,
+                               priority=priority, actor=actor_name }
+  end
+
+  return proxy, captures
+end
+
+-- ============================================================
+-- Registry constructor
+-- ============================================================
+
 --- Create a new actor registry.
----@param state table  State store instance
+---@param state table  Runtime state store instance
 ---@param log   table  Transaction log instance
 ---@return table
 function M.new(state, log)
   local registry = {
-    _state   = state,
-    _log     = log,
-    _actors  = {},   -- {name, state_path, perceives, inbox_type, behavior, priority}
-    _deferred = {},  -- list of {priority, path, value, actor_name}
-    _pending_msgs = {},  -- messages to be delivered next turn
+    _state        = state,
+    _log          = log,
+    _actors       = {},   -- list of actor defs, sorted by priority desc
+    _pending_msgs = {},   -- { actor_name → {msg, ...} } queued by send!
+    _deferred     = {},   -- accumulated capture records from last run_behaviors
   }
 
+  -- ── Registration ──────────────────────────────────────────
+
   --- Register an actor from the compiled game table.
+  ---@param actor_def table  {name, state_path, perceives, inbox_type, behavior, priority}
   function registry:register(actor_def)
+    for _, a in ipairs(self._actors) do
+      if a.name == actor_def.name then return end  -- deduplicate
+    end
     self._actors[#self._actors + 1] = actor_def
-    -- Sort by priority descending (highest priority first)
     table.sort(self._actors, function(a, b) return a.priority > b.priority end)
   end
 
-  --- Build a perception snapshot for an actor.
-  ---@param actor table  Actor definition
-  ---@return table  Read-only table of {path: value}
-  function registry:snapshot(actor)
-    local snap = {}
-    local _ = actor  -- perceives patterns not yet evaluated
-    return snap
-  end
+  -- ── Message sending ────────────────────────────────────────
 
-  --- Run all actor behavior functions (deferred mutation mode).
-  ---@param current_time table
-  function registry:run_behaviors(current_time)
-    local _ = current_time
-    self._deferred = {}
-    -- Not yet implemented
-  end
-
-  --- Apply deferred mutations in priority order.
-  function registry:apply_deferred()
-    -- Not yet implemented
-  end
-
-  --- Deliver pending messages into actor inboxes.
-  function registry:deliver_messages()
-    self._pending_msgs = {}
-    -- Not yet implemented
-  end
-
-  --- Enqueue a message for delivery on the next turn.
+  --- Enqueue a message for delivery into an actor's inbox.
+  --- Called by the SEND_MUT evaluator during player-action or behavior phase.
   ---@param actor_name string
-  ---@param msg        table  Typed ActorMsg value
+  ---@param msg        any   typed message value
   function registry:send(actor_name, msg)
     if not self._pending_msgs[actor_name] then
       self._pending_msgs[actor_name] = {}
     end
-    self._pending_msgs[actor_name][#self._pending_msgs[actor_name] + 1] = msg
+    local q = self._pending_msgs[actor_name]
+    q[#q + 1] = msg
   end
 
-  --- Clear all actor inboxes at end of turn.
+  --- Push all pending messages into actor inbox state paths.
+  --- Inbox path = "{state_path}/inbox"  (e.g. "npcs/blacksmith/inbox").
+  function registry:deliver_messages()
+    for _, actor in ipairs(self._actors) do
+      local msgs = self._pending_msgs[actor.name]
+      if msgs and #msgs > 0 then
+        local inbox_path = (actor.state_path or actor.name) .. "/inbox"
+        local current = self._state:get(inbox_path)
+        if type(current) ~= "table" then current = {} end
+        for _, msg in ipairs(msgs) do
+          current[#current + 1] = msg
+        end
+        self._state:set(inbox_path, current, "deliver")
+      end
+    end
+    self._pending_msgs = {}
+  end
+
+  -- ── Behavior dispatch ──────────────────────────────────────
+
+  --- Run every registered actor's behavior function using a capture proxy.
+  --- Actors are called in descending priority order.
+  --- All mutations are deferred — call apply_deferred() afterwards.
+  ---@param fns table  game_table.fns
+  function registry:run_behaviors(fns)
+    local eval = require("runtime.eval")
+    local all_captures = {}
+
+    for _, actor in ipairs(self._actors) do
+      local behavior = actor.behavior
+      local fn_def   = behavior and fns and fns[behavior]
+      if not fn_def then goto continue end
+
+      local proxy, captures = make_capture_proxy(
+        self._state, actor.priority, actor.name)
+
+      -- Check pre: conditions against real state (not the proxy)
+      local pre_ctx = eval.new_ctx(self._state, fns, behavior)
+      local pre_ok  = true
+      for _, pre_expr in ipairs(fn_def.pre or {}) do
+        if not eval.eval_expr(pre_expr, pre_ctx) then
+          pre_ok = false; break
+        end
+      end
+
+      if pre_ok then
+        local ctx    = eval.new_ctx(proxy, fns, behavior)
+        ctx.actors   = self   -- allow send! within behavior bodies
+        local ok, _err = pcall(eval.eval_stmts, fn_def.body, ctx)
+        if not ok then
+          captures = {}   -- discard writes from a failed behavior
+        end
+      end
+
+      for _, c in ipairs(captures) do
+        all_captures[#all_captures + 1] = c
+      end
+
+      ::continue::
+    end
+
+    -- Stable sort by priority descending so highest-priority set wins below
+    table.sort(all_captures, function(a, b) return a.priority > b.priority end)
+    self._deferred = all_captures
+  end
+
+  -- ── Deferred mutation application ─────────────────────────
+
+  --- Apply all deferred mutations to the real state.
+  ---   set / clear  — first write per path wins (= highest priority actor)
+  ---   inc / dec / collection / spawn / despawn / inc_time — all applied
+  function registry:apply_deferred()
+    local written = {}  -- paths already claimed by a higher-priority set/clear
+
+    for _, c in ipairs(self._deferred) do
+      local tag = "actor:" .. (c.actor or "?")
+
+      if c.op == "set" then
+        if not written[c.path] then
+          written[c.path] = true
+          self._state:set(c.path, c.value, tag)
+        end
+
+      elseif c.op == "clear" then
+        if not written[c.path] then
+          written[c.path] = true
+          self._state:clear(c.path, tag)
+        end
+
+      elseif c.op == "inc" then
+        self._state:inc(c.path, c.amount, tag)
+
+      elseif c.op == "dec" then
+        self._state:dec(c.path, c.amount, tag)
+
+      elseif c.op == "add" then
+        self._state:add(c.path, c.value, tag)
+
+      elseif c.op == "remove" then
+        self._state:remove(c.path, c.value, tag)
+
+      elseif c.op == "push" then
+        self._state:push(c.path, c.value, tag)
+
+      elseif c.op == "pop" then
+        pcall(function() self._state:pop(c.path, tag) end)
+
+      elseif c.op == "spawn" then
+        -- Guard: skip if the key already exists in the family
+        pcall(function()
+          self._state:spawn(c.family, c.key, c.record, tag)
+        end)
+
+      elseif c.op == "despawn" then
+        pcall(function()
+          self._state:despawn(c.family, c.key, tag)
+        end)
+
+      elseif c.op == "inc_time" then
+        self._state:inc_time(c.axis, c.amount)
+      end
+    end
+
+    self._deferred = {}
+  end
+
+  -- ── Inbox clearing ─────────────────────────────────────────
+
+  --- Clear every actor's inbox state path at end of turn.
   function registry:clear_inboxes()
-    -- Not yet implemented
+    for _, actor in ipairs(self._actors) do
+      local inbox_path = (actor.state_path or actor.name) .. "/inbox"
+      local current = self._state:get(inbox_path)
+      if type(current) == "table" and #current > 0 then
+        self._state:set(inbox_path, {}, "clear_inboxes")
+      end
+    end
   end
 
   return registry

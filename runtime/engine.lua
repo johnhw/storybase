@@ -12,9 +12,11 @@
 -- Phase 3: steps 1 and 6 (player action + time tick) are implemented.
 -- Steps 2-5 are deferred to later phases.
 
-local state_mod = require("runtime.state")
-local log_mod   = require("runtime.log")
-local eval      = require("runtime.eval")
+local state_mod  = require("runtime.state")
+local log_mod    = require("runtime.log")
+local eval       = require("runtime.eval")
+local actors_mod = require("runtime.actors")
+local sched_mod  = require("runtime.scheduler")
 
 -- ============================================================
 -- Save / load helpers
@@ -93,8 +95,10 @@ function M.new(game_table, opts)
     or opts.max_stack
     or DEFAULT_MAX_STACK
 
-  local log   = log_mod.new()
-  local store = state_mod.new(game_table.schema, log)
+  local log    = log_mod.new()
+  local store  = state_mod.new(game_table.schema, log)
+  local actors = actors_mod.new(store, log)
+  local sched  = sched_mod.new(store, log)
 
   local eng = {
     _game        = game_table,
@@ -103,8 +107,10 @@ function M.new(game_table, opts)
     _max_stack   = max_stack,
     _log         = log,
     _state       = store,
-    _fns         = game_table.fns or {},
+    _fns         = game_table.fns    or {},
     _scenes      = game_table.scenes or {},
+    _actors      = actors,
+    _scheduler   = sched,
     _io_out      = opts.io_out or io.stdout,
     _io_in       = opts.io_in  or io.stdin,
   }
@@ -157,10 +163,13 @@ function M.new(game_table, opts)
   -- ── Evaluation context factory ───────────────────────────────
 
   --- Build an eval context for the current game state.
+  --- Includes actor registry so send! can enqueue messages.
   ---@param fn_name string  name to record in log entries
   ---@return table
   function eng:make_ctx(fn_name)
-    return eval.new_ctx(self._state, self._fns, fn_name)
+    local ctx    = eval.new_ctx(self._state, self._fns, fn_name)
+    ctx.actors   = self._actors
+    return ctx
   end
 
   -- ── Narration rendering ──────────────────────────────────────
@@ -266,8 +275,8 @@ function M.new(game_table, opts)
         if show then
           visible = visible + 1
           if visible == choice_idx then
-            -- Execute choice body
-            local sub = eval.new_ctx(self._state, self._fns, "choice")
+            -- Execute choice body (uses make_ctx so send! has actor registry)
+            local sub = self:make_ctx("choice")
             eval.eval_stmts(item.body, sub)
             return sub.signal
           end
@@ -280,15 +289,41 @@ function M.new(game_table, opts)
 
   -- ── State initialisation ─────────────────────────────────────
 
-  --- Initialise the engine: load defaults, go to entry scene.
+  --- Initialise the engine: load defaults, register actors/schedules, go to entry scene.
   function eng:init()
     self._state:init_defaults()
+
+    -- Register actors from the compiled game table
+    for _, actor_def in pairs(self._game.actors or {}) do
+      self._actors:register(actor_def)
+    end
+
+    -- Register static schedules from the compiled game table
+    for _, sched_def in pairs(self._game.schedules or {}) do
+      self._scheduler:register(sched_def.name, sched_def.trigger, sched_def.body)
+    end
+
     local entry = self._game.schema
       and self._game.schema.engine_config
       and self._game.schema.engine_config["entry-scene"]
     if entry then
       self._scene_stack = { entry }
     end
+  end
+
+  --- Run post-action phases (steps 2–6 of the turn lifecycle).
+  --- Called after every player action (including autonomous turns).
+  ---   2. Deliver pending messages into actor inboxes
+  ---   3. Run actor behavior functions (writes captured, not applied yet)
+  ---   4. Apply deferred mutations in priority order
+  ---   5. Tick the scheduler (fire due schedules)
+  ---   6. Clear actor inboxes
+  function eng:post_action()
+    self._actors:deliver_messages()
+    self._actors:run_behaviors(self._fns)
+    self._actors:apply_deferred()
+    self._scheduler:tick(self._fns)
+    self._actors:clear_inboxes()
   end
 
   -- ── Turn loop ────────────────────────────────────────────────
@@ -362,6 +397,10 @@ function M.new(game_table, opts)
 
     -- Execute choice
     local signal = self:do_choice(scene_name, idx)
+
+    -- Post-action phases: message delivery, actor behaviors, scheduler
+    self:post_action()
+
     if signal then
       if signal.type == "goto" then
         self:goto_scene(signal.target)
