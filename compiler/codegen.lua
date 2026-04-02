@@ -457,6 +457,41 @@ local function emit_scenes(decls)
   return scenes
 end
 
+--- Emit the actors table: name → actor descriptor.
+local function emit_actors(decls)
+  local actors = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.ACTOR_DECL then
+      actors[node.name] = {
+        name       = node.name,
+        state_path = node.state_path,
+        perceives  = node.perceives or {},
+        inbox_type = node.inbox_type,
+        behavior   = node.behavior,
+        priority   = node.priority or 0,
+        doc        = node.doc,
+      }
+    end
+  end
+  return actors
+end
+
+--- Emit the schedules table: name → schedule descriptor.
+local function emit_schedules(decls)
+  local schedules = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.SCHEDULE_DECL then
+      schedules[node.name] = {
+        name    = node.name,
+        trigger = node.trigger or {},
+        body    = node.body or {},
+        doc     = node.doc,
+      }
+    end
+  end
+  return schedules
+end
+
 -- ============================================================
 -- Public API
 -- ============================================================
@@ -508,10 +543,12 @@ function M.emit(typed_ast)
       engine_config    = eng_cfg,
       time_model       = time_mdl,
     },
-    fns      = emit_fns(decls),
-    scenes   = emit_scenes(decls),
-    verifies = {},
-    watches  = {},
+    fns       = emit_fns(decls),
+    scenes    = emit_scenes(decls),
+    actors    = emit_actors(decls),
+    schedules = emit_schedules(decls),
+    verifies  = {},
+    watches   = {},
   }
 
   return game_table, diags

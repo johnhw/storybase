@@ -423,3 +423,88 @@ scene room:
     assert.is_true(#scene.body >= 2)  -- narration_line + choice
   end)
 end)
+
+describe("codegen — actor emission", function()
+  it("emits actors table with actor descriptor", function()
+    local gt = compile([[
+type ActorMsg: | ping:
+state npcs/{npc}: Int(0,100) max: 8
+actor blacksmith:
+  state:     npcs/blacksmith
+  perceives: [player/location]
+  inbox:     List(ActorMsg, 4)
+  behavior:  blacksmith-behavior
+  priority:  10
+]])
+    assert.is_table(gt.actors)
+    local a = gt.actors["blacksmith"]
+    assert.is_not_nil(a)
+    assert.equal("blacksmith", a.name)
+    assert.equal("npcs/blacksmith", a.state_path)
+    assert.equal("blacksmith-behavior", a.behavior)
+    assert.equal(10, a.priority)
+    assert.equal(1, #a.perceives)
+    assert.equal("player/location", a.perceives[1])
+  end)
+
+  it("emits multiple actors", function()
+    local gt = compile([[
+type ActorMsg: | ping:
+state npcs/{npc}: Int(0,100) max: 8
+actor blacksmith:
+  state:    npcs/blacksmith
+  behavior: blacksmith-behavior
+  priority: 10
+actor guard:
+  state:    npcs/guard
+  behavior: guard-behavior
+  priority: 20
+]])
+    assert.is_table(gt.actors)
+    assert.is_not_nil(gt.actors["blacksmith"])
+    assert.is_not_nil(gt.actors["guard"])
+    assert.equal(20, gt.actors["guard"].priority)
+  end)
+end)
+
+describe("codegen — schedule emission", function()
+  it("emits schedules table with every/offset trigger", function()
+    local gt = compile([[
+state player/gold: Int(0,999) = 200
+state world/tax-due: Int(0,999) = 0
+schedule daily-tax:
+  every:  [day: +1]
+  offset: [hour: 6]
+  fn:
+    dec!  player/gold 5
+    inc!  world/tax-due 5
+]])
+    assert.is_table(gt.schedules)
+    local s = gt.schedules["daily-tax"]
+    assert.is_not_nil(s)
+    assert.equal("daily-tax", s.name)
+    assert.not_nil(s.trigger.every)
+    assert.equal("day", s.trigger.every[1].axis)
+    assert.equal(1, s.trigger.every[1].value)
+    assert.not_nil(s.trigger.offset)
+    assert.equal("hour", s.trigger.offset[1].axis)
+    assert.equal(6, s.trigger.offset[1].value)
+    assert.equal(2, #s.body)
+  end)
+
+  it("emits schedule with at: trigger", function()
+    local gt = compile([[
+state player/chapter: Int(0,3) = 0
+schedule mid-point:
+  at: [tick: +20]
+  fn:
+    set! player/chapter 1
+]])
+    local s = gt.schedules["mid-point"]
+    assert.is_not_nil(s)
+    assert.not_nil(s.trigger.at)
+    assert.equal("tick", s.trigger.at[1].axis)
+    assert.equal(20, s.trigger.at[1].value)
+    assert.equal(1, #s.body)
+  end)
+end)

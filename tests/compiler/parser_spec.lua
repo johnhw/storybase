@@ -1279,3 +1279,130 @@ describe("parser — Phase 4 integration: test06_actors.sb", function()
     assert.are.equal(0, errs)
   end)
 end)
+
+describe("parser — actor declaration", function()
+  it("parses actor with all fields", function()
+    local src = [[
+actor blacksmith:
+  state:     npcs/blacksmith
+  perceives: [player/location, player/inventory]
+  inbox:     List(ActorMsg, 4)
+  behavior:  blacksmith-behavior
+  priority:  10
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local node = tree.decls[1]
+    assert.equal(ast.K.ACTOR_DECL, node.kind)
+    assert.equal("blacksmith", node.name)
+    assert.equal("npcs/blacksmith", node.state_path)
+    assert.equal("blacksmith-behavior", node.behavior)
+    assert.equal(10, node.priority)
+    assert.equal(2, #node.perceives)
+    assert.equal("player/location", node.perceives[1])
+    assert.equal("player/inventory", node.perceives[2])
+    assert.equal(ast.K.TYPE_LIST, node.inbox_type.kind)
+  end)
+
+  it("parses actor with wildcard perceives", function()
+    local src = [[
+actor guard:
+  state:     npcs/guard
+  perceives: [player/location, npcs/*/location, npcs/guard/*]
+  inbox:     List(ActorMsg, 4)
+  behavior:  guard-behavior
+  priority:  20
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local node = tree.decls[1]
+    assert.equal(ast.K.ACTOR_DECL, node.kind)
+    assert.equal("guard", node.name)
+    assert.equal(20, node.priority)
+    assert.equal(3, #node.perceives)
+    -- wildcard paths are stored as reconstructed strings
+    assert.equal("npcs/*/location", node.perceives[2])
+    assert.equal("npcs/guard/*", node.perceives[3])
+  end)
+
+  it("attaches doc string to actor_decl", function()
+    local src = [[
+"The village blacksmith."
+actor blacksmith:
+  state:    npcs/blacksmith
+  behavior: blacksmith-behavior
+  priority: 10
+]]
+    local tree, diags = parse(src)
+    local node = tree.decls[1]
+    assert.equal(ast.K.ACTOR_DECL, node.kind)
+    assert.equal("The village blacksmith.", node.doc)
+  end)
+end)
+
+describe("parser — schedule declaration", function()
+  it("parses schedule with every: and offset:", function()
+    local src = [[
+schedule daily-tax:
+  every:  [day: +1]
+  offset: [hour: 6]
+  fn:
+    dec!  player/gold 5
+    inc!  world/tax-due 5
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local node = tree.decls[1]
+    assert.equal(ast.K.SCHEDULE_DECL, node.kind)
+    assert.equal("daily-tax", node.name)
+    assert.not_nil(node.trigger.every)
+    assert.equal(1, #node.trigger.every)
+    assert.equal("day", node.trigger.every[1].axis)
+    assert.equal(1, node.trigger.every[1].value)
+    assert.not_nil(node.trigger.offset)
+    assert.equal("hour", node.trigger.offset[1].axis)
+    assert.equal(6, node.trigger.offset[1].value)
+    assert.equal(2, #node.body)
+  end)
+
+  it("parses schedule with at:", function()
+    local src = [[
+schedule mid-point:
+  at: [tick: +20]
+  fn:
+    when player/chapter = 'intro:
+      set! player/chapter 'mid
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local node = tree.decls[1]
+    assert.equal(ast.K.SCHEDULE_DECL, node.kind)
+    assert.equal("mid-point", node.name)
+    assert.not_nil(node.trigger.at)
+    assert.equal("tick", node.trigger.at[1].axis)
+    assert.equal(20, node.trigger.at[1].value)
+    assert.equal(1, #node.body)
+  end)
+
+  it("attaches doc string to schedule_decl", function()
+    local src = [[
+"Reset dispositions each morning."
+schedule morning-reset:
+  every: [day: +1]
+  fn:
+    pass
+]]
+    local tree, diags = parse(src)
+    local node = tree.decls[1]
+    assert.equal(ast.K.SCHEDULE_DECL, node.kind)
+    assert.equal("Reset dispositions each morning.", node.doc)
+  end)
+end)

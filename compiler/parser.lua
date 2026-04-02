@@ -1683,6 +1683,188 @@ local function parse_scene_decl(p, doc)
   return ast.scene_decl(scene_name, body, doc, tpos)
 end
 
+-- ── Time-trigger helper ──────────────────────────────────────────────────────
+
+--- Parse a time-axis list: [axis: +N, axis: N, ...]
+--- Returns a list of {axis=string, value=number} tables.
+local function parse_time_trigger(p)
+  local entries = {}
+  if not p:at("OP", "[") then return entries end
+  p:adv()  -- consume "["
+  while not p:at("OP", "]") and not p:at("EOF") and not p:at("NEWLINE") do
+    if p:at("NAMED_ARG") then
+      local axis = p:adv().value
+      local sign = 1
+      if     p:at("OP", "+") then p:adv()
+      elseif p:at("OP", "-") then p:adv(); sign = -1 end
+      local n = 0
+      if p:at("INTEGER") then n = p:adv().value end
+      table.insert(entries, { axis = axis, value = sign * n })
+    else
+      p:adv()
+    end
+    p:match("OP", ",")
+  end
+  p:expect("OP", "]", "expected ']' to close time-trigger list")
+  return entries
+end
+
+-- ── Actor declaration ────────────────────────────────────────────────────────
+
+--- actor name:
+---   state:     path
+---   perceives: [path, ...]
+---   inbox:     TypeExpr
+---   behavior:  fn-name
+---   priority:  N
+local function parse_actor_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD("actor")
+
+  local name
+  if p:at("NAMED_ARG") then
+    name = p:adv().value
+  elseif p:at("IDENT") then
+    name = p:adv().value
+    p:expect("OP", ":", "expected ':' after actor name")
+  else
+    p:emit_err(ast.E.BAD_DECLARATION, "expected actor name after 'actor'", p:cur().pos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  end
+
+  p:match("NEWLINE")
+
+  local state_path, perceives, inbox_type, behavior, priority = nil, {}, nil, nil, 0
+
+  if not p:at("INDENT") then
+    return ast.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, tpos)
+  end
+  p:adv()  -- consume INDENT
+
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    local bt = p:cur()
+    if bt.kind == "NAMED_ARG" then
+      if bt.value == "state" then
+        p:adv()
+        if p:at("PATH") then
+          state_path = p:adv().value
+        elseif p:at("IDENT") then
+          state_path = p:adv().value
+        end
+      elseif bt.value == "perceives" then
+        p:adv()
+        if p:at("OP", "[") then
+          p:adv()
+          while not p:at("OP", "]") and not p:at("EOF") and not p:at("NEWLINE") do
+            -- Collect tokens until ',' or ']' and reconstruct path string
+            local parts = {}
+            while not p:at("OP", ",") and not p:at("OP", "]")
+                  and not p:at("EOF") and not p:at("NEWLINE") do
+              table.insert(parts, tostring(p:adv().value or ""))
+            end
+            if #parts > 0 then
+              table.insert(perceives, table.concat(parts))
+            end
+            p:match("OP", ",")
+            p:skip_newlines()
+          end
+          p:expect("OP", "]", "expected ']' to close perceives list")
+        end
+      elseif bt.value == "inbox" then
+        p:adv()
+        inbox_type = parse_type_expr(p)
+      elseif bt.value == "behavior" then
+        p:adv()
+        if p:at("IDENT") then
+          behavior = p:adv().value
+        end
+      elseif bt.value == "priority" then
+        p:adv()
+        if p:at("INTEGER") then
+          priority = p:adv().value
+        end
+      end
+    end
+    p:skip_to_eol()
+  end
+
+  if p:at("DEDENT") then p:adv() end
+  return ast.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, tpos)
+end
+
+-- ── Schedule declaration ─────────────────────────────────────────────────────
+
+--- schedule name:
+---   every:  [axis: +N, ...]
+---   at:     [axis: +N, ...]
+---   offset: [axis: N, ...]
+---   fn:
+---     body...
+local function parse_schedule_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD("schedule")
+
+  local name
+  if p:at("NAMED_ARG") then
+    name = p:adv().value
+  elseif p:at("IDENT") then
+    name = p:adv().value
+    p:expect("OP", ":", "expected ':' after schedule name")
+  else
+    p:emit_err(ast.E.BAD_DECLARATION, "expected schedule name after 'schedule'", p:cur().pos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  end
+
+  p:match("NEWLINE")
+
+  local trigger = {}
+  local body = {}
+
+  if not p:at("INDENT") then
+    return ast.schedule_decl(name, trigger, body, doc, tpos)
+  end
+  p:adv()  -- consume INDENT
+
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    local bt = p:cur()
+    if bt.kind == "NAMED_ARG" then
+      if bt.value == "every" then
+        p:adv()
+        trigger.every = parse_time_trigger(p)
+        p:skip_to_eol()
+      elseif bt.value == "at" then
+        p:adv()
+        trigger.at = parse_time_trigger(p)
+        p:skip_to_eol()
+      elseif bt.value == "offset" then
+        p:adv()
+        trigger.offset = parse_time_trigger(p)
+        p:skip_to_eol()
+      elseif bt.value == "fn" then
+        p:adv()  -- consume "fn:" NAMED_ARG
+        p:match("NEWLINE")
+        if p:at("INDENT") then
+          body = parse_body_items(p, false)
+        else
+          local stmt = parse_stmt(p)
+          if stmt then body = { stmt } end
+        end
+      else
+        p:skip_to_eol()
+      end
+    else
+      p:skip_to_eol()
+    end
+  end
+
+  if p:at("DEDENT") then p:adv() end
+  return ast.schedule_decl(name, trigger, body, doc, tpos)
+end
+
 -- ============================================================
 -- Top-level dispatch
 -- ============================================================
@@ -1698,8 +1880,10 @@ local function parse_decl(p, doc)
     elseif t.value == "relation" then return parse_relation_decl(p, doc)
     elseif t.value == "fn"       then return parse_fn_decl(p, doc)
     elseif t.value == "scene"    then return parse_scene_decl(p, doc)
+    elseif t.value == "actor"    then return parse_actor_decl(p, doc)
+    elseif t.value == "schedule" then return parse_schedule_decl(p, doc)
     else
-      -- actor, schedule, bounded, verify, watch, macro, migration — later phases
+      -- bounded, verify, watch, macro, migration — later phases
       p:skip_to_eol()
       p:skip_block()
       return nil
