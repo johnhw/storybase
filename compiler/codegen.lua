@@ -431,6 +431,7 @@ local function emit_fns(decls)
         params         = node.params or {},
         pre            = node.pre or {},
         post           = node.post or {},
+        tags           = node.tags or {},
         body           = node.body or {},
         is_transaction = node.is_transaction or false,
         doc            = node.doc,
@@ -492,6 +493,66 @@ local function emit_schedules(decls)
   return schedules
 end
 
+--- Emit the verifies list: [{label, clauses}]
+--- Clauses contain raw AST nodes evaluated by the verify runtime.
+local function emit_verifies(decls)
+  local verifies = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.VERIFY_DECL then
+      local clauses = {}
+      for _, c in ipairs(node.clauses or {}) do
+        clauses[#clauses+1] = {
+          kind      = c.clause_kind,
+          condition = c.condition,  -- AST expr node (may be nil)
+          body      = c.body or {}, -- list of AST assertion nodes
+        }
+      end
+      verifies[#verifies+1] = {
+        label   = node.label,
+        clauses = clauses,
+      }
+    end
+  end
+  return verifies
+end
+
+--- Emit the watches list: [{kind, path/condition, label}]
+local function emit_watches(decls)
+  local watches = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.WATCH_DECL then
+      watches[#watches+1] = {
+        kind  = "watch",
+        path  = node.path,
+        label = node.label,
+      }
+    elseif node.kind == ast.K.WATCH_WHEN_DECL then
+      watches[#watches+1] = {
+        kind      = "watch_when",
+        condition = node.condition,
+        label     = node.label,
+      }
+    end
+  end
+  return watches
+end
+
+local function emit_migrations(decls)
+  local migrations = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.MIGRATION_DECL then
+      migrations[#migrations+1] = {
+        from_ver = node.from_ver,
+        to_ver   = node.to_ver,
+        ops      = node.ops or {},
+      }
+    end
+  end
+  -- Sort ascending by from_ver
+  table.sort(migrations, function(a, b) return (a.from_ver or 0) < (b.from_ver or 0) end)
+  return migrations
+end
+
 -- ============================================================
 -- Public API
 -- ============================================================
@@ -547,8 +608,9 @@ function M.emit(typed_ast)
     scenes    = emit_scenes(decls),
     actors    = emit_actors(decls),
     schedules = emit_schedules(decls),
-    verifies  = {},
-    watches   = {},
+    verifies   = emit_verifies(decls),
+    watches    = emit_watches(decls),
+    migrations = emit_migrations(decls),
   }
 
   return game_table, diags

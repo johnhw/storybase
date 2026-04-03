@@ -69,6 +69,7 @@ local K = {
   UNDO_MUT           = "undo_mut",
   TIME_INC_MUT       = "time_inc_mut",
   CANCEL_SCHEDULE_MUT = "cancel_schedule_mut",
+  PATH_AT_BEFORE     = "path_at_before",
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
@@ -180,6 +181,15 @@ eval_expr = function(node, ctx)
 
   elseif k == K.INTERP_PATH then
     return ctx.state:get(eval_path(node, ctx))
+
+  elseif k == K.PATH_AT_BEFORE then
+    -- path@before: read value from before-snapshot if available
+    local path = eval_path(node.path, ctx)
+    if ctx.before_snapshot then
+      return ctx.before_snapshot[path]
+    end
+    -- Fallback to current state (for contexts without a snapshot)
+    return ctx.state:get(path)
 
   -- Binary operators
   elseif k == K.BINARY_OP then
@@ -454,6 +464,11 @@ local BUILTINS = {
   ["tostring"] = function(args, ctx)
     return tostring(eval_expr(args[1], ctx))
   end,
+  ["path-exists?"] = function(args, ctx)
+    local path = eval_expr(args[1], ctx)
+    if type(path) ~= "string" then return false end
+    return ctx.state:path_exists(path) == true
+  end,
 }
 
 --- Dispatch a function call by name.
@@ -497,6 +512,10 @@ call_fn = function(name, args, ctx)
     local pname = type(param) == "table" and param.name or tostring(param)
     sub.vars[pname] = arg_vals[i]
   end
+  -- Propagate before_snapshot for path@before in post: conditions
+  if ctx.before_snapshot then
+    sub.before_snapshot = ctx.before_snapshot
+  end
 
   -- Check pre: conditions
   for _, pre_expr in ipairs(fn.pre or {}) do
@@ -506,8 +525,27 @@ call_fn = function(name, args, ctx)
     end
   end
 
+  -- Push checkpoint snapshot before executing body (if fn is tagged [checkpoint])
+  local is_checkpoint = false
+  for _, tag in ipairs(fn.tags or {}) do
+    if tag == "checkpoint" then is_checkpoint = true; break end
+  end
+  if is_checkpoint and ctx.state and ctx.state.push_checkpoint then
+    ctx.state:push_checkpoint(name)
+  end
+
   -- Execute body
   eval_stmts(fn.body, sub)
+
+  -- Check post: conditions (only when a before_snapshot is provided)
+  if sub.before_snapshot and #(fn.post or {}) > 0 then
+    for _, post_expr in ipairs(fn.post) do
+      local ok = eval_expr(post_expr, sub)
+      if not ok then
+        error("Postcondition failed in " .. name)
+      end
+    end
+  end
 
   -- Propagate any scene-navigation signal
   if sub.signal then
@@ -657,7 +695,13 @@ eval_stmt = function(node, ctx)
     if ctx.scheduler then ctx.scheduler:cancel(node.name) end
 
   elseif k == K.UNDO_MUT then
-    -- undo! not yet implemented — no-op
+    local steps = node.steps and eval_expr(node.steps, ctx) or 1
+    if ctx.state and ctx.state.undo then
+      local ok = ctx.state:undo(steps)
+      if not ok then
+        error("undo!: no checkpoint found in history")
+      end
+    end
 
   elseif k == K.TIME_INC_MUT then
     -- Advance engine time clock for each named axis

@@ -156,12 +156,13 @@ function M.new(schema, log)
   end
 
   local store = {
-    _cache      = {},
-    _schema     = schema or {},
-    _type_index = type_index,
-    _log        = log,
-    _time       = init_time,   -- current engine time (e.g. {day=0, hour=0, tick=0})
-    _time_wrap  = time_wrap,   -- axis → wrap_at (nil = no wrap)
+    _cache        = {},
+    _schema       = schema or {},
+    _type_index   = type_index,
+    _log          = log,
+    _time         = init_time,   -- current engine time (e.g. {day=0, hour=0, tick=0})
+    _time_wrap    = time_wrap,   -- axis → wrap_at (nil = no wrap)
+    _checkpoints  = {},          -- stack of {seq, cache, time} snapshots for undo!
   }
 
   -- ── Read ───────────────────────────────────────────────────
@@ -178,6 +179,75 @@ function M.new(schema, log)
   ---@return boolean
   function store:path_exists(path)
     return self._cache[path] ~= nil
+  end
+
+  -- ── Checkpoint stack (for undo!) ───────────────────────────
+
+  --- Deep-copy the cache (table values get a shallow array copy).
+  local function deep_copy_cache(src)
+    local dst = {}
+    for k, v in pairs(src) do
+      if type(v) == "table" then
+        local c = {}; for i, x in ipairs(v) do c[i] = x end
+        dst[k] = c
+      else
+        dst[k] = v
+      end
+    end
+    return dst
+  end
+
+  --- Push a checkpoint snapshot (call before executing a checkpoint function body).
+  ---@param fn_name string
+  function store:push_checkpoint(fn_name)
+    local snap_time = {}
+    for k, v in pairs(self._time) do snap_time[k] = v end
+    self._checkpoints[#self._checkpoints + 1] = {
+      fn    = fn_name,
+      seq   = self._log and self._log:seq() or 0,
+      cache = deep_copy_cache(self._cache),
+      time  = snap_time,
+    }
+    -- Also mark checkpoint boundary in the log
+    if self._log then self._log:checkpoint(fn_name) end
+  end
+
+  --- Revert state to N checkpoints back; returns true on success, false if none exist.
+  ---@param steps integer  default 1
+  ---@return boolean
+  function store:undo(steps)
+    steps = steps or 1
+    local n = #self._checkpoints
+    if n == 0 then return false end
+    local idx = n - steps + 1
+    if idx < 1 then idx = 1 end
+    local snap = self._checkpoints[idx]
+    -- Restore cache
+    for k in pairs(self._cache) do self._cache[k] = nil end
+    for k, v in pairs(snap.cache) do
+      if type(v) == "table" then
+        local c = {}; for i, x in ipairs(v) do c[i] = x end
+        self._cache[k] = c
+      else
+        self._cache[k] = v
+      end
+    end
+    -- Restore time
+    for k in pairs(self._time) do self._time[k] = 0 end
+    for k, v in pairs(snap.time) do self._time[k] = v end
+    -- Drop checkpoints at or after this one
+    for i = n, idx, -1 do self._checkpoints[i] = nil end
+    -- Append undo audit entry
+    if self._log then
+      self._log:append({
+        kind     = "undo",
+        fn       = "undo!",
+        path     = nil,
+        old      = nil,
+        ["new"]  = nil,
+      })
+    end
+    return true
   end
 
   --- Return a list of all instantiated keys in a family.

@@ -397,3 +397,92 @@ scene main:
   end)
 end)
 
+-- ============================================================
+-- undo! with checkpoint tags
+-- ============================================================
+
+describe("undo!", function()
+  local src = [[
+module undo-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 100
+
+fn spend amount:
+  tags:  [checkpoint]
+  dec! world/gold amount
+
+fn earn amount:
+  tags:  [checkpoint]
+  inc! world/gold amount
+
+fn undo-last:
+  undo!
+
+scene main:
+  * Go
+    -> main
+]]
+
+  it("undo! reverts state to before the last checkpoint fn", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    assert.equal(100, eng._state:get("world/gold"))
+
+    -- Call spend (checkpoint): gold → 70
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
+    eval_mod.call_fn("spend", {{ kind = "int_lit", value = 30 }}, ctx)
+    assert.equal(70, eng._state:get("world/gold"))
+
+    -- undo! should revert to 100
+    eval_mod.call_fn("undo-last", {}, ctx)
+    assert.equal(100, eng._state:get("world/gold"))
+  end)
+
+  it("undo! with multiple checkpoints reverts to the Nth one back", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
+
+    -- spend 30 (checkpoint 1): gold → 70
+    eval_mod.call_fn("spend", {{ kind = "int_lit", value = 30 }}, ctx)
+    assert.equal(70, eng._state:get("world/gold"))
+
+    -- earn 20 (checkpoint 2): gold → 90
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 20 }}, ctx)
+    assert.equal(90, eng._state:get("world/gold"))
+
+    -- undo! steps: 2 — reverts to before spend (100)
+    eval_mod.eval_stmt({ kind = "undo_mut", steps = { kind = "int_lit", value = 2 } }, ctx)
+    assert.equal(100, eng._state:get("world/gold"))
+  end)
+
+  it("undo! errors when no checkpoint exists", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
+
+    assert.has_error(function()
+      eval_mod.eval_stmt({ kind = "undo_mut", steps = nil }, ctx)
+    end)
+  end)
+end)
+

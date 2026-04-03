@@ -8,43 +8,31 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-03)
 
-**Phase 5 milestone met ✅** — 650 tests passing. `storybase verify tests/test05_log_and_time.sb` passes all 3 verify blocks.
+**Phase 5 partial ✅** — 650 tests passing. verify blocks (BFS + after-check + requires) working.
+`storybase verify tests/test05_log_and_time.sb` passes all 3 blocks. test06 pending (needs `path-exists?` builtin + full search engine for `can-reach?` blocks).
 
-**Phase 3 milestones met ✅**
-**Phase 4 milestones met ✅** — actors, scheduler, 6-step lifecycle all working.
-**Phase 5 milestones met ✅** — verify blocks (verify-always BFS + after-check + requires-skip) all working.
+**Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅
 
-**Completed 2026-04-03 (Phase 5):**
-- `parse_verify_decl` ✅: parser handles verify-always, requires, after (IDENT or NAMED_ARG), from-any-state, when
-- `path@before` ✅: lexed as PATH + OP "@" + IDENT "before"; parsed into PATH_AT_BEFORE node; evaluated via ctx.before_snapshot
-- `runtime/verify.lua` ✅: BFS over (cache, scene_stack) pairs for verify-always; single-state after-check; requires skip
-- `cli/verify_cmd.lua` ✅: full implementation; exit code 1 on failures
-- `tests/runtime/verify_spec.lua` ✅: 7 tests for verify-always/after/requires/multiple blocks
-- Fixed `after` clause parsing bug: `after (fn args):` tokenizes `after` as IDENT, not NAMED_ARG
+**Phase 6 scope (per implementation.md §4):**
+Goal: Counterfactuals, bounded computations, undo, and schema migration all work.
+- `undo!` with checkpoint targeting + log audit entries
+- Schema migration chain: rename/add/drop/transform; `storybase migrate` CLI
+- `counterfactual` form: branched GameState, `(in-state gs)` path redirect
+- `bounded` declarations: Lua handler registration, `uses-bounded` tag
+- Phase 5 overflow: `find`/`where` query engine, relation queries, `can-reach?`/`find-path`, `schedule!` imperative
 
-**Known gaps (deferred to later phases):**
-- Log snapshot + delta replay — deferred to Phase 8
-- Indexed list access (`path[n]`, `path[a:b]`) — deferred to Phase 6
-- `clamp-event` debug hook — deferred to Phase 8
-- `undo!` — stub only (no-op); deferred to Phase 6
-- `path@before` in post: conditions — deferred to Phase 7
-- `offset:` in schedules — deferred to Phase 6
-- `schedule!` imperative — deferred to Phase 6
-- Perceives enforcement (compiler rule) — deferred to Phase 6
-- Autonomous turns / NPC speed modelling — deferred to Phase 6
-- Checker: discrete/superficial boundary enforcement — deferred to Phase 6
-- Checker: write-set analysis — deferred to Phase 6
-- Conflict logging in transaction log — deferred to Phase 8
-- Full query engine (find/where/order-by etc.) — deferred to Phase 5 advanced / Phase 6
-- `can-reach?`, `find-path`, `probability` search operations — deferred to Phase 6
-
-**Immediate next steps (Phase 6):**
-- Relation declarations + runtime (`adjacent?`, `reachable?`, `connected-to`)
-- Indexed list/set access (`path[n]`, `path[a:b]`)
-- `find` query: base form + where clauses + order-by + limit
-- `schedule!` imperative (create schedule at runtime)
-- `undo!` full implementation (revert to last checkpoint)
-- Perceives enforcement (compiler rule for actor field access)
+**Known gaps (deferred to Phase 7+):**
+- Indexed list access (`path[n]`, `path[a:b]`) — Phase 7
+- `clamp-event` debug hook — Phase 7
+- `path@before` in post: conditions — Phase 7
+- Perceives enforcement (compiler rule) — Phase 7
+- Autonomous turns / NPC speed modelling — Phase 7
+- Checker: discrete/superficial boundary enforcement — Phase 7
+- Checker: write-set analysis (pass 4) — Phase 7
+- Collection literals (set `{'a,'b}`, map `{k:v}`) — Phase 7
+- Import/resolve imported names — Phase 7
+- Log snapshot + delta replay — Phase 8
+- Conflict logging in transaction log — Phase 8
 
 ---
 
@@ -93,7 +81,7 @@ Milestone goals are marked **M**.
 - [x] Module header: `module name version: N`
 - [x] `import "file"` (flat)
 - [x] `import "file" as Alias` (namespaced)
-- [ ] Import cycle detection (compile error) — deferred to Phase 6
+- [ ] Import cycle detection (compile error) — deferred to Phase 7
 - [x] `schema-version: N`
 - [x] `engine-config:` block with all known keys
 - [x] `time-model:` block (`axes:`, `wrap:`)
@@ -135,31 +123,31 @@ A separate types.lua is not needed for Phase 1.
 - [x] `RecordName`, `VariantName` (declared named types)
 - [x] `(T -> R)`, `(T U -> R)` (function/lambda types)
 - [x] State-space size computation for all discrete types (in codegen.lua)
-- [ ] Discrete / superficial tag on every type — deferred to Phase 6
+- [ ] Discrete / superficial tag on every type — deferred to Phase 7
 
 ### Checker — Pass 1 (Schema Collection) ✅ DONE (2026-03-25)
 
 - [x] Collect all declared type names into symbol table
 - [x] Collect all state paths (scalar and family)
 - [x] Collect all relation names
-- [ ] Collect all scene names (auto-generate `SceneId` enum) — deferred to Phase 6 (needed for typed scene refs in verify/search)
+- [ ] Collect all scene names (auto-generate `SceneId` enum) — deferred to Phase 7
 - [x] Resolve forward references within the same compilation unit (pass1 collects all names before pass2 resolves)
-- [ ] Resolve imported names (flat and namespaced) — deferred to Phase 6
+- [ ] Resolve imported names (flat and namespaced) — deferred to Phase 7
 - [x] Error: duplicate type/state/scene/relation name
 - [x] Error: undefined type reference
 
 ### Checker — Pass 2 (Basic Type-Check) ✅ DONE (2026-03-25)
 
 - [x] Field types reference declared types (or built-in type expressions)
-- [ ] Record field defaults are type-correct — deferred to Phase 6
+- [ ] Record field defaults are type-correct — deferred to Phase 7
 - [x] `Int(min, max)` bounds well-formed (`min <= max`)
 - [x] `with` mixin: all fields spliced at the `with` point
 - [x] `with` mixin: default override accepted (override after mixin allowed; no error emitted)
-- [ ] `with` mixin: type override rejected — deferred to Phase 6
+- [ ] `with` mixin: type override rejected — deferred to Phase 7
 - [x] `with` mixin: conflicting field from two different `with` sources → error
 - [x] Entity family `max: N` stored and used for state-space computation
-- [ ] `SymbolOf(Family)` — family name resolves to a declared entity family — deferred to Phase 6
-- [ ] `warn-untyped-symbol` for bare `Symbol` in any discrete position — deferred to Phase 6
+- [ ] `SymbolOf(Family)` — family name resolves to a declared entity family — deferred to Phase 7
+- [ ] `warn-untyped-symbol` for bare `Symbol` in any discrete position — deferred to Phase 7
 
 ### Codegen (`compiler/codegen.lua`) ✅ DONE (2026-03-26)
 
@@ -207,8 +195,8 @@ A separate types.lua is not needed for Phase 1.
 - [x] Inline path interpolation `{varname}` within a path segment
 - [x] Collection literal: set `(set)` (empty), `[]` empty list
 - [x] Collection literal: list `['a, 'b]`
-- [ ] Collection literal: set `{'a, 'b}` — NOT done; deferred to Phase 6 (map/set disambiguation complex)
-- [ ] Collection literal: map `{k: v, ...}` — NOT done; deferred to Phase 6
+- [ ] Collection literal: set `{'a, 'b}` — NOT done; deferred to Phase 7 (map/set disambiguation complex)
+- [ ] Collection literal: map `{k: v, ...}` — NOT done; deferred to Phase 7
 - [x] `match expr: arm1: val, arm2: val, _: val` (expression and statement forms)
 - [x] `cond: cond1: body, cond2: body, _: body` — done (Phase 3+)
 - [x] `if cond: body` / `if cond: body else: body`
@@ -229,7 +217,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `undo!`, `undo! steps: N` (stub — no-op; full implementation deferred to Phase 5)
 - [x] `cancel-schedule!` — done (2026-04-03)
 - [x] Scene navigation sigils in scene bodies: `->`, `->()`, `=>`, `<-`
-- [ ] Indexed path access: `path[n]`, `path[-n]`, `path[a:b]` — NOT done; deferred to Phase 6
+- [ ] Indexed path access: `path[n]`, `path[-n]`, `path[a:b]` — NOT done; deferred to Phase 7
 - [x] Narration inline expressions: `{expr}` inside scene text lines
 
 **Deviation:** `_` added to lexer `is_alpha` (required for wildcard in match arms; previously illegal char).
@@ -241,33 +229,33 @@ A separate types.lua is not needed for Phase 1.
 - [x] Pure: calls no mutation primitives directly (transitive call-graph deferred)
 - [x] Transaction: calls any mutation primitive directly
 - [x] Error (PURE_CALLS_MUT): mutation primitive in `pre:` or `post:` block
-- [ ] Error: pure function called from write position — deferred to Phase 6
-- [ ] Error: transaction function called inside `find where` clause — deferred to Phase 6
-- [ ] Error: transaction function called inside `verify` condition — deferred to Phase 6
+- [ ] Error: pure function called from write position — deferred to Phase 7
+- [ ] Error: transaction function called inside `find where` clause — deferred to Phase 7
+- [ ] Error: transaction function called inside `verify` condition — deferred to Phase 7
 - [ ] Lambda purity rule — deferred to Phase 7 (lambdas not yet parsed)
 - [ ] `uses-bounded` tag — deferred to Phase 6
 
 ### Checker — Pass 4 (Write-Set Analysis)
 
-- [ ] Compute static write-set for every transaction function — deferred to Phase 6
-- [ ] `{var}` interpolation legal in write position — deferred to Phase 6
-- [ ] Error: untyped variable in write position — deferred to Phase 6
+- [ ] Compute static write-set for every transaction function — deferred to Phase 7
+- [ ] `{var}` interpolation legal in write position — deferred to Phase 7
+- [ ] Error: untyped variable in write position — deferred to Phase 7
 
 ### Checker — Pass 5 (State-Space Computation)
 
 - [x] Compute state-space size for all discrete types (done in Phase 1 codegen)
 - [x] Total game state-space size reported in compile summary
-- [ ] `warn-untyped-symbol` for `Symbol` in any logic position — deferred to Phase 6
+- [ ] `warn-untyped-symbol` for `Symbol` in any logic position — deferred to Phase 7
 
 ### Checker — Pass 6 (Contract Validation)
 
-- [ ] All items deferred to Phase 6
+- [ ] All items deferred to Phase 7
 
 ### Compiler Boundary Enforcement (requires expression type inference)
 
-- [ ] Error: superficial value in any conditional — deferred to Phase 6
-- [ ] Error: superficial value passed where discrete type expected — deferred to Phase 6
-- [ ] Error: random source producing a superficial value — deferred to Phase 6
+- [ ] Error: superficial value in any conditional — deferred to Phase 7
+- [ ] Error: superficial value passed where discrete type expected — deferred to Phase 7
+- [ ] Error: random source producing a superficial value — deferred to Phase 7
 
 ### Codegen — Full Functions ✅ DONE (2026-04-01)
 
@@ -287,8 +275,8 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/compiler/parser_spec.lua` — scene declarations: narration, choices, guards, goto, enter, exit
 - [x] `tests/compiler/parser_spec.lua` — integration: test02/test03 parse without errors
 - [x] `tests/compiler/checker_spec.lua` — pure/transaction inference (10 tests)
-- [ ] `tests/compiler/checker_spec.lua` — discrete/superficial boundary — deferred to Phase 6
-- [ ] `tests/compiler/checker_spec.lua` — write-set analysis — deferred to Phase 6
+- [ ] `tests/compiler/checker_spec.lua` — discrete/superficial boundary — deferred to Phase 7
+- [ ] `tests/compiler/checker_spec.lua` — write-set analysis — deferred to Phase 7
 
 **M Milestone:** `tests/test02_choices.sb` and `tests/test03_types.sb` compile without errors. ✅ DONE (2026-03-30)
 
@@ -310,9 +298,9 @@ A separate types.lua is not needed for Phase 1.
 - [x] `clear!(path)` — empty a Set or List
 - [x] `push!(path, value)` — append to List
 - [x] `pop!(path)` — remove and return last element of List; error if empty
-- [ ] Indexed List read: `path[n]` (positive and negative indices) — NOT done; deferred to Phase 6
-- [ ] Indexed List write: `path[n] = value` — NOT done; deferred to Phase 6
-- [ ] List slice read: `path[a:b]` — NOT done; deferred to Phase 6
+- [ ] Indexed List read: `path[n]` (positive and negative indices) — NOT done; deferred to Phase 7
+- [ ] Indexed List write: `path[n] = value` — NOT done; deferred to Phase 7
+- [ ] List slice read: `path[a:b]` — NOT done; deferred to Phase 7
 - [x] `spawn!(family, key, record)` — instantiate family member; error if key exists
 - [x] `despawn!(family, key)` — remove family member; subsequent reads return nil
 - [x] `path-exists?(path)` — Bool predicate
@@ -351,7 +339,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] Inline narration expressions: evaluate `{expr}` and convert to display string
 - [x] Time model: declare axes and wrap behaviour at startup — done (state.lua init_time from schema.time_model)
 - [x] `time-inc!` with named axis and explicit value — done (Phase 3+)
-- [ ] Absolute time set via time literal — NOT done; deferred to Phase 6
+- [ ] Absolute time set via time literal — NOT done; deferred to Phase 7
 - [x] Basic turn lifecycle: player action → post-action phases — done (full 6-step lifecycle in Phase 4)
 
 ### Save / Load ✅ DONE (2026-04-02)
@@ -425,7 +413,7 @@ A separate types.lua is not needed for Phase 1.
 
 - [x] Actor registration at load time (from compiled game table)
 - [x] Perception snapshot: behavior reads delegate to real state via capture proxy (full perceives filtering deferred to Phase 6)
-- [ ] Perception snapshot: enforce compiler rule (behavior fn may only read perceived paths) — deferred to Phase 6
+- [ ] Perception snapshot: enforce compiler rule (behavior fn may only read perceived paths) — deferred to Phase 7
 - [x] Behavior function dispatch: call behavior fn with proxy as read/capture context
 - [x] Deferred mutation queue: collect all writes from all behavior functions
 - [x] Conflict detection: two actors writing the same path in the same turn
@@ -444,7 +432,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `every: [axis: +N]` trigger: fire at regular intervals
 - [x] `at: [axis: N]` trigger: fire once at absolute time
 - [ ] `offset: [axis: N]` applied to `every:` triggers — NOT done; deferred to Phase 6
-- [ ] `schedule!` imperative: create a named scheduled event from within a transaction fn — deferred to Phase 5
+- [ ] `schedule!` imperative: create a named scheduled event from within a transaction fn — deferred to Phase 6
 - [x] `cancel-schedule!` imperative: cancel a named scheduled event (2026-04-03)
 - [ ] Pending schedule queue is itself discrete logged state — deferred to Phase 8
 - [ ] Schedule creation and cancellation appear in the transaction log — deferred to Phase 8
@@ -458,13 +446,13 @@ A separate types.lua is not needed for Phase 1.
 - [x] Step 4: Deferred mutations applied in priority order
 - [x] Step 5: Scheduled events whose trigger time has arrived are fired
 - [x] Step 6: Inbox clearing
-- [ ] Autonomous turn (no player input): steps 2–6 only — deferred to Phase 6
-- [ ] NPC speed modelling: run N autonomous turns per player turn — deferred to Phase 6
+- [ ] Autonomous turn (no player input): steps 2–6 only — deferred to Phase 7
+- [ ] NPC speed modelling: run N autonomous turns per player turn — deferred to Phase 7
 
 ### Tests — Phase 4 ✅ DONE
 
 - [x] `tests/runtime/actors_spec.lua` — capture proxy (basic delegation test)
-- [ ] `tests/runtime/actors_spec.lua` — perceived vs. unperceived path enforcement — deferred to Phase 6
+- [ ] `tests/runtime/actors_spec.lua` — perceived vs. unperceived path enforcement — deferred to Phase 7
 - [x] `tests/runtime/actors_spec.lua` — deferred mutations applied after all behaviors
 - [x] `tests/runtime/actors_spec.lua` — conflict detection and priority resolution
 - [ ] `tests/runtime/actors_spec.lua` — conflict logging — deferred to Phase 8
@@ -476,7 +464,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/runtime/actors_spec.lua` — `cancel-schedule!` prevents future fires (2026-04-03)
 - [ ] `tests/runtime/actors_spec.lua` — pending queue appears in log — deferred to Phase 8
 - [x] `tests/runtime/engine_spec.lua` — full six-step lifecycle (implicit in integration tests)
-- [ ] `tests/runtime/engine_spec.lua` — autonomous turn (steps 2–6 only) — deferred to Phase 6
+- [ ] `tests/runtime/engine_spec.lua` — autonomous turn (steps 2–6 only) — deferred to Phase 7
 - [ ] Integration scenario 4: deliver ore to blacksmith — deferred to Phase 7
 - [ ] Integration scenario 5: random encounter with fixed seed (reproducible) — deferred to Phase 7
 - [ ] Integration scenario 6: morning reset schedule fires — deferred to Phase 7
@@ -562,18 +550,32 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/runtime/verify_spec.lua` — requires runs when precondition met (2026-04-03)
 - [x] `tests/runtime/verify_spec.lua` — multiple verify blocks reported independently (2026-04-03)
 - [x] Integration: `storybase verify tests/test05_log_and_time.sb` — all 3 blocks pass (2026-04-03)
-- [ ] `tests/runtime/search_spec.lua` — `can-reach?`, `find-path`, `probability` — deferred to Phase 6
-- [ ] `tests/fuzz/search_fuzz_spec.lua` — state-space computed size ≥ actual reachable count — deferred to Phase 6
-- [ ] `tests/test05_log_and_time.sb` — all three verify blocks pass
-- [ ] `tests/test06_actors.sb` — all three verify blocks pass
+- [x] Integration: `storybase verify tests/test05_log_and_time.sb` — all 3 blocks pass ✅
+- [ ] `tests/test06_actors.sb` verify blocks: `verify-always` passes; `from-any-state`/`when` blocks need `can-reach?` (Phase 6)
+- [ ] `tests/runtime/search_spec.lua` — `can-reach?`, `find-path`, `probability` — Phase 6
+- [ ] `tests/fuzz/search_fuzz_spec.lua` — state-space computed size ≥ actual reachable count — Phase 8
 
-**M Milestone:** `storybase verify tests/test05_log_and_time.sb` and `storybase verify tests/test06_actors.sb` all pass.
+**M Milestone:** `storybase verify tests/test05_log_and_time.sb` ✅ and `storybase verify tests/test06_actors.sb` (Phase 6, needs `can-reach?`).
 
 ---
 
-## Phase 6 — Advanced Features
+## Phase 6 — Advanced Features + Phase 5 Overflow
 
 **M Goal:** Counterfactuals, bounded computations, undo, and schema migration all work.
+Also completing Phase 5 overflow: find/query engine, relation queries, `can-reach?`/`find-path`, `schedule!`.
+
+### Phase 5 Overflow — Query Engine
+
+- [x] `path-exists?` builtin in eval.lua (2026-04-03)
+- [ ] `find family` base form + `where`, `or-where`, `order-by`, `limit`, `count` clauses
+- [ ] Relation queries: `adjacent?`, `reachable?`, `shortest-path`, `reachable-set`, `inverse-adjacent?`
+- [ ] `can-reach?` with `depth:` — Bool future-state search
+- [ ] `find-path` — action sequence or nil
+- [ ] `probability` — Float
+- [ ] `schedule!` imperative: create a named scheduled event from within a fn
+- [ ] `offset:` applied to `every:` schedule triggers
+- [ ] `from-any-state:` clause in verify — run `can-reach?` from every BFS state (not just always-pass)
+- [ ] `when cond:` clause in verify — restrict to states satisfying the condition
 
 ### Counterfactual (`runtime/counterfactual.lua`)
 
@@ -600,28 +602,29 @@ A separate types.lua is not needed for Phase 1.
 
 ### Undo
 
-- [ ] `undo!` — revert state to the most recent checkpoint
-- [ ] `undo! steps: N` — revert N checkpoints back
-- [ ] Append `undo` event to log (audit trail preserved; no log entries deleted)
-- [ ] Correctly identify checkpoint boundaries (functions tagged `checkpoint` or auto-checkpoint)
-- [ ] Runtime error if no checkpoint exists in history
+- [x] `undo!` — revert state to the most recent checkpoint (2026-04-03)
+- [x] `undo! steps: N` — revert N checkpoints back (2026-04-03)
+- [x] Append `undo` event to log (audit trail preserved) (2026-04-03)
+- [x] Correctly identify checkpoint boundaries (functions tagged `[checkpoint]`) (2026-04-03)
+- [x] Runtime error if no checkpoint exists in history (2026-04-03)
+- [x] `tags: [checkpoint]` parsed in parser and emitted to compiled fns (2026-04-03)
 
 ### Schema Migration (`runtime/migrate.lua`)
 
-- [ ] `schema-version: N` declaration stored and compared on load
-- [ ] `migration A -> B:` block parsing
-- [ ] `rename old-path -> new-path` — path renamed, value transferred
-- [ ] `add path = value` — new path initialised with value
-- [ ] `drop path` — path removed silently
-- [ ] `transform path: fn old: expr` — function applied to each matching value
-- [ ] `transform npcs/*/field:` — wildcard applied per family member
-- [ ] `rename-enum path old -> new` — enum literal renamed in a specific path
-- [ ] Apply migration chain in ascending version order on load
-- [ ] Error: save is at version N but migration N → N+1 is missing
+- [x] `schema-version: N` declaration stored and compared on load (Phase 3)
+- [x] `migration A -> B:` block parsing (2026-04-03)
+- [x] `rename old-path -> new-path` — path renamed, value transferred (2026-04-03)
+- [x] `add path = value` — new path initialised with value (2026-04-03)
+- [x] `drop path` — path removed silently (2026-04-03)
+- [x] `transform path: fn old: expr` — function applied to each matching value (2026-04-03)
+- [x] `transform npcs/*/field:` — wildcard applied per family member (2026-04-03)
+- [x] `rename-enum path old -> new` — enum literal renamed in a specific path (2026-04-03)
+- [x] Apply migration chain in ascending version order (2026-04-03)
+- [x] Error: save is at version N but migration N → N+1 is missing (2026-04-03)
 
 ### CLI — Phase 6
 
-- [ ] `storybase migrate <save.log>` — apply outstanding migrations, write upgraded copy
+- [x] `storybase migrate <game.sb> <save.log>` — apply outstanding migrations, write upgraded copy (2026-04-03)
 
 ### Tests — Phase 6
 
@@ -631,12 +634,16 @@ A separate types.lua is not needed for Phase 1.
 - [ ] `tests/runtime/counterfactual_spec.lua` — `simulate: true` includes actor steps
 - [ ] `tests/runtime/counterfactual_spec.lua` — nesting depth limit enforced
 - [ ] `tests/fuzz/counterfactual_fuzz_spec.lua` — isolation holds under random transitions
-- [ ] `tests/runtime/migrate_spec.lua` — rename
-- [ ] `tests/runtime/migrate_spec.lua` — add and drop
-- [ ] `tests/runtime/migrate_spec.lua` — transform (scalar and family wildcard)
-- [ ] `tests/runtime/migrate_spec.lua` — rename-enum
-- [ ] `tests/runtime/migrate_spec.lua` — version chain applied in order
-- [ ] `tests/runtime/migrate_spec.lua` — missing intermediate version → error
+- [x] `tests/runtime/migrate_spec.lua` — rename (2026-04-03)
+- [x] `tests/runtime/migrate_spec.lua` — add and drop (2026-04-03)
+- [x] `tests/runtime/migrate_spec.lua` — rename-enum (2026-04-03)
+- [x] `tests/runtime/migrate_spec.lua` — version chain applied in order (2026-04-03)
+- [x] `tests/runtime/migrate_spec.lua` — missing intermediate version → error (2026-04-03)
+- [x] `tests/runtime/migrate_spec.lua` — migration parsing round-trip (2026-04-03)
+- [x] `tests/runtime/engine_spec.lua` — undo! reverts to checkpoint state (2026-04-03)
+- [x] `tests/runtime/engine_spec.lua` — undo! steps: N reverts N checkpoints (2026-04-03)
+- [x] `tests/runtime/engine_spec.lua` — undo! errors with no checkpoints (2026-04-03)
+- [ ] `tests/runtime/migrate_spec.lua` — transform (scalar and family wildcard) — TODO
 - [ ] Integration scenario 8: player dies, `undo!` restores pre-death state
 - [ ] Integration scenario 10: save → migrate → reload → state identical
 

@@ -1659,7 +1659,18 @@ local function parse_fn_decl(p, doc)
       end
 
     elseif bt.kind == "NAMED_ARG" and bt.value == "tags" then
-      -- tags: [name, ...]  — skip for now
+      p:adv()  -- consume "tags:"
+      if p:at("OP", "[") then
+        p:adv()  -- consume "["
+        while not p:at("OP", "]") and not p:at("EOF") and not p:at("NEWLINE") do
+          if p:at("IDENT") then
+            tags[#tags + 1] = p:cur().value
+            p:adv()
+          end
+          if p:at("OP", ",") then p:adv() end
+        end
+        if p:at("OP", "]") then p:adv() end
+      end
       p:skip_to_eol()
 
     else
@@ -1882,6 +1893,138 @@ local function parse_schedule_decl(p, doc)
   return ast.schedule_decl(name, trigger, body, doc, tpos)
 end
 
+--- Parse a `migration A -> B: ops` declaration.
+--- Syntax:
+---   migration 1 -> 2:
+---     rename player/hp -> player/health
+---     add    player/mana = 50
+---     drop   player/notes
+---     transform player/level:
+---       fn old: old * 10
+---     rename-enum player/class 'fighter -> 'warrior
+local function parse_migration_decl(p, _doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume IDENT "migration"
+
+  -- from_ver -> to_ver
+  local from_ver = nil
+  local to_ver   = nil
+  if p:at("INTEGER") then
+    from_ver = tonumber(p:cur().value); p:adv()
+  end
+  if p:at("OP", "->") then p:adv() end
+  if p:at("INTEGER") then
+    to_ver = tonumber(p:cur().value); p:adv()
+  end
+  p:expect("OP", ":", "expected ':' after migration version range")
+  p:match("NEWLINE")
+
+  local ops = {}
+  if p:at("INDENT") then
+    p:adv()
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+
+      local ct = p:cur()
+      if ct.kind == "IDENT" and ct.value == "rename" then
+        p:adv()
+        -- Check if this is rename-enum (next token could be "-enum" suffix)
+        -- Actually "rename-enum" is tokenised as a single IDENT due to kebab-case
+        -- We won't reach this branch for rename-enum (handled below)
+        -- rename old-path -> new-path
+        local old_path = nil
+        if p:at("PATH") or p:at("IDENT") then
+          old_path = p:cur().value; p:adv()
+        end
+        p:expect("OP", "->", "expected '->' in rename op")
+        local new_path = nil
+        if p:at("PATH") or p:at("IDENT") then
+          new_path = p:cur().value; p:adv()
+        end
+        ops[#ops + 1] = { op = "rename", old_path = old_path, new_path = new_path }
+
+      elseif ct.kind == "IDENT" and ct.value == "rename-enum" then
+        p:adv()
+        -- rename-enum path old-symbol -> new-symbol
+        local path = nil
+        if p:at("PATH") or p:at("IDENT") then
+          path = p:cur().value; p:adv()
+        end
+        local old_sym = nil
+        if p:at("SYMBOL") then
+          old_sym = p:cur().value; p:adv()
+        end
+        p:expect("OP", "->", "expected '->' in rename-enum op")
+        local new_sym = nil
+        if p:at("SYMBOL") then
+          new_sym = p:cur().value; p:adv()
+        end
+        ops[#ops + 1] = { op = "rename-enum", path = path, old_sym = old_sym, new_sym = new_sym }
+
+      elseif ct.kind == "IDENT" and ct.value == "add" then
+        p:adv()
+        -- add path = value
+        local path = nil
+        if p:at("PATH") or p:at("IDENT") then
+          path = p:cur().value; p:adv()
+        end
+        p:expect("OP", "=", "expected '=' in add op")
+        local val_expr = parse_expr(p)
+        ops[#ops + 1] = { op = "add", path = path, value = val_expr }
+
+      elseif ct.kind == "IDENT" and ct.value == "drop" then
+        p:adv()
+        -- drop path
+        local path = nil
+        if p:at("PATH") or p:at("IDENT") then
+          path = p:cur().value; p:adv()
+        end
+        ops[#ops + 1] = { op = "drop", path = path }
+
+      elseif ct.kind == "IDENT" and ct.value == "transform" then
+        p:adv()
+        -- transform path: fn old: expr
+        local path = nil
+        if p:at("PATH") or p:at("IDENT") or p:at("NAMED_ARG") then
+          -- Consume the path — it may end with ':' if NAMED_ARG
+          if p:at("NAMED_ARG") then
+            path = p:cur().value; p:adv()
+          else
+            path = p:cur().value; p:adv()
+            if p:at("OP", ":") then p:adv() end
+          end
+        end
+        p:match("NEWLINE")
+        -- Expect indented body: fn old: expr
+        local transform_expr = nil
+        if p:at("INDENT") then
+          p:adv()
+          -- fn old: expr
+          if p:at("KEYWORD") and p:cur().value == "fn" then
+            p:adv()
+            -- consume param name (e.g. "old")
+            local _param = nil
+            if p:at("IDENT") then _param = p:cur().value; p:adv() end
+            p:expect("OP", ":", "expected ':' after transform param")
+            transform_expr = parse_expr(p)
+          end
+          p:skip_to_eol()
+          if p:at("DEDENT") then p:adv() end
+        end
+        ops[#ops + 1] = { op = "transform", path = path, expr = transform_expr }
+
+      else
+        p:skip_to_eol()
+      end
+      p:skip_to_eol()
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+
+  return ast.migration_decl(from_ver, to_ver, ops, tpos)
+end
+
 --- Parse a `verify "label": clauses` declaration.
 local function parse_verify_decl(p, doc)
   local tpos = p:cur().pos
@@ -2035,7 +2178,7 @@ local function parse_decl(p, doc)
     elseif t.value == "watch"
         or t.value == "watch-when" then return parse_watch_decl(p, doc)
     else
-      -- bounded, macro, migration — later phases
+      -- bounded, macro — later phases
       p:skip_to_eol()
       p:skip_block()
       return nil
@@ -2051,6 +2194,15 @@ local function parse_decl(p, doc)
       p:skip_to_eol()
       return nil
     end
+
+  elseif t.kind == "IDENT" then
+    if t.value == "migration" then return parse_migration_decl(p, doc) end
+    -- unknown top-level identifier — skip
+    p:emit_err(ast.E.UNEXPECTED_TOKEN,
+      "unexpected IDENT '" .. t.value .. "' at top level", t.pos)
+    p:skip_to_eol()
+    p:skip_block()
+    return nil
 
   else
     p:emit_err(ast.E.UNEXPECTED_TOKEN,

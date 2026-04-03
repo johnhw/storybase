@@ -27,7 +27,10 @@
       "Bash(/mnt/c/Users/john/Dropbox/devel/storybase/tests/compiler/codegen_spec.lua:*)",
       "Bash(python3:*)",
       "Bash(printf \"1\\\\nq\\\\n\")",
-      "Bash(/mnt/c/Users/john/Dropbox/devel/storybase/tests/runtime/state_spec.lua:*)"
+      "Bash(/mnt/c/Users/john/Dropbox/devel/storybase/tests/runtime/state_spec.lua:*)",
+      "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase add TODO.md todo.md)",
+      "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase status --short)",
+      "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase commit -m ':*)"
     ]
   }
 }

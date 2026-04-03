@@ -75,6 +75,62 @@ function M.new()
     return result
   end
 
+  --- Append a checkpoint marker (no path/old/new — just a boundary marker).
+  ---@param fn_name string  name of the function being checkpointed
+  function log:checkpoint(fn_name)
+    self._seq = self._seq + 1
+    self._entries[#self._entries + 1] = {
+      seq      = self._seq,
+      kind     = "checkpoint",
+      fn       = fn_name,
+      path     = nil,
+      old      = nil,
+      ["new"]  = nil,
+    }
+  end
+
+  --- Return the seq number of the most recent checkpoint entry, or nil if none.
+  ---@param steps integer  how many checkpoints back (default 1)
+  ---@return integer? seq of the target checkpoint entry, or nil
+  function log:last_checkpoint_seq(steps)
+    steps = steps or 1
+    local count = 0
+    for i = #self._entries, 1, -1 do
+      local e = self._entries[i]
+      if e.kind == "checkpoint" then
+        count = count + 1
+        if count >= steps then return e.seq end
+      end
+    end
+    return nil
+  end
+
+  --- Return all mutation entries (kind ~= "checkpoint") strictly after seq_from.
+  ---@param seq_from integer  first seq to exclude (inclusive lower bound excluded)
+  ---@return table  list of mutation entries
+  function log:entries_after(seq_from)
+    local result = {}
+    for _, e in ipairs(self._entries) do
+      if e.seq > seq_from and e.kind ~= "checkpoint" and e.kind ~= "undo" then
+        result[#result + 1] = e
+      end
+    end
+    return result
+  end
+
+  --- Return all mutation entries at or before `seq_to`.
+  ---@param seq_to integer
+  ---@return table
+  function log:entries_up_to(seq_to)
+    local result = {}
+    for _, e in ipairs(self._entries) do
+      if e.seq <= seq_to and e.kind ~= "checkpoint" and e.kind ~= "undo" then
+        result[#result + 1] = e
+      end
+    end
+    return result
+  end
+
   --- Serialise the log to a self-contained Lua chunk (with `return`).
   --- Execute with load() to recover the entries list.
   function log:serialise()
@@ -144,10 +200,13 @@ function M.serialise_entries(entries)
     local parts = {
       "seq="  .. tostring(e.seq),
       "fn="   .. ser_val(e.fn),
-      "path=" .. ser_val(e.path),
-      "old="  .. ser_val(e.old),
-      '["new"]=' .. ser_val(e.new),  -- 'new' is a keyword in older Lua
     }
+    if e.kind then
+      parts[#parts + 1] = "kind=" .. ser_val(e.kind)
+    end
+    parts[#parts + 1] = "path=" .. ser_val(e.path)
+    parts[#parts + 1] = "old="  .. ser_val(e.old)
+    parts[#parts + 1] = '["new"]=' .. ser_val(e.new)  -- 'new' is a keyword in older Lua
     if e.time ~= nil then
       parts[#parts + 1] = "time=" .. ser_val(e.time)
     end
