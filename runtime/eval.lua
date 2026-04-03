@@ -68,6 +68,7 @@ local K = {
   SEND_MUT           = "send_mut",
   UNDO_MUT           = "undo_mut",
   TIME_INC_MUT       = "time_inc_mut",
+  CANCEL_SCHEDULE_MUT = "cancel_schedule_mut",
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
@@ -105,7 +106,8 @@ local function child_ctx(parent, fn_name)
     fn_name = fn_name or parent.fn_name,
     signal  = nil,
     retval  = nil,
-    actors  = parent.actors,  -- propagate actor registry for send!
+    actors    = parent.actors,     -- propagate actor registry for send!
+    scheduler = parent.scheduler,  -- propagate scheduler for cancel-schedule!
   }
   -- Copy parent vars into child (shadowing allowed)
   for k, v in pairs(parent.vars) do
@@ -650,6 +652,9 @@ eval_stmt = function(node, ctx)
     if ctx.actors then
       ctx.actors:send(actor_name, msg)
     end
+
+  elseif k == K.CANCEL_SCHEDULE_MUT then
+    if ctx.scheduler then ctx.scheduler:cancel(node.name) end
 
   elseif k == K.UNDO_MUT then
     -- undo! not yet implemented — no-op

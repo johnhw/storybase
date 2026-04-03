@@ -490,3 +490,83 @@ scene main:
     assert.equal(5, eng._state:get("world/tax"))
   end)
 end)
+
+-- ============================================================
+-- actors.lua — inbox overflow
+-- ============================================================
+
+describe("actors — inbox overflow", function()
+  it("errors when inbox exceeds max capacity", function()
+    local store, _ = make_store()
+    local registry = actors_mod.new(store, nil)
+
+    registry:register({
+      name       = "guard",
+      state_path = "npcs/guard",
+      perceives  = {},
+      priority   = 10,
+      inbox_type = { tag = "list", inner = {}, max = 2 },
+    })
+
+    -- Fill inbox to capacity
+    registry:send("guard", { variant = "alert" })
+    registry:send("guard", { variant = "alert" })
+    registry:deliver_messages()
+    assert.equal(2, #store:get("npcs/guard/inbox"))
+
+    -- One more message — overflow on next deliver
+    registry:send("guard", { variant = "overflow" })
+    assert.has_error(function()
+      registry:deliver_messages()
+    end, nil)  -- any error is acceptable
+  end)
+end)
+
+-- ============================================================
+-- scheduler.lua — cancel-schedule!
+-- ============================================================
+
+describe("scheduler — cancel-schedule!", function()
+  it("cancel-schedule! prevents further fires", function()
+    local src = [[
+module test-cancel
+  version: 1.0
+engine-config:
+  entry-scene: main
+time-model:
+  axes: [day]
+  wrap: [none]
+state world/tax: Int(0,9999) = 0
+schedule daily-tax:
+  every: [day: +1]
+  fn:
+    inc! world/tax 5
+fn advance-day:
+  time-inc! day: 1
+fn stop-tax:
+  cancel-schedule! daily-tax
+  time-inc! day: 1
+scene main:
+  * Advance day (fires tax)
+    advance-day
+    -> main
+  * Cancel tax and advance
+    stop-tax
+    -> main
+  * Done
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+
+    local out = make_output()
+    -- advance once (tax fires → 5), cancel+advance (tax should NOT fire), quit
+    local inp = make_input({ "1", "2", "q" })
+    local eng = engine_mod.new(gt, { io_out=out, io_in=inp })
+    eng:init()
+    while eng:step() do end
+
+    -- Tax fired once (5), was then cancelled; second advance should not add 5
+    assert.equal(5, eng._state:get("world/tax"))
+  end)
+end)

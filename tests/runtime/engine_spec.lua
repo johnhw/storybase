@@ -339,3 +339,61 @@ describe("engine: simulated turn loop", function()
     assert.is_true(#out.lines > 0)
   end)
 end)
+
+-- ============================================================
+-- Save / load round-trip
+-- ============================================================
+
+describe("engine: save/load round-trip", function()
+  local src = [[
+module test-save
+  version: 1.0
+engine-config:
+  entry-scene: main
+state player/gold: Int(0,999) = 10
+fn earn:
+  inc! player/gold 50
+scene main:
+  * Earn gold
+    earn
+    -> main
+  * Done
+    -> main
+]]
+
+  it("state is identical after save then load", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+
+    local save_path = os.tmpname()
+
+    -- First run: earn gold once, then save
+    local out1 = make_output()
+    local inp1 = { read = function(self, _)
+      local seq = { "1", "q" }
+      self._i = (self._i or 0) + 1
+      return seq[self._i]
+    end }
+    engine_mod.run(gt, { io_out=out1, io_in=inp1, save_path=save_path })
+
+    -- Second run: load from save
+    local eng2 = engine_mod.new(gt, {})
+    -- Load restores state via replay
+    local state_mod = require("runtime.state")
+    local log_mod   = require("runtime.log")
+    local f = io.open(save_path, "r")
+    assert.is_not_nil(f)
+    local src2 = f:read("*a"); f:close()
+    local fn = load(src2)
+    assert.is_not_nil(fn)
+    local save_data = fn()
+    eng2._state:init_defaults()
+    state_mod.replay(eng2._state, save_data.entries or {})
+
+    -- Gold should be 60 (10 default + 50 earned)
+    assert.equal(60, eng2._state:get("player/gold"))
+
+    os.remove(save_path)
+  end)
+end)
+

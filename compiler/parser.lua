@@ -1392,6 +1392,12 @@ local MUTATION_TABLE = {
     end
     p:skip_to_eol(); return ast.time_inc_mut(axes, pos)
   end,
+  ["cancel-schedule!"] = function(p, pos)
+    local name = p:at("IDENT") and p:adv().value
+                 or (p:at("SYMBOL") and p:adv().value)
+                 or "?"
+    p:skip_to_eol(); return ast.cancel_schedule_mut(name, pos)
+  end,
 }
 
 -- ── Scene navigation ─────────────────────────────────────────────────────────

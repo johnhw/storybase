@@ -140,3 +140,51 @@ describe("log_mod.serialise_entries", function()
     assert.same({}, t)
   end)
 end)
+
+-- ============================================================
+-- Round-trip: serialise → deserialise → identical cache
+-- ============================================================
+
+describe("log round-trip: serialise → deserialise", function()
+  local state_mod = require("runtime.state")
+
+  it("integer and symbol values survive round-trip", function()
+    local l = log_mod.new()
+    l:append({ path = "player/gold", old = 0,  new = 42,        fn = "earn" })
+    l:append({ path = "player/mood", old = nil, new = "happy",  fn = "cheer" })
+    local l2 = log_mod.deserialise(l:serialise())
+    local es = l2:entries()
+    assert.equal(42,      es[1]["new"])
+    assert.equal("happy", es[2]["new"])
+    assert.equal(2,       #es)
+  end)
+
+  it("boolean values survive round-trip", function()
+    local l = log_mod.new()
+    l:append({ path = "flags/alive", old = false, new = true, fn = "spawn" })
+    local l2 = log_mod.deserialise(l:serialise())
+    assert.equal(true, l2:entries()[1]["new"])
+  end)
+
+  it("replay over state reproduces same cache values", function()
+    local schema = { types = {}, states = {}, relations = {} }
+    local l = log_mod.new()
+    local store = state_mod.new(schema, l)
+    store:set("hero/hp", 100, "init")
+    store:set("hero/hp", 75,  "damage")
+    store:set("hero/name", "Aria", "init")
+
+    -- Serialise and replay into a fresh store
+    local entries = l:entries()
+    local serialised = log_mod.serialise_entries(entries)
+    local fn = load("return " .. serialised)
+    local restored_entries = fn()
+
+    local l2    = log_mod.new()
+    local store2 = state_mod.new(schema, l2)
+    state_mod.replay(store2, restored_entries)
+
+    assert.equal(75,     store2:get("hero/hp"))
+    assert.equal("Aria", store2:get("hero/name"))
+  end)
+end)

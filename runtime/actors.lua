@@ -125,7 +125,12 @@ function M.new(state, log)
         local inbox_path = (actor.state_path or actor.name) .. "/inbox"
         local current = self._state:get(inbox_path)
         if type(current) ~= "table" then current = {} end
+        local max_inbox = actor.inbox_type and actor.inbox_type.max
         for _, msg in ipairs(msgs) do
+          if max_inbox and #current >= max_inbox then
+            error("INBOX_OVERFLOW: actor '" .. actor.name
+                  .. "' inbox is full (max " .. max_inbox .. ")")
+          end
           current[#current + 1] = msg
         end
         self._state:set(inbox_path, current, "deliver")
