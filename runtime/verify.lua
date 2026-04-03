@@ -204,7 +204,7 @@ local function run_always_check(verify_entry, game_table)
     local fake_state = state_mod.new(game_table.schema, fake_log)
     for k, v in pairs(cache_snap) do fake_state._cache[k] = v end
 
-    local ctx = eval.new_ctx(fake_state, game_table.fns, "verify-always")
+    local ctx = eval.new_ctx(fake_state, game_table.fns, "verify-always", game_table)
     local ok, result = pcall(eval.eval_expr, always_expr, ctx)
     if not ok then
       return { pass = false,
@@ -242,7 +242,7 @@ local function run_after_check(verify_entry, game_table)
 
   -- Build fresh state from defaults
   local store = make_fresh_store(game_table)
-  local ctx   = eval.new_ctx(store, game_table.fns, "verify")
+  local ctx   = eval.new_ctx(store, game_table.fns, "verify", game_table)
 
   -- Check requires clause — skip (pass vacuously) if not satisfied
   if requires_expr then
@@ -282,6 +282,84 @@ local function run_after_check(verify_entry, game_table)
 end
 
 -- ============================================================
+-- from-any-state / when check
+-- ============================================================
+
+local function run_can_reach_check(verify_entry, game_table)
+  local from_any_state_body = nil
+  local when_cond           = nil
+
+  for _, c in ipairs(verify_entry.clauses) do
+    if c.kind == "from_any_state" then
+      -- condition may be set (inline expr) or body may be a list of sub-exprs
+      if c.condition then
+        from_any_state_body = { c.condition }
+      elseif c.body and #c.body > 0 then
+        from_any_state_body = c.body
+      end
+    elseif c.kind == "when" then
+      when_cond = c.condition
+    end
+  end
+
+  if not from_any_state_body then return { pass = true } end
+
+  local log_mod   = require("runtime.log")
+  local state_mod = require("runtime.state")
+
+  local entry = game_table.schema
+    and game_table.schema.engine_config
+    and game_table.schema.engine_config["entry-scene"]
+
+  -- Collect all BFS-reachable snapshots
+  local snapshots = bfs_states(game_table, DEFAULT_BFS_DEPTH)
+
+  -- For each snapshot, optionally filter by when: condition
+  for i, snap in ipairs(snapshots) do
+    -- Apply when: filter
+    if when_cond then
+      local l  = log_mod.new()
+      local fs = state_mod.new(game_table.schema, l)
+      for k, v in pairs(snap) do fs._cache[k] = v end
+      local wctx = eval.new_ctx(fs, game_table.fns, "verify-when", game_table)
+      local ok, result = pcall(eval.eval_expr, when_cond, wctx)
+      if not ok or not result then
+        goto continue_snap
+      end
+    end
+
+    -- Evaluate each from-any-state expression from this snapshot
+    for _, check_node in ipairs(from_any_state_body) do
+      -- Unwrap expr_stmt if needed
+      local check_expr = check_node
+      if check_expr and check_expr.kind == "expr_stmt" then
+        check_expr = check_expr.expr
+      end
+      if not check_expr then goto continue_snap end
+
+      local l          = log_mod.new()
+      local fake_state = state_mod.new(game_table.schema, l)
+      for k, v in pairs(snap) do fake_state._cache[k] = v end
+
+      local ctx = eval.new_ctx(fake_state, game_table.fns, "verify-from-any", game_table)
+      ctx.scene_stack = entry and { entry } or {}
+
+      local ok2, result2 = pcall(eval.eval_expr, check_expr, ctx)
+      if not ok2 or not result2 then
+        return {
+          pass     = false,
+          fail_msg = string.format("from-any-state: condition failed at BFS state %d", i),
+        }
+      end
+    end
+
+    ::continue_snap::
+  end
+
+  return { pass = true, states_checked = #snapshots }
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -292,11 +370,13 @@ function M.run_all(game_table)
   local results = {}
 
   for _, verify_entry in ipairs(game_table.verifies or {}) do
-    local has_always = false
-    local has_after  = false
+    local has_always          = false
+    local has_after           = false
+    local has_from_any_state  = false
     for _, c in ipairs(verify_entry.clauses) do
-      if c.kind == "always" then has_always = true end
-      if c.kind == "after"  then has_after  = true end
+      if c.kind == "always"          then has_always         = true end
+      if c.kind == "after"           then has_after          = true end
+      if c.kind == "from_any_state"  then has_from_any_state = true end
     end
 
     local result = { label = verify_entry.label, pass = true }
@@ -319,6 +399,14 @@ function M.run_all(game_table)
       elseif r.skipped then
         result.skipped = true
         result.reason  = r.reason
+      end
+    end
+
+    if has_from_any_state and result.pass then
+      local r = run_can_reach_check(verify_entry, game_table)
+      if not r.pass then
+        result.pass     = false
+        result.fail_msg = r.fail_msg
       end
     end
 

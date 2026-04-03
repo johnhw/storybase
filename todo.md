@@ -8,30 +8,42 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-03)
 
-**Phase 6 in progress** — 673 tests passing. Counterfactual (`counterfactual do:`, `(in-state gs)`) fully implemented and tested. Schema migration complete. Undo complete.
+**Phase 6 in progress** — 709 tests passing. Counterfactual, schema migration, undo, find query engine, relation queries, can-reach? BFS search, schedule! imperative, offset: support for scheduler, bounded declarations, and verify from-any-state/when all implemented.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅
 
-**Phase 6 scope (per implementation.md §4):**
-Goal: Counterfactuals, bounded computations, undo, and schema migration all work.
-- `undo!` with checkpoint targeting + log audit entries
-- Schema migration chain: rename/add/drop/transform; `storybase migrate` CLI
-- `counterfactual` form: branched GameState, `(in-state gs)` path redirect
-- `bounded` declarations: Lua handler registration, `uses-bounded` tag
-- Phase 5 overflow: `find`/`where` query engine, relation queries, `can-reach?`/`find-path`, `schedule!` imperative
+**Completed this session (2026-04-03):**
+- `find family where/or-where/order-by/limit/count` query engine — parser + eval + runtime/query.lua
+- Relation queries: `adjacent`, `reachable` (BFS), `shortest-path` (BFS), `reachable-set`, `inverse-adjacent`
+- `can-reach?` BFS search in runtime/search.lua — stop-early BFS from current state
+- `can-reach?` builtin in eval.lua BUILTINS table
+- `game` field added to eval ctx (new_ctx accepts optional game param, child_ctx propagates it)
+- `child_ctx_vars` helper exported from eval.lua
+- `find_expr` eval case in eval_expr
+- Verify: `from-any-state:` clause now evaluated (not just always-pass) — runs can-reach? from each BFS state
+- Verify: `when:` clause filters BFS states; `game` passed to all verify contexts
+- `schedule!` mutation: parser (MUTATION_TABLE), eval (SCHEDULE_MUT case), scheduler.register call
+- `offset:` support in scheduler.register — adjusts initial next_fire threshold
+- `bounded` declarations: parser (parse_bounded_decl), codegen (emit_bounded → game_table.bounded)
+- `bounded` call dispatch in eval.lua call_fn — calls `game._bounded_handlers[name]` if registered
+- Tests: tests/runtime/query_spec.lua (24 tests), tests/runtime/search_spec.lua (5 tests)
+- Tests: parser_spec.lua additions (find, schedule! mutations), codegen_spec.lua (bounded)
 
-**Known gaps (deferred to Phase 7+):**
+**Remaining gaps (deferred to Phase 7+):**
 - Indexed list access (`path[n]`, `path[a:b]`) — Phase 7
 - `clamp-event` debug hook — Phase 7
-- `path@before` in post: conditions — Phase 7
 - Perceives enforcement (compiler rule) — Phase 7
 - Autonomous turns / NPC speed modelling — Phase 7
 - Checker: discrete/superficial boundary enforcement — Phase 7
 - Checker: write-set analysis (pass 4) — Phase 7
-- Collection literals (set `{'a,'b}`, map `{k:v}`) — Phase 7
 - Import/resolve imported names — Phase 7
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8
+- `find-path` action sequence search — Phase 7
+- `probability` Float BFS — Phase 7
+- Counterexample detail in verify output — Phase 7
+- `simulate: true` in counterfactual (actor+schedule steps) — Phase 7
+- `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
 
 ---
 
@@ -550,8 +562,12 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/runtime/verify_spec.lua` — multiple verify blocks reported independently (2026-04-03)
 - [x] Integration: `storybase verify tests/test05_log_and_time.sb` — all 3 blocks pass (2026-04-03)
 - [x] Integration: `storybase verify tests/test05_log_and_time.sb` — all 3 blocks pass ✅
-- [ ] `tests/test06_actors.sb` verify blocks: `verify-always` passes; `from-any-state`/`when` blocks need `can-reach?` (Phase 6)
-- [ ] `tests/runtime/search_spec.lua` — `can-reach?`, `find-path`, `probability` — Phase 6
+- [x] `tests/runtime/search_spec.lua` — `can-reach?` BFS search (2026-04-03)
+- [x] `tests/runtime/query_spec.lua` — `find`/`where`/`order-by`/`limit`/`count`, relation queries (2026-04-03)
+- [x] `tests/compiler/parser_spec.lua` — find expression parsing, schedule! mutation (2026-04-03)
+- [x] `tests/compiler/codegen_spec.lua` — bounded declarations (2026-04-03)
+- [ ] `tests/test06_actors.sb` verify blocks: `from-any-state`/`when` blocks fully validated end-to-end — Phase 7
+- [ ] `tests/runtime/search_spec.lua` — `find-path`, `probability` — Phase 7
 - [ ] `tests/fuzz/search_fuzz_spec.lua` — state-space computed size ≥ actual reachable count — Phase 8
 
 **M Milestone:** `storybase verify tests/test05_log_and_time.sb` ✅ and `storybase verify tests/test06_actors.sb` (Phase 6, needs `can-reach?`).
@@ -566,15 +582,15 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 ### Phase 5 Overflow — Query Engine
 
 - [x] `path-exists?` builtin in eval.lua (2026-04-03)
-- [ ] `find family` base form + `where`, `or-where`, `order-by`, `limit`, `count` clauses
-- [ ] Relation queries: `adjacent?`, `reachable?`, `shortest-path`, `reachable-set`, `inverse-adjacent?`
-- [ ] `can-reach?` with `depth:` — Bool future-state search
-- [ ] `find-path` — action sequence or nil
-- [ ] `probability` — Float
-- [ ] `schedule!` imperative: create a named scheduled event from within a fn
-- [ ] `offset:` applied to `every:` schedule triggers
-- [ ] `from-any-state:` clause in verify — run `can-reach?` from every BFS state (not just always-pass)
-- [ ] `when cond:` clause in verify — restrict to states satisfying the condition
+- [x] `find family` base form + `where`, `or-where`, `order-by`, `limit`, `count` clauses (2026-04-03)
+- [x] Relation queries: `adjacent`, `reachable` (BFS), `shortest-path`, `reachable-set`, `inverse-adjacent` (2026-04-03)
+- [x] `can-reach?` with `depth:` — Bool future-state BFS search (2026-04-03)
+- [ ] `find-path` — action sequence or nil — Phase 7
+- [ ] `probability` — Float — Phase 7
+- [x] `schedule!` imperative: create a named scheduled event from within a fn (2026-04-03)
+- [x] `offset:` applied to `every:` schedule triggers (2026-04-03)
+- [x] `from-any-state:` clause in verify — runs check exprs from every BFS state (2026-04-03)
+- [x] `when cond:` clause in verify — filters BFS states by condition (2026-04-03)
 
 ### Counterfactual (`runtime/eval.lua` — inline in eval_expr)
 
@@ -591,10 +607,11 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 
 ### Bounded Computations
 
-- [ ] `bounded` declaration parsing: `returns:`, `distribution:`, `reads:`, `lua:`
-- [ ] Lua handler registration: `game:register_bounded(name, fn)`
-- [ ] Call convention: `fn(arg, state_snapshot)` where snapshot is read-only table of `reads:` paths
-- [ ] Log result as a random-draw entry `{source, result, seed}`
+- [x] `bounded` declaration parsing: `returns:`, `distribution:`, `reads:`, `lua:` (2026-04-03)
+- [x] Codegen emits `game_table.bounded` table with declaration metadata (2026-04-03)
+- [x] Call dispatch in eval.lua: calls `game._bounded_handlers[name](arg, snap)` (2026-04-03)
+- [ ] Lua handler registration via `game:register_bounded(name, fn)` public API — Phase 7
+- [ ] Log result as a random-draw entry `{source, result, seed}` — Phase 8
 - [ ] `uses-bounded` tag auto-applied to any function calling a `bounded` computation
 - [ ] Search: branch over `uniform` distribution
 - [ ] Search: branch over `conditioned-on path` distribution using current path value as prior

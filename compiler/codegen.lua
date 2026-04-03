@@ -537,6 +537,23 @@ local function emit_watches(decls)
   return watches
 end
 
+--- Emit bounded declarations into game_table.bounded
+local function emit_bounded(decls)
+  local bounded = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.BOUNDED_DECL then
+      bounded[node.name] = {
+        name         = node.name,
+        returns      = node.returns_type,
+        distribution = node.distribution,
+        reads        = node.reads or {},
+        lua          = node.lua_name,
+      }
+    end
+  end
+  return bounded
+end
+
 local function emit_migrations(decls)
   local migrations = {}
   for _, node in ipairs(decls) do
@@ -604,13 +621,14 @@ function M.emit(typed_ast)
       engine_config    = eng_cfg,
       time_model       = time_mdl,
     },
-    fns       = emit_fns(decls),
-    scenes    = emit_scenes(decls),
-    actors    = emit_actors(decls),
-    schedules = emit_schedules(decls),
+    fns        = emit_fns(decls),
+    scenes     = emit_scenes(decls),
+    actors     = emit_actors(decls),
+    schedules  = emit_schedules(decls),
     verifies   = emit_verifies(decls),
     watches    = emit_watches(decls),
     migrations = emit_migrations(decls),
+    bounded    = emit_bounded(decls),
   }
 
   return game_table, diags

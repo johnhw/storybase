@@ -825,6 +825,93 @@ local function parse_atom(p)
     end
     return ast.counterfactual_expr(from_tick, transitions, simulate, tpos)
 
+  elseif t.kind == "IDENT" and t.value == "find" then
+    -- find family [where: expr] [order-by: path asc|desc] [limit: N] [count]
+    p:adv()  -- consume "find"
+    local family_name = ""
+    if p:at("IDENT") or p:at("PATH") then
+      family_name = p:adv().value
+    end
+    local clauses = {}
+    -- Parse inline clauses (same line) or indented block
+    local function parse_find_clauses_inline()
+      while p:at("NAMED_ARG") do
+        local na = p:adv()
+        if na.value == "where" then
+          local cond = parse_expr(p)
+          clauses[#clauses+1] = { kind = "where", condition = cond }
+        elseif na.value == "or-where" then
+          local cond = parse_expr(p)
+          clauses[#clauses+1] = { kind = "or_where", condition = cond }
+        elseif na.value == "order-by" then
+          local path_node = parse_atom(p)
+          local dir = "asc"
+          if p:at("IDENT") and (p:cur().value == "asc" or p:cur().value == "desc") then
+            dir = p:adv().value
+          end
+          clauses[#clauses+1] = { kind = "order_by", path = path_node, dir = dir }
+        elseif na.value == "limit" then
+          local lim_tok = parse_expr(p)
+          local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or 10
+          clauses[#clauses+1] = { kind = "limit", value = lim_val }
+        end
+        -- unknown NAMED_ARG: skip
+      end
+      -- bare "count" IDENT
+      if p:at("IDENT", "count") then
+        p:adv()
+        clauses[#clauses+1] = { kind = "count" }
+      end
+    end
+
+    -- Check for indented block or inline clauses
+    if p:at("NEWLINE") then
+      local saved_pos = p.pos
+      p:adv()  -- consume NEWLINE
+      if p:at("INDENT") then
+        p:adv()  -- consume INDENT
+        while not p:at("DEDENT") and not p:at("EOF") do
+          p:skip_newlines()
+          if p:at("DEDENT") or p:at("EOF") then break end
+          if p:at("NAMED_ARG") then
+            local na = p:adv()
+            if na.value == "where" then
+              local cond = parse_expr(p)
+              clauses[#clauses+1] = { kind = "where", condition = cond }
+            elseif na.value == "or-where" then
+              local cond = parse_expr(p)
+              clauses[#clauses+1] = { kind = "or_where", condition = cond }
+            elseif na.value == "order-by" then
+              local path_node = parse_atom(p)
+              local dir = "asc"
+              if p:at("IDENT") and (p:cur().value == "asc" or p:cur().value == "desc") then
+                dir = p:adv().value
+              end
+              clauses[#clauses+1] = { kind = "order_by", path = path_node, dir = dir }
+            elseif na.value == "limit" then
+              local lim_tok = parse_expr(p)
+              local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or 10
+              clauses[#clauses+1] = { kind = "limit", value = lim_val }
+            end
+            p:skip_to_eol()
+          elseif p:at("IDENT", "count") then
+            p:adv()
+            clauses[#clauses+1] = { kind = "count" }
+            p:skip_to_eol()
+          else
+            p:skip_to_eol()
+          end
+        end
+        if p:at("DEDENT") then p:adv() end
+      else
+        -- No indent block, undo the NEWLINE consume
+        p.pos = saved_pos
+      end
+    else
+      parse_find_clauses_inline()
+    end
+    return ast.find_expr(family_name, clauses, tpos)
+
   elseif t.kind == "IDENT" then
     -- 0-arg function call (no further argument collection in atom context)
     p:adv(); return ast.fn_call(t.value, {}, tpos)
@@ -1206,6 +1293,10 @@ local function parse_primary(p)
   end
 
   -- Special IDENTs that are parsed as structured expressions (not fn calls)
+  if t.kind == "IDENT" and t.value == "find" then
+    return parse_atom(p)
+  end
+
   if t.kind == "IDENT" and t.value == "counterfactual" then
     return parse_atom(p)
   end
@@ -1456,6 +1547,50 @@ local MUTATION_TABLE = {
                  or (p:at("SYMBOL") and p:adv().value)
                  or "?"
     p:skip_to_eol(); return ast.cancel_schedule_mut(name, pos)
+  end,
+  ["schedule!"] = function(p, pos)
+    -- schedule! 'name every: [tick: +N] fn: fn-name
+    -- or: schedule! name every: [tick: +N] fn: fn-name
+    local name_expr = nil
+    if p:at("SYMBOL") then
+      name_expr = ast.symbol_lit(p:adv().value, p:cur().pos)
+    elseif p:at("IDENT") then
+      name_expr = ast.fn_call(p:cur().value, {}, p:cur().pos); p:adv()
+    else
+      name_expr = parse_expr(p)
+    end
+    local opts = {}
+    local fn_name = nil
+    while p:at("NAMED_ARG") do
+      local na = p:adv()
+      if na.value == "every" or na.value == "at" or na.value == "offset" then
+        -- Parse a time list: [tick: +N, ...]
+        local trigger_entries = {}
+        if p:at("OP", "[") then
+          p:adv()
+          while not p:at("OP", "]") and not p:at("NEWLINE") and not p:at("EOF") do
+            if p:at("NAMED_ARG") then
+              local axis_tok = p:adv()
+              local val_expr = parse_expr(p)
+              trigger_entries[#trigger_entries+1] = { axis = axis_tok.value, value = val_expr }
+            else
+              break
+            end
+            p:match("OP", ",")
+          end
+          p:match("OP", "]")
+        end
+        opts[na.value] = trigger_entries
+      elseif na.value == "fn" then
+        if p:at("IDENT") or p:at("PATH") then
+          fn_name = p:adv().value
+        else
+          fn_name = (parse_expr(p) or {}).name or "?"
+        end
+      end
+    end
+    p:skip_to_eol()
+    return ast.schedule_mut(name_expr, opts, fn_name, pos)
   end,
 }
 
@@ -2073,6 +2208,93 @@ local function parse_migration_decl(p, _doc)
   return ast.migration_decl(from_ver, to_ver, ops, tpos)
 end
 
+--- Parse a `bounded name param: clauses` declaration.
+--- Syntax:
+---   bounded classify-intent text:
+---     returns:      PlayerIntent
+---     distribution: uniform
+---     reads:        []
+---     lua:          "game.nlp.classify_intent"
+local function parse_bounded_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD("bounded") or IDENT("bounded")
+  local name = p:at("IDENT") and p:adv().value or "?"
+  -- Optional parameter name.
+  -- The lexer may have eaten the ':' from "paramname:" producing NAMED_ARG.
+  -- If next token is NAMED_ARG, the param name is its value and ':' is consumed.
+  -- If next token is IDENT followed by ':', parse param as IDENT.
+  local params = {}
+  if p:at("NAMED_ARG") then
+    -- "paramname:" → the ':' is already consumed; this doubles as the colon we need
+    params[#params+1] = p:adv().value
+    -- No need to consume ':' separately
+    p:match("NEWLINE")
+    goto bounded_body
+  end
+  if p:at("IDENT") then
+    params[#params+1] = p:adv().value
+  end
+  p:expect("OP", ":", "expected ':' after bounded declaration name")
+  ::bounded_body::
+  p:match("NEWLINE")
+
+  local returns_type  = nil
+  local distribution  = nil
+  local reads         = {}
+  local lua_name      = nil
+
+  if p:at("INDENT") then
+    p:adv()
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+      local ct = p:cur()
+      if ct.kind == "NAMED_ARG" then
+        local na = p:adv()
+        if na.value == "returns" then
+          if p:at("IDENT") then returns_type = p:adv().value end
+        elseif na.value == "distribution" then
+          -- distribution: uniform  or  distribution: conditioned-on path
+          if p:at("IDENT") then
+            local d = p:adv().value
+            if p:at("IDENT") then
+              -- e.g. conditioned-on
+              local part2 = p:adv().value
+              if p:at("PATH") or p:at("IDENT") then
+                local path_val = p:adv().value
+                distribution = d .. "-" .. part2 .. " " .. path_val
+              else
+                distribution = d .. "-" .. part2
+              end
+            else
+              distribution = d
+            end
+          end
+        elseif na.value == "reads" then
+          if p:at("OP", "[") then
+            p:adv()
+            while not p:at("OP", "]") and not p:at("NEWLINE") and not p:at("EOF") do
+              if p:at("PATH") or p:at("IDENT") then
+                reads[#reads+1] = p:adv().value
+              else
+                p:adv()
+              end
+              p:match("OP", ",")
+            end
+            p:match("OP", "]")
+          end
+        elseif na.value == "lua" then
+          if p:at("STRING") then lua_name = p:adv().value end
+        end
+      end
+      p:skip_to_eol()
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+
+  return ast.bounded_decl(name, params, returns_type, distribution, reads, lua_name, doc, tpos)
+end
+
 --- Parse a `verify "label": clauses` declaration.
 local function parse_verify_decl(p, doc)
   local tpos = p:cur().pos
@@ -2225,8 +2447,9 @@ local function parse_decl(p, doc)
     elseif t.value == "verify"     then return parse_verify_decl(p, doc)
     elseif t.value == "watch"
         or t.value == "watch-when" then return parse_watch_decl(p, doc)
+    elseif t.value == "bounded"    then return parse_bounded_decl(p, doc)
     else
-      -- bounded, macro — later phases
+      -- macro — later phases
       p:skip_to_eol()
       p:skip_block()
       return nil

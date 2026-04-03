@@ -69,9 +69,11 @@ local K = {
   UNDO_MUT           = "undo_mut",
   TIME_INC_MUT       = "time_inc_mut",
   CANCEL_SCHEDULE_MUT = "cancel_schedule_mut",
+  SCHEDULE_MUT        = "schedule_mut",
   PATH_AT_BEFORE        = "path_at_before",
   COUNTERFACTUAL_EXPR   = "counterfactual_expr",
   IN_STATE_EXPR         = "in_state_expr",
+  FIND_EXPR             = "find_expr",
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
@@ -85,8 +87,9 @@ local K = {
 ---@param state   table   runtime.state instance
 ---@param fns     table   game_table.fns
 ---@param fn_name string  current function name (for log)
+---@param game    table?  compiled game table (for can-reach? etc.)
 ---@return table
-function M.new_ctx(state, fns, fn_name)
+function M.new_ctx(state, fns, fn_name, game)
   return {
     state   = state,
     fns     = fns or {},
@@ -94,6 +97,7 @@ function M.new_ctx(state, fns, fn_name)
     fn_name = fn_name or "?",
     signal  = nil,
     retval  = nil,
+    game    = game,
   }
 end
 
@@ -111,6 +115,8 @@ local function child_ctx(parent, fn_name)
     retval  = nil,
     actors    = parent.actors,     -- propagate actor registry for send!
     scheduler = parent.scheduler,  -- propagate scheduler for cancel-schedule!
+    game      = parent.game,       -- propagate compiled game table
+    scene_stack = parent.scene_stack,
   }
   -- Copy parent vars into child (shadowing allowed)
   for k, v in pairs(parent.vars) do
@@ -338,6 +344,11 @@ eval_expr = function(node, ctx)
     end
     return t
 
+  -- find query expression
+  elseif k == K.FIND_EXPR then
+    local query_mod = require("runtime.query")
+    return query_mod.find(ctx, node.family, node.clauses)
+
   -- Record constructor: TypeName(field: val, ...)
   elseif k == K.RECORD_CONSTRUCTOR then
     -- Embed the variant name so match patterns can identify the branch.
@@ -529,6 +540,66 @@ local BUILTINS = {
     if type(path) ~= "string" then return false end
     return ctx.state:path_exists(path) == true
   end,
+  ["can-reach?"] = function(args, ctx)
+    if not ctx.game then return false end
+
+    local search_mod = require("runtime.search")
+    local log_mod    = require("runtime.log")
+    local state_mod  = require("runtime.state")
+
+    local cond_expr = args[1]
+    local depth     = 20
+
+    -- Check for depth: named arg
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "depth" then
+        local d = eval_expr(a.value, ctx)
+        if type(d) == "number" then depth = d end
+      end
+    end
+
+    -- Snapshot current state
+    local cache = {}
+    for k, v in pairs(ctx.state._cache) do
+      if type(v) == "table" then
+        local copy = {}
+        for i, x in ipairs(v) do copy[i] = x end
+        cache[k] = copy
+      else
+        cache[k] = v
+      end
+    end
+
+    -- Scene stack: from ctx if available, otherwise use entry scene
+    local stack = ctx.scene_stack
+    if not stack then
+      local entry = ctx.game.schema
+        and ctx.game.schema.engine_config
+        and ctx.game.schema.engine_config["entry-scene"]
+      stack = entry and { entry } or {}
+    end
+
+    -- Condition function: evaluate cond_expr in a snapshot state
+    local function condition_fn(snap_cache)
+      local l          = log_mod.new()
+      local fake_state = state_mod.new(ctx.game.schema or {}, l)
+      for k, v in pairs(snap_cache) do fake_state._cache[k] = v end
+      local fake_ctx = {
+        state    = fake_state,
+        fns      = ctx.fns,
+        vars     = {},
+        fn_name  = "can-reach?",
+        signal   = nil,
+        retval   = nil,
+        game     = ctx.game,
+      }
+      local ok, result = pcall(eval_expr, cond_expr, fake_ctx)
+      return ok and result
+    end
+
+    return search_mod.can_reach(ctx.game, cache, stack, condition_fn, depth)
+  end,
 }
 
 --- Dispatch a function call by name.
@@ -546,6 +617,23 @@ call_fn = function(name, args, ctx)
   local builtin = BUILTINS[name]
   if builtin then
     return builtin(args, ctx)
+  end
+
+  -- Bounded function call
+  local bounded_def = ctx.game and ctx.game.bounded and ctx.game.bounded[name]
+  if bounded_def then
+    if ctx.game._bounded_handlers and ctx.game._bounded_handlers[name] then
+      -- Evaluate first argument
+      local first_arg = args and args[1] and eval_expr(args[1], ctx) or nil
+      -- Snapshot the reads
+      local snap = {}
+      for _, path in ipairs(bounded_def.reads or {}) do
+        snap[path] = ctx.state:get(path)
+      end
+      return ctx.game._bounded_handlers[name](first_arg, snap)
+    end
+    -- Fallback: no handler registered, return nil
+    return nil
   end
 
   -- User-defined function
@@ -764,6 +852,28 @@ eval_stmt = function(node, ctx)
   elseif k == K.CANCEL_SCHEDULE_MUT then
     if ctx.scheduler then ctx.scheduler:cancel(node.name) end
 
+  elseif k == K.SCHEDULE_MUT then
+    -- Imperative schedule creation: schedule! 'name every: [...] fn: fn-name
+    if ctx.scheduler then
+      local name_val = eval_expr(node.name, ctx)
+      if type(name_val) ~= "string" then name_val = tostring(name_val or "?") end
+      local fn_name  = node.fn  -- string function name
+      local trigger  = { every = {}, at = {}, offset = {} }
+      -- Evaluate trigger entries
+      for kind, entries in pairs(node.opts or {}) do
+        if trigger[kind] then
+          for _, entry in ipairs(entries or {}) do
+            local val = eval_expr(entry.value, ctx)
+            trigger[kind][#trigger[kind]+1] = { axis = entry.axis, value = val or 0 }
+          end
+        end
+      end
+      -- Retrieve fn body from fns table
+      local fn = fn_name and ctx.fns and ctx.fns[fn_name]
+      local body = fn and fn.body or {}
+      ctx.scheduler:register(name_val, trigger, body)
+    end
+
   elseif k == K.UNDO_MUT then
     local steps = node.steps and eval_expr(node.steps, ctx) or 1
     if ctx.state and ctx.state.undo then
@@ -872,6 +982,16 @@ end
 ---@param ctx  table  evaluation context
 function M.eval_stmt(node, ctx)
   eval_stmt(node, ctx)
+end
+
+--- Create a child context with extra variable bindings.
+---@param ctx  table  parent context
+---@param vars table  variable bindings to add {name → value}
+---@return table
+function M.child_ctx_vars(ctx, vars)
+  local c = child_ctx(ctx)
+  for k, v in pairs(vars or {}) do c.vars[k] = v end
+  return c
 end
 
 --- Evaluate a path node to a string.

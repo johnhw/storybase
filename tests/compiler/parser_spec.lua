@@ -1406,3 +1406,79 @@ schedule morning-reset:
     assert.equal("Reset dispositions each morning.", node.doc)
   end)
 end)
+
+-- ── find expression parsing ─────────────────────────────────────────────────
+
+describe("parser — find expression", function()
+  local function parse_fn_body(src_fn)
+    local src = "fn test-fn:\n" .. src_fn
+    local tree, diags = parse(src)
+    local errs = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errs[#errs+1] = d end end
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local fn_node = tree.decls[1]
+    return fn_node.body
+  end
+
+  it("parses simple find with no clauses", function()
+    local body = parse_fn_body("  find npcs\n")
+    assert.equal(1, #body)
+    local stmt = body[1]
+    -- may be expr_stmt wrapping find_expr
+    local node = stmt.kind == "expr_stmt" and stmt.expr or stmt
+    assert.equal(ast.K.FIND_EXPR, node.kind)
+    assert.equal("npcs", node.family)
+    assert.equal(0, #node.clauses)
+  end)
+
+  it("parses find with inline where clause", function()
+    local body = parse_fn_body("  find npcs where: npcs/health > 0\n")
+    local stmt = body[1]
+    local node = stmt.kind == "expr_stmt" and stmt.expr or stmt
+    assert.equal(ast.K.FIND_EXPR, node.kind)
+    assert.equal("npcs", node.family)
+    assert.equal(1, #node.clauses)
+    assert.equal("where", node.clauses[1].kind)
+  end)
+
+  it("parses find with limit and count clauses", function()
+    local body = parse_fn_body("  find npcs where: npcs/alive = true limit: 5 count\n")
+    local stmt = body[1]
+    local node = stmt.kind == "expr_stmt" and stmt.expr or stmt
+    assert.equal(ast.K.FIND_EXPR, node.kind)
+    local has_where, has_limit, has_count = false, false, false
+    for _, c in ipairs(node.clauses) do
+      if c.kind == "where"  then has_where = true end
+      if c.kind == "limit"  then has_limit = true; assert.equal(5, c.value) end
+      if c.kind == "count"  then has_count = true end
+    end
+    assert.is_true(has_where)
+    assert.is_true(has_limit)
+    assert.is_true(has_count)
+  end)
+end)
+
+-- ── schedule! mutation parsing ──────────────────────────────────────────────
+
+describe("parser — schedule! mutation", function()
+  local function parse_fn_body(src_fn)
+    local src = "fn test-fn:\n" .. src_fn
+    local tree, diags = parse(src)
+    local errs = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errs[#errs+1] = d end end
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    return tree.decls[1].body
+  end
+
+  it("parses schedule! with every and fn", function()
+    local body = parse_fn_body("  schedule! 'patrol every: [tick: 5] fn: my-fn\n")
+    assert.equal(1, #body)
+    local node = body[1]
+    assert.equal(ast.K.SCHEDULE_MUT, node.kind)
+    assert.equal("patrol", node.name.name)  -- symbol_lit
+    assert.equal("my-fn", node.fn)
+    assert.is_not_nil(node.opts.every)
+    assert.equal(1, #node.opts.every)
+    assert.equal("tick", node.opts.every[1].axis)
+  end)
+end)

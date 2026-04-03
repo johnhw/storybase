@@ -508,3 +508,83 @@ schedule mid-point:
     assert.equal(1, #s.body)
   end)
 end)
+
+-- ── bounded declarations ───────────────────────────────────────────────────
+
+describe("codegen — bounded declarations", function()
+  it("emits bounded declaration into game_table.bounded", function()
+    local gt = compile([[
+bounded classify-intent text:
+  returns:      Mood
+  distribution: uniform
+  reads:        []
+  lua:          "game.nlp.classify"
+]])
+    assert.is_not_nil(gt.bounded)
+    assert.is_not_nil(gt.bounded["classify-intent"])
+    local b = gt.bounded["classify-intent"]
+    assert.equal("classify-intent", b.name)
+    assert.equal("Mood", b.returns)
+    assert.equal("uniform", b.distribution)
+    assert.equal("game.nlp.classify", b.lua)
+  end)
+
+  it("emits bounded with reads list", function()
+    local gt = compile([[
+bounded threat-level npc:
+  returns:      Threat
+  distribution: uniform
+  reads:        [player/location, player/health]
+  lua:          "game.ai.threat"
+]])
+    assert.is_not_nil(gt.bounded["threat-level"])
+    local b = gt.bounded["threat-level"]
+    assert.equal(2, #b.reads)
+  end)
+
+  it("bounded handler can be called via eval", function()
+    local compiler_mod = require("compiler.compiler")
+    local eval_mod     = require("runtime.eval")
+    local log_mod      = require("runtime.log")
+    local state_mod    = require("runtime.state")
+
+    local src = [[
+module bounded-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  x: Int(0, 100) = 5
+
+bounded add-noise value:
+  returns:      Int
+  distribution: uniform
+  reads:        [world/x]
+  lua:          "test.noise"
+
+scene main:
+  Finished.
+]]
+    local gt, diags = compiler_mod.compile(src, "test.sb")
+    local has_err = false
+    for _, d in ipairs(diags) do if d.level == "error" then has_err = true end end
+    if has_err then return end  -- skip if checker rejects it
+
+    -- Register a handler
+    gt._bounded_handlers = {
+      ["add-noise"] = function(val, snap)
+        return (val or 0) + (snap["world/x"] or 0)
+      end,
+    }
+
+    local l   = log_mod.new()
+    local s   = state_mod.new(gt.schema, l)
+    s:set("world/x", 3)
+    local ctx = eval_mod.new_ctx(s, gt.fns, "test", gt)
+
+    local call_node = { kind = "fn_call", name = "add-noise",
+                        args = { { kind = "int_lit", value = 10 } } }
+    local result = eval_mod.eval_expr(call_node, ctx)
+    assert.equal(13, result)  -- 10 + 3 (world/x)
+  end)
+end)

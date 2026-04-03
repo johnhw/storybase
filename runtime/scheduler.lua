@@ -34,9 +34,18 @@ function M.new(state, log)
     local fire_at  = {}   -- { axis → threshold } for "at" schedules
     local fired    = {}   -- { axis → true } marks fired "at" entries
 
-    -- every: next fire = current_value + step
+    -- Build offset map for easy lookup
+    local offset_map = {}
+    for _, entry in ipairs(trigger.offset or {}) do
+      offset_map[entry.axis] = entry.value
+    end
+
+    -- every: next fire = current_value + step (adjusted by offset)
     for _, entry in ipairs(trigger.every or {}) do
-      next_fire[entry.axis] = (current[entry.axis] or 0) + entry.value
+      local cur_val = current[entry.axis] or 0
+      local offset  = offset_map[entry.axis] or 0
+      -- First fire: offset from current, then step from that point
+      next_fire[entry.axis] = cur_val + offset + entry.value
     end
 
     -- at: fire when axis reaches this absolute value (relative to start = 0)
