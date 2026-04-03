@@ -778,7 +778,18 @@ local function parse_atom(p)
   elseif t.kind == "SYMBOL" then
     p:adv(); return ast.symbol_lit(t.value, tpos)
   elseif t.kind == "PATH" then
-    p:adv(); return make_path_expr(t.value, tpos)
+    p:adv()
+    local path_node = make_path_expr(t.value, tpos)
+    -- Check for path@before suffix
+    if p:at("OP", "@") then
+      local nx = p:peek()
+      if nx and nx.kind == "IDENT" and nx.value == "before" then
+        p:adv()  -- consume "@"
+        p:adv()  -- consume "before"
+        return ast.path_at_before(path_node, tpos)
+      end
+    end
+    return path_node
   elseif t.kind == "INTERP_PATH" then
     p:adv(); return make_interp_path(t.value, tpos)
   elseif t.kind == "IDENT" then
@@ -1871,6 +1882,138 @@ local function parse_schedule_decl(p, doc)
   return ast.schedule_decl(name, trigger, body, doc, tpos)
 end
 
+--- Parse a `verify "label": clauses` declaration.
+local function parse_verify_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD("verify")
+
+  local label = nil
+  if p:at("STRING") then label = p:adv().value end
+  p:expect("OP", ":", "expected ':' after verify label")
+  p:match("NEWLINE")
+
+  local clauses = {}
+
+  if not p:at("INDENT") then
+    return ast.verify_decl(label, clauses, tpos)
+  end
+  p:adv()  -- consume INDENT
+
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    local ct = p:cur()
+    local cpos = ct.pos
+
+    if ct.kind == "IDENT" and ct.value == "verify-always" then
+      p:adv()
+      local expr = parse_expr(p); p:skip_to_eol()
+      clauses[#clauses+1] = ast.verify_clause("always", expr, {}, cpos)
+
+    elseif ct.kind == "NAMED_ARG" and ct.value == "from-any-state" then
+      p:adv(); p:skip_to_eol()
+      -- Consume the nested body (sub-clauses like can-reach?) — stored but not yet evaluated
+      if p:at("INDENT") then
+        local sub_body = parse_body_items(p, false)
+        clauses[#clauses+1] = ast.verify_clause("from_any_state", nil, sub_body, cpos)
+      else
+        clauses[#clauses+1] = ast.verify_clause("from_any_state", nil, {}, cpos)
+      end
+
+    elseif (ct.kind == "IDENT" or ct.kind == "NAMED_ARG") and ct.value == "requires" then
+      p:adv()
+      local expr = parse_expr(p); p:skip_to_eol()
+      clauses[#clauses+1] = ast.verify_clause("requires", expr, {}, cpos)
+
+    elseif (ct.kind == "NAMED_ARG" or ct.kind == "IDENT") and ct.value == "after" then
+      p:adv()
+      -- after (<fn-call>): body
+      local call_expr = nil
+      if p:at("OP", "(") then
+        p:adv()
+        call_expr = parse_expr(p)
+        p:expect("OP", ")", "expected ')' after after-clause call")
+      else
+        call_expr = parse_expr(p)
+      end
+      p:expect("OP", ":", "expected ':' after after-clause call")
+      p:match("NEWLINE")
+      local assertions = {}
+      if p:at("INDENT") then
+        p:adv()
+        while not p:at("DEDENT") and not p:at("EOF") do
+          p:skip_newlines()
+          if p:at("DEDENT") or p:at("EOF") then break end
+          local ae = parse_expr(p); p:skip_to_eol()
+          if ae then assertions[#assertions+1] = ae end
+        end
+        if p:at("DEDENT") then p:adv() end
+      end
+      clauses[#clauses+1] = ast.verify_clause("after", call_expr, assertions, cpos)
+
+    elseif ct.kind == "KEYWORD" and ct.value == "when" then
+      p:adv()
+      local cond = parse_expr(p)
+      p:expect("OP", ":", "expected ':' after when-condition")
+      p:match("NEWLINE")
+      -- when body is sub-clauses (for now, just skip)
+      if p:at("INDENT") then p:adv(); while not p:at("DEDENT") and not p:at("EOF") do p:skip_to_eol() end; if p:at("DEDENT") then p:adv() end end
+      clauses[#clauses+1] = ast.verify_clause("when", cond, {}, cpos)
+
+    else
+      p:skip_to_eol()
+    end
+  end
+
+  if p:at("DEDENT") then p:adv() end
+  return ast.verify_decl(label, clauses, doc, tpos)
+end
+
+--- Parse `watch path "label"` and `watch-when cond "label"` declarations.
+local function parse_watch_decl(p, doc)
+  local tpos = p:cur().pos
+  local kw = p:adv().value  -- consume KEYWORD("watch" or "watch-when")
+
+  -- Helper: grab optional label (STRING) on the same or next indented line
+  local function consume_label()
+    if p:at("STRING") then return p:adv().value end
+    p:skip_to_eol()
+    -- Check if label is on the next line as an indented string
+    if p:at("INDENT") then
+      p:adv()  -- consume INDENT
+      p:skip_newlines()
+      local lbl = nil
+      if p:at("STRING") then lbl = p:adv().value end
+      p:skip_to_eol()
+      while not p:at("DEDENT") and not p:at("EOF") do p:skip_to_eol() end
+      if p:at("DEDENT") then p:adv() end
+      return lbl
+    end
+    return nil
+  end
+
+  if kw == "watch" then
+    local path_node = nil
+    if p:at("PATH") then
+      local pt = p:adv(); path_node = make_path_expr(pt.value, pt.pos)
+    elseif p:at("INTERP_PATH") then
+      local pt = p:adv(); path_node = make_interp_path(pt.value, pt.pos)
+    elseif p:at("IDENT") then
+      local pt = p:adv(); path_node = ast.path_expr({pt.value}, pt.pos)
+    else
+      p:emit_err(ast.E.BAD_DECLARATION, "expected state path after 'watch'", p:cur().pos)
+      p:skip_to_eol(); return nil
+    end
+    local label = consume_label()
+    return ast.watch_decl(path_node, label, tpos)
+  else  -- watch-when
+    local cond = parse_expr(p)
+    local label = consume_label()
+    return ast.watch_when_decl(cond, label, tpos)
+  end
+end
+
+
 -- ============================================================
 -- Top-level dispatch
 -- ============================================================
@@ -1886,10 +2029,13 @@ local function parse_decl(p, doc)
     elseif t.value == "relation" then return parse_relation_decl(p, doc)
     elseif t.value == "fn"       then return parse_fn_decl(p, doc)
     elseif t.value == "scene"    then return parse_scene_decl(p, doc)
-    elseif t.value == "actor"    then return parse_actor_decl(p, doc)
-    elseif t.value == "schedule" then return parse_schedule_decl(p, doc)
+    elseif t.value == "actor"      then return parse_actor_decl(p, doc)
+    elseif t.value == "schedule"   then return parse_schedule_decl(p, doc)
+    elseif t.value == "verify"     then return parse_verify_decl(p, doc)
+    elseif t.value == "watch"
+        or t.value == "watch-when" then return parse_watch_decl(p, doc)
     else
-      -- bounded, verify, watch, macro, migration — later phases
+      -- bounded, macro, migration — later phases
       p:skip_to_eol()
       p:skip_block()
       return nil
