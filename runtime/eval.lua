@@ -69,7 +69,9 @@ local K = {
   UNDO_MUT           = "undo_mut",
   TIME_INC_MUT       = "time_inc_mut",
   CANCEL_SCHEDULE_MUT = "cancel_schedule_mut",
-  PATH_AT_BEFORE     = "path_at_before",
+  PATH_AT_BEFORE        = "path_at_before",
+  COUNTERFACTUAL_EXPR   = "counterfactual_expr",
+  IN_STATE_EXPR         = "in_state_expr",
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
@@ -190,6 +192,64 @@ eval_expr = function(node, ctx)
     end
     -- Fallback to current state (for contexts without a snapshot)
     return ctx.state:get(path)
+
+  elseif k == K.COUNTERFACTUAL_EXPR then
+    -- Create a branched GameState by deep-copying current cache and applying transitions
+    local log_mod   = require("runtime.log")
+    local state_mod = require("runtime.state")
+    local cf_log    = log_mod.new()
+    local cf_state  = state_mod.new(ctx.state and ctx.state._schema or {}, cf_log)
+    -- Deep-copy current cache
+    for path, val in pairs(ctx.state and ctx.state._cache or {}) do
+      if type(val) == "table" then
+        local c = {}; for i, x in ipairs(val) do c[i] = x end
+        cf_state._cache[path] = c
+      else
+        cf_state._cache[path] = val
+      end
+    end
+    -- Copy time
+    for axis, v in pairs(ctx.state and ctx.state._time or {}) do
+      cf_state._time[axis] = v
+    end
+    -- Apply transition function calls to the copy
+    local cf_ctx = M.new_ctx(cf_state, ctx.fns, "counterfactual")
+    cf_ctx.actors    = ctx.actors
+    cf_ctx.scheduler = ctx.scheduler
+    for _, trans_expr in ipairs(node.transitions or {}) do
+      pcall(eval_expr, trans_expr, cf_ctx)
+    end
+    -- Return an immutable GameState object (read-only wrapper)
+    return {
+      _cache = cf_state._cache,
+      _time  = cf_state._time,
+      get    = function(self, path) return self._cache[path] end,
+      path_exists = function(self, path) return self._cache[path] ~= nil end,
+    }
+
+  elseif k == K.IN_STATE_EXPR then
+    -- Read inner_expr using the GameState's cache instead of live state
+    local gs = eval_expr(node.state_expr, ctx)
+    if not gs or type(gs) ~= "table" or not gs._cache then
+      error("in-state: expected a GameState value, got " .. type(gs))
+    end
+    local log_mod   = require("runtime.log")
+    local state_mod = require("runtime.state")
+    local fake_log   = log_mod.new()
+    local fake_state = state_mod.new(ctx.state and ctx.state._schema or {}, fake_log)
+    fake_state._cache = gs._cache
+    fake_state._time  = gs._time or {}
+    local gs_ctx = {
+      state   = fake_state,
+      fns     = ctx.fns,
+      vars    = ctx.vars,
+      fn_name = "in-state",
+      signal  = nil,
+      retval  = nil,
+      actors    = ctx.actors,
+      scheduler = ctx.scheduler,
+    }
+    return eval_expr(node.inner_expr, gs_ctx)
 
   -- Binary operators
   elseif k == K.BINARY_OP then
@@ -668,15 +728,25 @@ eval_stmt = function(node, ctx)
     end
 
   elseif k == K.LET_STMT then
-    local sub = child_ctx(ctx)
-    for _, binding in ipairs(node.bindings or {}) do
-      -- binding is a let_binding node with .name and .expr
-      if binding.kind == K.LET_BINDING then
-        sub.vars[binding.name] = eval_expr(binding.expr, sub)
+    if #(node.body or {}) > 0 then
+      -- Colon form: `let x = expr: body` — scoped sub-context
+      local sub = child_ctx(ctx)
+      for _, binding in ipairs(node.bindings or {}) do
+        if binding.kind == K.LET_BINDING then
+          sub.vars[binding.name] = eval_expr(binding.expr, sub)
+        end
+      end
+      eval_stmts(node.body, sub)
+      if sub.signal then ctx.signal = sub.signal end
+      if sub.retval ~= nil then ctx.retval = sub.retval end
+    else
+      -- Plain form: `let x = expr` — bind into current context for rest of fn
+      for _, binding in ipairs(node.bindings or {}) do
+        if binding.kind == K.LET_BINDING then
+          ctx.vars[binding.name] = eval_expr(binding.expr, ctx)
+        end
       end
     end
-    eval_stmts(node.body, sub)
-    if sub.signal then ctx.signal = sub.signal end
 
   elseif k == K.SEND_MUT then
     -- Resolve actor name from the actor node (always a 0-arg fn_call)

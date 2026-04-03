@@ -792,10 +792,53 @@ local function parse_atom(p)
     return path_node
   elseif t.kind == "INTERP_PATH" then
     p:adv(); return make_interp_path(t.value, tpos)
+  elseif t.kind == "IDENT" and t.value == "counterfactual" then
+    -- counterfactual [from: expr] [simulate: true] do: (indented block)
+    p:adv()
+    local from_tick = nil
+    local simulate  = false
+    -- Optional from: and simulate: clauses (both are NAMED_ARG tokens)
+    while p:at("NAMED_ARG") and (p:cur().value == "from" or p:cur().value == "simulate") do
+      local clause = p:cur().value; p:adv()
+      if clause == "from" then
+        from_tick = parse_expr(p)
+      elseif clause == "simulate" then
+        if p:at("BOOL") then simulate = p:cur().value; p:adv()
+        else simulate = true end
+      end
+    end
+    -- do: block
+    local transitions = {}
+    if p:at("NAMED_ARG") and p:cur().value == "do" then
+      p:adv()  -- consume "do:"
+      p:match("NEWLINE")
+      if p:at("INDENT") then
+        p:adv()
+        while not p:at("DEDENT") and not p:at("EOF") do
+          p:skip_newlines()
+          if p:at("DEDENT") or p:at("EOF") then break end
+          local call_expr = parse_expr(p); p:skip_to_eol()
+          if call_expr then transitions[#transitions+1] = call_expr end
+        end
+        if p:at("DEDENT") then p:adv() end
+      end
+    end
+    return ast.counterfactual_expr(from_tick, transitions, simulate, tpos)
+
   elseif t.kind == "IDENT" then
     -- 0-arg function call (no further argument collection in atom context)
     p:adv(); return ast.fn_call(t.value, {}, tpos)
   elseif t.kind == "OP" and t.value == "(" then
+    -- Check for (in-state gs) prefix before regular expr
+    local nx = p:peek()
+    if nx and nx.kind == "IDENT" and nx.value == "in-state" then
+      p:adv()  -- consume "("
+      p:adv()  -- consume "in-state"
+      local state_var = parse_expr(p)
+      p:expect("OP", ")", "expected ')' after in-state expression")
+      local inner = parse_atom(p)  -- path or simple expr to redirect
+      return ast.in_state_expr(state_var, inner, tpos)
+    end
     p:adv()
     -- (set) → empty set literal
     if p:at("IDENT", "set") and p:peek().kind == "OP" and p:peek().value == ")" then
@@ -1160,6 +1203,11 @@ local function parse_primary(p)
     p:emit_err(ast.E.BAD_EXPRESSION,
       "unexpected keyword '" .. t.value .. "' in expression", tpos)
     p:adv(); return ast.int_lit(0, tpos)
+  end
+
+  -- Special IDENTs that are parsed as structured expressions (not fn calls)
+  if t.kind == "IDENT" and t.value == "counterfactual" then
+    return parse_atom(p)
   end
 
   -- For IDENT: function application with argument collection

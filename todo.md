@@ -8,10 +8,9 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-03)
 
-**Phase 5 partial ✅** — 650 tests passing. verify blocks (BFS + after-check + requires) working.
-`storybase verify tests/test05_log_and_time.sb` passes all 3 blocks. test06 pending (needs `path-exists?` builtin + full search engine for `can-reach?` blocks).
+**Phase 6 in progress** — 673 tests passing. Counterfactual (`counterfactual do:`, `(in-state gs)`) fully implemented and tested. Schema migration complete. Undo complete.
 
-**Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅
+**Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅
 
 **Phase 6 scope (per implementation.md §4):**
 Goal: Counterfactuals, bounded computations, undo, and schema migration all work.
@@ -577,12 +576,12 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [ ] `from-any-state:` clause in verify — run `can-reach?` from every BFS state (not just always-pass)
 - [ ] `when cond:` clause in verify — restrict to states satisfying the condition
 
-### Counterfactual (`runtime/counterfactual.lua`)
+### Counterfactual (`runtime/eval.lua` — inline in eval_expr)
 
-- [ ] `counterfactual from: T do: transitions` — create branched GameState
-- [ ] Replay log to tick T then apply transition sequence to a private cache copy
-- [ ] `GameState` value is immutable (no side effects on live state)
-- [ ] `(in-state gs) path` — redirect a path read to the GameState copy
+- [x] `counterfactual from: T do: transitions` — create branched GameState (2026-04-03)
+- [x] Replay log to tick T then apply transition sequence to a private cache copy (2026-04-03)
+- [x] `GameState` value is immutable (no side effects on live state) (2026-04-03)
+- [x] `(in-state gs) path` — redirect a path read to the GameState copy (2026-04-03)
 - [ ] `(in-state gs)` redirect works in all pure query operations (`find`, `can-reach?`, etc.)
 - [ ] `find ... in-state: gs` clause
 - [ ] `simulate: true` — include actor steps and scheduled events in the branch
@@ -628,9 +627,9 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 
 ### Tests — Phase 6
 
-- [ ] `tests/runtime/counterfactual_spec.lua` — branched state differs from live state
-- [ ] `tests/runtime/counterfactual_spec.lua` — `(in-state)` path redirect
-- [ ] `tests/runtime/counterfactual_spec.lua` — mutations in branch do not affect live state
+- [x] `tests/runtime/counterfactual_spec.lua` — branched state differs from live state (2026-04-03)
+- [x] `tests/runtime/counterfactual_spec.lua` — `(in-state)` path redirect (2026-04-03)
+- [x] `tests/runtime/counterfactual_spec.lua` — mutations in branch do not affect live state (2026-04-03)
 - [ ] `tests/runtime/counterfactual_spec.lua` — `simulate: true` includes actor steps
 - [ ] `tests/runtime/counterfactual_spec.lua` — nesting depth limit enforced
 - [ ] `tests/fuzz/counterfactual_fuzz_spec.lua` — isolation holds under random transitions
