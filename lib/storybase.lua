@@ -227,6 +227,64 @@ function M._make_game(game_table)
     return result
   end
 
+  -- ── Entity family queries ─────────────────────────────────
+
+  --- Query an entity family, returning matching keys.
+  ---
+  --- Options table (all optional):
+  ---   where      function(key) → bool  Lua predicate to filter keys
+  ---   order_by   string               Path template to sort by; use "{key}" for the loop var
+  ---              e.g. "npcs/{key}/level"
+  ---   order_dir  "asc"|"desc"         Default "asc"
+  ---   limit      integer              Cap result count
+  ---   count      boolean              Return integer count instead of list
+  ---
+  ---@param family string
+  ---@param opts   table?
+  ---@return table|integer  list of matching keys (or integer when count=true)
+  function self:find(family, opts)
+    assert(self._eng, "call game:init() first")
+    opts = opts or {}
+    local state = self._eng._state
+
+    -- All instantiated keys
+    local keys = state:path_list(family)
+
+    -- Filter
+    if type(opts.where) == "function" then
+      local filtered = {}
+      for _, key in ipairs(keys) do
+        if opts.where(key) then filtered[#filtered+1] = key end
+      end
+      keys = filtered
+    end
+
+    -- Sort
+    if opts.order_by then
+      local tmpl = opts.order_by
+      local desc = (opts.order_dir == "desc")
+      table.sort(keys, function(a, b)
+        local pa = tmpl:gsub("{key}", a)
+        local pb = tmpl:gsub("{key}", b)
+        local va = state:get(pa) or 0
+        local vb = state:get(pb) or 0
+        if desc then return va > vb else return va < vb end
+      end)
+    end
+
+    -- Limit
+    if opts.limit then
+      local lim = {}
+      for i = 1, math.min(opts.limit, #keys) do lim[i] = keys[i] end
+      keys = lim
+    end
+
+    -- Count
+    if opts.count then return #keys end
+
+    return keys
+  end
+
   -- ── Expression evaluation ─────────────────────────────────
 
   --- Evaluate a StoryBase expression string in the current state.

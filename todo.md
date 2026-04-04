@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 855 tests passing.
+**Phase 7/8 in progress** — 862 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -744,7 +744,7 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `sb.from_source(src, name)` → game object (2026-04-04)
 - [x] `game:call(fn_name, arg1, ...)` — invoke transaction function (2026-04-04)
 - [x] `game:get(path)` → current value (2026-04-04)
-- [ ] `game:find(family, clause_table)` → list of matching keys — deferred to Phase 8
+- [x] `game:find(family, opts)` → list of matching keys (opts: where fn, order_by, order_dir, limit, count) (2026-04-04)
 - [x] `game:on(event_name, handler_fn)` — subscribe to debug/presentation events (2026-04-04)
 - [x] `game:choose(index)` — dispatch player choice by visible index (2026-04-04)
 - [x] `game:eval(expr_string)` → value (pure expressions only) (2026-04-04)

@@ -190,6 +190,105 @@ describe("game object", function()
   end)
 end)
 
+-- ── game:find ────────────────────────────────────────────────────────────────
+
+describe("game:find", function()
+  local FAMILY_SRC = [[
+module find-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type NpcData:
+  level: Int(1, 99) = 1
+  alive: Bool       = true
+
+state npcs/{npc}: NpcData  max: 10
+
+scene main:
+  Done.
+]]
+
+  local function make_npc_game()
+    local g = sb.from_source(FAMILY_SRC, "find-test")
+    g:init()
+    -- Spawn three npcs
+    g._eng._state:spawn("npcs", "alice", {})
+    g._eng._state:spawn("npcs", "bob",   {})
+    g._eng._state:spawn("npcs", "carol", {})
+    g._eng._state:set("npcs/alice/level", 5)
+    g._eng._state:set("npcs/bob/level",   3)
+    g._eng._state:set("npcs/carol/level", 7)
+    g._eng._state:set("npcs/bob/alive",   false)
+    return g
+  end
+
+  it("returns all keys with no options", function()
+    local g = make_npc_game()
+    local keys = g:find("npcs")
+    assert.equal(3, #keys)
+  end)
+
+  it("filters with a where predicate", function()
+    local g = make_npc_game()
+    local state = g._eng._state
+    local keys = g:find("npcs", {
+      where = function(k) return state:get("npcs/" .. k .. "/alive") ~= false end
+    })
+    assert.equal(2, #keys)
+    -- alice and carol should be alive
+    local found = {}
+    for _, k in ipairs(keys) do found[k] = true end
+    assert.is_true(found["alice"])
+    assert.is_true(found["carol"])
+    assert.is_nil(found["bob"])
+  end)
+
+  it("orders by a path template ascending", function()
+    local g = make_npc_game()
+    local keys = g:find("npcs", { order_by = "npcs/{key}/level" })
+    -- bob(3) < alice(5) < carol(7)
+    assert.equal("bob",   keys[1])
+    assert.equal("alice", keys[2])
+    assert.equal("carol", keys[3])
+  end)
+
+  it("orders descending", function()
+    local g = make_npc_game()
+    local keys = g:find("npcs", {
+      order_by = "npcs/{key}/level", order_dir = "desc"
+    })
+    assert.equal("carol", keys[1])
+    assert.equal("alice", keys[2])
+    assert.equal("bob",   keys[3])
+  end)
+
+  it("limits the result count", function()
+    local g = make_npc_game()
+    local keys = g:find("npcs", {
+      order_by = "npcs/{key}/level", limit = 2
+    })
+    assert.equal(2, #keys)
+    assert.equal("bob",   keys[1])
+    assert.equal("alice", keys[2])
+  end)
+
+  it("returns count when count=true", function()
+    local g = make_npc_game()
+    local n = g:find("npcs", { count = true })
+    assert.equal(3, n)
+  end)
+
+  it("returns 0 count with restrictive where", function()
+    local g = make_npc_game()
+    local n = g:find("npcs", {
+      where = function() return false end,
+      count = true
+    })
+    assert.equal(0, n)
+  end)
+end)
+
 -- ── sb.load (file-based) ─────────────────────────────────────────────────────
 
 describe("sb.load", function()
