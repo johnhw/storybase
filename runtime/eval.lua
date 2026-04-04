@@ -241,6 +241,29 @@ eval_expr = function(node, ctx)
     for _, trans_expr in ipairs(node.transitions or {}) do
       pcall(eval_expr, trans_expr, cf_ctx)
     end
+    -- simulate: true — run one round of actor behaviors + scheduler on the copy
+    if node.simulate and ctx.actors then
+      local actors_mod = require("runtime.actors")
+      local sched_mod  = require("runtime.scheduler")
+      local log_mod2   = require("runtime.log")
+      local sim_log    = log_mod2.new()
+      local sim_actors = actors_mod.new(cf_state, sim_log)
+      -- Register actors from game table if available
+      if ctx.game then
+        for _, a in pairs(ctx.game.actors or {}) do sim_actors:register(a) end
+      end
+      local sim_sched = sched_mod.new(cf_state, sim_log)
+      if ctx.game then
+        for _, s in pairs(ctx.game.schedules or {}) do
+          sim_sched:register(s.name, s.trigger, s.body)
+        end
+      end
+      sim_actors:deliver_messages()
+      sim_actors:run_behaviors(ctx.fns)
+      sim_actors:apply_deferred()
+      sim_sched:tick(ctx.fns)
+      sim_actors:clear_inboxes()
+    end
     -- Return an immutable GameState object (read-only wrapper)
     return {
       _cache = cf_state._cache,
@@ -678,6 +701,87 @@ local BUILTINS = {
     local labels = {}
     for _, step in ipairs(path) do labels[#labels + 1] = step.label end
     return labels
+  end,
+
+  -- verify-always expr [depth: N] → Bool (true if expr holds in ALL reachable states)
+  ["verify-always"] = function(args, ctx)
+    if not ctx.game then return true end
+    local search_mod = require("runtime.search")
+    local log_mod    = require("runtime.log")
+    local state_mod  = require("runtime.state")
+    local cond_expr  = args[1]
+    local depth      = 20
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "depth" then
+        local d = eval_expr(a.value, ctx); if type(d) == "number" then depth = d end
+      end
+    end
+    -- Build initial BFS snapshot
+    local cache = {}
+    for k, v in pairs(ctx.state._cache) do
+      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
+    end
+    local stack = ctx.scene_stack or (function()
+      local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
+      return e and {e} or {}
+    end)()
+    -- "holds always" = NOT (can-reach? NOT cond)
+    local function negated_fn(snap)
+      local l = log_mod.new()
+      local fs = state_mod.new(ctx.game.schema or {}, l)
+      for k, v in pairs(snap) do fs._cache[k] = v end
+      local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="verify-always", signal=nil, retval=nil, game=ctx.game }
+      local ok, result = pcall(eval_expr, cond_expr, fc)
+      return ok and not result  -- negated: looking for states where cond is FALSE
+    end
+    return not search_mod.can_reach(ctx.game, cache, stack, negated_fn, depth)
+  end,
+
+  -- find-counterexample expr [depth: N] → frozen GameState or nil
+  ["find-counterexample"] = function(args, ctx)
+    if not ctx.game then return nil end
+    local search_mod = require("runtime.search")
+    local log_mod    = require("runtime.log")
+    local state_mod  = require("runtime.state")
+    local cond_expr  = args[1]
+    local depth      = 20
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "depth" then
+        local d = eval_expr(a.value, ctx); if type(d) == "number" then depth = d end
+      end
+    end
+    local cache = {}
+    for k, v in pairs(ctx.state._cache) do
+      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
+    end
+    local stack = ctx.scene_stack or (function()
+      local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
+      return e and {e} or {}
+    end)()
+    -- BFS: find first state where cond is false
+    local found_snap = nil
+    local function violation_fn(snap)
+      local l = log_mod.new()
+      local fs = state_mod.new(ctx.game.schema or {}, l)
+      for k, v in pairs(snap) do fs._cache[k] = v end
+      local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="find-counterexample", signal=nil, retval=nil, game=ctx.game }
+      local ok, result = pcall(eval_expr, cond_expr, fc)
+      if ok and not result then
+        found_snap = snap
+        return true  -- signal found
+      end
+      return false
+    end
+    search_mod.can_reach(ctx.game, cache, stack, violation_fn, depth)
+    if not found_snap then return nil end
+    return {
+      _cache = found_snap,
+      _time  = {},
+      get    = function(self, path) return self._cache[path] end,
+      path_exists = function(self, path) return self._cache[path] ~= nil end,
+    }
   end,
 }
 

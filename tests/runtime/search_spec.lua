@@ -237,3 +237,136 @@ scene end-scene:
     assert.is_nil(path)
   end)
 end)
+
+-- ============================================================
+-- verify-always builtin
+-- ============================================================
+
+describe("verify-always builtin", function()
+  local compiler = require("compiler.compiler")
+  local engine_mod = require("runtime.engine")
+  local eval_mod = require("runtime.eval")
+
+  local function compile(src)
+    local result, diags = compiler.compile(src, "test.sb")
+    local errors = {}
+    for _, d in ipairs(diags or {}) do
+      if d.level == "error" then errors[#errors+1] = d end
+    end
+    return result, errors
+  end
+
+  local SRC = [[
+module va-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 100) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+  * Stop
+    -> end-scene
+
+scene end-scene:
+  Done.
+
+fn always-nonneg:
+  verify-always (world/gold >= 0)
+fn always-zero:
+  verify-always (world/gold = 0)
+]]
+
+  it("returns true when invariant holds in all reachable states", function()
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local fn = gt.fns["always-nonneg"]
+    local c = eval_mod.new_ctx(eng._state, gt.fns, "test")
+    c.game = gt
+    eval_mod.eval_stmts(fn.body, c)
+    assert.is_true(c.retval)
+  end)
+
+  it("returns false when invariant can be violated", function()
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local fn = gt.fns["always-zero"]
+    local c = eval_mod.new_ctx(eng._state, gt.fns, "test")
+    c.game = gt
+    eval_mod.eval_stmts(fn.body, c)
+    assert.is_false(c.retval)
+  end)
+end)
+
+-- ============================================================
+-- find-counterexample builtin
+-- ============================================================
+
+describe("find-counterexample builtin", function()
+  local compiler = require("compiler.compiler")
+  local engine_mod = require("runtime.engine")
+  local eval_mod = require("runtime.eval")
+
+  local function compile(src)
+    local result, diags = compiler.compile(src, "test.sb")
+    local errors = {}
+    for _, d in ipairs(diags or {}) do
+      if d.level == "error" then errors[#errors+1] = d end
+    end
+    return result, errors
+  end
+
+  local SRC = [[
+module fce-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 100) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+
+fn ce-of-zero:
+  find-counterexample (world/gold = 0)
+fn ce-of-nonneg:
+  find-counterexample (world/gold >= 0)
+]]
+
+  it("returns nil when invariant always holds", function()
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local fn = gt.fns["ce-of-nonneg"]
+    local c = eval_mod.new_ctx(eng._state, gt.fns, "test")
+    c.game = gt
+    eval_mod.eval_stmts(fn.body, c)
+    assert.is_nil(c.retval)
+  end)
+
+  it("returns counterexample GameState when invariant can be violated", function()
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local fn = gt.fns["ce-of-zero"]
+    local c = eval_mod.new_ctx(eng._state, gt.fns, "test")
+    c.game = gt
+    eval_mod.eval_stmts(fn.body, c)
+    assert.is_not_nil(c.retval)
+    -- The counterexample should be a GameState with gold > 0
+    assert.is_true((c.retval:get("world/gold") or 0) > 0)
+  end)
+end)

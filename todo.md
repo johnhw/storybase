@@ -17,8 +17,12 @@ Milestone goals are marked **M**.
 - Debug TCP transport: proper socket setup, non-blocking poll, JSON codec (encode + decode)
 - `clamp-event` debug hook — state.lua `_clamp_hook`, wired in engine `set_debug_server`
 - Perceives enforcement: runtime perception snapshot + checker pass4 PERCEIVES_VIOLATION warning
-- `find-path` BFS returning action sequence — search.lua + eval builtin `find-path`
-- Tests: +18 new tests (767→771)
+- `find-path` BFS returning action sequence — search.lua + eval builtin
+- `verify-always` builtin — returns Bool (true if invariant holds in all reachable states)
+- `find-counterexample` builtin — returns frozen GameState at violation or nil
+- Counterexample detail in verify failures — `counterexample` table + human-readable fail_msg
+- `simulate: true` in counterfactual — runs actor behaviors + scheduler on copy
+- Tests: +32 new tests (741→777)
 
 **Remaining gaps (Phase 7+):**
 - Checker: discrete/superficial boundary enforcement — Phase 7
@@ -27,11 +31,9 @@ Milestone goals are marked **M**.
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8
 - `probability` Float BFS — Phase 7
-- Counterexample detail in verify output — Phase 7
-- `simulate: true` in counterfactual (actor+schedule steps) — Phase 7
+- `optimal-path` (cost-minimizing BFS) — Phase 7
 - `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
 - Production build mode (strip debug-only declarations) — Phase 8
-- `verify-always` / `find-counterexample` builtins — Phase 7
 
 ---
 
