@@ -289,6 +289,10 @@ function M.new(schema, log)
         time = time_snap,
       })
     end
+    -- Optional debug mutation hook (set by engine when debug server is active)
+    if self._mutation_hook then
+      pcall(self._mutation_hook, path, old, new_val, fn_name)
+    end
   end
 
   -- ── Time model ─────────────────────────────────────────────

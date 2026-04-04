@@ -142,10 +142,17 @@ function M.new(game_table, opts)
   --- Replace the top-of-stack with a new scene name (goto).
   ---@param name string
   function eng:goto_scene(name)
+    local from = self._scene_stack[#self._scene_stack]
     if #self._scene_stack == 0 then
       self._scene_stack[1] = name
     else
       self._scene_stack[#self._scene_stack] = name
+    end
+    if self._debug then
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      self._debug:emit("scene-change", { from = from, to = name,
+                                         stack = self._scene_stack, tick = tick })
+      self._debug:check_watches()
     end
   end
 
@@ -153,11 +160,23 @@ function M.new(game_table, opts)
   ---@param name string
   function eng:enter_scene(name)
     self:push_scene(name)
+    if self._debug then
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      self._debug:emit("scene-change", { to = name, stack = self._scene_stack, tick = tick })
+      self._debug:check_watches()
+    end
   end
 
   --- Pop stack; return to previous scene (exit).
   function eng:exit_scene()
+    local from = self._scene_stack[#self._scene_stack]
     self:pop_scene()
+    if self._debug then
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      self._debug:emit("scene-change", { from = from, to = self:current_scene(),
+                                         stack = self._scene_stack, tick = tick })
+      self._debug:check_watches()
+    end
   end
 
   -- ── Evaluation context factory ───────────────────────────────
@@ -310,6 +329,18 @@ function M.new(game_table, opts)
       and self._game.schema.engine_config["entry-scene"]
     if entry then
       self._scene_stack = { entry }
+    end
+  end
+
+  --- Attach a debug server to the engine, wiring mutation and scene hooks.
+  ---@param srv table  debug server instance (from runtime.debug)
+  function eng:set_debug_server(srv)
+    self._debug = srv
+    -- Wire mutation events through state store
+    self._state._mutation_hook = function(path, old, new_val, fn_name)
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      srv:emit("mutation", { path = path, old = old, new = new_val,
+                              fn = fn_name, tick = tick })
     end
   end
 
