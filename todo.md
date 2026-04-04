@@ -30,7 +30,6 @@ Milestone goals are marked **M**.
 - Import/resolve imported names — Phase 7
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8
-- `probability` Float BFS — Phase 7
 - `optimal-path` (cost-minimizing BFS) — Phase 7
 - `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
 - Production build mode (strip debug-only declarations) — Phase 8

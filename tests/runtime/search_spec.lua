@@ -370,3 +370,67 @@ fn ce-of-nonneg:
     assert.is_true((c.retval:get("world/gold") or 0) > 0)
   end)
 end)
+
+-- ============================================================
+-- probability search
+-- ============================================================
+
+describe("search.probability", function()
+  local SRC_PROB = [[
+module prob-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 100) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+  * Wait
+    -> main
+]]
+
+  it("returns 0 when condition impossible at depth 0 from initial state", function()
+    local gt, errs = compile(SRC_PROB)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local p = search_mod.probability(gt, cache, {"main"}, function(c)
+      return (c["world/gold"] or 0) >= 10
+    end, 0)
+    assert.equal(0, p)
+  end)
+
+  it("returns 0.5 when exactly half of depth-1 outcomes satisfy condition", function()
+    local gt, errs = compile(SRC_PROB)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    -- 2 choices: Earn (gold=10, satisfies >=10) and Wait (gold=0, does not)
+    -- → probability = 0.5
+    local p = search_mod.probability(gt, cache, {"main"}, function(c)
+      return (c["world/gold"] or 0) >= 10
+    end, 1)
+    assert.is_true(math.abs(p - 0.5) < 0.01, "expected ~0.5, got " .. tostring(p))
+  end)
+
+  it("returns 1.0 when condition always holds (e.g. gold >= 0)", function()
+    local gt, errs = compile(SRC_PROB)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local p = search_mod.probability(gt, cache, {"main"}, function(c)
+      return (c["world/gold"] or 0) >= 0
+    end, 3)
+    assert.is_true(math.abs(p - 1.0) < 0.01)
+  end)
+end)

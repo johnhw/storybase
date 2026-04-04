@@ -272,6 +272,106 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn, dep
 end
 
 -- ============================================================
+-- Probability search
+-- ============================================================
+
+--- Compute the probability that condition_fn holds at exactly `depth` steps
+--- in the future, assuming uniform random choice at each step.
+--- Returns a float in [0, 1].
+---@param game_table    table     Compiled game table
+---@param initial_cache table     Initial state cache snapshot
+---@param initial_stack table     Initial scene stack
+---@param condition_fn  function  Predicate: condition_fn(cache) → bool
+---@param depth         integer   Number of steps to simulate (default 10)
+---@param threshold     number?   Probability pruning threshold (default 0.001)
+---@return number  probability in [0, 1]
+function M.probability(game_table, initial_cache, initial_stack, condition_fn, depth, threshold)
+  depth     = depth     or 10
+  threshold = threshold or 0.001
+
+  local engine_mod = require("runtime.engine")
+  local io_sink    = { write = function() end }
+
+  -- Queue entries: {cache, stack, prob, d}
+  -- No cycle detection: depth limit bounds exploration; cycle detection would
+  -- incorrectly deduplicate states that must be counted at different path weights.
+  local queue = { { cache = clone_flat(initial_cache), stack = initial_stack, prob = 1.0, d = 0 } }
+  local head  = 1
+  local total_prob = 0.0
+
+  -- Check initial state at depth 0
+  if depth == 0 and condition_fn(initial_cache) then return 1.0 end
+
+  while head <= #queue do
+    local item = queue[head]; head = head + 1
+
+    if item.prob < threshold then goto next_prob_item end
+
+    if item.d == depth then
+      -- Leaf: check condition
+      if condition_fn(item.cache) then
+        total_prob = total_prob + item.prob
+      end
+      goto next_prob_item
+    end
+
+    local scene_name = item.stack[#item.stack]
+    if not scene_name then goto next_prob_item end
+
+    local eng = engine_mod.new(game_table, { io_out = io_sink })
+    eng:register_actors_schedules()
+    restore_engine(eng, item.cache, item.stack)
+
+    local ok, choices = pcall(function()
+      local _, ch = eng:render_scene(scene_name); return ch
+    end)
+    if not ok or not choices or #choices == 0 then
+      -- No choices: treat as terminal
+      if condition_fn(item.cache) then total_prob = total_prob + item.prob end
+      goto next_prob_item
+    end
+
+    local branch_prob = item.prob / #choices
+
+    for _, ch in ipairs(choices) do
+      if branch_prob >= threshold then
+        local eng2 = engine_mod.new(game_table, { io_out = io_sink })
+        eng2:register_actors_schedules()
+        restore_engine(eng2, item.cache, item.stack)
+
+        local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
+        if ok2 then
+          pcall(function() eng2:post_action() end)
+
+          local new_cache = clone_cache(eng2._state)
+          local new_stack = {}
+          for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack+1] = s end
+
+          if sig then
+            if sig.type == "goto" and sig.target then
+              if #new_stack > 0 then new_stack[#new_stack] = sig.target else new_stack[1] = sig.target end
+            elseif sig.type == "enter" and sig.target then
+              new_stack[#new_stack+1] = sig.target
+            elseif sig.type == "exit" then
+              new_stack[#new_stack] = nil
+            end
+          end
+
+          if #new_stack > 0 then
+            queue[#queue+1] = { cache = new_cache, stack = new_stack,
+                                prob = branch_prob, d = item.d + 1 }
+          end
+        end
+      end
+    end
+
+    ::next_prob_item::
+  end
+
+  return math.min(1.0, total_prob)
+end
+
+-- ============================================================
 -- Legacy object-based API (stub, kept for compatibility)
 -- ============================================================
 

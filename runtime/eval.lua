@@ -738,6 +738,42 @@ local BUILTINS = {
     return not search_mod.can_reach(ctx.game, cache, stack, negated_fn, depth)
   end,
 
+  -- probability expr [depth: N] → Float (probability that expr holds at depth N)
+  ["probability"] = function(args, ctx)
+    if not ctx.game then return 0.0 end
+    local search_mod = require("runtime.search")
+    local log_mod    = require("runtime.log")
+    local state_mod  = require("runtime.state")
+    local cond_expr  = args[1]
+    local depth      = 10
+    local threshold  = 0.001
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG then
+        local d = eval_expr(a.value, ctx)
+        if a.name == "depth"     and type(d) == "number" then depth = d end
+        if a.name == "threshold" and type(d) == "number" then threshold = d end
+      end
+    end
+    local cache = {}
+    for k, v in pairs(ctx.state._cache) do
+      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
+    end
+    local stack = ctx.scene_stack or (function()
+      local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
+      return e and {e} or {}
+    end)()
+    local function condition_fn(snap)
+      local l = log_mod.new()
+      local fs = state_mod.new(ctx.game.schema or {}, l)
+      for k, v in pairs(snap) do fs._cache[k] = v end
+      local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="probability", signal=nil, retval=nil, game=ctx.game }
+      local ok, result = pcall(eval_expr, cond_expr, fc)
+      return ok and result
+    end
+    return search_mod.probability(ctx.game, cache, stack, condition_fn, depth, threshold)
+  end,
+
   -- find-counterexample expr [depth: N] → frozen GameState or nil
   ["find-counterexample"] = function(args, ctx)
     if not ctx.game then return nil end
