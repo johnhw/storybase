@@ -322,6 +322,69 @@ describe("eval: fn calls", function()
     end)
   end)
 
+  it("pre-condition expressed as expr_stmt is evaluated correctly", function()
+    -- When pre: contains expr_stmt-wrapped nodes (as emitted by the parser),
+    -- the condition should be unwrapped and evaluated properly.
+    local fns = {
+      ["guarded-fn"] = {
+        name = "guarded-fn",
+        params = {},
+        -- pre: flag (wrapped in expr_stmt, as the parser emits)
+        pre = { { kind = "expr_stmt", expr = { kind = "path_expr", segments = {"flag"} } } },
+        post = {},
+        body = { { kind = "set_mut",
+                   path = { kind = "path_expr", segments = {"result"} },
+                   value = bool_lit(true) } },
+        is_transaction = true,
+      }
+    }
+    -- flag = false → precondition fails
+    local c1 = ctx({ flag = false, result = false }, fns)
+    assert.has_error(function() eval.eval_expr(fn_call("guarded-fn"), c1) end)
+    -- flag = true → precondition passes, body runs
+    local c2 = ctx({ flag = true, result = false }, fns)
+    assert.has_no.errors(function() eval.eval_expr(fn_call("guarded-fn"), c2) end)
+    assert.is_true(c2.state:get("result"))
+  end)
+
+  it("pre: with not operator (via full compile) evaluates correctly", function()
+    local compiler = require("compiler.compiler")
+    local src = [[
+module pre-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+state world:
+  done: Bool = false
+
+fn do-once:
+  pre:
+    not world/done
+  set! world/done true
+
+scene s:
+  Done.
+]]
+    local gt, diags = compiler.compile(src, "pre-test")
+    assert.is_false(diags:has_errors())
+
+    local log_mod   = require("runtime.log")
+    local state_mod = require("runtime.state")
+    local l = log_mod.new()
+    local s = state_mod.new(gt.schema, l)
+    s:init_defaults()
+    local c = eval.new_ctx(s, gt.fns, "test")
+    c.game = gt
+
+    -- First call: world/done = false → pre: passes → sets done = true
+    assert.has_no.errors(function() eval.call_fn("do-once", {}, c) end)
+    assert.is_true(s:get("world/done"))
+
+    -- Second call: world/done = true → pre: fails
+    assert.has_error(function() eval.call_fn("do-once", {}, c) end)
+  end)
+
   it("min() built-in", function()
     assert.equal(3, eval.eval_expr(fn_call("min", int_lit(3), int_lit(7)), ctx()))
   end)

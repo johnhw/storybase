@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 889 tests passing.
+**Phase 7/8 in progress** — 891 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -36,8 +36,9 @@ Milestone goals are marked **M**.
 - `game:counterfactual(fn)` Lua interop — isolated branch, fn mutates copy, returns frozen snapshot
 - `log:query_at(path, time)` — seq-number and axis-table time bounds implemented
 - Import resolver: `import "file.sb"` splices declarations before checker, with cycle detection (IMPORT_CYCLE error), transitive imports
-- Demo games: `demo_games.md` spec written; `demo01_wanderer.sb` and `demo02_merchant.sb` implemented and runnable
-- Tests: +148 new tests (741→889)
+- Demo games: `demo_games.md` spec written; `demo01_wanderer.sb`, `demo02_merchant.sb`, `demo03_quest.sb` implemented and runnable
+- BUGFIX: `pre:` condition eval — `expr_stmt` wrapper was not unwrapped before `eval_expr`, causing all pre-conditions to always fail; fixed in `runtime/eval.lua`
+- Tests: +150 new tests (741→891)
 
 **Remaining gaps (Phase 7+):**
 - `as Alias` namespacing for imports (currently flat merge) — Phase 8

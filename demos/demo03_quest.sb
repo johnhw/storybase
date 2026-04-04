@@ -1,0 +1,142 @@
+# demo03_quest.sb
+# The Quest -- complete three tasks to unlock the lost shrine.
+#
+# Features demonstrated:
+#   Bool state flags for quest progression
+#   fn with pre: precondition
+#   if / else conditional scenes
+#   when conditional execution
+#   cond expression in narration
+#   type (enum) for player class
+#   multiple scene loops with distinct choice sets
+#   match on enum type
+#
+# Run with:  storybase run demos/demo03_quest.sb
+
+module quest
+  version: 1.0
+
+engine-config:
+  entry-scene: intro
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+type Class = warrior | mage | rogue
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state player:
+  class:        Class  = 'warrior
+  found-herb:   Bool   = false
+  slew-wolf:    Bool   = false
+  spoke-elder:  Bool   = false
+  shrine-found: Bool   = false
+  xp:           Int(0, 999) = 0
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+fn gain-xp amount:
+  inc! player/xp amount
+
+fn find-herb:
+  pre:
+    not player/found-herb
+  set! player/found-herb true
+  gain-xp 20
+
+fn slay-wolf:
+  pre:
+    not player/slew-wolf
+  set! player/slew-wolf true
+  gain-xp 30
+
+fn speak-to-elder:
+  pre:
+    player/found-herb and player/slew-wolf
+  set! player/spoke-elder true
+
+fn find-shrine:
+  pre:
+    player/spoke-elder
+  set! player/shrine-found true
+  gain-xp 100
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene intro:
+  Welcome to Ashvale. A mysterious shrine has been lost for generations.
+  To find it you must prove yourself to the village elder.
+  Choose your path.
+  * Become a warrior
+    set! player/class 'warrior
+    -> village
+  * Become a mage
+    set! player/class 'mage
+    -> village
+  * Become a rogue
+    set! player/class 'rogue
+    -> village
+
+scene village:
+  You stand in Ashvale village.
+  Class: {player/class}. XP: {player/xp}.
+  Herb collected: {player/found-herb}. Wolf slain: {player/slew-wolf}.
+  Spoke to elder: {player/spoke-elder}.
+  * Go into the forest
+    -> forest
+  * Visit the cave
+    -> cave
+  * [player/found-herb and player/slew-wolf] Speak to the elder
+    speak-to-elder
+    -> village
+  * [player/spoke-elder] Journey to the shrine
+    -> shrine-journey
+
+scene forest:
+  You enter the shadowed forest. The trees creak and moan.
+  when not player/found-herb:
+    A bundle of silver herbs glints among the roots.
+  when player/found-herb:
+    The herbs are gone. You already collected them.
+  * [not player/found-herb] Gather the silver herbs
+    find-herb
+    -> village
+  * Return to village
+    -> village
+
+scene cave:
+  You descend into the damp cave. Something growls in the darkness.
+  when not player/slew-wolf:
+    A grey wolf blocks the passage its eyes gleaming red.
+  when player/slew-wolf:
+    The wolf lies defeated. The cave is quiet now.
+  * [not player/slew-wolf] Fight the wolf
+    slay-wolf
+    -> village
+  * Return to village
+    -> village
+
+scene shrine-journey:
+  You follow the elder's directions through twisting paths.
+  when not player/shrine-found:
+    The shrine shimmers ahead half-hidden by ancient vines.
+  * Approach the shrine and claim the discovery
+    find-shrine
+    -> ending
+
+scene ending:
+  You have found the Lost Shrine of Ashvale.
+  Total XP earned: {player/xp}.
+  Your class was {player/class}.
+  if player/xp >= 150:
+    You are a legend. The village will remember your deeds forever.
+  else:
+    A worthy achievement. There are still greater challenges ahead.

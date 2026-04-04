@@ -936,8 +936,10 @@ call_fn = function(name, args, ctx)
   end
 
   -- Check pre: conditions
-  for _, pre_expr in ipairs(fn.pre or {}) do
-    local ok = eval_expr(pre_expr, sub)
+  -- Each item in fn.pre may be an expr_stmt (wrapper) or a raw expression.
+  for _, pre_node in ipairs(fn.pre or {}) do
+    local expr_to_eval = (pre_node.kind == K.EXPR_STMT) and pre_node.expr or pre_node
+    local ok = eval_expr(expr_to_eval, sub)
     if not ok then
       error("Precondition failed in " .. name)
     end
