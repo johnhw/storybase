@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7 in progress** — 767 tests passing. Perceives enforcement done (runtime filtering + static checker warning). clamp-event debug hook wired. Indexed list access working. TCP debug server functional with JSON codec.
+**Phase 7 in progress** — 783 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -22,7 +22,9 @@ Milestone goals are marked **M**.
 - `find-counterexample` builtin — returns frozen GameState at violation or nil
 - Counterexample detail in verify failures — `counterexample` table + human-readable fail_msg
 - `simulate: true` in counterfactual — runs actor behaviors + scheduler on copy
-- Tests: +32 new tests (741→777)
+- `optimal-path` Dijkstra search — search.lua + 3 tests (1-step optimal, nil unreachable, empty initial)
+- `code_map.md` created — comprehensive codebase navigation index
+- Tests: +42 new tests (741→783)
 
 **Remaining gaps (Phase 7+):**
 - Checker: discrete/superficial boundary enforcement — Phase 7
@@ -30,7 +32,6 @@ Milestone goals are marked **M**.
 - Import/resolve imported names — Phase 7
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8
-- `optimal-path` (cost-minimizing BFS) — Phase 7
 - `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
 - Production build mode (strip debug-only declarations) — Phase 8
 

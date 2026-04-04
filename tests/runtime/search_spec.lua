@@ -434,3 +434,77 @@ scene main:
     assert.is_true(math.abs(p - 1.0) < 0.01)
   end)
 end)
+
+-- ============================================================
+-- optimal_path tests
+-- ============================================================
+
+describe("search.optimal_path", function()
+  -- Scene with two choices: Earn10 (+10 gold, cheap but slow) and
+  -- Earn50 (+50 gold, one step to goal).  With uniform cost (default),
+  -- optimal_path should pick the 1-step Earn50 route over 5× Earn10.
+  local SRC_OPT = [[
+module opt-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 0
+
+scene main:
+  * Earn10
+    inc! world/gold 10
+    -> main
+  * Earn50
+    inc! world/gold 50
+    -> main
+]]
+
+  it("finds 1-step Earn50 path (optimal) over 5-step Earn10 path", function()
+    local gt, errs = compile(SRC_OPT)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    local path = search_mod.optimal_path(gt, cache, {"main"}, function(c)
+      return (c["world/gold"] or 0) >= 50
+    end, 10)
+    assert.is_not_nil(path)
+    -- Optimal (min-step) is 1 step via Earn50
+    assert.equal(1, #path)
+    assert.equal("Earn50", path[1].label)
+  end)
+
+  it("returns nil when goal is not reachable within depth", function()
+    local gt, errs = compile(SRC_OPT)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    -- gold >= 9999 would require many steps; restrict depth so it's unreachable
+    local path = search_mod.optimal_path(gt, cache, {"main"}, function(c)
+      return (c["world/gold"] or 0) >= 9999
+    end, 2)
+    assert.is_nil(path)
+  end)
+
+  it("returns empty path when condition satisfied in initial state", function()
+    local gt, errs = compile(SRC_OPT)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    local path = search_mod.optimal_path(gt, cache, {"main"}, function(c)
+      return (c["world/gold"] or 0) == 0  -- already true
+    end, 5)
+    assert.is_not_nil(path)
+    assert.equal(0, #path)
+  end)
+end)
