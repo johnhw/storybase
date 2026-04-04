@@ -246,6 +246,83 @@ end
 
 -- ── Dispatch table ────────────────────────────────────────────
 
+local COMMAND_HELP = {
+  ["compile"] = [[
+storybase compile [--production] <file>
+
+  Compile a .sb file and report any errors or warnings.
+  Exits 0 on success, 1 if compilation fails.
+
+  Options:
+    --production   Strip debug-only content (watches, verify blocks)
+                   from the compiled game table.
+]],
+  ["run"] = [[
+storybase run [options] <file>
+
+  Compile and run a game interactively in the terminal.
+
+  Options:
+    --production   Strip debug-only content before running
+    --seed N       Fix the random seed for reproducible runs
+    --save <path>  Save the game log to <path> on exit
+    --load <path>  Load a saved game log from <path> before starting
+]],
+  ["verify"] = [[
+storybase verify <file>
+
+  Run all verify blocks defined in a .sb file.
+  Each block performs a BFS over reachable states and checks invariants.
+  Exits 0 if all checks pass, 1 if any fail.
+]],
+  ["migrate"] = [[
+storybase migrate <save.log>
+
+  Apply outstanding schema migrations to a save log.
+  Reads the save log, applies any migration functions defined in the
+  compiled game, and writes the updated log back to the same path.
+]],
+  ["extract-symbols"] = [[
+storybase extract-symbols <file>
+
+  Scan a .sb file for bare symbol literals and group them by the state
+  paths they are written to.  Suggests `type` enum declarations for
+  paths that have consistent sets of symbol values.
+]],
+  ["compact"] = [[
+storybase compact <game.sb> <save.log> [--out <output.log>]
+
+  Collapse a full save log into a snapshot for faster replay.
+  Reads the save log, replays it to get the final state, and emits a
+  new compact log with one synthetic SET entry per state path.
+
+  Options:
+    --out <path>   Write compacted log to <path>
+                   (default: <save.log base>.compact.log)
+]],
+  ["help"] = [[
+storybase help [<command>]
+
+  Show overall usage or detailed help for a specific command.
+
+  Examples:
+    storybase help
+    storybase help run
+    storybase help verify
+]],
+}
+
+local function cmd_help(args)
+  local _, pos_args = parse_args(args)
+  local subcmd = pos_args[1]
+  if subcmd and COMMAND_HELP[subcmd] then
+    io.stdout:write(COMMAND_HELP[subcmd])
+  else
+    print_usage()
+  end
+  return 0
+end
+
 local COMMANDS = {
   ["compile"]         = cmd_compile,
   ["run"]             = cmd_run,
@@ -253,7 +330,7 @@ local COMMANDS = {
   ["migrate"]         = cmd_migrate,
   ["extract-symbols"] = cmd_extract_symbols,
   ["compact"]         = cmd_compact,
-  ["help"]            = function(_) print_usage(); return 0 end,
+  ["help"]            = cmd_help,
 }
 
 -- ── Main entry point ──────────────────────────────────────────

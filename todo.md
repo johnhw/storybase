@@ -49,6 +49,7 @@ Milestone goals are marked **M**.
 - Conflict logging in transaction log: `actors.lua:apply_deferred` logs `kind="conflict"` entries when higher-priority actor already claimed a set/clear path
 - Schedule events in transaction log: `scheduler.lua:tick` logs `kind="schedule_fired"` on fire; `sched:cancel` logs `kind="cancel_schedule"` on cancel
 - `state.lua:replay` updated to skip metadata entries (`checkpoint`, `conflict`, `schedule_fired`, `cancel_schedule`) so they don't corrupt state reconstruction
+- `storybase help <subcommand>`: per-subcommand help text for all 6 commands; `help run`, `help verify`, etc.
 - Tests: +3 codegen production mode tests (897 total)
 
 **Remaining gaps (Phase 8):**
