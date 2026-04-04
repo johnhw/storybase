@@ -109,6 +109,7 @@ local function bfs_states(game_table, max_depth)
 
         -- Build a temporary engine from this snapshot to enumerate choices
         local eng = engine_mod.new(game_table, { io_out = { write = function() end } })
+        eng:register_actors_schedules()
         -- Restore state directly (internal access, consistent with test approach)
         for k in pairs(eng._state._cache) do eng._state._cache[k] = nil end
         for k, v in pairs(item.cache) do
@@ -129,6 +130,7 @@ local function bfs_states(game_table, max_depth)
         for _, ch in ipairs(choices) do
           -- Apply choice on a fresh copy of the engine state
           local eng2 = engine_mod.new(game_table, { io_out = { write = function() end } })
+          eng2:register_actors_schedules()
           for k in pairs(eng2._state._cache) do eng2._state._cache[k] = nil end
           for k, v in pairs(item.cache) do
             if type(v) == "table" then

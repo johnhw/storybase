@@ -105,6 +105,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, dep
     if not scene_name then goto next_item end
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
+    eng:register_actors_schedules()
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices_or_err = pcall(function()
@@ -116,6 +117,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, dep
 
     for _, ch in ipairs(choices) do
       local eng2 = engine_mod.new(game_table, { io_out = io_sink })
+      eng2:register_actors_schedules()
       restore_engine(eng2, item.cache, item.stack)
 
       local ok2, sig = pcall(function()

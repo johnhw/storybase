@@ -214,12 +214,12 @@ function M.new(game_table, opts)
         end
 
       elseif item.kind == "choice" then
-        choice_idx = choice_idx + 1
         local visible = true
         if item.guard then
           visible = eval.eval_expr(item.guard, ctx)
         end
         if visible then
+          choice_idx = choice_idx + 1
           local label_str = self:render_text(item.label, ctx)
           choices[#choices + 1] = { index = choice_idx, label = label_str }
         end
@@ -290,19 +290,20 @@ function M.new(game_table, opts)
 
   -- ── State initialisation ─────────────────────────────────────
 
-  --- Initialise the engine: load defaults, register actors/schedules, go to entry scene.
-  function eng:init()
-    self._state:init_defaults()
-
-    -- Register actors from the compiled game table
+  --- Register actors and schedules without touching state (used by BFS).
+  function eng:register_actors_schedules()
     for _, actor_def in pairs(self._game.actors or {}) do
       self._actors:register(actor_def)
     end
-
-    -- Register static schedules from the compiled game table
     for _, sched_def in pairs(self._game.schedules or {}) do
       self._scheduler:register(sched_def.name, sched_def.trigger, sched_def.body)
     end
+  end
+
+  --- Initialise the engine: load defaults, register actors/schedules, go to entry scene.
+  function eng:init()
+    self._state:init_defaults()
+    self:register_actors_schedules()
 
     local entry = self._game.schema
       and self._game.schema.engine_config

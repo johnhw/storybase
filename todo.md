@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-03)
 
-**Phase 6 in progress** — 709 tests passing. Counterfactual, schema migration, undo, find query engine, relation queries, can-reach? BFS search, schedule! imperative, offset: support for scheduler, bounded declarations, and verify from-any-state/when all implemented.
+**Phase 6 in progress** — 709 tests passing. Counterfactual, schema migration, undo, find query engine, relation queries, can-reach? BFS search, schedule! imperative, offset: support for scheduler, bounded declarations, and verify from-any-state/when all implemented. All verify blocks in test06_actors.sb now pass.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅
 
@@ -28,6 +28,9 @@ Milestone goals are marked **M**.
 - `bounded` call dispatch in eval.lua call_fn — calls `game._bounded_handlers[name]` if registered
 - Tests: tests/runtime/query_spec.lua (24 tests), tests/runtime/search_spec.lua (5 tests)
 - Tests: parser_spec.lua additions (find, schedule! mutations), codegen_spec.lua (bounded)
+- Fixed: BFS engines (search.lua, verify.lua) now call register_actors_schedules() so actor behaviors fire in BFS states
+- Fixed: verify from-any-state test syntax — can-reach? condition must be parenthesized (parser collects atoms not full exprs as fn args); when: is a sibling filter clause not a nesting parent
+- Added: engine.register_actors_schedules() helper (registers actors+schedules without resetting state)
 
 **Remaining gaps (deferred to Phase 7+):**
 - Indexed list access (`path[n]`, `path[a:b]`) — Phase 7
