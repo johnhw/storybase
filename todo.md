@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7 in progress** — 783 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
+**Phase 7 in progress** — 791 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -24,11 +24,11 @@ Milestone goals are marked **M**.
 - `simulate: true` in counterfactual — runs actor behaviors + scheduler on copy
 - `optimal-path` Dijkstra search — search.lua + 3 tests (1-step optimal, nil unreachable, empty initial)
 - `code_map.md` created — comprehensive codebase navigation index
-- Tests: +42 new tests (741→783)
+- Checker pass 5: discrete/superficial boundary enforcement — SUPERFICIAL_IN_COND + RANDOM_SUPERFICIAL warnings
+- Tests: +50 new tests (741→791)
 
 **Remaining gaps (Phase 7+):**
-- Checker: discrete/superficial boundary enforcement — Phase 7
-- Checker: write-set analysis (pass 5) — Phase 7
+- Checker: write-set analysis (pass 6) — Phase 7
 - Import/resolve imported names — Phase 7
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8

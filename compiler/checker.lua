@@ -510,6 +510,210 @@ local function pass4_check_perceives(acc, program)
 end
 
 -- ============================================================
+-- Pass 5 — Discrete/Superficial boundary enforcement
+-- ============================================================
+-- Emits warnings when:
+--   SUPERFICIAL_IN_COND  — a String/Float/Symbol path appears in a comparison
+--   RANDOM_SUPERFICIAL   — random-choice result assigned to a superficial field
+
+--- Return true if the type expression node is superficial (String, Float, Symbol,
+--- List, UList, or UMap).  Recurses through TYPE_ALIAS named types.
+local function is_superficial_texpr(texpr, symtab)
+  if not texpr then return false end
+  local k = ast.K
+  if texpr.kind == k.TYPE_STRING then return true end
+  if texpr.kind == k.TYPE_FLOAT  then return true end
+  if texpr.kind == k.TYPE_SYMBOL then return true end   -- untyped Symbol
+  if texpr.kind == k.TYPE_LIST   then return true end
+  if texpr.kind == k.TYPE_ULIST  then return true end
+  if texpr.kind == k.TYPE_UMAP   then return true end
+  if texpr.kind == k.TYPE_NAMED  then
+    -- Follow one level of alias resolution
+    if texpr.resolved and texpr.resolved.kind == k.TYPE_ALIAS then
+      return is_superficial_texpr(texpr.resolved.type_expr, symtab)
+    end
+  end
+  return false
+end
+
+--- Build a flat map  path-string → type_expr node  for all declared state fields.
+--- Handles STATE_SCALAR, STATE_RECORD (inline), and STATE_FAMILY.
+--- For STATE_SCALAR whose type resolves to a TYPE_RECORD, expands sub-fields.
+local function build_path_type_map(program, symtab_data)
+  local map = {}
+  local k   = ast.K
+
+  local function expand_record_fields(prefix, fields)
+    for _, field in ipairs(fields or {}) do
+      if field.kind == k.RECORD_FIELD then
+        map[prefix .. "/" .. field.name] = field.type_expr
+      end
+    end
+  end
+
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.STATE_SCALAR then
+      local p = path_key(node.path)
+      map[p] = node.type_expr
+      local texpr = node.type_expr
+      if texpr and texpr.kind == k.TYPE_NAMED and texpr.resolved then
+        local res = texpr.resolved
+        if res.kind == k.TYPE_RECORD then
+          expand_record_fields(p, res.fields)
+        end
+      end
+
+    elseif node.kind == k.STATE_RECORD then
+      local p = path_key(node.path)
+      expand_record_fields(p, node.fields)
+
+    elseif node.kind == k.STATE_FAMILY then
+      local family = node.family
+      local texpr  = node.type_expr
+      if texpr then
+        map[family] = texpr
+        if texpr.kind == k.TYPE_NAMED and texpr.resolved then
+          local res = texpr.resolved
+          if res.kind == k.TYPE_RECORD then
+            for _, field in ipairs(res.fields or {}) do
+              if field.kind == k.RECORD_FIELD then
+                -- Store under wildcard pattern "family/*/fieldname"
+                map[family .. "/*/" .. field.name] = field.type_expr
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return map
+end
+
+--- Look up the type_expr for a PATH_EXPR node in the map.
+--- Returns nil for interpolated paths or unknown paths.
+local function lookup_path_type(path_node, path_map)
+  if not path_node then return nil end
+  local k = ast.K
+  if path_node.kind ~= k.PATH_EXPR then return nil end
+  local segs = path_node.segments or {}
+  for _, s in ipairs(segs) do
+    if type(s) ~= "string" then return nil end   -- interpolated segment
+  end
+  local p = table.concat(segs, "/")
+  if path_map[p] then return path_map[p] end
+  -- Try family wildcard: "npcs/guard/hp" → "npcs/*/hp"
+  if #segs >= 3 then
+    local wcard = segs[1] .. "/*/" .. table.concat(segs, "/", 3, #segs)
+    if path_map[wcard] then return path_map[wcard] end
+  end
+  return nil
+end
+
+local COMPARISON_OPS = {
+  ["="] = true, ["!="] = true,
+  ["<"] = true, [">"]  = true,
+  ["<="] = true, [">="] = true,
+}
+
+--- Recursively walk a node tree emitting boundary warnings.
+local function walk_boundary(node, path_map, symtab_data, acc)
+  if not node or type(node) ~= "table" or not node.kind then return end
+  local k = ast.K
+
+  if node.kind == k.BINARY_OP and COMPARISON_OPS[node.op] then
+    -- Check both sides for superficial path reads
+    for _, side in ipairs({ node.left, node.right }) do
+      if side and side.kind == k.PATH_EXPR then
+        local texpr = lookup_path_type(side, path_map)
+        if texpr and is_superficial_texpr(texpr, symtab_data) then
+          local pstr = table.concat(side.segments or {}, "/")
+          table.insert(acc.diags, ast.warning(
+            ast.E.SUPERFICIAL_IN_COND,
+            "'" .. pstr .. "' has a superficial type in a comparison expression",
+            side.pos,
+            "String/Float/Symbol values cannot drive state-space search; use a discrete type"))
+        end
+      end
+    end
+  end
+
+  if node.kind == k.SET_MUT then
+    local val = node.value
+    if val and val.kind == k.FN_CALL and
+       (val.name == "random-choice" or val.name == "random-element") then
+      local texpr = lookup_path_type(node.path, path_map)
+      if texpr and is_superficial_texpr(texpr, symtab_data) then
+        local pstr = node.path and path_key(node.path) or "?"
+        table.insert(acc.diags, ast.warning(
+          ast.E.RANDOM_SUPERFICIAL,
+          "random output assigned to superficial path '" .. pstr .. "'",
+          node.pos,
+          "random values should only be assigned to discrete types (Int, Bool, Enum)"))
+      end
+    end
+  end
+
+  -- Recurse into all child fields
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        walk_boundary(child, path_map, symtab_data, acc)
+        -- Also walk choice.guard for scene choices
+        if child and type(child) == "table" and child.guard then
+          walk_boundary(child.guard, path_map, symtab_data, acc)
+        end
+        -- Walk match/cond arm bodies
+        if child and type(child) == "table" and child.body then
+          if type(child.body) == "table" and not child.body.kind then
+            for _, s in ipairs(child.body) do
+              walk_boundary(s, path_map, symtab_data, acc)
+            end
+          else
+            walk_boundary(child.body, path_map, symtab_data, acc)
+          end
+        end
+      end
+    end
+  end
+  local NODE_FIELDS = { "condition", "expr", "left", "right",
+                        "base", "value", "amount", "msg", "inner_expr" }
+  for _, field in ipairs(NODE_FIELDS) do
+    walk_boundary(node[field], path_map, symtab_data, acc)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do walk_boundary(a, path_map, symtab_data, acc) end
+  end
+end
+
+local function pass5_check_boundary(acc, symtab_data, program)
+  local path_map = build_path_type_map(program, symtab_data)
+  local k = ast.K
+
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then
+      for _, stmt in ipairs(node.body or {}) do
+        walk_boundary(stmt, path_map, symtab_data, acc)
+      end
+    elseif node.kind == k.SCENE_DECL then
+      for _, stmt in ipairs(node.body or {}) do
+        walk_boundary(stmt, path_map, symtab_data, acc)
+      end
+      for _, choice in ipairs(node.choices or {}) do
+        if choice.guard then
+          walk_boundary(choice.guard, path_map, symtab_data, acc)
+        end
+        for _, stmt in ipairs(choice.body or {}) do
+          walk_boundary(stmt, path_map, symtab_data, acc)
+        end
+      end
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -530,6 +734,7 @@ function M.check(ast_root, filename)
   pass2_check(acc, symtab, ast_root)
   pass3_infer_purity(acc, ast_root)
   pass4_check_perceives(acc, ast_root)
+  pass5_check_boundary(acc, symtab, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

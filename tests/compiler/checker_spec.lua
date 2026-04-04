@@ -466,3 +466,133 @@ fn guard-behavior:
     assert.equal(0, #warns)
   end)
 end)
+
+-- ============================================================
+-- Pass 5 — Discrete/Superficial boundary enforcement
+-- ============================================================
+
+describe("checker: superficial-in-condition (pass 5)", function()
+
+  it("warns SUPERFICIAL_IN_COND when String path used in = comparison", function()
+    local _, diags = compile([[
+state player:
+  name: String = "Alice"
+fn check-name:
+  if player/name = "Bob":
+    pass
+]])
+    local found = nil
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.SUPERFICIAL_IN_COND then found = d; break end
+    end
+    assert.is_not_nil(found, "expected SUPERFICIAL_IN_COND warning")
+    assert.is_true(found.message:find("player/name") ~= nil)
+  end)
+
+  it("warns SUPERFICIAL_IN_COND when Float path used in < comparison", function()
+    local _, diags = compile([[
+state world:
+  ratio: Float = 0.0
+fn check-ratio:
+  if world/ratio < 0.5:
+    pass
+]])
+    local found = nil
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.SUPERFICIAL_IN_COND then found = d; break end
+    end
+    assert.is_not_nil(found, "expected SUPERFICIAL_IN_COND warning")
+  end)
+
+  it("does NOT warn when Int path used in comparison", function()
+    local _, diags = compile([[
+state world:
+  gold: Int(0, 9999) = 0
+fn check-gold:
+  if world/gold > 100:
+    pass
+]])
+    for _, d in ipairs(diags) do
+      assert.is_not_equal(ast.E.SUPERFICIAL_IN_COND, d.code)
+    end
+  end)
+
+  it("does NOT warn when Bool path used in comparison", function()
+    local _, diags = compile([[
+state world:
+  done: Bool = false
+fn check-done:
+  if world/done = true:
+    pass
+]])
+    for _, d in ipairs(diags) do
+      assert.is_not_equal(ast.E.SUPERFICIAL_IN_COND, d.code)
+    end
+  end)
+
+  it("warns SUPERFICIAL_IN_COND for String in inline state record field", function()
+    local _, diags = compile([[
+state player:
+  name: String = "X"
+  hp: Int(0, 100) = 50
+fn check-player:
+  when player/name = "Hero":
+    pass
+]])
+    local found = nil
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.SUPERFICIAL_IN_COND then found = d; break end
+    end
+    assert.is_not_nil(found, "expected SUPERFICIAL_IN_COND warning for player/name")
+  end)
+
+  it("warns SUPERFICIAL_IN_COND for String field in named-type state", function()
+    local _, diags = compile([[
+type Hero:
+  name: String = "X"
+  hp: Int(0, 100) = 50
+state player: Hero
+fn check-player:
+  when player/name = "Hero":
+    pass
+]])
+    local found = nil
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.SUPERFICIAL_IN_COND then found = d; break end
+    end
+    assert.is_not_nil(found, "expected SUPERFICIAL_IN_COND warning for player/name via named type")
+  end)
+
+end)
+
+describe("checker: random-superficial (pass 5)", function()
+
+  it("warns RANDOM_SUPERFICIAL when random-choice assigned to String field", function()
+    local _, diags = compile([[
+state player:
+  name: String = "Alice"
+  options: List(String, 5)
+fn randomize:
+  set! player/name (random-choice player/options)
+]])
+    local found = nil
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.RANDOM_SUPERFICIAL then found = d; break end
+    end
+    assert.is_not_nil(found, "expected RANDOM_SUPERFICIAL warning")
+    assert.is_true(found.message:find("player/name") ~= nil)
+  end)
+
+  it("does NOT warn when random-int assigned to Int field", function()
+    local _, diags = compile([[
+state world:
+  seed: Int(0, 999) = 0
+fn randomize:
+  set! world/seed (random-int 0 999)
+]])
+    for _, d in ipairs(diags) do
+      assert.is_not_equal(ast.E.RANDOM_SUPERFICIAL, d.code)
+    end
+  end)
+
+end)
