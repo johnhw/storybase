@@ -95,6 +95,9 @@ function M.new(game_table, opts)
     or opts.max_stack
     or DEFAULT_MAX_STACK
 
+  -- Apply random seed if provided (enables reproducible runs)
+  if opts.seed then math.randomseed(opts.seed) end
+
   local log    = log_mod.new()
   local store  = state_mod.new(game_table.schema, log)
   local actors = actors_mod.new(store, log)

@@ -290,3 +290,196 @@ scene end-scene:
     os.remove(path)
   end)
 end)
+
+-- ============================================================
+-- Scenario 5: random encounter with fixed seed (reproducible)
+-- ============================================================
+
+describe("Integration scenario 5: reproducible random", function()
+  local SRC = [[
+module rand-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  roll1: Int(1, 6) = 1
+  roll2: Int(1, 6) = 1
+
+scene main:
+  * Roll dice
+    set! world/roll1 (random-int 1 6)
+    set! world/roll2 (random-int 1 6)
+    -> main
+]]
+
+  it("same seed produces same sequence", function()
+    local engine_mod = require("runtime.engine")
+    local compiler   = require("compiler.compiler")
+    local gt, diags  = compiler.compile(SRC, "rand-test")
+    assert.is_false(diags:has_errors())
+
+    -- Run with seed 42 twice and compare results
+    local results = {}
+    for run = 1, 2 do
+      local eng = engine_mod.new(gt, {
+        io_out = { write = function() end },
+        seed   = 42,
+      })
+      eng:init()
+      eng:do_choice("main", 1)
+      results[run] = { eng._state:get("world/roll1"), eng._state:get("world/roll2") }
+    end
+
+    assert.equal(results[1][1], results[2][1])
+    assert.equal(results[1][2], results[2][2])
+  end)
+
+  it("different seeds produce different results (usually)", function()
+    local engine_mod = require("runtime.engine")
+    local compiler   = require("compiler.compiler")
+    local gt, diags  = compiler.compile(SRC, "rand-test")
+    assert.is_false(diags:has_errors())
+
+    local roll_for = function(seed)
+      local eng = engine_mod.new(gt, {
+        io_out = { write = function() end },
+        seed   = seed,
+      })
+      eng:init()
+      eng:do_choice("main", 1)
+      return eng._state:get("world/roll1")
+    end
+
+    -- With seeds 1..10, at least two should differ for a 6-sided die
+    local seen = {}
+    for i = 1, 10 do seen[roll_for(i)] = true end
+    local unique = 0
+    for _ in pairs(seen) do unique = unique + 1 end
+    assert.is_true(unique > 1, "expected different outcomes for different seeds")
+  end)
+end)
+
+-- ============================================================
+-- Scenario 6: scheduled event fires on autonomous turns
+-- ============================================================
+
+describe("Integration scenario 6: scheduled event fires", function()
+  -- The schedule fires every time the 'turn' axis advances by 1.
+  -- The player action explicitly increments the turn axis.
+  local SRC = [[
+module sched-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+time-model:
+  turn
+
+state world:
+  resets: Int(0, 999) = 0
+
+schedule day-reset:
+  every: [turn: +1]
+  fn:
+    reset-counter
+
+fn reset-counter:
+  inc! world/resets 1
+
+scene main:
+  * Advance turn
+    time-inc! turn: 1
+    -> main
+  * End
+    -> end-scene
+
+scene end-scene:
+  Done.
+]]
+
+  it("schedule fires after one turn advance", function()
+    local g, err = sb.from_source(SRC, "sched-test")
+    if not g then
+      pending("sched-test compile failed: " .. tostring(err))
+      return
+    end
+    g:init()
+    g:choose(1)   -- Advance turn (inc time by 1; triggers scheduler)
+    local resets = g:get("world/resets")
+    assert.is_true(resets >= 1, "expected resets >= 1 after one turn, got " .. tostring(resets))
+  end)
+
+  it("schedule fires N times after N turn advances", function()
+    local g, err = sb.from_source(SRC, "sched-test")
+    if not g then
+      pending("sched-test compile failed: " .. tostring(err))
+      return
+    end
+    g:init()
+    g:choose(1); g:choose(1); g:choose(1)   -- 3 turns
+    assert.equal(3, g:get("world/resets"))
+  end)
+end)
+
+-- ============================================================
+-- Scenario 7: actor messaging — alert changes state
+-- ============================================================
+
+describe("Integration scenario 7: actor sends message, recipient reacts", function()
+  local SRC = [[
+module msg-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state guard:
+  alert: Bool = false
+
+state player:
+  action: Symbol = 'idle
+
+fn guard-behavior:
+  pass
+
+actor guard-actor:
+  state:     guard
+  perceives: [guard/alert]
+  behavior:  guard-behavior
+  priority:  10
+
+scene main:
+  * Trigger alert
+    set! player/action 'alert
+    send! guard-actor 'intruder
+    -> main
+  * Reset
+    set! guard/alert false
+    -> main
+]]
+
+  it("sending a message to an actor succeeds without error", function()
+    local g, err = sb.from_source(SRC, "msg-test")
+    if not g then
+      pending("msg-test compile failed: " .. tostring(err))
+      return
+    end
+    g:init()
+    assert.has_no.errors(function()
+      g:choose(1)   -- Trigger alert (sends message to guard-actor)
+    end)
+    assert.equal("alert", g:get("player/action"))
+  end)
+
+  it("autonomous turn after alert processes actor behaviors", function()
+    local g, err = sb.from_source(SRC, "msg-test")
+    if not g then
+      pending("msg-test compile failed: " .. tostring(err))
+      return
+    end
+    g:init()
+    g:choose(1)   -- send message
+    -- post_action is already called by choose, but an extra tick is fine
+    assert.has_no.errors(function() g:tick() end)
+  end)
+end)

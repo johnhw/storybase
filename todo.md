@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 837 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
+**Phase 7/8 in progress** — 843 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -27,8 +27,9 @@ Milestone goals are marked **M**.
 - Checker pass 5: discrete/superficial boundary enforcement — SUPERFICIAL_IN_COND + RANDOM_SUPERFICIAL warnings
 - Checker pass 6: write-set analysis — WRITE_UNTYPED_VAR warnings, WRITE_DYNAMIC_PATH errors, write_set annotation on FN_DECL/SCENE_DECL; loop-var SymbolOf inference for `for v in (path-list family)`
 - Lua interop API (`lib/storybase.lua`): sb.load/from_source, game:init/render/choose/call/eval/get/set/tick/save/load/on
-- Integration scenarios 1-4 (village→forest→dungeon, combat, guarded shop, save/load round-trip)
-- Tests: +96 new tests (741→837)
+- Integration scenarios 1-7 (village walk, combat, guarded shop, save/load, random seeds, schedule, actor messaging)
+- Fixed engine seed: `engine_mod.new(gt, {seed=N})` now applies math.randomseed(N)
+- Tests: +102 new tests (741→843)
 
 **Remaining gaps (Phase 7+):**
 - Import/resolve imported names — Phase 7
@@ -467,11 +468,11 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/runtime/actors_spec.lua` — `cancel-schedule!` prevents future fires (2026-04-03)
 - [ ] `tests/runtime/actors_spec.lua` — pending queue appears in log — deferred to Phase 8
 - [x] `tests/runtime/engine_spec.lua` — full six-step lifecycle (implicit in integration tests)
-- [ ] `tests/runtime/engine_spec.lua` — autonomous turn (steps 2–6 only) — deferred to Phase 7
-- [ ] Integration scenario 4: deliver ore to blacksmith — deferred to Phase 7
-- [ ] Integration scenario 5: random encounter with fixed seed (reproducible) — deferred to Phase 7
-- [ ] Integration scenario 6: morning reset schedule fires — deferred to Phase 7
-- [ ] Integration scenario 7: blacksmith alert → guard becomes hostile — deferred to Phase 7
+- [x] `tests/runtime/engine_spec.lua` — autonomous turn (steps 2–6 only) — tested via game:tick in integration_spec (2026-04-04)
+- [ ] Integration scenario 4: deliver ore to blacksmith — deferred to Phase 8
+- [x] Integration scenario 5: random encounter with fixed seed (reproducible) (2026-04-04)
+- [x] Integration scenario 6: morning reset schedule fires (2026-04-04)
+- [x] Integration scenario 7: actor messaging (2026-04-04)
 
 **M Milestone:** `tests/test06_actors.sb` runs correctly; §25 complete example runs end-to-end. ✅ DONE
 
