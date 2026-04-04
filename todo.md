@@ -41,6 +41,7 @@ Milestone goals are marked **M**.
 - BUGFIX: `path-exists?` builtin — was calling `eval_expr` on PATH_EXPR arg returning the value (e.g. integer), not the path string; now uses `eval_path` when arg is PATH_EXPR/INTERP_PATH
 - BUGFIX: `when_stmt` in scene body narration — `render_scene` never handled `when_stmt`, causing conditional narration to silently vanish; added `_render_narration_items` helper and wired `when_stmt`/`if_expr` through it
 - Demo games: `demo04_expedition.sb` implemented and runnable (entity families, spawn/despawn, for loops, path-exists?, count-where)
+- Demo games: `demo05_siege.sb` implemented and runnable (time-model, actor, send!, behavior/inbox, schedule, cancel-schedule!, verify-always)
 - Tests: +153 new tests (741→894)
 
 **Remaining gaps (Phase 7+):**

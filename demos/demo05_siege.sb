@@ -1,0 +1,236 @@
+# demo05_siege.sb
+# The Siege -- defend a fortress for ten turns.
+#
+# Features demonstrated:
+#   time-model with a turn axis
+#   actor with behavior function and inbox messages
+#   send! to deliver messages to an actor
+#   schedule block with every: trigger
+#   cancel-schedule! to stop a scheduled event
+#   verify-always invariant
+#   match on variant message type
+#
+# Run with:  storybase run demos/demo05_siege.sb
+
+module siege
+  version: 1.0
+
+time-model:
+  axes: [turn]
+  wrap: [none]
+
+engine-config:
+  entry-scene: fortress
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+type AlertLevel = calm | guarded | battle
+
+type CaptainMsg:
+  | raise-alert: level: AlertLevel
+  | stand-down:
+  | resupply:    amount: Int(0, 100)
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state castle:
+  hp:          Int(0, 500) = 500
+  supplies:    Int(0, 300) = 150
+  turn:        Int(0, 30)  = 0
+  siege-ended: Bool        = false
+
+state garrison:
+  alert:  AlertLevel    = 'calm
+  morale: Int(0, 100)   = 80
+
+# ─────────────────────────────────────────────────────────
+# Actor
+# ─────────────────────────────────────────────────────────
+
+"The garrison captain. Adjusts the garrison alert level in response to orders."
+actor captain:
+  state:     garrison
+  perceives: [garrison/alert, garrison/morale, castle/hp, castle/supplies]
+  inbox:     List(CaptainMsg, 8)
+  behavior:  captain-behavior
+  priority:  10
+
+# ─────────────────────────────────────────────────────────
+# Schedule
+# ─────────────────────────────────────────────────────────
+
+"Attacker wave hits the walls every 2 turns."
+schedule attacker-wave:
+  every:  [turn: +2]
+  offset: [turn: 0]
+  fn:
+    match garrison/alert:
+      'battle:
+        dec! castle/hp 15
+      'guarded:
+        dec! castle/hp 30
+      'calm:
+        dec! castle/hp 50
+
+"Resupply caravan arrives every 4 turns."
+schedule resupply-caravan:
+  every:  [turn: +4]
+  offset: [turn: 0]
+  fn:
+    inc! castle/supplies 40
+    when castle/supplies > 300:
+      set! castle/supplies 300
+
+# ─────────────────────────────────────────────────────────
+# Verify
+# ─────────────────────────────────────────────────────────
+
+verify "castle hp stays non-negative":
+  verify-always castle/hp >= 0
+
+verify "supplies stay non-negative":
+  verify-always castle/supplies >= 0
+
+# ─────────────────────────────────────────────────────────
+# Behavior
+# ─────────────────────────────────────────────────────────
+
+fn captain-behavior:
+  for msg in garrison/inbox:
+    match msg:
+      raise-alert {level}:
+        set! garrison/alert level
+        when garrison/morale < 100:
+          inc! garrison/morale 5
+      stand-down:
+        set! garrison/alert 'calm
+        inc! garrison/morale 10
+      resupply {amount}:
+        inc! castle/supplies amount
+        inc! garrison/morale 5
+      _: pass
+
+# ─────────────────────────────────────────────────────────
+# Pure functions
+# ─────────────────────────────────────────────────────────
+
+fn castle-stands?:
+  castle/hp > 0
+
+fn victory?:
+  castle/turn >= 10  and  castle/hp > 0
+
+fn can-reinforce?:
+  castle/supplies >= 30
+
+fn can-resupply?:
+  castle/supplies < 60
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+fn end-turn:
+  pre: castle/hp > 0
+  pre: castle/turn < 10
+  time-inc! turn: 1
+  inc! castle/turn 1
+  dec! castle/supplies 10
+  when castle/supplies < 0:
+    set! castle/supplies 0
+
+fn reinforce-walls:
+  pre: can-reinforce?
+  dec! castle/supplies 30
+  inc! castle/hp 40
+
+fn order-battle-stations:
+  pre: garrison/alert != 'battle
+  send! captain (CaptainMsg/raise-alert level: 'battle)
+
+fn order-guarded:
+  pre: garrison/alert != 'guarded
+  send! captain (CaptainMsg/raise-alert level: 'guarded)
+
+fn order-stand-down:
+  pre: garrison/alert != 'calm
+  send! captain (CaptainMsg/stand-down)
+
+fn call-resupply:
+  pre: can-resupply?
+  send! captain (CaptainMsg/resupply amount: 50)
+
+fn end-siege:
+  pre: castle/turn >= 10
+  pre: castle/hp > 0
+  set! castle/siege-ended true
+  cancel-schedule! attacker-wave
+  cancel-schedule! resupply-caravan
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene fortress:
+  Fortress. Turn {castle/turn} of 10. Castle HP {castle/hp}.
+  Supplies {castle/supplies}. Alert level {garrison/alert}.
+  Garrison morale {garrison/morale}.
+
+  when garrison/alert = 'battle:
+    The garrison stands at full battle readiness.
+  when garrison/alert = 'guarded:
+    The garrison is on guard. Extra sentries patrol the walls.
+  when garrison/alert = 'calm:
+    Routine patrols only. The garrison rests between sorties.
+
+  when castle/hp < 150:
+    The walls are severely damaged. Breaches are visible.
+  when castle/hp >= 400:
+    The fortifications look strong.
+
+  * [castle/hp > 0  and  castle/turn < 10] Advance to next turn
+    end-turn
+    -> fortress
+
+  * [can-reinforce?] Reinforce the walls (costs 30 supplies)
+    reinforce-walls
+    -> fortress
+
+  * [garrison/alert != 'battle] Order battle stations
+    order-battle-stations
+    -> fortress
+
+  * [garrison/alert != 'guarded] Order guarded posture
+    order-guarded
+    -> fortress
+
+  * [garrison/alert != 'calm] Stand down
+    order-stand-down
+    -> fortress
+
+  * [can-resupply?] Request emergency resupply
+    call-resupply
+    -> fortress
+
+  * [castle/turn >= 10  and  castle/hp > 0] Declare victory
+    end-siege
+    -> ending
+
+  * [castle/hp <= 0] Assess the damage
+    -> ending
+
+scene ending:
+  The siege has ended.
+  Turn {castle/turn} reached. Castle HP {castle/hp}.
+  if castle/hp > 0:
+    The fortress held. Victory after {castle/turn} turns.
+    if castle/hp >= 400:
+      The walls are nearly intact -- an overwhelming defence.
+    else:
+      The walls took heavy damage but the castle stands.
+  else:
+    The walls have fallen. The castle is lost.
