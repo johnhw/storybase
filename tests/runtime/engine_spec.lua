@@ -486,3 +486,152 @@ scene main:
   end)
 end)
 
+-- ============================================================
+-- Integration scenario 8: undo! restores pre-death state
+-- ============================================================
+
+describe("engine: integration scenario 8 — undo restores pre-death state", function()
+  local src = [[
+module death-test
+  version: 1.0
+engine-config:
+  entry-scene: combat
+
+state player:
+  health: Int(0, 100) = 50
+  alive:  Bool        = true
+
+fn take-damage amount:
+  tags: [checkpoint]
+  dec! player/health amount
+  when player/health = 0:
+    set! player/alive false
+
+fn undo-death:
+  undo!
+
+scene combat:
+  HP: {player/health}.
+  [not player/alive] You died.
+
+  * Take 50 damage
+    take-damage 50
+    -> combat
+
+  * Undo last action
+    undo-death
+    -> combat
+]]
+
+  local gt, errs = compile(src)
+
+  it("compiles without errors", function()
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+  end)
+
+  it("undo! after death restores health and alive flag", function()
+    if not gt then pending("compile failed"); return end
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local eval_mod = require("runtime.eval")
+    local ctx = eng:make_ctx("test")
+
+    -- Initial state
+    assert.equal(50, eng._state:get("player/health"))
+    assert.equal(true, eng._state:get("player/alive"))
+
+    -- Take 50 damage → health = 0, alive = false
+    eval_mod.call_fn("take-damage", {{ kind = "int_lit", value = 50 }}, ctx)
+    assert.equal(0, eng._state:get("player/health"))
+    assert.equal(false, eng._state:get("player/alive"))
+
+    -- undo! → restore to pre-damage state
+    eval_mod.call_fn("undo-death", {}, ctx)
+    assert.equal(50, eng._state:get("player/health"))
+    assert.equal(true, eng._state:get("player/alive"))
+  end)
+end)
+
+-- ============================================================
+-- Integration scenario 10: save → migrate → reload → state identical
+-- ============================================================
+
+describe("engine: integration scenario 10 — save, migrate, reload", function()
+  local src_v1 = [[
+module migrate-test
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: main
+
+state world:
+  score: Int(0, 9999) = 0
+
+scene main:
+  * Score point
+    inc! world/score 1
+    -> main
+]]
+
+  local src_v2 = [[
+module migrate-test
+  version: 1.0
+schema-version: 2
+engine-config:
+  entry-scene: main
+
+state world:
+  score:  Int(0, 9999) = 0
+  points: Int(0, 9999) = 0
+
+migration 1 -> 2:
+  rename world/score -> world/points
+
+scene main:
+  * Score point
+    inc! world/points 1
+    -> main
+]]
+
+  it("migrated save has correct value after reload", function()
+    local gt1, errs1 = compile(src_v1)
+    assert.equal(0, #errs1)
+    local gt2, errs2 = compile(src_v2)
+    assert.equal(0, #errs2)
+
+    local save_path = os.tmpname()
+
+    -- Run v1: score 3 points, then save
+    local out = { write = function() end }
+    local inp = { _i = 0, read = function(self, _)
+      self._i = self._i + 1
+      return ({ "1", "1", "1", "q" })[self._i]
+    end }
+    engine_mod.run(gt1, { io_out = out, io_in = inp, save_path = save_path })
+
+    -- Load the save file raw to get entries
+    local f = assert(io.open(save_path, "r"))
+    local save_src = f:read("*a"); f:close()
+    local fn = assert(load(save_src))
+    local save_data = fn()
+
+    -- Apply migration: v1 → v2
+    local migrate_mod = require("runtime.migrate")
+    local cache = {}
+    for _, e in ipairs(save_data.entries or {}) do
+      cache[e.path] = e["new"]
+    end
+    local diags = migrate_mod.migrate(cache, gt2.migrations, 1, 2, gt2)
+    assert.equal(0, #(diags.errors or {}))
+
+    -- world/score should be gone; world/points should be 3
+    assert.is_nil(cache["world/score"])
+    assert.equal(3, cache["world/points"])
+
+    os.remove(save_path)
+  end)
+end)
+

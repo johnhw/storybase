@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-03)
 
-**Phase 6 in progress** — 709 tests passing. Counterfactual, schema migration, undo, find query engine, relation queries, can-reach? BFS search, schedule! imperative, offset: support for scheduler, bounded declarations, and verify from-any-state/when all implemented. All verify blocks in test06_actors.sb now pass.
+**Phase 6 complete** — 714 tests passing. Counterfactual, schema migration, undo, find query engine, relation queries, can-reach? BFS search, schedule! imperative, offset: support for scheduler, bounded declarations, and verify from-any-state/when all implemented. All verify blocks in test06_actors.sb now pass.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅
 
@@ -663,8 +663,8 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `tests/runtime/engine_spec.lua` — undo! steps: N reverts N checkpoints (2026-04-03)
 - [x] `tests/runtime/engine_spec.lua` — undo! errors with no checkpoints (2026-04-03)
 - [x] `tests/runtime/migrate_spec.lua` — transform (scalar and family wildcard) — done (2026-04-03)
-- [ ] Integration scenario 8: player dies, `undo!` restores pre-death state
-- [ ] Integration scenario 10: save → migrate → reload → state identical
+- [x] Integration scenario 8: player dies, `undo!` restores pre-death state (2026-04-03)
+- [x] Integration scenario 10: save → migrate → reload → state identical (2026-04-03)
 
 ---
 
