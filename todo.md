@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 876 tests passing.
+**Phase 7/8 in progress** — 882 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -33,7 +33,9 @@ Milestone goals are marked **M**.
 - `compiler.parse_and_check` / `parse_and_check_file` — new pipeline entry point returning typed AST (stops before codegen), used by extract-symbols
 - `game:find(family, opts)` Lua interop — filters, sorts, limits, counts entity family keys
 - `storybase compact <game.sb> <save.log>` CLI — collapses full log into snapshot entries for fast replay
-- Tests: +128 new tests (741→869)
+- `game:counterfactual(fn)` Lua interop — isolated branch, fn mutates copy, returns frozen snapshot
+- `log:query_at(path, time)` — seq-number and axis-table time bounds implemented
+- Tests: +141 new tests (741→882)
 
 **Remaining gaps (Phase 7+):**
 - Import/resolve imported names — Phase 7
@@ -225,7 +227,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `undo!`, `undo! steps: N` (stub — no-op; full implementation deferred to Phase 5)
 - [x] `cancel-schedule!` — done (2026-04-03)
 - [x] Scene navigation sigils in scene bodies: `->`, `->()`, `=>`, `<-`
-- [ ] Indexed path access: `path[n]`, `path[-n]`, `path[a:b]` — NOT done; deferred to Phase 7
+- [x] Indexed path access: `path[n]`, `path[-n]` (INDEX_EXPR in parser + eval) — slice `path[a:b]` deferred to Phase 8
 - [x] Narration inline expressions: `{expr}` inside scene text lines
 
 **Deviation:** `_` added to lexer `is_alpha` (required for wildcard in match arms; previously illegal char).
@@ -306,9 +308,9 @@ A separate types.lua is not needed for Phase 1.
 - [x] `clear!(path)` — empty a Set or List
 - [x] `push!(path, value)` — append to List
 - [x] `pop!(path)` — remove and return last element of List; error if empty
-- [ ] Indexed List read: `path[n]` (positive and negative indices) — NOT done; deferred to Phase 7
-- [ ] Indexed List write: `path[n] = value` — NOT done; deferred to Phase 7
-- [ ] List slice read: `path[a:b]` — NOT done; deferred to Phase 7
+- [x] Indexed List read: `path[n]` (positive and negative indices) — INDEX_EXPR in eval.lua
+- [ ] Indexed List write: `path[n] = value` — deferred to Phase 8
+- [ ] List slice read: `path[a:b]` — deferred to Phase 8
 - [x] `spawn!(family, key, record)` — instantiate family member; error if key exists
 - [x] `despawn!(family, key)` — remove family member; subsequent reads return nil
 - [x] `path-exists?(path)` — Bool predicate
@@ -750,7 +752,7 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `game:on(event_name, handler_fn)` — subscribe to debug/presentation events (2026-04-04)
 - [x] `game:choose(index)` — dispatch player choice by visible index (2026-04-04)
 - [x] `game:eval(expr_string)` → value (pure expressions only) (2026-04-04)
-- [ ] `game:counterfactual(opts, fn)` → GameState — deferred to Phase 8
+- [x] `game:counterfactual(fn)` → frozen snapshot — branch game, run fn(branch), return snapshot with :get/:current_scene (2026-04-04)
 - [x] `game:register_bounded(name, lua_fn)` — register bounded computation handler (2026-04-04)
 
 ### CLI Polish

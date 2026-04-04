@@ -309,6 +309,73 @@ function M._make_game(game_table)
     return ctx.retval
   end
 
+  -- ── Counterfactual branches ──────────────────────────────
+
+  --- Create a branched game copy, apply mutations via a callback, and return a frozen snapshot.
+  ---
+  --- The callback receives a branch game object (same API as the main game) whose mutations
+  --- are isolated from the live state. Returns a frozen state table with a :get(path) method.
+  ---
+  ---@param fn function  fn(branch) — mutate the branch, then it is frozen
+  ---@return table  frozen state with :get(path) → value  and :current_scene() → string
+  function self:counterfactual(fn)
+    assert(self._eng, "call game:init() first")
+    assert(type(fn) == "function", "game:counterfactual expects a function argument")
+
+    local log_mod   = require("runtime.log")
+    local state_mod = require("runtime.state")
+
+    -- Deep-copy current engine state
+    local cf_log   = log_mod.new()
+    local schema   = self._eng._game and self._eng._game.schema or {}
+    local cf_state = state_mod.new(schema, cf_log)
+
+    for path, val in pairs(self._eng._state._cache) do
+      if type(val) == "table" then
+        local c = {}; for i, x in ipairs(val) do c[i] = x end
+        cf_state._cache[path] = c
+      else
+        cf_state._cache[path] = val
+      end
+    end
+    for axis, v in pairs(self._eng._state._time) do
+      cf_state._time[axis] = v
+    end
+
+    -- Build a branch game object with the copied state
+    local branch_gt = self._gt  -- share game table (schema, fns, etc.)
+    local branch    = M._make_game(branch_gt)
+
+    -- Override init so it uses the pre-copied state
+    branch._eng = engine_mod.new(branch_gt, { io_out = { write = function() end } })
+    branch._eng._state = cf_state
+    branch._eng._log   = cf_log
+    -- Copy scene stack
+    branch._eng._scene_stack = {}
+    for i, s in ipairs(self._eng._scene_stack) do
+      branch._eng._scene_stack[i] = s
+    end
+
+    -- Run user's mutation callback
+    local ok, err = pcall(fn, branch)
+    if not ok then
+      error("game:counterfactual callback error: " .. tostring(err), 2)
+    end
+
+    -- Return a frozen snapshot (read-only)
+    local snap_cache = {}
+    for path, val in pairs(cf_state._cache) do snap_cache[path] = val end
+    local snap_stack = {}
+    for i, s in ipairs(branch._eng._scene_stack) do snap_stack[i] = s end
+
+    return {
+      get = function(_, path) return snap_cache[path] end,
+      current_scene = function(_)
+        return snap_stack[#snap_stack]
+      end,
+    }
+  end
+
   -- ── Bounded computations ──────────────────────────────────
 
   --- Register a Lua handler for a bounded computation.

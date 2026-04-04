@@ -306,3 +306,91 @@ describe("sb.load", function()
     assert.is_not_nil(game:current_scene())
   end)
 end)
+
+-- ── game:counterfactual ───────────────────────────────────────────────────────
+
+describe("game:counterfactual", function()
+  local SRC2 = [[
+module cf-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  score: Int(0, 9999) = 0
+
+scene main:
+  * Score
+    inc! world/score 5
+    -> main
+  * End
+    -> done
+
+scene done:
+  Done.
+]]
+
+  local function make()
+    local g = sb.from_source(SRC2, "cf-test"); g:init()
+    return g
+  end
+
+  it("branch mutations do not affect live state", function()
+    local g = make()
+    g:choose(1)  -- live score = 5
+    local snap = g:counterfactual(function(branch)
+      branch:choose(1)  -- branch score = 10
+      branch:choose(1)  -- branch score = 15
+    end)
+    assert.equal(15, snap:get("world/score"))
+    assert.equal(5,  g:get("world/score"))  -- live unchanged
+  end)
+
+  it("snapshot captures state after branch mutations", function()
+    local g = make()
+    local snap = g:counterfactual(function(branch)
+      branch:choose(1); branch:choose(1)  -- 10 points
+    end)
+    assert.equal(10, snap:get("world/score"))
+  end)
+
+  it("snapshot current_scene reflects branch navigation", function()
+    local g = make()
+    local snap = g:counterfactual(function(branch)
+      branch:choose(2)  -- End → done
+    end)
+    assert.equal("done", snap:current_scene())
+    assert.equal("main", g:current_scene())  -- live unchanged
+  end)
+
+  it("branch inherits live state at time of counterfactual call", function()
+    local g = make()
+    g:choose(1); g:choose(1)  -- live score = 10
+    local snap = g:counterfactual(function(branch)
+      -- No extra mutations; snapshot should match live
+    end)
+    assert.equal(10, snap:get("world/score"))
+  end)
+
+  it("nested counterfactuals work independently", function()
+    local g = make()
+    local snap1 = g:counterfactual(function(b1)
+      b1:choose(1)  -- 5 pts
+    end)
+    local snap2 = g:counterfactual(function(b2)
+      b2:choose(1); b2:choose(1)  -- 10 pts
+    end)
+    assert.equal(5,  snap1:get("world/score"))
+    assert.equal(10, snap2:get("world/score"))
+    assert.equal(0,  g:get("world/score"))  -- live unchanged
+  end)
+
+  it("errors in callback are propagated", function()
+    local g = make()
+    assert.has_error(function()
+      g:counterfactual(function()
+        error("intentional error")
+      end)
+    end)
+  end)
+end)
