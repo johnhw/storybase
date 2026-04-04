@@ -575,7 +575,13 @@ local BUILTINS = {
     return tostring(eval_expr(args[1], ctx))
   end,
   ["path-exists?"] = function(args, ctx)
-    local path = eval_expr(args[1], ctx)
+    local arg = args[1]
+    local path
+    if arg and (arg.kind == K.PATH_EXPR or arg.kind == K.INTERP_PATH) then
+      path = eval_path(arg, ctx)
+    else
+      path = eval_expr(arg, ctx)
+    end
     if type(path) ~= "string" then return false end
     return ctx.state:path_exists(path) == true
   end,

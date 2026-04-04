@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 891 tests passing.
+**Phase 7/8 in progress** — 894 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -38,7 +38,10 @@ Milestone goals are marked **M**.
 - Import resolver: `import "file.sb"` splices declarations before checker, with cycle detection (IMPORT_CYCLE error), transitive imports
 - Demo games: `demo_games.md` spec written; `demo01_wanderer.sb`, `demo02_merchant.sb`, `demo03_quest.sb` implemented and runnable
 - BUGFIX: `pre:` condition eval — `expr_stmt` wrapper was not unwrapped before `eval_expr`, causing all pre-conditions to always fail; fixed in `runtime/eval.lua`
-- Tests: +150 new tests (741→891)
+- BUGFIX: `path-exists?` builtin — was calling `eval_expr` on PATH_EXPR arg returning the value (e.g. integer), not the path string; now uses `eval_path` when arg is PATH_EXPR/INTERP_PATH
+- BUGFIX: `when_stmt` in scene body narration — `render_scene` never handled `when_stmt`, causing conditional narration to silently vanish; added `_render_narration_items` helper and wired `when_stmt`/`if_expr` through it
+- Demo games: `demo04_expedition.sb` implemented and runnable (entity families, spawn/despawn, for loops, path-exists?, count-where)
+- Tests: +153 new tests (741→894)
 
 **Remaining gaps (Phase 7+):**
 - `as Alias` namespacing for imports (currently flat merge) — Phase 8

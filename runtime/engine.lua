@@ -205,6 +205,31 @@ function M.new(game_table, opts)
     return eval.render_text(text, ctx)
   end
 
+  --- Recursively render a list of narration body items into the narration table.
+  --- Handles narration_line, cond_narration, when_stmt, and if_expr.
+  ---@param narration table  accumulator list
+  ---@param items     table  list of AST nodes
+  ---@param ctx       table  eval context
+  function eng:_render_narration_items(narration, items, ctx)
+    for _, sub in ipairs(items or {}) do
+      if not sub then
+      elseif sub.kind == "narration_line" then
+        narration[#narration + 1] = self:render_text(sub.text, ctx)
+      elseif sub.kind == "cond_narration" then
+        if eval.eval_expr(sub.condition, ctx) then
+          narration[#narration + 1] = self:render_text(sub.text, ctx)
+        end
+      elseif sub.kind == "when_stmt" then
+        if eval.eval_expr(sub.condition, ctx) then
+          self:_render_narration_items(narration, sub.body, ctx)
+        end
+      elseif sub.kind == "if_expr" then
+        local body = eval.eval_expr(sub.condition, ctx) and sub.then_body or sub.else_body
+        self:_render_narration_items(narration, body, ctx)
+      end
+    end
+  end
+
   --- Render a scene body and return {narration, choices}.
   --- narration — list of visible text strings
   --- choices   — list of {index, label_str} tables (visible choices only)
@@ -255,19 +280,21 @@ function M.new(game_table, opts)
         eval.eval_stmt(item, ctx)
         if ctx.signal then nav_signal = ctx.signal; break end
 
+      elseif item.kind == "when_stmt" then
+        -- Conditional narration block: render body if condition is true
+        local cond = eval.eval_expr(item.condition, ctx)
+        if cond then
+          for _, sub in ipairs(item.body or {}) do
+            self:_render_narration_items(narration, {sub}, ctx)
+          end
+        end
+
       elseif item.kind == "if_expr" then
         -- if/else block at scene level (narration-only, no choice)
         local cond = eval.eval_expr(item.condition, ctx)
         local body = cond and item.then_body or item.else_body
         if body then
-          for _, sub in ipairs(body) do
-            if sub and sub.kind == "narration_line" then
-              narration[#narration + 1] = self:render_text(sub.text, ctx)
-            elseif sub and sub.kind == "cond_narration" then
-              local c2 = eval.eval_expr(sub.condition, ctx)
-              if c2 then narration[#narration + 1] = self:render_text(sub.text, ctx) end
-            end
-          end
+          self:_render_narration_items(narration, body, ctx)
         end
       end
     end

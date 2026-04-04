@@ -650,3 +650,59 @@ describe("eval — indexed list access", function()
     assert.is_nil(c.retval)
   end)
 end)
+
+-- ============================================================
+-- path-exists? builtin
+-- ============================================================
+
+describe("builtin: path-exists?", function()
+  local compiler = require("compiler.compiler")
+  local engine   = require("runtime.engine")
+
+  it("returns false for absent path via path_expr arg", function()
+    local c = ctx({})
+    -- path-exists? foo/bar/hp — path_expr arg, nothing in state
+    local node = { kind="expr_stmt", expr=fn_call("path-exists?", path("foo","bar","hp")) }
+    eval.eval_stmt(node, c)
+    assert.is_false(c.retval)
+  end)
+
+  it("returns true for existing path via path_expr arg (not the value)", function()
+    local c = ctx({ ["crew/renn/hp"] = 100 })
+    -- path-exists? must return true even though the value is an integer, not a string
+    local node = { kind="expr_stmt", expr=fn_call("path-exists?", path("crew","renn","hp")) }
+    eval.eval_stmt(node, c)
+    assert.is_true(c.retval)
+  end)
+
+  it("returns true for path with integer value after spawn (full compile)", function()
+    local src = [[
+module t
+  version: 1.0
+type M:
+  hp: Int(0,100) = 60
+state crew/{member}: M  max: 4
+fn spawn-renn:
+  spawn! crew 'renn M(hp: 80)
+fn check:
+  path-exists? crew/renn/hp
+fn check-interp member:
+  path-exists? crew/{member}/hp
+]]
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local log  = require("runtime.log").new()
+    local st   = require("runtime.state").new(gt.schema, log)
+    local c    = eval.new_ctx(st, gt.fns, "test")
+    -- Before spawn: should be false
+    local before = eval.call_fn("check", {}, c)
+    assert.is_false(before)
+    -- Spawn renn
+    eval.call_fn("spawn-renn", {}, c)
+    -- After spawn: integer hp value at crew/renn/hp → path-exists? must return true
+    local after = eval.call_fn("check", {}, c)
+    assert.is_true(after)
+    -- Interpolated path variant (pass arg as string_lit node)
+    local interp = eval.call_fn("check-interp", {str_lit("renn")}, c)
+    assert.is_true(interp)
+  end)
+end)

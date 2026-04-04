@@ -1,0 +1,159 @@
+# demo04_expedition.sb
+# The Expedition -- lead a crew through a dangerous canyon.
+#
+# Features demonstrated:
+#   state crew/{member}: CrewMember  -- entity family with typed record
+#   spawn! and despawn!              -- add/remove family members
+#   for loop over path-list          -- iterate over all crew members
+#   path-exists? predicate           -- check if a specific member is present
+#   set! with interpolated paths     -- crew/{m}/hp
+#   count-where with lambda          -- count living crew
+#   fn with pre: preconditions
+#
+# Run with:  storybase run demos/demo04_expedition.sb
+
+module expedition
+  version: 1.0
+
+engine-config:
+  entry-scene: base-camp
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+type Role = scout | medic | porter
+
+type CrewMember:
+  role:   Role         = 'scout
+  hp:     Int(0, 100)  = 100
+  morale: Int(0, 100)  = 80
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state crew/{member}: CrewMember  max: 5
+
+state expedition:
+  food:     Int(0, 200) = 100
+  day:      Int(0, 30)  = 0
+  complete: Bool        = false
+
+# ─────────────────────────────────────────────────────────
+# Pure functions
+# ─────────────────────────────────────────────────────────
+
+fn living-count:
+  count-where (path-list crew)  fn(m): crew/{m}/hp > 0
+
+fn crew-ready?:
+  living-count > 0
+
+fn well-fed?:
+  expedition/food >= living-count
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+fn recruit-crew:
+  pre: not (path-exists? crew/renn/hp)
+  spawn! crew 'renn  CrewMember(role: 'scout,  hp: 100, morale: 90)
+  spawn! crew 'lyra  CrewMember(role: 'medic,  hp: 100, morale: 85)
+  spawn! crew 'bram  CrewMember(role: 'porter, hp: 100, morale: 75)
+
+fn advance-day:
+  inc! expedition/day 1
+  for m in (path-list crew):
+    when crew/{m}/hp > 0:
+      dec! expedition/food 1
+      when crew/{m}/morale > 5:
+        dec! crew/{m}/morale 5
+
+fn rest-crew:
+  pre: well-fed?
+  dec! expedition/food living-count
+  for m in (path-list crew):
+    when crew/{m}/hp > 0  and  crew/{m}/hp < 90:
+      inc! crew/{m}/hp 15
+    when crew/{m}/morale < 90:
+      inc! crew/{m}/morale 10
+
+fn explore:
+  pre: expedition/food > 0
+  pre: crew-ready?
+  dec! expedition/food living-count
+  for m in (path-list crew):
+    when crew/{m}/hp > 0:
+      dec! crew/{m}/hp (random-int 5 25)
+      when crew/{m}/hp <= 0:
+        set! crew/{m}/hp 0
+  inc! expedition/day 1
+
+fn evacuate-renn:
+  pre: path-exists? crew/renn/hp
+  despawn! crew 'renn
+
+fn complete-expedition:
+  pre: expedition/day >= 5
+  set! expedition/complete true
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene base-camp:
+  Base camp. Day {expedition/day}. Food supply {expedition/food}.
+  Active crew {living-count}.
+  when path-exists? crew/renn/hp:
+    Renn the scout. hp {crew/renn/hp} morale {crew/renn/morale}.
+  when path-exists? crew/lyra/hp:
+    Lyra the medic. hp {crew/lyra/hp} morale {crew/lyra/morale}.
+  when path-exists? crew/bram/hp:
+    Bram the porter. hp {crew/bram/hp} morale {crew/bram/morale}.
+
+  * [not (path-exists? crew/renn/hp)  and  not (path-exists? crew/lyra/hp)] Recruit crew
+    recruit-crew
+    -> base-camp
+
+  * [crew-ready?  and  expedition/food > 0] Head into the canyon
+    -> canyon
+
+  * [well-fed?  and  crew-ready?] Rest and recover
+    rest-crew
+    -> base-camp
+
+  * [expedition/day >= 5  and  crew-ready?] Declare success
+    complete-expedition
+    -> ending
+
+  * Wait one day
+    advance-day
+    -> base-camp
+
+scene canyon:
+  The canyon walls rise on both sides. Day {expedition/day}.
+  Food remaining {expedition/food}. Living crew {living-count}.
+
+  * Push deeper (costs food, crew take damage)
+    explore
+    -> canyon
+
+  * Make camp here
+    -> base-camp
+
+  * [path-exists? crew/renn/hp  and  crew/renn/hp < 30] Evacuate Renn (critically low HP)
+    evacuate-renn
+    -> canyon
+
+scene ending:
+  The expedition returns after {expedition/day} days.
+  Survivors: {living-count} of 3.
+  if living-count >= 3:
+    All hands returned safely. A flawless expedition.
+  else:
+    if living-count >= 2:
+      Two crew members made it out. A difficult victory.
+    else:
+      Only one survived. The canyon claimed its toll.
