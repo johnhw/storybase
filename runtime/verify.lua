@@ -213,9 +213,29 @@ local function run_always_check(verify_entry, game_table)
                fail_msg = "error evaluating verify-always: " .. tostring(result) }
     end
     if not result then
-      return { pass = false,
-               fail_msg = string.format(
-                 "verify-always violated at BFS state %d", i) }
+      -- Build a human-readable snapshot of the failing state
+      local snap_parts = {}
+      local keys = {}
+      for k in pairs(cache_snap) do keys[#keys+1] = k end
+      table.sort(keys)
+      for _, k in ipairs(keys) do
+        local v = cache_snap[k]
+        if type(v) == "table" then
+          local items = {}
+          for _, item in ipairs(v) do items[#items+1] = tostring(item) end
+          snap_parts[#snap_parts+1] = k .. "=[" .. table.concat(items, ",") .. "]"
+        else
+          snap_parts[#snap_parts+1] = k .. "=" .. tostring(v)
+        end
+      end
+      return {
+        pass             = false,
+        fail_msg         = string.format(
+          "verify-always violated at BFS state %d: {%s}",
+          i, table.concat(snap_parts, ", ")),
+        counterexample   = cache_snap,
+        counterexample_n = i,
+      }
     end
   end
 
@@ -348,9 +368,28 @@ local function run_can_reach_check(verify_entry, game_table)
 
       local ok2, result2 = pcall(eval.eval_expr, check_expr, ctx)
       if not ok2 or not result2 then
+        -- Build counterexample detail
+        local snap_parts = {}
+        local keys = {}
+        for k in pairs(snap) do keys[#keys+1] = k end
+        table.sort(keys)
+        for _, k in ipairs(keys) do
+          local v = snap[k]
+          if type(v) == "table" then
+            local items = {}
+            for _, item in ipairs(v) do items[#items+1] = tostring(item) end
+            snap_parts[#snap_parts+1] = k .. "=[" .. table.concat(items, ",") .. "]"
+          else
+            snap_parts[#snap_parts+1] = k .. "=" .. tostring(v)
+          end
+        end
         return {
-          pass     = false,
-          fail_msg = string.format("from-any-state: condition failed at BFS state %d", i),
+          pass           = false,
+          fail_msg       = string.format(
+            "from-any-state: condition failed at BFS state %d: {%s}",
+            i, table.concat(snap_parts, ", ")),
+          counterexample = snap,
+          counterexample_n = i,
         }
       end
     end
@@ -386,8 +425,10 @@ function M.run_all(game_table)
     if has_always then
       local r = run_always_check(verify_entry, game_table)
       if not r.pass then
-        result.pass     = false
-        result.fail_msg = r.fail_msg
+        result.pass             = false
+        result.fail_msg         = r.fail_msg
+        result.counterexample   = r.counterexample
+        result.counterexample_n = r.counterexample_n
       else
         result.states_checked = r.states_checked
       end
@@ -407,8 +448,10 @@ function M.run_all(game_table)
     if has_from_any_state and result.pass then
       local r = run_can_reach_check(verify_entry, game_table)
       if not r.pass then
-        result.pass     = false
-        result.fail_msg = r.fail_msg
+        result.pass             = false
+        result.fail_msg         = r.fail_msg
+        result.counterexample   = r.counterexample
+        result.counterexample_n = r.counterexample_n
       end
     end
 

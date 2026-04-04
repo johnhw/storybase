@@ -254,3 +254,66 @@ verify "damage reduces hp":
   end)
 
 end)
+
+-- ── counterexample detail ────────────────────────────────────────────────────
+
+describe("verify: counterexample detail in failure", function()
+  it("includes counterexample table when verify-always fails", function()
+    local src = [[
+module ce-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 100) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+
+verify "gold stays zero":
+  verify-always world/gold = 0
+]]
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.equal(1, #results)
+    assert.is_false(results[1].pass)
+    -- Should have counterexample detail
+    assert.is_not_nil(results[1].counterexample,
+      "expected counterexample table in failure result")
+    -- The counterexample should show gold > 0
+    local ce = results[1].counterexample
+    assert.is_true((ce["world/gold"] or 0) > 0)
+  end)
+
+  it("includes BFS state detail in fail_msg", function()
+    local src = [[
+module ce-test2
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 100) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+
+verify "gold zero always":
+  verify-always world/gold = 0
+]]
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+    -- fail_msg should contain state details
+    local msg = results[1].fail_msg or ""
+    assert.is_true(msg:find("world/gold") ~= nil or msg:find("BFS state") ~= nil,
+      "fail_msg should include state info: " .. msg)
+  end)
+end)
