@@ -616,6 +616,69 @@ local BUILTINS = {
 
     return search_mod.can_reach(ctx.game, cache, stack, condition_fn, depth)
   end,
+
+  ["find-path"] = function(args, ctx)
+    if not ctx.game then return nil end
+
+    local search_mod = require("runtime.search")
+    local log_mod    = require("runtime.log")
+    local state_mod  = require("runtime.state")
+
+    local cond_expr = args[1]
+    local depth     = 20
+
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "depth" then
+        local d = eval_expr(a.value, ctx)
+        if type(d) == "number" then depth = d end
+      end
+    end
+
+    local cache = {}
+    for k, v in pairs(ctx.state._cache) do
+      if type(v) == "table" then
+        local copy = {}
+        for i, x in ipairs(v) do copy[i] = x end
+        cache[k] = copy
+      else
+        cache[k] = v
+      end
+    end
+
+    local stack = ctx.scene_stack
+    if not stack then
+      local entry = ctx.game.schema
+        and ctx.game.schema.engine_config
+        and ctx.game.schema.engine_config["entry-scene"]
+      stack = entry and { entry } or {}
+    end
+
+    local function condition_fn(snap_cache)
+      local l          = log_mod.new()
+      local fake_state = state_mod.new(ctx.game.schema or {}, l)
+      for k, v in pairs(snap_cache) do fake_state._cache[k] = v end
+      local fake_ctx = {
+        state    = fake_state,
+        fns      = ctx.fns,
+        vars     = {},
+        fn_name  = "find-path",
+        signal   = nil,
+        retval   = nil,
+        game     = ctx.game,
+      }
+      local ok, result = pcall(eval_expr, cond_expr, fake_ctx)
+      return ok and result
+    end
+
+    -- find_path returns a list of {scene, label, index} steps or nil
+    local path = search_mod.find_path(ctx.game, cache, stack, condition_fn, depth)
+    if not path then return nil end
+    -- Convert to a list of label strings for easy consumption
+    local labels = {}
+    for _, step in ipairs(path) do labels[#labels + 1] = step.label end
+    return labels
+  end,
 }
 
 --- Dispatch a function call by name.

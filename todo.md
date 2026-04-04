@@ -16,10 +16,9 @@ Milestone goals are marked **M**.
 - Indexed list access `path[n]` / `ident[n]` — parser + eval
 - Debug TCP transport: proper socket setup, non-blocking poll, JSON codec (encode + decode)
 - `clamp-event` debug hook — state.lua `_clamp_hook`, wired in engine `set_debug_server`
-- Perceives enforcement:
-  - Runtime: `make_capture_proxy` now filters reads to `perceives` patterns; actor's own state subtree always visible
-  - Checker pass4: warns `PERCEIVES_VIOLATION` when behavior fn reads static path not in perceives
-- Tests: +14 tests across parser/eval/debug/checker specs
+- Perceives enforcement: runtime perception snapshot + checker pass4 PERCEIVES_VIOLATION warning
+- `find-path` BFS returning action sequence — search.lua + eval builtin `find-path`
+- Tests: +18 new tests (767→771)
 
 **Remaining gaps (Phase 7+):**
 - Checker: discrete/superficial boundary enforcement — Phase 7
@@ -27,12 +26,12 @@ Milestone goals are marked **M**.
 - Import/resolve imported names — Phase 7
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8
-- `find-path` action sequence search — Phase 7
 - `probability` Float BFS — Phase 7
 - Counterexample detail in verify output — Phase 7
 - `simulate: true` in counterfactual (actor+schedule steps) — Phase 7
 - `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
 - Production build mode (strip debug-only declarations) — Phase 8
+- `verify-always` / `find-counterexample` builtins — Phase 7
 
 ---
 
