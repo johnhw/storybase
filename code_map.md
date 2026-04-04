@@ -15,7 +15,7 @@ source.sb
   → runtime/engine.lua       new(game_table, opts) → engine
 ```
 
-Entry point: `compiler/compiler.lua` — `M.compile(source, file)` / `M.compile_file(path)`
+Entry points: `compiler/compiler.lua` — `M.compile(source, file)` / `M.compile_file(path)` (full pipeline); `M.parse_and_check(source, file)` / `M.parse_and_check_file(path)` (stops before codegen, returns typed AST)
 
 ---
 
@@ -115,9 +115,11 @@ MATCH_ARM, COND_ARM
 
 ---
 
-### `compiler/compiler.lua` (98 lines)
-- `M.compile(source, filename)` → `(game_table, diags[])`
-- `M.compile_file(filepath)` → `(game_table, diags[])`
+### `compiler/compiler.lua` (~140 lines)
+- `M.compile(source, filename)` → `(game_table, diags)`
+- `M.compile_file(filepath)` → `(game_table, diags)`
+- `M.parse_and_check(source, filename)` → `(typed_ast, diags)` — stops before codegen; returns AST with `.decls`
+- `M.parse_and_check_file(filepath)` → `(typed_ast, diags)`
 - Runs lexer → parser → checker → codegen in sequence; collects all diags
 
 ---

@@ -65,6 +65,52 @@ function M.compile(source, filename)
   return game_table, diags
 end
 
+--- Parse and type-check source text, returning the typed AST (stops before codegen).
+--- Useful for tools that need to walk the AST (e.g. extract-symbols).
+---
+---@param source   string
+---@param filename string
+---@return table?, table   typed_ast (with .decls), diags
+function M.parse_and_check(source, filename)
+  local diags = ast.new_accum()
+
+  local tokens, lex_diags = lexer.tokenize(source, filename)
+  diags:push_all(lex_diags)
+  if tokens == nil then return nil, diags end
+
+  local ast_root, parse_diags = parser.parse(tokens, filename)
+  diags:push_all(parse_diags)
+  if ast_root == nil then return nil, diags end
+
+  local typed_ast, check_diags = checker.check(ast_root, filename)
+  diags:push_all(check_diags)
+  if diags:has_errors() then return nil, diags end
+
+  return typed_ast, diags
+end
+
+--- Parse and type-check a .sb file (stops before codegen).
+---
+---@param filepath string
+---@return table?, table   typed_ast (with .decls), diags
+function M.parse_and_check_file(filepath)
+  local diags = ast.new_accum()
+
+  local f, err = io.open(filepath, "r")
+  if not f then
+    diags:push_error(ast.E.FILE_NOT_FOUND,
+      "Cannot open file: " .. tostring(err), ast.pos(filepath, 0, 0))
+    return nil, diags
+  end
+  local source = f:read("*a"); f:close()
+  if source == nil then
+    diags:push_error(ast.E.FILE_READ_ERROR,
+      "Failed to read file contents", ast.pos(filepath, 0, 0))
+    return nil, diags
+  end
+  return M.parse_and_check(source, filepath)
+end
+
 --- Compile a .sb file specified by path.
 ---
 ---@param filepath string  Absolute or relative path to the .sb file

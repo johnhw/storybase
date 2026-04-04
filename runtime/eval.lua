@@ -774,6 +774,57 @@ local BUILTINS = {
     return search_mod.probability(ctx.game, cache, stack, condition_fn, depth, threshold)
   end,
 
+  -- optimal-path expr [by: cost-expr] [depth: N] → list of choice labels or nil
+  ["optimal-path"] = function(args, ctx)
+    if not ctx.game then return nil end
+    local search_mod = require("runtime.search")
+    local log_mod    = require("runtime.log")
+    local state_mod  = require("runtime.state")
+    local cond_expr  = args[1]
+    local depth      = 20
+    local by_expr    = nil  -- optional cost expression
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG then
+        local val = eval_expr(a.value, ctx)
+        if a.name == "depth" and type(val) == "number" then depth = val end
+        if a.name == "by"    then by_expr = a.value end
+      end
+    end
+    local cache = {}
+    for k, v in pairs(ctx.state._cache) do
+      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
+    end
+    local stack = ctx.scene_stack or (function()
+      local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
+      return e and {e} or {}
+    end)()
+    local function condition_fn(snap)
+      local l = log_mod.new()
+      local fs = state_mod.new(ctx.game.schema or {}, l)
+      for k, v in pairs(snap) do fs._cache[k] = v end
+      local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="optimal-path", signal=nil, retval=nil, game=ctx.game }
+      local ok, result = pcall(eval_expr, cond_expr, fc)
+      return ok and result
+    end
+    local cost_fn = nil
+    if by_expr then
+      cost_fn = function(snap)
+        local l = log_mod.new()
+        local fs = state_mod.new(ctx.game.schema or {}, l)
+        for k, v in pairs(snap) do fs._cache[k] = v end
+        local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="optimal-path-cost", signal=nil, retval=nil, game=ctx.game }
+        local ok, result = pcall(eval_expr, by_expr, fc)
+        return (ok and type(result) == "number") and result or 1
+      end
+    end
+    local path = search_mod.optimal_path(ctx.game, cache, stack, condition_fn, depth, cost_fn)
+    if not path then return nil end
+    local labels = {}
+    for _, step in ipairs(path) do labels[#labels+1] = step.label end
+    return labels
+  end,
+
   -- find-counterexample expr [depth: N] → frozen GameState or nil
   ["find-counterexample"] = function(args, ctx)
     if not ctx.game then return nil end

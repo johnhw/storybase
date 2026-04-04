@@ -372,6 +372,114 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn, d
 end
 
 -- ============================================================
+-- Optimal path search (Dijkstra / uniform cost BFS)
+-- ============================================================
+
+--- Find the shortest (minimum-cost) action sequence to reach a state satisfying
+--- condition_fn.  The cost function cost_fn(cache) returns the cost of being in
+--- a state; by default every step costs 1 (min-turns = BFS shortest path).
+---@param game_table    table     Compiled game table
+---@param initial_cache table     Initial state cache snapshot
+---@param initial_stack table     Initial scene stack
+---@param condition_fn  function  Predicate: condition_fn(cache) → bool
+---@param depth         integer?  Max search depth (default 20)
+---@param cost_fn       function? Cost function cost_fn(cache) → number; default = step count
+---@return table?  Ordered list of {scene, label, index} steps (minimum cost), or nil
+function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn, depth, cost_fn)
+  depth   = depth   or DEFAULT_DEPTH
+  cost_fn = cost_fn or function() return 1 end  -- uniform: minimise steps
+
+  local engine_mod = require("runtime.engine")
+  local seen       = {}
+  local io_sink    = { write = function() end }
+
+  if condition_fn(initial_cache) then return {} end
+
+  -- Priority queue: sorted by cumulative cost ascending
+  -- Simple implementation: sorted insert or re-sort on each expansion
+  -- For correctness with BFS (uniform cost 1), this degenerates to BFS order
+  local open = { {
+    cache = clone_flat(initial_cache),
+    stack = initial_stack,
+    d     = 0,
+    cost  = 0,
+    path  = {},
+  } }
+
+  while #open > 0 do
+    -- Pop lowest-cost node (index 1 after sort)
+    table.sort(open, function(a, b) return a.cost < b.cost end)
+    local item = table.remove(open, 1)
+
+    if item.d > depth then goto next_opt_item end
+
+    local h = hash_state(item.cache, item.stack)
+    if seen[h] then goto next_opt_item end
+    seen[h] = true
+
+    local scene_name = item.stack[#item.stack]
+    if not scene_name then goto next_opt_item end
+
+    local eng = engine_mod.new(game_table, { io_out = io_sink })
+    eng:register_actors_schedules()
+    restore_engine(eng, item.cache, item.stack)
+
+    local ok, choices = pcall(function()
+      local _, ch = eng:render_scene(scene_name); return ch
+    end)
+    if not ok then goto next_opt_item end
+    local choices = choices or {}
+
+    for _, ch in ipairs(choices) do
+      local eng2 = engine_mod.new(game_table, { io_out = io_sink })
+      eng2:register_actors_schedules()
+      restore_engine(eng2, item.cache, item.stack)
+
+      local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
+      if ok2 then
+        pcall(function() eng2:post_action() end)
+
+        local new_cache = clone_cache(eng2._state)
+        local new_stack = {}
+        for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack+1] = s end
+
+        if sig then
+          if sig.type == "goto" and sig.target then
+            if #new_stack > 0 then new_stack[#new_stack] = sig.target else new_stack[1] = sig.target end
+          elseif sig.type == "enter" and sig.target then
+            new_stack[#new_stack+1] = sig.target
+          elseif sig.type == "exit" then
+            new_stack[#new_stack] = nil
+          end
+        end
+
+        local new_path = {}
+        for _, step in ipairs(item.path) do new_path[#new_path+1] = step end
+        new_path[#new_path+1] = { scene = scene_name, label = ch.label, index = ch.index }
+
+        if condition_fn(new_cache) then return new_path end
+
+        if #new_stack > 0 then
+          local step_cost = cost_fn(new_cache)
+          if type(step_cost) ~= "number" then step_cost = 1 end
+          open[#open+1] = {
+            cache = new_cache,
+            stack = new_stack,
+            d     = item.d + 1,
+            cost  = item.cost + step_cost,
+            path  = new_path,
+          }
+        end
+      end
+    end
+
+    ::next_opt_item::
+  end
+
+  return nil
+end
+
+-- ============================================================
 -- Legacy object-based API (stub, kept for compatibility)
 -- ============================================================
 

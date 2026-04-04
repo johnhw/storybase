@@ -635,3 +635,60 @@ scene main:
   end)
 end)
 
+-- ============================================================
+-- Autonomous turns (steps 2–6 without player input)
+-- ============================================================
+
+describe("engine: autonomous turns", function()
+  local src = [[
+module auto-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+time-model:
+  axes: [tick]
+  wrap: [none]
+
+state world:
+  tick: Int(0, 9999) = 0
+
+actor ticker:
+  state:     world
+  perceives: [world/tick]
+  inbox:     List(Int(0,9), 2)
+  behavior:  ticker-fn
+  priority:  1
+
+fn ticker-fn:
+  inc! world/tick 1
+
+scene main:
+  * Wait
+    -> main
+]]
+
+  local gt, errs = compile(src)
+
+  it("compiles without errors", function()
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+  end)
+
+  it("autonomous_turn runs actor behaviors without player input", function()
+    if not gt then pending("compile failed"); return end
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    assert.equal(0, eng._state:get("world/tick"))
+
+    -- One autonomous turn → ticker-fn runs → tick increments
+    eng:autonomous_turn()
+    assert.equal(1, eng._state:get("world/tick"))
+
+    -- Another autonomous turn
+    eng:autonomous_turn()
+    assert.equal(2, eng._state:get("world/tick"))
+  end)
+end)

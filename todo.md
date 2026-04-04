@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 843 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
+**Phase 7/8 in progress** — 855 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -29,7 +29,9 @@ Milestone goals are marked **M**.
 - Lua interop API (`lib/storybase.lua`): sb.load/from_source, game:init/render/choose/call/eval/get/set/tick/save/load/on
 - Integration scenarios 1-7 (village walk, combat, guarded shop, save/load, random seeds, schedule, actor messaging)
 - Fixed engine seed: `engine_mod.new(gt, {seed=N})` now applies math.randomseed(N)
-- Tests: +102 new tests (741→843)
+- `storybase extract-symbols <file>` CLI command — walks typed AST, groups SYMBOL_LIT by write target, suggests enum type declarations
+- `compiler.parse_and_check` / `parse_and_check_file` — new pipeline entry point returning typed AST (stops before codegen), used by extract-symbols
+- Tests: +114 new tests (741→855)
 
 **Remaining gaps (Phase 7+):**
 - Import/resolve imported names — Phase 7
@@ -738,19 +740,20 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 
 ### Lua Interop (`lib/storybase.lua`)
 
-- [ ] `sb.load(file)` → game object
-- [ ] `game:call(fn_name, arg1, ...)` — invoke transaction function
-- [ ] `game:get(path)` → current value
-- [ ] `game:find(family, clause_table)` → list of matching keys
-- [ ] `game:on(event_name, handler_fn)` — subscribe to debug/presentation events
-- [ ] `game:choose(index)` — dispatch player choice by visible index
-- [ ] `game:eval(expr_string)` → value (pure expressions only)
-- [ ] `game:counterfactual(opts, fn)` → GameState
-- [ ] `game:register_bounded(name, lua_fn)` — register bounded computation handler
+- [x] `sb.load(file)` → game object (2026-04-04)
+- [x] `sb.from_source(src, name)` → game object (2026-04-04)
+- [x] `game:call(fn_name, arg1, ...)` — invoke transaction function (2026-04-04)
+- [x] `game:get(path)` → current value (2026-04-04)
+- [ ] `game:find(family, clause_table)` → list of matching keys — deferred to Phase 8
+- [x] `game:on(event_name, handler_fn)` — subscribe to debug/presentation events (2026-04-04)
+- [x] `game:choose(index)` — dispatch player choice by visible index (2026-04-04)
+- [x] `game:eval(expr_string)` → value (pure expressions only) (2026-04-04)
+- [ ] `game:counterfactual(opts, fn)` → GameState — deferred to Phase 8
+- [x] `game:register_bounded(name, lua_fn)` — register bounded computation handler (2026-04-04)
 
 ### CLI Polish
 
-- [ ] `storybase extract-symbols <file>` — scan symbol literals, output candidate `type` declaration
+- [x] `storybase extract-symbols <file>` — scan symbol literals, output candidate `type` declaration (2026-04-04)
 - [ ] `storybase compile --production` — emit production build (strips debug-only content)
 - [ ] `storybase run --seed N` — fix random seed for reproducible runs
 - [ ] `storybase compact <save.log>` — emit snapshot + delta log to reduce replay time
