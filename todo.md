@@ -36,6 +36,7 @@ Milestone goals are marked **M**.
 - `game:counterfactual(fn)` Lua interop — isolated branch, fn mutates copy, returns frozen snapshot
 - `log:query_at(path, time)` — seq-number and axis-table time bounds implemented
 - Import resolver: `import "file.sb"` splices declarations before checker, with cycle detection (IMPORT_CYCLE error), transitive imports
+- Demo games: `demo_games.md` spec written; `demo01_wanderer.sb` and `demo02_merchant.sb` implemented and runnable
 - Tests: +148 new tests (741→889)
 
 **Remaining gaps (Phase 7+):**

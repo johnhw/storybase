@@ -1,0 +1,121 @@
+# demo02_merchant.sb
+# The Merchant -- buy low, sell high in a fantasy market.
+#
+# Features demonstrated:
+#   type declarations (enum)
+#   multiple state paths with different types (Int, Symbol)
+#   named transaction functions (fn)
+#   choice guards [condition]
+#   match expression
+#   if/else conditional
+#   inc! and dec! mutations
+#
+# Run with:  storybase run demos/demo02_merchant.sb
+
+module merchant
+  version: 1.0
+
+engine-config:
+  entry-scene: market
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+type Goods = herbs | iron | silk | empty
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state merchant:
+  gold:   Int(0, 9999) = 100
+  item:   Goods = 'empty
+
+# Prices fluctuate based on which town the merchant visits.
+state market:
+  herb-price: Int(1, 50) = 8
+  iron-price: Int(1, 50) = 15
+  silk-price: Int(1, 50) = 30
+  sell-bonus: Int(0, 20) = 0
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+fn buy-herbs:
+  dec! merchant/gold market/herb-price
+  set! merchant/item 'herbs
+
+fn buy-iron:
+  dec! merchant/gold market/iron-price
+  set! merchant/item 'iron
+
+fn buy-silk:
+  dec! merchant/gold market/silk-price
+  set! merchant/item 'silk
+
+fn sell-herbs:
+  inc! merchant/gold market/herb-price * 2 + market/sell-bonus
+  set! merchant/item 'empty
+
+fn sell-iron:
+  inc! merchant/gold market/iron-price * 2 + market/sell-bonus
+  set! merchant/item 'empty
+
+fn sell-silk:
+  inc! merchant/gold market/silk-price * 2 + market/sell-bonus
+  set! merchant/item 'empty
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene market:
+  You are at the market.
+  Gold: {merchant/gold}. Carrying: {merchant/item}.
+  Herb price: {market/herb-price}. Iron price: {market/iron-price}. Silk price: {market/silk-price}.
+  * [merchant/gold >= market/herb-price and merchant/item = 'empty] Buy herbs ({market/herb-price}g)
+    buy-herbs
+    -> market
+  * [merchant/gold >= market/iron-price and merchant/item = 'empty] Buy iron ({market/iron-price}g)
+    buy-iron
+    -> market
+  * [merchant/gold >= market/silk-price and merchant/item = 'empty] Buy silk ({market/silk-price}g)
+    buy-silk
+    -> market
+  * [merchant/item != 'empty] Travel to port town to sell
+    -> port
+  * Stay home and count gold
+    -> end-scene
+
+scene port:
+  You arrive at the busy port town.
+  Merchants here pay a premium for goods.
+  Gold: {merchant/gold}. Carrying: {merchant/item}.
+  Port bonus: +{market/sell-bonus} gold.
+  * [merchant/item = 'herbs] Sell herbs here
+    set! market/sell-bonus 5
+    sell-herbs
+    set! market/sell-bonus 0
+    -> market
+  * [merchant/item = 'iron] Sell iron here
+    set! market/sell-bonus 5
+    sell-iron
+    set! market/sell-bonus 0
+    -> market
+  * [merchant/item = 'silk] Sell silk here
+    set! market/sell-bonus 5
+    sell-silk
+    set! market/sell-bonus 0
+    -> market
+  * Return to market without selling
+    -> market
+
+scene end-scene:
+  You retire from trading.
+  Final gold: {merchant/gold}.
+  if merchant/gold >= 200:
+    A wealthy merchant indeed.
+  else:
+    You could have done better.

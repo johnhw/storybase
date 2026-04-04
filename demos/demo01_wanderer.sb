@@ -1,0 +1,63 @@
+# demo01_wanderer.sb
+# The Wanderer — a simple linear journey through three locations.
+#
+# Features demonstrated:
+#   module / engine-config / entry-scene
+#   state (Int scalar)
+#   scene with narration text
+#   -> (goto) scene transitions
+#   inc! mutation
+#   Inline expressions {expr} in narration
+#
+# Run with:  storybase run demos/demo01_wanderer.sb
+
+module wanderer
+  version: 1.0
+
+engine-config:
+  entry-scene: village
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+# Track how many new locations the wanderer has visited.
+state world:
+  visited: Int(0, 99) = 0
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene village:
+  You stand at the edge of a quiet village.
+  Smoke rises from the chimneys and children play in the dusty streets.
+  You have visited {world/visited} location(s) so far.
+  * Leave the village and head into the forest.
+    inc! world/visited 1
+    -> forest
+
+scene forest:
+  The forest is cool and dark.
+  Shafts of light pierce the canopy above.
+  A narrow path winds upward toward the distant mountains.
+  You have visited {world/visited} location(s) so far.
+  * Follow the path up into the mountain pass.
+    inc! world/visited 1
+    -> mountain-pass
+
+scene mountain-pass:
+  The air is thin and cold here.
+  Loose stones skitter beneath your boots.
+  Far below the village is just a smudge of grey smoke.
+  You have visited {world/visited} location(s) so far.
+  * Climb the final stretch to the summit.
+    inc! world/visited 1
+    -> summit
+
+scene summit:
+  You stand at the top of the world.
+  The wind howls across the bare rock.
+  Snow-capped peaks stretch to every horizon.
+  You have visited all {world/visited} locations on your journey.
+  The journey is complete.
