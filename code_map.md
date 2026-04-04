@@ -450,10 +450,24 @@ rng:weighted(weights, list) → value
 
 ## lib/
 
-### `lib/storybase.lua` (113 lines)
+### `lib/storybase.lua` (~230 lines)
 Public Lua API for embedding StoryBase in another Lua program.
-- `M.load(filepath)` → game object
-- `M._make_game(game_table)` → game object
+- `M.load(filepath)` → game object (compiles from file)
+- `M.from_source(source, filename?)` → game object (compiles from string)
+- `M._make_game(game_table)` → game object with methods:
+  - `game:init()` — initialise from defaults; must call before anything else
+  - `game:render()` → narration list, choices list
+  - `game:current_scene()` → scene name string
+  - `game:choose(index)` → bool; dispatch player choice + post_action
+  - `game:call(fn_name, ...)` → retval; invoke named function with raw Lua args
+  - `game:eval(expr_string)` → value, err; evaluate pure expression string
+  - `game:get(path)` → value; read state path
+  - `game:set(path, value)` — write state path directly
+  - `game:tick()` — one autonomous turn (post_action only)
+  - `game:save(filepath)` → ok, err; write save file
+  - `game:load(filepath)` → ok, err; restore from save file
+  - `game:on(event, handler)` — subscribe to "choice", "mutation", "scene-change"
+  - `game:register_bounded(name, fn)` — register bounded computation handler
 
 ---
 
@@ -464,7 +478,8 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/ast_spec.lua` | AST node constructors |
 | `tests/compiler/lexer_spec.lua` | Tokenizer |
 | `tests/compiler/parser_spec.lua` | Parser (includes INDEX_EXPR tests) |
-| `tests/compiler/checker_spec.lua` | Checker passes 1-4, perceives violation |
+| `tests/compiler/checker_spec.lua` | Checker passes 1-6 (schema, types, purity, perceives, boundary, write-sets) |
+| `tests/lib/storybase_spec.lua` | Public Lua interop API (sb.load, from_source, game object methods) |
 | `tests/compiler/codegen_spec.lua` | Game table emission |
 | `tests/runtime/state_spec.lua` | Store CRUD, clamping, undo, spawn/despawn |
 | `tests/runtime/eval_spec.lua` | Expr/stmt evaluation, INDEX_EXPR eval |

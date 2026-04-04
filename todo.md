@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7 in progress** — 800 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
+**Phase 7/8 in progress** — 819 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -26,7 +26,8 @@ Milestone goals are marked **M**.
 - `code_map.md` created — comprehensive codebase navigation index
 - Checker pass 5: discrete/superficial boundary enforcement — SUPERFICIAL_IN_COND + RANDOM_SUPERFICIAL warnings
 - Checker pass 6: write-set analysis — WRITE_UNTYPED_VAR warnings, WRITE_DYNAMIC_PATH errors, write_set annotation on FN_DECL/SCENE_DECL; loop-var SymbolOf inference for `for v in (path-list family)`
-- Tests: +59 new tests (741→800)
+- Lua interop API (`lib/storybase.lua`): sb.load/from_source, game:init/render/choose/call/eval/get/set/tick/save/load/on
+- Tests: +78 new tests (741→819)
 
 **Remaining gaps (Phase 7+):**
 - Import/resolve imported names — Phase 7
