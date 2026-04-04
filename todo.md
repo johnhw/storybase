@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 894 tests passing.
+**Phase 7/8 in progress** — 897 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -44,12 +44,18 @@ Milestone goals are marked **M**.
 - Demo games: `demo05_siege.sb` implemented and runnable (time-model, actor, send!, behavior/inbox, schedule, cancel-schedule!, verify-always)
 - Tests: +153 new tests (741→894)
 
-**Remaining gaps (Phase 7+):**
-- `as Alias` namespacing for imports (currently flat merge) — Phase 8
-- Log snapshot + delta replay — Phase 8
-- Conflict logging in transaction log — Phase 8
-- `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
-- Production build mode (strip debug-only declarations) — Phase 8
+**Completed this session (Phase 8):**
+- Production build mode: `compiler.compile(src, file, {production=true})` strips watches + verifies from game table; `--production` CLI flag now works; `BOOL_FLAGS` set in parse_args prevents flag eating positional args
+- Conflict logging in transaction log: `actors.lua:apply_deferred` logs `kind="conflict"` entries when higher-priority actor already claimed a set/clear path
+- Schedule events in transaction log: `scheduler.lua:tick` logs `kind="schedule_fired"` on fire; `sched:cancel` logs `kind="cancel_schedule"` on cancel
+- `state.lua:replay` updated to skip metadata entries (`checkpoint`, `conflict`, `schedule_fired`, `cancel_schedule`) so they don't corrupt state reconstruction
+- Tests: +3 codegen production mode tests (897 total)
+
+**Remaining gaps (Phase 8):**
+- `as Alias` namespacing for imports (currently flat merge)
+- Hygienic macro system (`macro` declarations, expansion before type-check)
+- Search engine coroutine time-budget (wall-clock limit per search call)
+- Tile grid extension (`defgrid`, spatial queries)
 
 ---
 

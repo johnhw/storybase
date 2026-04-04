@@ -79,8 +79,12 @@ local function diag_summary(diags)
   return table.concat(parts, ", ")
 end
 
+-- Flags that are boolean (do not consume the next token as a value).
+local BOOL_FLAGS = { production = true }
+
 --- Parse a flat argument list into {flags, positional}.
 --- Flags are --name or --name value pairs; positional are the rest.
+--- Known boolean flags (e.g. --production) never consume the following token.
 local function parse_args(args)
   local flags = {}
   local positional = {}
@@ -89,8 +93,12 @@ local function parse_args(args)
     local a = args[i]
     if a:sub(1, 2) == "--" then
       local key = a:sub(3)
-      -- Peek at next arg: if it doesn't start with "--", treat as value
-      if args[i + 1] and args[i + 1]:sub(1, 2) ~= "--" then
+      if BOOL_FLAGS[key] then
+        -- Boolean flag: no value token
+        flags[key] = true
+        i = i + 1
+      elseif args[i + 1] and args[i + 1]:sub(1, 2) ~= "--" then
+        -- Value flag: next token is the value
         flags[key] = args[i + 1]
         i = i + 2
       else
@@ -121,7 +129,8 @@ local function cmd_compile(args)
     return 1
   end
 
-  local game_table, diags = compiler.compile_file(filepath)
+  local compile_opts = { production = (flags["production"] == true) }
+  local game_table, diags = compiler.compile_file(filepath, compile_opts)
   print_diags(diags)
 
   if diags:has_errors() then
@@ -166,7 +175,8 @@ local function cmd_run(args)
     return 1
   end
 
-  local game_table, diags = compiler.compile_file(filepath)
+  local compile_opts = { production = (flags["production"] == true) }
+  local game_table, diags = compiler.compile_file(filepath, compile_opts)
   print_diags(diags)
   if diags:has_errors() then
     io.stderr:write("Compilation failed; cannot run.\n")

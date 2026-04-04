@@ -115,7 +115,8 @@ end
 ---@param source   string  Source text of the .sb file
 ---@param filename string  File name used in diagnostic messages
 ---@return table?, table
-function M.compile(source, filename)
+function M.compile(source, filename, opts)
+  opts = opts or {}
   local diags = ast.new_accum()
 
   -- ── Pass 1: Lex ──────────────────────────────────────────────
@@ -147,7 +148,7 @@ function M.compile(source, filename)
   end
 
   -- ── Pass 4: Codegen ──────────────────────────────────────────
-  local game_table, gen_diags = codegen.emit(typed_ast)
+  local game_table, gen_diags = codegen.emit(typed_ast, opts)
   diags:push_all(gen_diags)
   if diags:has_errors() then
     return nil, diags
@@ -209,7 +210,7 @@ end
 ---
 ---@param filepath string  Absolute or relative path to the .sb file
 ---@return table?, table
-function M.compile_file(filepath)
+function M.compile_file(filepath, opts)
   local diags = ast.new_accum()
 
   local f, err = io.open(filepath, "r")
@@ -232,7 +233,7 @@ function M.compile_file(filepath)
     return nil, diags
   end
 
-  return M.compile(source, filepath)
+  return M.compile(source, filepath, opts)
 end
 
 return M

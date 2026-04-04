@@ -255,14 +255,35 @@ function M.new(state, log)
 
       if c.op == "set" then
         if not written[c.path] then
-          written[c.path] = true
+          written[c.path] = { actor = c.actor, priority = c.priority }
           self._state:set(c.path, c.value, tag)
+        elseif self._log then
+          -- Log the conflict: this actor's write was discarded
+          local winner = written[c.path]
+          self._log:append({
+            kind          = "conflict",
+            path          = c.path,
+            fn            = tag,
+            winner_actor  = winner.actor,
+            loser_actor   = c.actor,
+            loser_value   = c.value,
+          })
         end
 
       elseif c.op == "clear" then
         if not written[c.path] then
-          written[c.path] = true
+          written[c.path] = { actor = c.actor, priority = c.priority }
           self._state:clear(c.path, tag)
+        elseif self._log then
+          local winner = written[c.path]
+          self._log:append({
+            kind          = "conflict",
+            path          = c.path,
+            fn            = tag,
+            winner_actor  = winner.actor,
+            loser_actor   = c.actor,
+            loser_value   = nil,
+          })
         end
 
       elseif c.op == "inc" then

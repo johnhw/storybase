@@ -588,3 +588,52 @@ scene main:
     assert.equal(13, result)  -- 10 + 3 (world/x)
   end)
 end)
+
+-- ── Production build mode ────────────────────────────────────────────────────
+
+describe("codegen — production build mode", function()
+  local src = [[
+module t
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  hp: Int(0, 100) = 50
+watch world/hp "HP"
+verify "hp stays positive":
+  verify-always world/hp >= 0
+scene main:
+  HP is {world/hp}.
+  * Done
+    -> main
+]]
+
+  it("dev build includes watches and verifies", function()
+    local tokens = lexer.tokenize(src, "t.sb")
+    local tree   = parser.parse(tokens, "t.sb")
+    local typed  = checker.check(tree, "t.sb")
+    local gt     = codegen.emit(typed)
+    assert.equal(1, #gt.watches)
+    assert.equal(1, #gt.verifies)
+    assert.is_false(gt.production)
+  end)
+
+  it("production build strips watches and verifies", function()
+    local tokens = lexer.tokenize(src, "t.sb")
+    local tree   = parser.parse(tokens, "t.sb")
+    local typed  = checker.check(tree, "t.sb")
+    local gt     = codegen.emit(typed, {production=true})
+    assert.equal(0, #gt.watches)
+    assert.equal(0, #gt.verifies)
+    assert.is_true(gt.production)
+  end)
+
+  it("production build preserves fns and scenes", function()
+    local tokens = lexer.tokenize(src, "t.sb")
+    local tree   = parser.parse(tokens, "t.sb")
+    local typed  = checker.check(tree, "t.sb")
+    local gt     = codegen.emit(typed, {production=true})
+    assert.is_not_nil(gt.scenes["main"])
+    assert.is_not_nil(gt.schema)
+  end)
+end)

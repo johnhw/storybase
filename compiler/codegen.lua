@@ -582,7 +582,12 @@ end
 ---
 ---@param typed_ast table  Typed AST root (with .symtab attached by checker)
 ---@return table, table
-function M.emit(typed_ast)
+--- Emit a compiled game table from a typed AST.
+---@param typed_ast table  The type-checked AST (output of checker)
+---@param opts      table? Optional: {production=true} strips debug-only content
+---@return table, table    game_table, diags
+function M.emit(typed_ast, opts)
+  opts = opts or {}
   local diags   = {}
   local decls   = typed_ast.decls or {}
   local symtab  = typed_ast.symtab or { types = {}, states = {}, relations = {} }
@@ -625,10 +630,12 @@ function M.emit(typed_ast)
     scenes     = emit_scenes(decls),
     actors     = emit_actors(decls),
     schedules  = emit_schedules(decls),
-    verifies   = emit_verifies(decls),
-    watches    = emit_watches(decls),
+    -- In production builds, strip debug-only content
+    verifies   = opts.production and {} or emit_verifies(decls),
+    watches    = opts.production and {} or emit_watches(decls),
     migrations = emit_migrations(decls),
     bounded    = emit_bounded(decls),
+    production = opts.production or false,
   }
 
   return game_table, diags

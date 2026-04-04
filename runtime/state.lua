@@ -561,11 +561,22 @@ end
 --- Also restores the engine time clock from the last entry that has a time field.
 ---@param store table  state store (already init_defaults'd)
 ---@param entries table  list of log entry tables (from log:entries())
+-- Entry kinds that are informational only and should not affect state during replay.
+local SKIP_ON_REPLAY = {
+  checkpoint      = true,
+  conflict        = true,
+  schedule_fired  = true,
+  cancel_schedule = true,
+}
+
 function M.replay(store, entries)
   for _, e in ipairs(entries) do
-    -- Apply the mutation: set path to the recorded new value.
-    -- e["new"] == nil correctly removes paths (e.g. after despawn).
-    store._cache[e.path] = e["new"]
+    -- Skip metadata-only entries that carry no state mutation.
+    if not SKIP_ON_REPLAY[e.kind] and e.path ~= nil then
+      -- Apply the mutation: set path to the recorded new value.
+      -- e["new"] == nil correctly removes paths (e.g. after despawn).
+      store._cache[e.path] = e["new"]
+    end
     -- Restore time clock from the most recent entry that has a time field
     if type(e.time) == "table" then
       for k, v in pairs(e.time) do

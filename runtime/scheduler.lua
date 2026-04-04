@@ -118,9 +118,19 @@ function M.new(state, log)
 
       -- ── Fire ────────────────────────────────────────────────
       if should_fire then
+        if self._log then
+          self._log:append({
+            kind = "schedule_fired",
+            fn   = "schedule:" .. name,
+            path = nil,
+            old  = nil,
+            new  = nil,
+            time = self._state:get_time(),
+          })
+        end
         local ctx    = eval.new_ctx(self._state, fns, "schedule:" .. name)
         local ok, _err = pcall(eval.eval_stmts, ss.body, ctx)
-        local _ = ok  -- result unused; errors are silent (log in future)
+        local _ = ok  -- result unused; errors are silent
       end
     end
   end
@@ -135,6 +145,16 @@ function M.new(state, log)
   --- Cancel a named schedule.
   ---@param name string
   function sched:cancel(name)
+    if self._static[name] and self._log then
+      self._log:append({
+        kind = "cancel_schedule",
+        fn   = "cancel-schedule!",
+        path = nil,
+        old  = nil,
+        new  = nil,
+        schedule_name = name,
+      })
+    end
     self._static[name] = nil
   end
 
