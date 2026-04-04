@@ -521,11 +521,11 @@ A separate types.lua is not needed for Phase 1.
 - [ ] Wall-clock time budget per search call (configurable) — Phase 8
 - [x] `can-reach? <condition>` — Bool (2026-04-03)
 - [x] `can-reach?` with `depth:` (2026-04-03)
-- [ ] `find-path <condition>` — action sequence or nil — Phase 7
+- [x] `find-path <condition>` — action sequence or nil (2026-04-03)
 - [x] `verify-always <condition>` — Bool (holds in all BFS states to depth) (2026-04-03)
-- [ ] `find-counterexample <condition>` — failing state + path, or nil — Phase 7
-- [ ] `probability <condition> depth: N` — Float — Phase 8
-- [ ] `optimal-path <condition> by: min-turns` — optimal action sequence
+- [x] `find-counterexample <condition>` — failing state + path, or nil (2026-04-03)
+- [x] `probability <condition> depth: N` — Float (2026-04-03)
+- [x] `optimal-path <condition> by: min-turns` — optimal action sequence (2026-04-03)
 
 ### Verify Blocks
 
@@ -559,8 +559,8 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/runtime/query_spec.lua` — `find`/`where`/`order-by`/`limit`/`count`, relation queries (2026-04-03)
 - [x] `tests/compiler/parser_spec.lua` — find expression parsing, schedule! mutation (2026-04-03)
 - [x] `tests/compiler/codegen_spec.lua` — bounded declarations (2026-04-03)
-- [ ] `tests/test06_actors.sb` verify blocks: `from-any-state`/`when` blocks fully validated end-to-end — Phase 7
-- [ ] `tests/runtime/search_spec.lua` — `find-path`, `probability` — Phase 7
+- [x] `tests/test06_actors.sb` verify blocks: `from-any-state`/`when` blocks fully validated — `storybase verify tests/test06_actors.sb` passes (2026-04-04)
+- [x] `tests/runtime/search_spec.lua` — `find-path`, `probability`, `optimal_path` (2026-04-03)
 - [ ] `tests/fuzz/search_fuzz_spec.lua` — state-space computed size ≥ actual reachable count — Phase 8
 
 **M Milestone:** `storybase verify tests/test05_log_and_time.sb` ✅ and `storybase verify tests/test06_actors.sb` (Phase 6, needs `can-reach?`).
@@ -603,7 +603,7 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `bounded` declaration parsing: `returns:`, `distribution:`, `reads:`, `lua:` (2026-04-03)
 - [x] Codegen emits `game_table.bounded` table with declaration metadata (2026-04-03)
 - [x] Call dispatch in eval.lua: calls `game._bounded_handlers[name](arg, snap)` (2026-04-03)
-- [ ] Lua handler registration via `game:register_bounded(name, fn)` public API — Phase 7
+- [x] Lua handler registration via `game:register_bounded(name, fn)` public API (2026-04-04, lib/storybase.lua)
 - [ ] Log result as a random-draw entry `{source, result, seed}` — Phase 8
 - [ ] `uses-bounded` tag auto-applied to any function calling a `bounded` computation
 - [ ] Search: branch over `uniform` distribution
