@@ -596,3 +596,159 @@ fn randomize:
   end)
 
 end)
+
+-- ============================================================
+-- Pass 6 — Write-set analysis
+-- ============================================================
+
+describe("checker pass 6 — write-set analysis", function()
+
+  -- Helper: compile and return the fn_decl node with the given name
+  local function get_fn(src, fn_name)
+    local typed, _ = compile(src)
+    for _, node in ipairs(typed.decls or {}) do
+      if node.kind == ast.K.FN_DECL and node.name == fn_name then
+        return node
+      end
+    end
+    return nil
+  end
+
+  -- Helper: compile and return the scene_decl node with the given name
+  local function get_scene(src, scene_name)
+    local typed, _ = compile(src)
+    for _, node in ipairs(typed.decls or {}) do
+      if node.kind == ast.K.SCENE_DECL and node.name == scene_name then
+        return node
+      end
+    end
+    return nil
+  end
+
+  -- Helper: collect only warnings with the given code
+  local function get_warnings(src, code)
+    local _, diags = compile(src)
+    local found = {}
+    for _, d in ipairs(diags) do
+      if d.level == "warning" and d.code == code then
+        found[#found+1] = d
+      end
+    end
+    return found
+  end
+
+  it("annotates fn write_set with a static set! path", function()
+    local fn = get_fn([[
+state world:
+  gold: Int(0, 9999) = 0
+fn earn:
+  set! world/gold 100
+]], "earn")
+    assert.is_not_nil(fn)
+    assert.is_not_nil(fn.write_set)
+    assert.is_true(fn.write_set["world/gold"] == true)
+  end)
+
+  it("annotates fn write_set with multiple mutation paths", function()
+    local fn = get_fn([[
+state player:
+  hp:   Int(0, 100) = 100
+  gold: Int(0, 999) = 0
+fn heal-and-pay:
+  set! player/hp   50
+  set! player/gold 10
+]], "heal-and-pay")
+    assert.is_not_nil(fn)
+    assert.is_true(fn.write_set["player/hp"]   == true)
+    assert.is_true(fn.write_set["player/gold"] == true)
+  end)
+
+  it("annotates fn write_set with inc!/dec! paths", function()
+    local fn = get_fn([[
+state world:
+  counter: Int(0, 9999) = 0
+fn tick:
+  inc! world/counter 1
+]], "tick")
+    assert.is_not_nil(fn)
+    assert.is_true(fn.write_set["world/counter"] == true)
+  end)
+
+  it("annotates fn write_set with spawn! family wildcard", function()
+    local fn = get_fn([[
+state npcs/{npc}: Int(0, 100)  max: 8
+fn do-spawn:
+  spawn! npcs 'bob 42
+]], "do-spawn")
+    assert.is_not_nil(fn)
+    assert.is_true(fn.write_set["npcs/*"] == true)
+  end)
+
+  it("annotates fn write_set with despawn! family wildcard", function()
+    local fn = get_fn([[
+state npcs/{npc}: Int(0, 100)  max: 8
+fn do-despawn:
+  despawn! npcs 'bob
+]], "do-despawn")
+    assert.is_not_nil(fn)
+    assert.is_true(fn.write_set["npcs/*"] == true)
+  end)
+
+  it("infers wildcard for {var} from for-in path-list loop", function()
+    local SRC = [[
+state npcs/{npc}: Int(0, 100)  max: 8
+fn reset-all:
+  for npc in (path-list npcs):
+    set! npcs/{npc} 0
+]]
+    local fn = get_fn(SRC, "reset-all")
+    assert.is_not_nil(fn)
+    assert.is_true(fn.write_set["npcs/*"] == true)
+    -- No WRITE_UNTYPED_VAR since var is loop-bound
+    local warnings = get_warnings(SRC, ast.E.WRITE_UNTYPED_VAR)
+    assert.equal(0, #warnings)
+  end)
+
+  it("emits WRITE_UNTYPED_VAR for unbound {var} in interp path", function()
+    local warnings = get_warnings([[
+state npcs/{npc}: Int(0, 100)  max: 8
+fn bad-write key:
+  set! npcs/{key} 0
+]], ast.E.WRITE_UNTYPED_VAR)
+    assert.is_true(#warnings >= 1)
+    assert.is_true(warnings[1].message:find("key") ~= nil)
+  end)
+
+  it("annotates scene write_set from choice bodies", function()
+    local sc = get_scene([[
+state world:
+  score: Int(0, 9999) = 0
+scene main:
+  * Score
+    inc! world/score 1
+    -> main
+  * Stop
+    -> end-scene
+scene end-scene:
+  Done.
+]], "main")
+    assert.is_not_nil(sc)
+    assert.is_not_nil(sc.write_set)
+    assert.is_true(sc.write_set["world/score"] == true)
+  end)
+
+  it("write_set is empty for a fn with no mutations", function()
+    local fn = get_fn([[
+state world:
+  val: Int(0, 9) = 0
+fn read-only:
+  let x = world/val:
+    pass
+]], "read-only")
+    assert.is_not_nil(fn)
+    local count = 0
+    for _ in pairs(fn.write_set or {}) do count = count + 1 end
+    assert.equal(0, count)
+  end)
+
+end)

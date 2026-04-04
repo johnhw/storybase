@@ -7,8 +7,8 @@
 --             record field defaults are kind-correct, Int bounds well-formed,
 --             with-mixin splicing and conflict detection.
 --
--- Passes 3-6 (pure/transaction inference, write-set analysis, state-space
--- computation, contract validation) are not yet implemented.
+-- Pass 6 — Write-set analysis: compute the set of state paths each fn/scene
+--           can write to; emit WRITE_UNTYPED_VAR / WRITE_DYNAMIC_PATH.
 --
 -- The checker annotates AST nodes in-place (adds a `resolved` field to
 -- TYPE_NAMED nodes) and returns the same tree with diagnostics.
@@ -714,6 +714,186 @@ local function pass5_check_boundary(acc, symtab_data, program)
 end
 
 -- ============================================================
+-- Pass 6 — Write-set analysis
+-- ============================================================
+
+--- Mutation node kinds that carry a `path` field.
+local WRITE_PATH_MUTS = {
+  [ast.K.SET_MUT]    = true, [ast.K.INC_MUT]    = true,
+  [ast.K.DEC_MUT]    = true, [ast.K.ADD_MUT]    = true,
+  [ast.K.REMOVE_MUT] = true, [ast.K.CLEAR_MUT]  = true,
+  [ast.K.PUSH_MUT]   = true, [ast.K.POP_MUT]    = true,
+}
+
+--- Resolve a path node into write-pattern strings, given the current variable env.
+--- env: { var_name → "family:X" } for loop-bound SymbolOf vars.
+--- Returns a table { pattern_string → true }.
+--- Emits WRITE_UNTYPED_VAR warning for unresolved {var}, WRITE_DYNAMIC_PATH error
+--- for non-path values in write position.
+local function resolve_write_path(path_node, env, acc)
+  if not path_node then return {} end
+  local k = ast.K
+  local result = {}
+
+  if path_node.kind == k.PATH_EXPR then
+    local segs = path_node.segments or {}
+    local parts = {}
+    for _, s in ipairs(segs) do
+      if type(s) == "string" then
+        parts[#parts+1] = s
+      else
+        -- Unexpected non-string segment in PATH_EXPR (shouldn't happen)
+        parts[#parts+1] = "?"
+      end
+    end
+    result[table.concat(parts, "/")] = true
+
+  elseif path_node.kind == k.INTERP_PATH then
+    local segs = path_node.segments or {}
+    local parts = {}
+    for _, s in ipairs(segs) do
+      if type(s) == "string" then
+        parts[#parts+1] = s
+      elseif type(s) == "table" and s.interp then
+        local var = s.interp
+        local binding = env and env[var]
+        if binding and binding:sub(1, 7) == "family:" then
+          parts[#parts+1] = "*"
+        else
+          table.insert(acc.diags, ast.warning(
+            ast.E.WRITE_UNTYPED_VAR,
+            "interpolated variable '{" .. var .. "}' in write path has no declared entity-family type",
+            path_node.pos,
+            "annotate the variable's type as SymbolOf(family) to enable static write-set inference"))
+          parts[#parts+1] = "*"
+        end
+      end
+    end
+    result[table.concat(parts, "/")] = true
+
+  else
+    -- A computed or non-path node in write position
+    table.insert(acc.diags, ast.error(
+      ast.E.WRITE_DYNAMIC_PATH,
+      "write position contains a dynamic or computed path expression",
+      path_node.pos,
+      "only static paths (player/health) and {var} interpolations are allowed in mutation targets"))
+  end
+
+  return result
+end
+
+--- Recursively collect write-path patterns from a statement/expression subtree.
+--- Adds patterns to write_set (table { pattern → true }).
+--- env: scoped loop-variable → family bindings.
+local function collect_writes(node, write_set, env, acc)
+  if not node or type(node) ~= "table" or not node.kind then return end
+  local k = ast.K
+
+  if WRITE_PATH_MUTS[node.kind] and node.path then
+    for pat in pairs(resolve_write_path(node.path, env, acc)) do
+      write_set[pat] = true
+    end
+    -- Recurse into value/amount in case they contain nested lambdas, etc.
+    collect_writes(node.value,  write_set, env, acc)
+    collect_writes(node.amount, write_set, env, acc)
+    return
+
+  elseif node.kind == k.SPAWN_MUT then
+    if type(node.family) == "string" then
+      write_set[node.family .. "/*"] = true
+    end
+    return
+
+  elseif node.kind == k.DESPAWN_MUT then
+    if type(node.family) == "string" then
+      write_set[node.family .. "/*"] = true
+    end
+    return
+
+  elseif node.kind == k.FOR_STMT then
+    -- Extend env: detect `for var in (path-list family)`
+    local new_env = {}
+    for vk, vv in pairs(env) do new_env[vk] = vv end
+
+    local iter = node.iter
+    if iter and iter.kind == k.FN_CALL and iter.name == "path-list" then
+      local args = iter.args or {}
+      if #args == 1 and args[1] then
+        local arg = args[1]
+        -- Family name may arrive as PATH_EXPR(["npcs"]) or fn_call{name="npcs", args={}}
+        local family_name
+        if arg.kind == k.PATH_EXPR then
+          local segs = arg.segments or {}
+          if #segs == 1 and type(segs[1]) == "string" then
+            family_name = segs[1]
+          end
+        elseif arg.kind == k.FN_CALL and #(arg.args or {}) == 0 then
+          family_name = arg.name
+        end
+        if family_name then
+          new_env[node.var] = "family:" .. family_name
+        end
+      end
+    end
+
+    for _, stmt in ipairs(node.body or {}) do
+      collect_writes(stmt, write_set, new_env, acc)
+    end
+    return
+  end
+
+  -- Generic recursive descent
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        collect_writes(child, write_set, env, acc)
+      end
+    end
+  end
+  local NODE_FIELDS = { "condition", "expr", "value", "amount", "iter" }
+  for _, field in ipairs(NODE_FIELDS) do
+    collect_writes(node[field], write_set, env, acc)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do collect_writes(a, write_set, env, acc) end
+  end
+end
+
+--- Pass 6: annotate every FN_DECL and SCENE_DECL with a `write_set` table.
+--- Also emits WRITE_UNTYPED_VAR / WRITE_DYNAMIC_PATH diagnostics.
+local function pass6_write_sets(acc, program)
+  local k = ast.K
+
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then
+      local ws = {}
+      for _, stmt in ipairs(node.body or {}) do
+        collect_writes(stmt, ws, {}, acc)
+      end
+      node.write_set = ws
+
+    elseif node.kind == k.SCENE_DECL then
+      local ws = {}
+      for _, stmt in ipairs(node.body or {}) do
+        collect_writes(stmt, ws, {}, acc)
+      end
+      for _, choice in ipairs(node.choices or {}) do
+        if choice.guard then
+          collect_writes(choice.guard, ws, {}, acc)
+        end
+        for _, stmt in ipairs(choice.body or {}) do
+          collect_writes(stmt, ws, {}, acc)
+        end
+      end
+      node.write_set = ws
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -735,6 +915,7 @@ function M.check(ast_root, filename)
   pass3_infer_purity(acc, ast_root)
   pass4_check_perceives(acc, ast_root)
   pass5_check_boundary(acc, symtab, ast_root)
+  pass6_write_sets(acc, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7 in progress** — 791 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
+**Phase 7 in progress** — 800 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -25,10 +25,10 @@ Milestone goals are marked **M**.
 - `optimal-path` Dijkstra search — search.lua + 3 tests (1-step optimal, nil unreachable, empty initial)
 - `code_map.md` created — comprehensive codebase navigation index
 - Checker pass 5: discrete/superficial boundary enforcement — SUPERFICIAL_IN_COND + RANDOM_SUPERFICIAL warnings
-- Tests: +50 new tests (741→791)
+- Checker pass 6: write-set analysis — WRITE_UNTYPED_VAR warnings, WRITE_DYNAMIC_PATH errors, write_set annotation on FN_DECL/SCENE_DECL; loop-var SymbolOf inference for `for v in (path-list family)`
+- Tests: +59 new tests (741→800)
 
 **Remaining gaps (Phase 7+):**
-- Checker: write-set analysis (pass 6) — Phase 7
 - Import/resolve imported names — Phase 7
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8
