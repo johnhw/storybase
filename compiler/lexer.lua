@@ -370,6 +370,11 @@ function M.tokenize(source, filename)
             -- Cannot happen: we checked is_alpha above
             break
           end
+        elseif next_ch == '*' then
+          -- Wildcard segment: npcs/*/health
+          adv()  -- consume '/'
+          adv()  -- consume '*'
+          table.insert(segments, '*')
         elseif next_ch == '{' then
           adv()  -- consume '/'
           -- Scan {ident} interpolation segment

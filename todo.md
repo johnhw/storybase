@@ -662,7 +662,7 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `tests/runtime/engine_spec.lua` — undo! reverts to checkpoint state (2026-04-03)
 - [x] `tests/runtime/engine_spec.lua` — undo! steps: N reverts N checkpoints (2026-04-03)
 - [x] `tests/runtime/engine_spec.lua` — undo! errors with no checkpoints (2026-04-03)
-- [ ] `tests/runtime/migrate_spec.lua` — transform (scalar and family wildcard) — TODO
+- [x] `tests/runtime/migrate_spec.lua` — transform (scalar and family wildcard) — done (2026-04-03)
 - [ ] Integration scenario 8: player dies, `undo!` restores pre-death state
 - [ ] Integration scenario 10: save → migrate → reload → state identical
 

@@ -250,3 +250,71 @@ scene main:
     assert.equals("drop",   gt.migrations[2].ops[1].op)
   end)
 end)
+
+-- ============================================================
+-- transform
+-- ============================================================
+
+describe("migration transform", function()
+  it("applies a scalar transform using the 'old' variable", function()
+    local src = [[
+module t
+  version: 1.0
+schema-version: 2
+engine-config:
+  entry-scene: main
+
+state world:
+  level: Int(0, 999) = 1
+
+migration 1 -> 2:
+  transform world/level:
+    fn old: old + 10
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local cache = { ["world/level"] = 5 }
+    local diags = migrate_mod.migrate(cache, gt.migrations, 1, 2, gt)
+    assert.equals(0, #(diags.errors or {}))
+    assert.equals(15, cache["world/level"])
+  end)
+
+  it("applies wildcard transform to all family members", function()
+    local src = [[
+module t
+  version: 1.0
+schema-version: 2
+engine-config:
+  entry-scene: main
+
+type Npc:
+  health: Int(0, 100) = 50
+
+state npcs/{npc}: Npc  max: 4
+
+migration 1 -> 2:
+  transform npcs/*/health:
+    fn old: old * 2
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local cache = {
+      ["npcs/guard/health"]      = 30,
+      ["npcs/blacksmith/health"] = 50,
+    }
+    local diags = migrate_mod.migrate(cache, gt.migrations, 1, 2, gt)
+    assert.equals(0, #(diags.errors or {}))
+    assert.equals(60, cache["npcs/guard/health"])
+    assert.equals(100, cache["npcs/blacksmith/health"])
+  end)
+end)
