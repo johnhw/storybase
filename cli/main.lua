@@ -225,10 +225,13 @@ end
 
 -- ── Command: compact ──────────────────────────────────────────
 
-local function cmd_compact(_args)
-  -- Phase 8 feature; not yet implemented.
-  io.stderr:write("storybase compact: not yet implemented\n")
-  return 1
+local function cmd_compact(args)
+  local ok, compact_cmd = pcall(require, "cli.compact_cmd")
+  if not ok then
+    io.stderr:write("error: could not load compact command: " .. tostring(compact_cmd) .. "\n")
+    return 1
+  end
+  return compact_cmd.run(args) or 0
 end
 
 -- ── Dispatch table ────────────────────────────────────────────

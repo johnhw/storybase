@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 862 tests passing.
+**Phase 7/8 in progress** — 869 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -31,7 +31,9 @@ Milestone goals are marked **M**.
 - Fixed engine seed: `engine_mod.new(gt, {seed=N})` now applies math.randomseed(N)
 - `storybase extract-symbols <file>` CLI command — walks typed AST, groups SYMBOL_LIT by write target, suggests enum type declarations
 - `compiler.parse_and_check` / `parse_and_check_file` — new pipeline entry point returning typed AST (stops before codegen), used by extract-symbols
-- Tests: +114 new tests (741→855)
+- `game:find(family, opts)` Lua interop — filters, sorts, limits, counts entity family keys
+- `storybase compact <game.sb> <save.log>` CLI — collapses full log into snapshot entries for fast replay
+- Tests: +128 new tests (741→869)
 
 **Remaining gaps (Phase 7+):**
 - Import/resolve imported names — Phase 7
@@ -755,8 +757,8 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 
 - [x] `storybase extract-symbols <file>` — scan symbol literals, output candidate `type` declaration (2026-04-04)
 - [ ] `storybase compile --production` — emit production build (strips debug-only content)
-- [ ] `storybase run --seed N` — fix random seed for reproducible runs
-- [ ] `storybase compact <save.log>` — emit snapshot + delta log to reduce replay time
+- [x] `storybase run --seed N` — fix random seed for reproducible runs (already wired via engine opts) (2026-04-04)
+- [x] `storybase compact <game.sb> <save.log>` — emit snapshot + delta log to reduce replay time (2026-04-04)
 - [ ] `storybase help` / `--help` on all subcommands
 
 ### Performance

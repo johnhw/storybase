@@ -434,10 +434,10 @@ rng:weighted(weights, list) → value
 
 ## cli/
 
-### `cli/main.lua` (284 lines)
+### `cli/main.lua` (~285 lines)
 - `M.main(argv)` — top-level dispatcher
-- Subcommands: `compile`, `run`, `verify`, `migrate`, `extract`, `version`
-- Flags: `--save` / `--load` for `run`
+- Subcommands: `compile`, `run`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
+- Flags: `--save` / `--load` / `--seed N` for `run`
 
 ### `cli/verify_cmd.lua` (79 lines)
 - `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
@@ -445,14 +445,18 @@ rng:weighted(weights, list) → value
 ### `cli/migrate_cmd.lua` (145 lines)
 - `M.run(args)` — load save file, run migrations, write output
 
-### `cli/extract_cmd.lua` (17 lines)
-- `M.run(args)` — extract schema from compiled game table (stub)
+### `cli/extract_cmd.lua` (~220 lines)
+- `M.run(args)` — walk typed AST (via `parse_and_check_file`), collect SYMBOL_LIT nodes grouped by SET_MUT target path, output candidate `type Name = val | val` declarations
+
+### `cli/compact_cmd.lua` (~115 lines)
+- `M.run(args)` — replay save log into fresh state, write compact save with one entry per path
+- Usage: `storybase compact <game.sb> <save.log> [--out <out.log>]`
 
 ---
 
 ## lib/
 
-### `lib/storybase.lua` (~230 lines)
+### `lib/storybase.lua` (~400 lines)
 Public Lua API for embedding StoryBase in another Lua program.
 - `M.load(filepath)` → game object (compiles from file)
 - `M.from_source(source, filename?)` → game object (compiles from string)
