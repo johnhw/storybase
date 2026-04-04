@@ -6,37 +6,22 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-03)
+## Current Status and Next Steps (2026-04-04)
 
-**Phase 7 in progress** — 739 tests passing. Debug server implemented with event hooks, watches, command handlers (get-state, eval, get-log, time-travel, set-breakpoint, hot-reload). TCP transport stub (requires LuaSocket). Mutation hook wired into state store. Scene-change events emitted from engine navigation. Counterfactual, schema migration, undo, find query engine, relation queries, can-reach? BFS search, schedule! imperative, offset: support for scheduler, bounded declarations, and verify from-any-state/when all implemented. All verify blocks in test06_actors.sb now pass.
+**Phase 7 in progress** — 760 tests passing. Debug server fully functional with TCP transport (LuaSocket available and used). Indexed list access `path[n]` and `ident[n]` working (parser + eval). JSON encoder and decoder in debug.lua. TCP server: proper `listen()`, non-blocking `accept()`, newline-delimited JSON protocol, dead-client cleanup. All verify blocks pass.
 
-**Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅
+**Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
-**Completed this session (2026-04-03):**
-- `find family where/or-where/order-by/limit/count` query engine — parser + eval + runtime/query.lua
-- Relation queries: `adjacent`, `reachable` (BFS), `shortest-path` (BFS), `reachable-set`, `inverse-adjacent`
-- `can-reach?` BFS search in runtime/search.lua — stop-early BFS from current state
-- `can-reach?` builtin in eval.lua BUILTINS table
-- `game` field added to eval ctx (new_ctx accepts optional game param, child_ctx propagates it)
-- `child_ctx_vars` helper exported from eval.lua
-- `find_expr` eval case in eval_expr
-- Verify: `from-any-state:` clause now evaluated (not just always-pass) — runs can-reach? from each BFS state
-- Verify: `when:` clause filters BFS states; `game` passed to all verify contexts
-- `schedule!` mutation: parser (MUTATION_TABLE), eval (SCHEDULE_MUT case), scheduler.register call
-- `offset:` support in scheduler.register — adjusts initial next_fire threshold
-- `bounded` declarations: parser (parse_bounded_decl), codegen (emit_bounded → game_table.bounded)
-- `bounded` call dispatch in eval.lua call_fn — calls `game._bounded_handlers[name]` if registered
-- Tests: tests/runtime/query_spec.lua (24 tests), tests/runtime/search_spec.lua (5 tests)
-- Tests: parser_spec.lua additions (find, schedule! mutations), codegen_spec.lua (bounded)
-- Fixed: BFS engines (search.lua, verify.lua) now call register_actors_schedules() so actor behaviors fire in BFS states
-- Fixed: verify from-any-state test syntax — can-reach? condition must be parenthesized (parser collects atoms not full exprs as fn args); when: is a sibling filter clause not a nesting parent
-- Added: engine.register_actors_schedules() helper (registers actors+schedules without resetting state)
+**Completed this session (2026-04-04):**
+- Indexed list access `path[n]` for multi-segment PATH tokens — parser (parse_atom PATH branch) + eval (INDEX_EXPR)
+- Indexed list access `ident[n]` for single-segment IDENT tokens — parser (parse_primary IDENT branch intercepts `[`) + eval (string fallback → state read)
+- Debug TCP transport: fixed socket setup (tcp()+bind()+listen()), proper non-blocking poll(), dead-client cleanup
+- Debug JSON decoder (M.decode_json) — handles null/bool/number/string/object/array, escape sequences
+- Tests: parser_spec.lua (3 indexed access tests), eval_spec.lua (4 indexed access tests), debug_spec.lua (JSON decoder + 2 TCP tests, total 37 tests)
 
-**Remaining gaps (deferred to Phase 7+):**
-- Indexed list access (`path[n]`, `path[a:b]`) — Phase 7
+**Remaining gaps (Phase 7+):**
 - `clamp-event` debug hook — Phase 7
 - Perceives enforcement (compiler rule) — Phase 7
-- Autonomous turns / NPC speed modelling — Phase 7
 - Checker: discrete/superficial boundary enforcement — Phase 7
 - Checker: write-set analysis (pass 4) — Phase 7
 - Import/resolve imported names — Phase 7
@@ -47,6 +32,7 @@ Milestone goals are marked **M**.
 - Counterexample detail in verify output — Phase 7
 - `simulate: true` in counterfactual (actor+schedule steps) — Phase 7
 - `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
+- Production build mode (strip debug-only declarations) — Phase 8
 
 ---
 

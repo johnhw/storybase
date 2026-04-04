@@ -533,3 +533,57 @@ scene start:
     assert.equal(3, store:get_time().hour)
   end)
 end)
+
+-- ── indexed list access ──────────────────────────────────────────────────────
+
+describe("eval — indexed list access", function()
+  local ast_mod = require("compiler.ast")
+  local P = ast_mod.pos("t", 1, 1)
+
+  local function index_expr(base, idx)
+    return { kind = "index_expr", base = base, index = idx, pos = P }
+  end
+  local function path_expr(segs)
+    return { kind = "path_expr", segments = segs, pos = P }
+  end
+  local function fn_call(name)
+    return { kind = "fn_call", name = name, args = {}, pos = P }
+  end
+  local function int_lit(v)
+    return { kind = "int_lit", value = v, pos = P }
+  end
+  local function expr_stmt(e)
+    return { kind = "expr_stmt", expr = e, pos = P }
+  end
+
+  it("evaluates path[n] for multi-segment path (state read)", function()
+    local c = ctx({ ["npcs/guard/items"] = {10, 20, 30} })
+    local node = expr_stmt(index_expr(path_expr({"npcs","guard","items"}), int_lit(1)))
+    eval.eval_stmt(node, c)
+    assert.equal(10, c.retval)
+  end)
+
+  it("evaluates single-segment ident[n] from state", function()
+    local c = ctx({ ["items"] = {10, 20, 30} })
+    -- fn_call("items") with 0 args falls back to string "items" → state read in INDEX_EXPR
+    local node = expr_stmt(index_expr(fn_call("items"), int_lit(2)))
+    eval.eval_stmt(node, c)
+    assert.equal(20, c.retval)
+  end)
+
+  it("evaluates index on local variable (ctx.vars)", function()
+    local c = ctx({})
+    c.vars["lst"] = {99, 88, 77}
+    -- fn_call("lst") resolves via ctx.vars
+    local node = expr_stmt(index_expr(fn_call("lst"), int_lit(1)))
+    eval.eval_stmt(node, c)
+    assert.equal(99, c.retval)
+  end)
+
+  it("returns nil for out-of-bounds index", function()
+    local c = ctx({ ["items"] = {10, 20} })
+    local node = expr_stmt(index_expr(fn_call("items"), int_lit(5)))
+    eval.eval_stmt(node, c)
+    assert.is_nil(c.retval)
+  end)
+end)

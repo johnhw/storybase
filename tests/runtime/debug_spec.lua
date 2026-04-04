@@ -576,3 +576,139 @@ scene next:
     assert.equal("next", changes[#changes].to)
   end)
 end)
+
+-- ============================================================
+-- JSON decoder
+-- ============================================================
+
+describe("debug: JSON decoder", function()
+  local dec = debug_mod.decode_json
+
+  it("decodes null to nil", function()
+    assert.is_nil(dec("null"))
+  end)
+
+  it("decodes boolean true/false", function()
+    assert.is_true(dec("true"))
+    assert.is_false(dec("false"))
+  end)
+
+  it("decodes integers and floats", function()
+    assert.equal(42, dec("42"))
+    assert.equal(-7, dec("-7"))
+    assert.equal(3.14, dec("3.14"))
+  end)
+
+  it("decodes plain strings", function()
+    assert.equal("hello", dec('"hello"'))
+  end)
+
+  it("decodes strings with escape sequences", function()
+    assert.equal('a"b', dec('"a\\"b"'))
+    assert.equal("a\nb", dec('"a\\nb"'))
+  end)
+
+  it("decodes empty object", function()
+    local v = dec("{}")
+    assert.same({}, v)
+  end)
+
+  it("decodes object with mixed values", function()
+    local v = dec('{"cmd":"get-state","from":1,"ok":true}')
+    assert.equal("get-state", v.cmd)
+    assert.equal(1, v.from)
+    assert.is_true(v.ok)
+  end)
+
+  it("decodes nested objects", function()
+    local v = dec('{"a":{"b":2}}')
+    assert.equal(2, v.a.b)
+  end)
+
+  it("decodes arrays", function()
+    local v = dec('[1,2,3]')
+    assert.same({1, 2, 3}, v)
+  end)
+
+  it("round-trips through encode/decode", function()
+    local orig = { cmd = "get-log", from = 1, to = 10 }
+    local encoded = debug_mod.encode_json(orig)
+    local decoded = dec(encoded)
+    assert.equal(orig.cmd, decoded.cmd)
+    assert.equal(orig.from, decoded.from)
+    assert.equal(orig.to, decoded.to)
+  end)
+end)
+
+-- ============================================================
+-- TCP transport (integration — requires LuaSocket)
+-- ============================================================
+
+describe("debug: TCP transport", function()
+  local socket = require("socket")
+
+  it("accepts a TCP connection and responds to get-state", function()
+    local gt, errs = compile(MINIMAL_SRC)
+    if #errs > 0 then pending("compile failed"); return end
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng, { mode = "tcp", port = 17373 })
+    srv:start()
+    eng:set_debug_server(srv)
+
+    -- Give server a moment then connect
+    local client = socket.tcp()
+    client:settimeout(1)
+    local ok, err = client:connect("127.0.0.1", 17373)
+    if not ok then
+      srv:stop()
+      pending("could not connect to debug server: " .. tostring(err))
+      return
+    end
+
+    -- Send a get-state command
+    local cmd = debug_mod.encode_json({ cmd = "get-state", pattern = "player/*" })
+    client:send(cmd .. "\n")
+
+    -- Server needs one poll to receive and respond
+    srv:poll()
+
+    local resp_line, rerr = client:receive("*l")
+    client:close()
+    srv:stop()
+
+    assert.is_not_nil(resp_line, "no response: " .. tostring(rerr))
+    local resp = debug_mod.decode_json(resp_line)
+    assert.is_not_nil(resp.state)
+    assert.equal(50,  resp.state["player/gold"])
+    assert.equal(100, resp.state["player/health"])
+  end)
+
+  it("handles get-log over TCP", function()
+    local gt, errs = compile(MINIMAL_SRC)
+    if #errs > 0 then pending("compile failed"); return end
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng, { mode = "tcp", port = 17374 })
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local client = socket.tcp()
+    client:settimeout(1)
+    local ok = client:connect("127.0.0.1", 17374)
+    if not ok then srv:stop(); pending("connect failed"); return end
+
+    client:send(debug_mod.encode_json({ cmd = "get-log" }) .. "\n")
+    srv:poll()
+
+    local resp_line = client:receive("*l")
+    client:close()
+    srv:stop()
+
+    assert.is_not_nil(resp_line)
+    local resp = debug_mod.decode_json(resp_line)
+    assert.is_not_nil(resp.entries)
+  end)
+end)

@@ -74,6 +74,7 @@ local K = {
   COUNTERFACTUAL_EXPR   = "counterfactual_expr",
   IN_STATE_EXPR         = "in_state_expr",
   FIND_EXPR             = "find_expr",
+  INDEX_EXPR            = "index_expr",
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
@@ -189,6 +190,21 @@ eval_expr = function(node, ctx)
 
   elseif k == K.INTERP_PATH then
     return ctx.state:get(eval_path(node, ctx))
+
+  elseif k == K.INDEX_EXPR then
+    -- path[n]: read element n (1-based) from a list/set at the given path
+    local list = eval_expr(node.base, ctx)
+    -- If base evaluated to a string, it may be a bare single-segment state path name.
+    -- Try reading it from state so that `items[1]` works for top-level list state.
+    if type(list) == "string" and ctx.state then
+      list = ctx.state:get(list)
+    end
+    local idx  = eval_expr(node.index, ctx)
+    if type(list) ~= "table" then return nil end
+    if type(idx) ~= "number" then return nil end
+    -- Support negative indices: -1 = last, -2 = second-to-last, etc.
+    if idx < 0 then idx = #list + idx + 1 end
+    return list[idx]
 
   elseif k == K.PATH_AT_BEFORE then
     -- path@before: read value from before-snapshot if available

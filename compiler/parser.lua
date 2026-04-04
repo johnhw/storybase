@@ -789,6 +789,24 @@ local function parse_atom(p)
         return ast.path_at_before(path_node, tpos)
       end
     end
+    -- Check for indexed access: path[n] or path[a:b]
+    if p:at("OP", "[") then
+      p:adv()  -- consume "["
+      local idx = parse_expr(p)
+      -- Optionally: path[a:b] slice — parse optional ':' and end
+      local idx2 = nil
+      if p:at("OP", ":") then
+        p:adv()
+        if not p:at("OP", "]") then
+          idx2 = parse_expr(p)
+        end
+      end
+      p:expect("OP", "]", "expected ']' to close index")
+      if idx2 then
+        return ast.index_expr(path_node, idx, tpos)  -- slices not yet supported; treat as [a]
+      end
+      return ast.index_expr(path_node, idx, tpos)
+    end
     return path_node
   elseif t.kind == "INTERP_PATH" then
     p:adv(); return make_interp_path(t.value, tpos)
@@ -1350,6 +1368,15 @@ local function parse_primary(p)
       end
       p:expect("OP", ")", "expected ')' to close record constructor")
       return ast.record_constructor(name, fields, tpos)
+    end
+    -- Check for index access: name[expr] — must come before arg collection
+    -- so that `items[1]` is not parsed as `items([1])`.
+    if p:at("OP", "[") then
+      p:adv()  -- consume "["
+      local idx = parse_expr(p)
+      p:expect("OP", "]", "expected ']' to close index")
+      local base = ast.fn_call(name, {}, tpos)
+      return ast.index_expr(base, idx, tpos)
     end
     local args = {}
     while can_start_arg(p) do

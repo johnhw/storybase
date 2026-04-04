@@ -1482,3 +1482,43 @@ describe("parser — schedule! mutation", function()
     assert.equal("tick", node.opts.every[1].axis)
   end)
 end)
+
+-- ── indexed list access ──────────────────────────────────────────────────────
+
+describe("parser — indexed list access", function()
+  local function parse_fn_body(src_fn)
+    local src = "fn test-fn:\n" .. src_fn
+    local tree, diags = parse(src)
+    local errs = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errs[#errs+1] = d end end
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    return tree.decls[1].body
+  end
+
+  it("parses path[n] as index_expr for multi-segment path", function()
+    local body = parse_fn_body("  npcs/guard/items[1]\n")
+    local node = (body[1].kind == "expr_stmt") and body[1].expr or body[1]
+    assert.equal(ast.K.INDEX_EXPR, node.kind)
+    assert.equal(ast.K.PATH_EXPR, node.base.kind)
+    assert.equal(ast.K.INT_LIT,   node.index.kind)
+    assert.equal(1, node.index.value)
+  end)
+
+  it("parses ident[n] as index_expr for single-segment path/variable", function()
+    local body = parse_fn_body("  items[1]\n")
+    local node = (body[1].kind == "expr_stmt") and body[1].expr or body[1]
+    assert.equal(ast.K.INDEX_EXPR, node.kind)
+    assert.equal(ast.K.FN_CALL,   node.base.kind)
+    assert.equal("items",          node.base.name)
+    assert.equal(ast.K.INT_LIT,   node.index.kind)
+    assert.equal(1, node.index.value)
+  end)
+
+  it("parses ident[var] as index_expr with variable index", function()
+    local body = parse_fn_body("  items[i]\n")
+    local node = (body[1].kind == "expr_stmt") and body[1].expr or body[1]
+    assert.equal(ast.K.INDEX_EXPR, node.kind)
+    assert.equal(ast.K.FN_CALL, node.index.kind)
+    assert.equal("i",           node.index.name)
+  end)
+end)

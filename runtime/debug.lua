@@ -288,14 +288,24 @@ function M.new(engine, opts)
     if self._mode == "tcp" then
       local ok, socket = pcall(require, "socket")
       if ok and socket then
-        local s, err = socket.bind("*", self._port)
-        if s then
-          self._tcp_socket = s
-        else
-          io.stderr:write("storybase debug: cannot bind port "
-                          .. self._port .. ": " .. tostring(err) .. "\n")
-          self._mode = "hook"  -- fall back to hook-only
+        local s, err = socket.tcp()
+        if not s then
+          io.stderr:write("storybase debug: cannot create socket: "
+                          .. tostring(err) .. "\n")
+          self._mode = "hook"; return
         end
+        s:setoption("reuseaddr", true)
+        local bound, berr = s:bind("*", self._port)
+        if not bound then
+          io.stderr:write("storybase debug: cannot bind port "
+                          .. self._port .. ": " .. tostring(berr) .. "\n")
+          s:close(); self._mode = "hook"; return
+        end
+        s:listen(8)
+        s:settimeout(0)
+        self._tcp_socket = s
+        io.stderr:write("storybase debug: listening on port "
+                        .. self._port .. "\n")
       else
         io.stderr:write("storybase debug: LuaSocket not available; TCP disabled\n")
         self._mode = "hook"
@@ -306,6 +316,10 @@ function M.new(engine, opts)
   --- Stop the debug server.
   function srv:stop()
     self._running = false
+    for _, c in ipairs(self._clients) do
+      pcall(function() c:close() end)
+    end
+    self._clients = {}
     if self._tcp_socket then
       pcall(function() self._tcp_socket:close() end)
       self._tcp_socket = nil
@@ -324,26 +338,35 @@ function M.new(engine, opts)
   end
 
   --- Accept one pending TCP connection (non-blocking poll).
+  --- Reads pending lines from all clients and dispatches commands.
   function srv:poll()
     if not self._running or not self._tcp_socket then return end
-    self._tcp_socket:settimeout(0)
+    -- Accept new clients (non-blocking)
     local client = self._tcp_socket:accept()
-    if client then
+    while client do
+      client:settimeout(0)
       self._clients[#self._clients + 1] = client
+      client = self._tcp_socket:accept()
     end
-    -- Read one line from each client
+    -- Read lines from existing clients
+    local live = {}
     for _, c in ipairs(self._clients) do
-      c:settimeout(0)
-      local line = c:receive("*l")
+      local line, err = c:receive("*l")
       if line then
-        -- Minimal JSON decode: expect {"cmd":"...", ...}
-        local cmd = line:match('"cmd"%s*:%s*"([^"]+)"')
-        if cmd then
-          local resp = self:handle_command(cmd, {})
-          c:send(M.encode_json(resp) .. "\n")
+        local ok_dec, payload = pcall(M.decode_json, line)
+        if ok_dec and type(payload) == "table" then
+          local cmd = payload.cmd
+          payload.cmd = nil  -- remove cmd from payload before passing
+          local resp = self:handle_command(tostring(cmd), payload)
+          pcall(function() c:send(M.encode_json(resp) .. "\n") end)
         end
+        live[#live + 1] = c
+      elseif err == "timeout" then
+        live[#live + 1] = c  -- still alive, just no data
       end
+      -- err == "closed" or other → drop client
     end
+    self._clients = live
   end
 
   return srv
@@ -401,6 +424,127 @@ function M.encode_json(v)
   else
     return '"' .. tostring(v) .. '"'
   end
+end
+
+-- ============================================================
+-- Minimal JSON decoder
+-- ============================================================
+
+--- Decode a JSON string into a Lua value.
+--- Handles null, boolean, number, string, array, and object.
+--- Raises an error on invalid JSON.
+---@param s string
+---@return any
+function M.decode_json(s)
+  local pos = 1
+
+  local function skip_ws()
+    pos = s:match("^%s*()", pos)
+  end
+
+  local decode_val  -- forward
+  local function decode_string()
+    assert(s:sub(pos, pos) == '"', "expected '\"'")
+    pos = pos + 1
+    local buf = {}
+    while pos <= #s do
+      local c = s:sub(pos, pos)
+      if c == '"' then
+        pos = pos + 1
+        return table.concat(buf)
+      elseif c == '\\' then
+        pos = pos + 1
+        local esc = s:sub(pos, pos)
+        pos = pos + 1
+        if     esc == '"'  then buf[#buf+1] = '"'
+        elseif esc == '\\' then buf[#buf+1] = '\\'
+        elseif esc == '/'  then buf[#buf+1] = '/'
+        elseif esc == 'n'  then buf[#buf+1] = '\n'
+        elseif esc == 'r'  then buf[#buf+1] = '\r'
+        elseif esc == 't'  then buf[#buf+1] = '\t'
+        elseif esc == 'b'  then buf[#buf+1] = '\b'
+        elseif esc == 'f'  then buf[#buf+1] = '\f'
+        elseif esc == 'u'  then
+          -- \uXXXX → skip (convert to ?)
+          buf[#buf+1] = '?'; pos = pos + 4
+        else
+          buf[#buf+1] = esc
+        end
+      else
+        -- collect a run of plain chars
+        local run_end = s:find('[\\"]', pos) or (#s + 1)
+        buf[#buf+1] = s:sub(pos, run_end - 1)
+        pos = run_end
+      end
+    end
+    error("unterminated string")
+  end
+
+  local function decode_array()
+    assert(s:sub(pos, pos) == '[', "expected '['")
+    pos = pos + 1
+    local arr = {}
+    skip_ws()
+    if s:sub(pos, pos) == ']' then pos = pos + 1; return arr end
+    while true do
+      skip_ws()
+      arr[#arr+1] = decode_val()
+      skip_ws()
+      local c = s:sub(pos, pos)
+      if c == ']' then pos = pos + 1; return arr end
+      assert(c == ',', "expected ',' in array")
+      pos = pos + 1
+    end
+  end
+
+  local function decode_object()
+    assert(s:sub(pos, pos) == '{', "expected '{'")
+    pos = pos + 1
+    local obj = {}
+    skip_ws()
+    if s:sub(pos, pos) == '}' then pos = pos + 1; return obj end
+    while true do
+      skip_ws()
+      local key = decode_string()
+      skip_ws()
+      assert(s:sub(pos, pos) == ':', "expected ':' after key")
+      pos = pos + 1
+      skip_ws()
+      obj[key] = decode_val()
+      skip_ws()
+      local c = s:sub(pos, pos)
+      if c == '}' then pos = pos + 1; return obj end
+      assert(c == ',', "expected ',' in object")
+      pos = pos + 1
+    end
+  end
+
+  decode_val = function()
+    skip_ws()
+    local c = s:sub(pos, pos)
+    if c == '"' then
+      return decode_string()
+    elseif c == '[' then
+      return decode_array()
+    elseif c == '{' then
+      return decode_object()
+    elseif s:sub(pos, pos+3) == "true" then
+      pos = pos + 4; return true
+    elseif s:sub(pos, pos+4) == "false" then
+      pos = pos + 5; return false
+    elseif s:sub(pos, pos+3) == "null" then
+      pos = pos + 4; return nil
+    else
+      -- number
+      local num_str = s:match("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
+      assert(num_str, "unexpected token at pos " .. pos .. ": " .. s:sub(pos, pos+10))
+      pos = pos + #num_str
+      return tonumber(num_str)
+    end
+  end
+
+  local val = decode_val()
+  return val
 end
 
 return M
