@@ -578,6 +578,80 @@ scene next:
 end)
 
 -- ============================================================
+-- clamp-event hook
+-- ============================================================
+
+describe("debug: clamp-event fires when value is clamped", function()
+  local gt, errs = compile(MINIMAL_SRC)
+
+  it("fires clamp-event when inc! exceeds Int max", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local clamps = {}
+    srv:on("clamp-event", function(p) clamps[#clamps + 1] = p end)
+
+    -- player/gold starts at 50, max is 999; inc by 1000 → clamp to 999
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, eng._fns, "test")
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 1000 }}, ctx)
+
+    assert.equal(1, #clamps)
+    assert.equal("player/gold", clamps[1].path)
+    assert.equal(1050, clamps[1].attempted)
+    assert.equal(999,  clamps[1].clamped)
+  end)
+
+  it("fires clamp-event when dec! goes below Int min", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local clamps = {}
+    srv:on("clamp-event", function(p) clamps[#clamps + 1] = p end)
+
+    -- player/health starts at 100, min is 0; dec by 200 → clamp to 0
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, eng._fns, "test")
+    eval_mod.call_fn("hurt", {{ kind = "int_lit", value = 200 }}, ctx)
+
+    assert.equal(1, #clamps)
+    assert.equal("player/health", clamps[1].path)
+    assert.equal(-100, clamps[1].attempted)
+    assert.equal(0,    clamps[1].clamped)
+  end)
+
+  it("does NOT fire clamp-event when no clamping occurs", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local clamps = {}
+    srv:on("clamp-event", function(p) clamps[#clamps + 1] = p end)
+
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, eng._fns, "test")
+    -- earn 10 gold: 50+10=60 (within 0..999)
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)
+
+    assert.equal(0, #clamps)
+  end)
+end)
+
+-- ============================================================
 -- JSON decoder
 -- ============================================================
 

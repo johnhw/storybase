@@ -8,22 +8,22 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7 in progress** — 760 tests passing. Debug server fully functional with TCP transport (LuaSocket available and used). Indexed list access `path[n]` and `ident[n]` working (parser + eval). JSON encoder and decoder in debug.lua. TCP server: proper `listen()`, non-blocking `accept()`, newline-delimited JSON protocol, dead-client cleanup. All verify blocks pass.
+**Phase 7 in progress** — 767 tests passing. Perceives enforcement done (runtime filtering + static checker warning). clamp-event debug hook wired. Indexed list access working. TCP debug server functional with JSON codec.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
 **Completed this session (2026-04-04):**
-- Indexed list access `path[n]` for multi-segment PATH tokens — parser (parse_atom PATH branch) + eval (INDEX_EXPR)
-- Indexed list access `ident[n]` for single-segment IDENT tokens — parser (parse_primary IDENT branch intercepts `[`) + eval (string fallback → state read)
-- Debug TCP transport: fixed socket setup (tcp()+bind()+listen()), proper non-blocking poll(), dead-client cleanup
-- Debug JSON decoder (M.decode_json) — handles null/bool/number/string/object/array, escape sequences
-- Tests: parser_spec.lua (3 indexed access tests), eval_spec.lua (4 indexed access tests), debug_spec.lua (JSON decoder + 2 TCP tests, total 37 tests)
+- Indexed list access `path[n]` / `ident[n]` — parser + eval
+- Debug TCP transport: proper socket setup, non-blocking poll, JSON codec (encode + decode)
+- `clamp-event` debug hook — state.lua `_clamp_hook`, wired in engine `set_debug_server`
+- Perceives enforcement:
+  - Runtime: `make_capture_proxy` now filters reads to `perceives` patterns; actor's own state subtree always visible
+  - Checker pass4: warns `PERCEIVES_VIOLATION` when behavior fn reads static path not in perceives
+- Tests: +14 tests across parser/eval/debug/checker specs
 
 **Remaining gaps (Phase 7+):**
-- `clamp-event` debug hook — Phase 7
-- Perceives enforcement (compiler rule) — Phase 7
 - Checker: discrete/superficial boundary enforcement — Phase 7
-- Checker: write-set analysis (pass 4) — Phase 7
+- Checker: write-set analysis (pass 5) — Phase 7
 - Import/resolve imported names — Phase 7
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8

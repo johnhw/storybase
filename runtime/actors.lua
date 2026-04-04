@@ -10,20 +10,75 @@
 local M = {}
 
 -- ============================================================
+-- Perception helpers
+-- ============================================================
+
+--- Test whether a concrete path matches a perceives pattern.
+--- Patterns may contain `*` as a wildcard segment.
+---@param pattern string  e.g. "npcs/*/health" or "player/location"
+---@param path    string  e.g. "npcs/guard/health"
+---@return boolean
+local function perceived(pattern, path)
+  if pattern == "*" or pattern == path then return true end
+  -- Escape Lua magic chars except *, then replace * with [^/]+
+  local lp = pattern:gsub("([%.%+%-%^%$%(%)%[%]%%])", "%%%1")
+  lp = lp:gsub("%*", "[^/]+")
+  return path:match("^" .. lp .. "$") ~= nil
+end
+
+--- Check if a path is visible to an actor given its perceives list.
+--- Returns true if perceives is empty (unspecified = perceives all).
+--- The actor's own state subtree (state_path/*) is always perceivable.
+---@param perceives  table   list of pattern strings
+---@param state_path string? actor's own state path prefix (e.g. "npcs/bot")
+---@param path       string  concrete path
+---@return boolean
+local function path_perceived(perceives, state_path, path)
+  if not perceives or #perceives == 0 then return true end
+  -- Actor always perceives its own state subtree
+  if state_path and (path == state_path
+      or path:sub(1, #state_path + 1) == state_path .. "/") then
+    return true
+  end
+  for _, pat in ipairs(perceives) do
+    if perceived(pat, path) then return true end
+  end
+  return false
+end
+
+-- ============================================================
 -- Capture proxy
 -- ============================================================
 
 --- Build a lightweight proxy around the real state store.
---- Read methods delegate to real_store via __index.
+--- Read methods delegate to real_store only for perceived paths;
+--- unperceived reads return nil (silent — compiler should have caught them).
 --- Write methods append a capture record instead of mutating state.
 ---@param real_store  table   Runtime state store
 ---@param priority    number  Actor priority (higher = wins set conflicts)
 ---@param actor_name  string
+---@param perceives   table?  list of path patterns (nil = perceive all)
+---@param state_path  string? actor's own state path prefix (always perceived)
 ---@return table proxy, table captures
-local function make_capture_proxy(real_store, priority, actor_name)
+local function make_capture_proxy(real_store, priority, actor_name, perceives, state_path)
   local captures = {}
 
-  local proxy = setmetatable({}, { __index = real_store })
+  -- Perception-filtered read proxy: fallback to real_store only for perceived paths.
+  local read_store = setmetatable({}, {
+    __index = function(_, k)
+      local v = real_store[k]
+      -- If 'k' looks like a method (function in the store), delegate directly
+      if type(v) == "function" then return v end
+      return v
+    end
+  })
+  -- Override the `get` method to enforce perception
+  read_store.get = function(_, path)
+    if not path_perceived(perceives, state_path, path) then return nil end
+    return real_store:get(path)
+  end
+
+  local proxy = setmetatable({}, { __index = read_store })
 
   proxy.set = function(_, path, val, _fn)
     captures[#captures+1] = { op="set",  path=path, value=val,
@@ -155,7 +210,7 @@ function M.new(state, log)
       if not fn_def then goto continue end
 
       local proxy, captures = make_capture_proxy(
-        self._state, actor.priority, actor.name)
+        self._state, actor.priority, actor.name, actor.perceives, actor.state_path)
 
       -- Check pre: conditions against real state (not the proxy)
       local pre_ctx = eval.new_ctx(self._state, fns, behavior)

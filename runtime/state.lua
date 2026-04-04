@@ -336,11 +336,15 @@ function M.new(schema, log)
   ---@param fn     string?
   function store:inc(path, amount, fn)
     local old     = self._cache[path] or 0
-    local new_val = old + (amount or 0)
+    local attempted = old + (amount or 0)
+    local new_val   = attempted
     local td      = lookup_type(self._type_index, path)
     if td and td.tag == "int" then
       if td.min and new_val < td.min then new_val = td.min end
       if td.max and new_val > td.max then new_val = td.max end
+    end
+    if new_val ~= attempted and self._clamp_hook then
+      pcall(self._clamp_hook, path, attempted, new_val, fn)
     end
     self._cache[path] = new_val
     _log_entry(self, path, old, new_val, fn)
@@ -352,11 +356,15 @@ function M.new(schema, log)
   ---@param fn     string?
   function store:dec(path, amount, fn)
     local old     = self._cache[path] or 0
-    local new_val = old - (amount or 0)
+    local attempted = old - (amount or 0)
+    local new_val   = attempted
     local td      = lookup_type(self._type_index, path)
     if td and td.tag == "int" then
       if td.min and new_val < td.min then new_val = td.min end
       if td.max and new_val > td.max then new_val = td.max end
+    end
+    if new_val ~= attempted and self._clamp_hook then
+      pcall(self._clamp_hook, path, attempted, new_val, fn)
     end
     self._cache[path] = new_val
     _log_entry(self, path, old, new_val, fn)

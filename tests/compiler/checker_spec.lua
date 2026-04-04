@@ -379,3 +379,90 @@ fn take-damage amount:
   dec! player/health amount]])
   end)
 end)
+
+-- ── Pass 4: perceives enforcement ─────────────────────────────────────────────
+
+local function check_warn(src, expected_code)
+  local _, diags = compile(src)
+  for _, d in ipairs(diags) do
+    if d.level == "warning" and d.code == expected_code then return d end
+  end
+  error("expected warning " .. expected_code .. " but got: "
+    .. table.concat((function()
+        local t = {}
+        for _, d in ipairs(diags) do t[#t+1] = d.level .. ":" .. d.code end
+        return t
+      end)(), ", "))
+end
+
+describe("checker: perceives enforcement (pass 4)", function()
+  local ACTOR_SRC = [[
+state player:
+  gold: Int(0,999) = 50
+  location: Int(0,10) = 0
+state npcs/{npc}: Int(0,9) max: 4
+actor guard:
+  state:     npcs/guard
+  perceives: [player/location, npcs/guard/*]
+  inbox:     List(Int, 4)
+  behavior:  guard-behavior
+  priority:  20
+]]
+
+  it("emits PERCEIVES_VIOLATION warning when behavior reads unperceived path", function()
+    local d = check_warn(ACTOR_SRC .. [[
+fn guard-behavior:
+  when player/gold > 100:
+    set! npcs/guard/alert true
+]], ast.E.PERCEIVES_VIOLATION)
+    assert.is_not_nil(d)
+    assert.is_true(d.message:find("player/gold") ~= nil)
+  end)
+
+  it("does not warn when behavior reads only perceived paths", function()
+    local _, diags = compile(ACTOR_SRC .. [[
+fn guard-behavior:
+  when player/location = 5:
+    set! npcs/guard/alert true
+]])
+    local warns = {}
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.PERCEIVES_VIOLATION then warns[#warns+1] = d end
+    end
+    assert.equal(0, #warns)
+  end)
+
+  it("does not warn when actor has empty perceives list (perceives all)", function()
+    local _, diags = compile([[
+state player:
+  gold: Int(0,999) = 50
+state npcs/{npc}: Int(0,9) max: 4
+actor bot:
+  state:     npcs/bot
+  inbox:     List(Int, 4)
+  behavior:  bot-behavior
+  priority:  10
+fn bot-behavior:
+  when player/gold > 50:
+    set! npcs/bot/active true
+]])
+    local warns = {}
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.PERCEIVES_VIOLATION then warns[#warns+1] = d end
+    end
+    assert.equal(0, #warns)
+  end)
+
+  it("does not warn when behavior reads actor's own state path", function()
+    local _, diags = compile(ACTOR_SRC .. [[
+fn guard-behavior:
+  when npcs/guard/alert = true:
+    pass
+]])
+    local warns = {}
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.PERCEIVES_VIOLATION then warns[#warns+1] = d end
+    end
+    assert.equal(0, #warns)
+  end)
+end)

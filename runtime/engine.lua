@@ -342,6 +342,12 @@ function M.new(game_table, opts)
       srv:emit("mutation", { path = path, old = old, new = new_val,
                               fn = fn_name, tick = tick })
     end
+    -- Wire clamp events through state store
+    self._state._clamp_hook = function(path, attempted, clamped, fn_name)
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      srv:emit("clamp-event", { path = path, attempted = attempted,
+                                 clamped = clamped, fn = fn_name, tick = tick })
+    end
   end
 
   --- Run post-action phases (steps 2–6 of the turn lifecycle).
@@ -357,6 +363,12 @@ function M.new(game_table, opts)
     self._actors:apply_deferred()
     self._scheduler:tick(self._fns)
     self._actors:clear_inboxes()
+  end
+
+  --- Run one autonomous turn (steps 2–6 only; no player input).
+  --- Used for NPC-driven turns, schedule-only advances, etc.
+  function eng:autonomous_turn()
+    self:post_action()
   end
 
   -- ── Turn loop ────────────────────────────────────────────────

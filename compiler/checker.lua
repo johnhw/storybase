@@ -403,6 +403,113 @@ local function pass3_infer_purity(acc, program)
 end
 
 -- ============================================================
+-- Pass 4 — Perceives enforcement
+-- ============================================================
+
+--- Test whether a concrete path matches a perceives pattern (same logic as runtime).
+local function pat_matches(pattern, path)
+  if pattern == "*" or pattern == path then return true end
+  local lp = pattern:gsub("([%.%+%-%^%$%(%)%[%]%%])", "%%%1")
+  lp = lp:gsub("%*", "[^/]+")
+  return path:match("^" .. lp .. "$") ~= nil
+end
+
+local function path_in_perceives(perceives, state_path, path)
+  -- Actor always perceives its own state subtree
+  if state_path and (path == state_path
+      or path:sub(1, #state_path + 1) == state_path .. "/") then
+    return true
+  end
+  for _, pat in ipairs(perceives) do
+    if pat_matches(pat, path) then return true end
+  end
+  return false
+end
+
+--- Collect all static PATH_EXPR reads from a node subtree (not writes).
+--- Skips paths that are the target of mutation primitives.
+local function collect_path_reads(node, into)
+  if not node or type(node) ~= "table" then return end
+  local k = ast.K
+  -- Skip mutation nodes — their target paths are writes, not reads
+  if ast.is_mut(node) then
+    -- Still recurse into value expressions (RHS of set!, amount of inc!, etc.)
+    if node.value then collect_path_reads(node.value, into) end
+    if node.amount then collect_path_reads(node.amount, into) end
+    if node.msg    then collect_path_reads(node.msg, into) end
+    return
+  end
+  if node.kind == k.PATH_EXPR then
+    -- Only collect concrete (non-interpolated) paths
+    local segs = node.segments or {}
+    local has_var = false
+    for _, s in ipairs(segs) do
+      if type(s) ~= "string" then has_var = true; break end
+    end
+    if not has_var then
+      into[#into+1] = { path = table.concat(segs, "/"), pos = node.pos }
+    end
+    return
+  end
+  -- Recurse into child expression/statement fields
+  for _, field in ipairs({ "body", "then_body", "else_body", "arms" }) do
+    if type(node[field]) == "table" then
+      for _, child in ipairs(node[field]) do
+        if type(child) == "table" then
+          if field == "arms" then
+            collect_path_reads(child.body, into)
+          else
+            collect_path_reads(child, into)
+          end
+        end
+      end
+    end
+  end
+  for _, field in ipairs({ "condition", "expr", "left", "right",
+                            "base", "index", "value", "msg" }) do
+    collect_path_reads(node[field], into)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do collect_path_reads(a, into) end
+  end
+end
+
+--- Warn when a behavior function reads a path not covered by the actor's perceives list.
+local function pass4_check_perceives(acc, program)
+  local k = ast.K
+  -- Build fn_name → fn_decl map
+  local fns = {}
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then fns[node.name] = node end
+  end
+  -- For each actor, check its behavior fn
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.ACTOR_DECL then
+      local perceives  = node.perceives or {}
+      local state_path = node.state_path or ""
+      local bname      = node.behavior
+      if not bname or #perceives == 0 then goto next_actor end
+      local fn = fns[bname]
+      if not fn then goto next_actor end
+
+      local reads = {}
+      collect_path_reads(fn, reads)
+      for _, r in ipairs(reads) do
+        if not path_in_perceives(perceives, state_path, r.path) then
+          -- Emit as a warning (not error) since some reads may be guarded
+          table.insert(acc.diags, ast.warning(
+            ast.E.PERCEIVES_VIOLATION,
+            "behavior '" .. bname .. "' reads '" .. r.path
+            .. "' which is not in actor '" .. node.name .. "' perceives list",
+            r.pos))
+        end
+      end
+      ::next_actor::
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -422,6 +529,7 @@ function M.check(ast_root, filename)
   pass1_collect(acc, symtab, ast_root)
   pass2_check(acc, symtab, ast_root)
   pass3_infer_purity(acc, ast_root)
+  pass4_check_perceives(acc, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab
