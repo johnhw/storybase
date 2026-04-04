@@ -8,7 +8,8 @@
 
 local M = {}
 
-local DEFAULT_DEPTH = 20
+local DEFAULT_DEPTH  = 20
+local BUDGET_CHECK_N = 50   -- check the clock every N BFS iterations
 
 -- ============================================================
 -- Helpers (shared with verify.lua logic)
@@ -79,22 +80,34 @@ end
 ---@param initial_stack table     Initial scene stack (list of scene names)
 ---@param condition_fn  function  Predicate: condition_fn(cache) → bool
 ---@param depth         integer?  Max BFS depth (default 20)
----@return boolean
-function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, depth)
+---@param budget        number?   Max wall-clock seconds (nil = no limit)
+---@return boolean, boolean  reached, timed_out
+function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, depth, budget)
   depth = depth or DEFAULT_DEPTH
 
   local engine_mod = require("runtime.engine")
   local seen       = {}
   local io_sink    = { write = function() end }
+  local start_time = budget and os.clock() or nil
+  local iter_count = 0
 
   -- Check initial state
-  if condition_fn(initial_cache) then return true end
+  if condition_fn(initial_cache) then return true, false end
 
   local queue = { { cache = clone_flat(initial_cache), stack = initial_stack, d = 0 } }
   local head  = 1
 
   while head <= #queue do
     local item = queue[head]; head = head + 1
+    iter_count = iter_count + 1
+
+    -- Time-budget check (every BUDGET_CHECK_N iterations)
+    if budget and iter_count % BUDGET_CHECK_N == 0 then
+      if (os.clock() - start_time) >= budget then
+        return false, true  -- timed out
+      end
+    end
+
     if item.d >= depth then goto next_item end
 
     local h = hash_state(item.cache, item.stack)
@@ -160,7 +173,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, dep
     ::next_item::
   end
 
-  return false
+  return false, false
 end
 
 -- ============================================================
@@ -174,13 +187,16 @@ end
 ---@param initial_stack table     Initial scene stack
 ---@param condition_fn  function  Predicate: condition_fn(cache) → bool
 ---@param depth         integer?  Max BFS depth (default 20)
----@return table?  Ordered list of {scene, choice_label, choice_index} or nil
-function M.find_path(game_table, initial_cache, initial_stack, condition_fn, depth)
+---@param budget        number?   Max wall-clock seconds (nil = no limit)
+---@return table?  Ordered list of {scene, choice_label, choice_index} or nil (nil on budget exhaust)
+function M.find_path(game_table, initial_cache, initial_stack, condition_fn, depth, budget)
   depth = depth or DEFAULT_DEPTH
 
   local engine_mod = require("runtime.engine")
   local seen       = {}
   local io_sink    = { write = function() end }
+  local start_time = budget and os.clock() or nil
+  local iter_count = 0
 
   -- Check initial state
   if condition_fn(initial_cache) then return {} end
@@ -196,6 +212,15 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn, dep
 
   while head <= #queue do
     local item = queue[head]; head = head + 1
+    iter_count = iter_count + 1
+
+    -- Time-budget check
+    if budget and iter_count % BUDGET_CHECK_N == 0 then
+      if (os.clock() - start_time) >= budget then
+        return nil  -- timed out; return nil like "not found"
+      end
+    end
+
     if item.d >= depth then goto next_item end
 
     local h = hash_state(item.cache, item.stack)

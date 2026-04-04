@@ -594,13 +594,19 @@ local BUILTINS = {
 
     local cond_expr = args[1]
     local depth     = 20
+    local budget    = nil
 
-    -- Check for depth: named arg
+    -- Check for depth: and budget: named args
     for i = 2, #args do
       local a = args[i]
-      if a and a.kind == K.NAMED_ARG and a.name == "depth" then
-        local d = eval_expr(a.value, ctx)
-        if type(d) == "number" then depth = d end
+      if a and a.kind == K.NAMED_ARG then
+        if a.name == "depth" then
+          local d = eval_expr(a.value, ctx)
+          if type(d) == "number" then depth = d end
+        elseif a.name == "budget" then
+          local b = eval_expr(a.value, ctx)
+          if type(b) == "number" then budget = b end
+        end
       end
     end
 
@@ -643,7 +649,7 @@ local BUILTINS = {
       return ok and result
     end
 
-    return search_mod.can_reach(ctx.game, cache, stack, condition_fn, depth)
+    return search_mod.can_reach(ctx.game, cache, stack, condition_fn, depth, budget)
   end,
 
   ["find-path"] = function(args, ctx)
@@ -655,12 +661,18 @@ local BUILTINS = {
 
     local cond_expr = args[1]
     local depth     = 20
+    local budget    = nil
 
     for i = 2, #args do
       local a = args[i]
-      if a and a.kind == K.NAMED_ARG and a.name == "depth" then
-        local d = eval_expr(a.value, ctx)
-        if type(d) == "number" then depth = d end
+      if a and a.kind == K.NAMED_ARG then
+        if a.name == "depth" then
+          local d = eval_expr(a.value, ctx)
+          if type(d) == "number" then depth = d end
+        elseif a.name == "budget" then
+          local b = eval_expr(a.value, ctx)
+          if type(b) == "number" then budget = b end
+        end
       end
     end
 
@@ -701,7 +713,7 @@ local BUILTINS = {
     end
 
     -- find_path returns a list of {scene, label, index} steps or nil
-    local path = search_mod.find_path(ctx.game, cache, stack, condition_fn, depth)
+    local path = search_mod.find_path(ctx.game, cache, stack, condition_fn, depth, budget)
     if not path then return nil end
     -- Convert to a list of label strings for easy consumption
     local labels = {}

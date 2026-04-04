@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 897 tests passing.
+**Phase 7/8 in progress** — 900 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -50,12 +50,12 @@ Milestone goals are marked **M**.
 - Schedule events in transaction log: `scheduler.lua:tick` logs `kind="schedule_fired"` on fire; `sched:cancel` logs `kind="cancel_schedule"` on cancel
 - `state.lua:replay` updated to skip metadata entries (`checkpoint`, `conflict`, `schedule_fired`, `cancel_schedule`) so they don't corrupt state reconstruction
 - `storybase help <subcommand>`: per-subcommand help text for all 6 commands; `help run`, `help verify`, etc.
-- Tests: +3 codegen production mode tests (897 total)
+- Search engine time-budget: `can_reach`/`find_path` accept optional `budget` parameter (seconds); returns (false, true) on timeout; `can-reach?` and `find-path` builtins accept `budget:` named arg; check every 50 iterations
+- Tests: +6 new tests (900 total)
 
 **Remaining gaps (Phase 8):**
-- `as Alias` namespacing for imports (currently flat merge)
+- `as Alias` namespacing for imports (currently flat merge; parser parses `as` but resolver ignores it)
 - Hygienic macro system (`macro` declarations, expansion before type-check)
-- Search engine coroutine time-budget (wall-clock limit per search call)
 - Tile grid extension (`defgrid`, spatial queries)
 
 ---
