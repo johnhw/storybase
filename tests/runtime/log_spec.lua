@@ -188,3 +188,76 @@ describe("log round-trip: serialise → deserialise", function()
     assert.equal("Aria", store2:get("hero/name"))
   end)
 end)
+
+-- ============================================================
+-- query_at
+-- ============================================================
+
+describe("transaction log: query_at", function()
+  local function make_log_with_entries()
+    local l = log_mod.new()
+    -- seq 1: path "hp" = 100 at time {day=1}
+    l:append({ path = "hp", old = nil, new = 100, fn = "init", time = {day=1} })
+    -- seq 2: path "hp" = 80 at time {day=2}
+    l:append({ path = "hp", old = 100, new = 80,  fn = "fight", time = {day=2} })
+    -- seq 3: path "gold" = 5 at time {day=2}
+    l:append({ path = "gold", old = nil, new = 5, fn = "init", time = {day=2} })
+    -- seq 4: path "hp" = 50 at time {day=3}
+    l:append({ path = "hp", old = 80,  new = 50,  fn = "fight", time = {day=3} })
+    return l
+  end
+
+  it("nil time returns current (latest) value", function()
+    local l = make_log_with_entries()
+    assert.equal(50, l:query_at("hp", nil))
+    assert.equal(5,  l:query_at("gold", nil))
+  end)
+
+  it("seq bound returns value at that sequence number", function()
+    local l = make_log_with_entries()
+    assert.equal(100, l:query_at("hp", 1))   -- after seq 1
+    assert.equal(80,  l:query_at("hp", 2))   -- after seq 2
+    assert.equal(80,  l:query_at("hp", 3))   -- seq 3 is gold, hp still 80
+    assert.equal(50,  l:query_at("hp", 4))   -- after seq 4
+    assert.equal(5,   l:query_at("gold", 3)) -- after seq 3
+  end)
+
+  it("seq bound before first entry returns nil", function()
+    local l = make_log_with_entries()
+    assert.is_nil(l:query_at("hp", 0))
+  end)
+
+  it("seq bound beyond last entry returns latest value", function()
+    local l = make_log_with_entries()
+    assert.equal(50, l:query_at("hp", 999))
+  end)
+
+  it("axis bound filters by time axis", function()
+    local l = make_log_with_entries()
+    assert.equal(100, l:query_at("hp", {day=1}))  -- only day=1 entry
+    assert.equal(80,  l:query_at("hp", {day=2}))  -- day<=2 entries; last hp is 80
+    assert.equal(50,  l:query_at("hp", {day=3}))  -- all entries; last hp is 50
+  end)
+
+  it("axis bound with no matching entries returns nil", function()
+    local l = make_log_with_entries()
+    assert.is_nil(l:query_at("hp", {day=0}))
+  end)
+
+  it("multi-axis bound requires all specified axes <= entry values", function()
+    local l = log_mod.new()
+    -- Two independent axes (both increase monotonically together)
+    l:append({ path = "x", old = nil, new = 1, fn = "f", time = {day=1, hour=6} })
+    l:append({ path = "x", old = 1,   new = 2, fn = "f", time = {day=1, hour=12} })
+    l:append({ path = "x", old = 2,   new = 3, fn = "f", time = {day=2, hour=18} })
+
+    -- At day=1, hour=10: include first (hour=6<=10) but not second (hour=12>10)
+    assert.equal(1, l:query_at("x", {day=1, hour=10}))
+    -- At day=1, hour=12: include both day=1 entries
+    assert.equal(2, l:query_at("x", {day=1, hour=12}))
+    -- At day=2, hour=18: all entries included
+    assert.equal(3, l:query_at("x", {day=2, hour=18}))
+    -- At day=2, hour=10: third entry (hour=18>10) and second (hour=12>10) excluded
+    assert.equal(1, l:query_at("x", {day=2, hour=10}))
+  end)
+end)

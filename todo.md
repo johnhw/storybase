@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 869 tests passing.
+**Phase 7/8 in progress** — 876 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -320,7 +320,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] Append log entry: `{seq, fn, path, old, new}`
 - [x] Sequential numbering with no gaps
 - [x] Atomic: cache update and log append happen together (no partial state)
-- [ ] `query-at(path, time)` — value at a specific time — stub only; deferred to Phase 7
+- [x] `query-at(path, time)` — value at a specific time — implemented: seq-number and axis-table bounds (2026-04-04)
 - [x] `query-history(path)` — ordered list of all changes for a path
 - [x] `query-changes(path, last-n)` — most recent N changes
 - [x] Serialise log to file (Lua table format) — done (log.serialise_entries, engine write_save)

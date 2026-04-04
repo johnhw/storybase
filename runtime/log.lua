@@ -40,18 +40,55 @@ function M.new()
     return self._entries
   end
 
-  --- query-at: return the value of `path` at the given time.
+  --- query-at: return the value of `path` at the given time bound.
+  ---
+  --- `time` can be:
+  ---   number  — treated as a seq bound: return value at the last entry whose seq <= time
+  ---   table   — axis table (e.g. {day=3}): return value at the last entry whose recorded
+  ---             time satisfies ALL provided axes (entry.time.axis <= time.axis for each axis).
+  ---   nil     — return the current value (same as query_history result)
+  ---
   ---@param path string
-  ---@param time table  Time tuple (e.g. {day=1, tick=5})
+  ---@param time number|table|nil
   ---@return any
   function log:query_at(path, time)
-    local _ = time  -- not yet implemented
     local result = nil
-    for _, e in ipairs(self._entries) do
-      if e.path == path then
-        result = e.new
+
+    if time == nil then
+      -- Return latest value
+      for _, e in ipairs(self._entries) do
+        if e.path == path then result = e.new end
       end
+      return result
     end
+
+    if type(time) == "number" then
+      -- Seq-based bound
+      local bound = math.floor(time)
+      for _, e in ipairs(self._entries) do
+        if e.seq > bound then break end
+        if e.path == path then result = e.new end
+      end
+      return result
+    end
+
+    if type(time) == "table" then
+      -- Axis-based bound: include entry if all provided axes satisfy entry.time.axis <= time.axis
+      for _, e in ipairs(self._entries) do
+        if e.path == path then
+          local ok = true
+          for axis, bound_val in pairs(time) do
+            local entry_val = e.time and e.time[axis]
+            if entry_val == nil or entry_val > bound_val then
+              ok = false; break
+            end
+          end
+          if ok then result = e.new end
+        end
+      end
+      return result
+    end
+
     return result
   end
 
