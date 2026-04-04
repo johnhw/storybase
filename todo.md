@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 819 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
+**Phase 7/8 in progress** — 837 tests passing. All search functions (can_reach, find_path, probability, optimal_path) implemented and tested.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -27,7 +27,8 @@ Milestone goals are marked **M**.
 - Checker pass 5: discrete/superficial boundary enforcement — SUPERFICIAL_IN_COND + RANDOM_SUPERFICIAL warnings
 - Checker pass 6: write-set analysis — WRITE_UNTYPED_VAR warnings, WRITE_DYNAMIC_PATH errors, write_set annotation on FN_DECL/SCENE_DECL; loop-var SymbolOf inference for `for v in (path-list family)`
 - Lua interop API (`lib/storybase.lua`): sb.load/from_source, game:init/render/choose/call/eval/get/set/tick/save/load/on
-- Tests: +78 new tests (741→819)
+- Integration scenarios 1-4 (village→forest→dungeon, combat, guarded shop, save/load round-trip)
+- Tests: +96 new tests (741→837)
 
 **Remaining gaps (Phase 7+):**
 - Import/resolve imported names — Phase 7
@@ -396,9 +397,9 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/runtime/engine_spec.lua` — simulated turn loop (2-turn sequence)
 - [x] `tests/runtime/log_spec.lua` — serialise → deserialise → identical cache — done (2026-04-03)
 - [x] `tests/runtime/engine_spec.lua` — save/load round-trip test — done (2026-04-03)
-- [ ] Integration scenario 1: player walks village → forest → dungeon — deferred to Phase 7
-- [ ] Integration scenario 2: combat state machine (attack, potion, flee) — deferred to Phase 7
-- [ ] Integration scenario 3: buy potion with gold guard — deferred to Phase 7
+- [x] Integration scenario 1: player walks village → forest → dungeon (2026-04-04)
+- [x] Integration scenario 2: combat state machine (attack, potion, flee) (2026-04-04)
+- [x] Integration scenario 3: buy potion with gold guard (2026-04-04)
 
 **M Milestone:** `test02_choices.sb` runs end-to-end with correct transaction log. ✅ DONE (2026-04-01)
 

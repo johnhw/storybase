@@ -480,6 +480,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/parser_spec.lua` | Parser (includes INDEX_EXPR tests) |
 | `tests/compiler/checker_spec.lua` | Checker passes 1-6 (schema, types, purity, perceives, boundary, write-sets) |
 | `tests/lib/storybase_spec.lua` | Public Lua interop API (sb.load, from_source, game object methods) |
+| `tests/runtime/integration_spec.lua` | End-to-end gameplay scenarios (walk, combat, guarded shop, save/load) |
 | `tests/compiler/codegen_spec.lua` | Game table emission |
 | `tests/runtime/state_spec.lua` | Store CRUD, clamping, undo, spawn/despawn |
 | `tests/runtime/eval_spec.lua` | Expr/stmt evaluation, INDEX_EXPR eval |
