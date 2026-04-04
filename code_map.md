@@ -101,8 +101,9 @@ MATCH_ARM, COND_ARM
 
 ---
 
-### `compiler/codegen.lua` (637 lines)
-- `M.emit(typed_ast)` → `(game_table, diags[])`
+### `compiler/codegen.lua` (~650 lines)
+- `M.emit(typed_ast, opts?)` → `(game_table, diags[])`
+- `opts.production = true` → strips verifies and watches from game_table; sets `game_table.production = true`
 - Produces the **game_table** structure (see below)
 - Local emitters: `emit_types`, `emit_states`, `emit_relations`, `emit_engine_config`, `emit_time_model`, `emit_fns`, `emit_scenes`, `emit_actors`, `emit_schedules`, `emit_verifies`, `emit_watches`, `emit_bounded`, `emit_migrations`
 
@@ -115,12 +116,14 @@ MATCH_ARM, COND_ARM
 
 ---
 
-### `compiler/compiler.lua` (~140 lines)
-- `M.compile(source, filename)` → `(game_table, diags)`
-- `M.compile_file(filepath)` → `(game_table, diags)`
+### `compiler/compiler.lua` (~245 lines)
+- `M.compile(source, filename, opts?)` → `(game_table, diags)`
+- `M.compile_file(filepath, opts?)` → `(game_table, diags)`
 - `M.parse_and_check(source, filename)` → `(typed_ast, diags)` — stops before codegen; returns AST with `.decls`
 - `M.parse_and_check_file(filepath)` → `(typed_ast, diags)`
-- Runs lexer → parser → checker → codegen in sequence; collects all diags
+- `opts.production = true` → passed to codegen to strip debug-only content
+- Runs lexer → parser → resolve_imports → checker → codegen in sequence
+- `resolve_imports` splices imported declarations (from `import "file.sb"`) before type-check; cycle detection via IMPORT_CYCLE error
 
 ---
 
@@ -147,10 +150,11 @@ game_table = {
   scenes     = { [name] = {name, choices=[{text, guard, body}]} },
   actors     = { [name] = {name, priority, perceives, state_path, behaviors} },
   schedules  = { [name] = {name, trigger, body} },
-  verifies   = [ {label, clauses=[{kind, condition, body}]} ],
-  watches    = [ {label, path_or_cond, kind} ],
+  verifies   = [ {label, clauses=[{kind, condition, body}]} ],  -- empty in production builds
+  watches    = [ {label, path_or_cond, kind} ],                 -- empty in production builds
   migrations = [ {from_version, body} ],
   bounded    = { [name] = {reads, body} },
+  production = bool,  -- true if compiled with opts.production
 }
 ```
 
@@ -228,9 +232,9 @@ count-where      → count items matching predicate
 any?, all?
 random-int
 tostring
-path-exists?
-can-reach?       → bool  (BFS, optional depth: N)
-find-path        → [{scene, label, index}, ...]  (BFS path)
+path-exists?     → bool (uses eval_path on PATH_EXPR args, not eval_expr)
+can-reach?       → bool  (BFS, optional depth: N, budget: secs)
+find-path        → [{scene, label, index}, ...]  (BFS path, optional depth: N, budget: secs)
 verify-always    → bool  (BFS negation check)
 probability      → float  (weighted BFS, optional depth:/threshold:)
 optimal-path     → [{scene, label, index}, ...]  (Dijkstra, optional by:/depth:)
@@ -275,18 +279,19 @@ eng:inp()                     → string  -- read from io_in
 
 ---
 
-### `runtime/search.lua` (526 lines)
+### `runtime/search.lua` (~540 lines)
 BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 
-- `M.can_reach(game_table, cache, stack, condition_fn, depth)` → bool
-- `M.find_path(game_table, cache, stack, condition_fn, depth)` → `[{scene, label, index}, ...]` | nil
+- `M.can_reach(game_table, cache, stack, condition_fn, depth, budget?)` → `(bool, timed_out_bool)`
+- `M.find_path(game_table, cache, stack, condition_fn, depth, budget?)` → `[{scene, label, index}, ...]` | nil
 - `M.probability(game_table, cache, stack, condition_fn, depth, threshold)` → float 0..1
 - `M.optimal_path(game_table, cache, stack, condition_fn, depth, cost_fn)` → path | nil  (Dijkstra)
 - `M.new(state, game, opts)` → search object (alternative stateful API, less used)
 
 **BFS node:** `{stack=[], cache={}, depth=N}`  
 **Cycle detection:** content hash of `cache + stack` via local `hash_cache`  
-**Note:** `probability` does NOT use cycle dedup (all paths must be counted separately)
+**Note:** `probability` does NOT use cycle dedup (all paths must be counted separately)  
+**Time budget:** `budget` in seconds (nil = no limit); clock checked every `BUDGET_CHECK_N=50` iterations
 
 ---
 
@@ -306,7 +311,7 @@ Verify block runner (offline model-checker).
 
 ---
 
-### `runtime/actors.lua` (321 lines)
+### `runtime/actors.lua` (~330 lines)
 Actor registry and behavior runner.
 
 - `M.new(state, log)` → registry
@@ -317,11 +322,13 @@ registry:register(actor_def)      -- register actor from game_table.actors
 registry:send(actor_name, msg)    -- push to actor inbox
 registry:deliver_messages()       -- move inbox to actor state paths
 registry:run_behaviors(fns)       -- run each actor's behavior fn with perception snapshot
-registry:apply_deferred()         -- commit deferred writes from behaviors
+registry:apply_deferred()         -- commit deferred writes; logs kind="conflict" on priority clash
 registry:clear_inboxes()
 ```
 
 **Perception filtering:** `make_capture_proxy(state, priority, name, perceives, state_path)` — creates read-only proxy where `get(path)` returns nil for paths not in `perceives` list (actor's own `state_path` subtree always readable).
+
+**Conflict logging:** when a lower-priority actor's `set`/`clear` write is discarded because a higher-priority actor already wrote the same path, a `kind="conflict"` entry is appended to the transaction log.
 
 ---
 
@@ -377,7 +384,7 @@ srv:handle_command(cmd, payload)     -- dispatch incoming command (e.g. "get-sta
 
 ---
 
-### `runtime/scheduler.lua` (144 lines)
+### `runtime/scheduler.lua` (~160 lines)
 Time-triggered event scheduler.
 
 - `M.new(state, log)` → sched
@@ -385,9 +392,9 @@ Time-triggered event scheduler.
 **sched methods:**
 ```
 sched:register(name, trigger, body)  -- register schedule from game_table.schedules
-sched:tick(fns)                      -- advance time, fire triggered schedules
+sched:tick(fns)                      -- advance time, fire triggered schedules; logs kind="schedule_fired"
 sched:schedule(name, opts, fn)       -- dynamic schedule (stub)
-sched:cancel(name)                   -- cancel dynamic schedule (stub)
+sched:cancel(name)                   -- cancel schedule; logs kind="cancel_schedule" if active
 ```
 
 ---
@@ -434,10 +441,12 @@ rng:weighted(weights, list) → value
 
 ## cli/
 
-### `cli/main.lua` (~285 lines)
+### `cli/main.lua` (~380 lines)
 - `M.main(argv)` — top-level dispatcher
 - Subcommands: `compile`, `run`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
-- Flags: `--save` / `--load` / `--seed N` for `run`
+- Flags: `--save` / `--load` / `--seed N` for `run`; `--production` for `compile`/`run`
+- `BOOL_FLAGS` set prevents boolean flags from eating the following positional arg
+- Per-subcommand help: `storybase help <subcommand>` shows detailed usage
 
 ### `cli/verify_cmd.lua` (79 lines)
 - `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
@@ -485,23 +494,40 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/lexer_spec.lua` | Tokenizer |
 | `tests/compiler/parser_spec.lua` | Parser (includes INDEX_EXPR tests) |
 | `tests/compiler/checker_spec.lua` | Checker passes 1-6 (schema, types, purity, perceives, boundary, write-sets) |
-| `tests/lib/storybase_spec.lua` | Public Lua interop API (sb.load, from_source, game object methods) |
+| `tests/compiler/codegen_spec.lua` | Game table emission; production build mode |
+| `tests/compiler/import_spec.lua` | Import resolver (basic, FILE_NOT_FOUND, IMPORT_CYCLE, transitive) |
+| `tests/lib/storybase_spec.lua` | Public Lua interop API; find(), counterfactual() |
 | `tests/runtime/integration_spec.lua` | End-to-end gameplay scenarios (walk, combat, guarded shop, save/load) |
-| `tests/compiler/codegen_spec.lua` | Game table emission |
 | `tests/runtime/state_spec.lua` | Store CRUD, clamping, undo, spawn/despawn |
-| `tests/runtime/eval_spec.lua` | Expr/stmt evaluation, INDEX_EXPR eval |
+| `tests/runtime/eval_spec.lua` | Expr/stmt evaluation; pre: fix; path-exists? fix |
 | `tests/runtime/engine_spec.lua` | Engine init, render, choice, save/load |
 | `tests/runtime/actors_spec.lua` | Actor registry, perception filtering |
-| `tests/runtime/search_spec.lua` | can_reach, find_path, probability, optimal_path, verify-always |
+| `tests/runtime/search_spec.lua` | can_reach, find_path, probability, optimal_path; time-budget |
 | `tests/runtime/verify_spec.lua` | verify block runner (always/after/requires/counterexample) |
-| `tests/runtime/log_spec.lua` | Log append, query, serialise/deserialise |
+| `tests/runtime/log_spec.lua` | Log append, query, serialise/deserialise, query_at |
 | `tests/runtime/query_spec.lua` | Relation queries |
 | `tests/runtime/counterfactual_spec.lua` | Counterfactual branching |
 | `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec |
 | `tests/runtime/migrate_spec.lua` | Migration runner |
-| `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files |
+| `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |
+| `tests/cli/compact_spec.lua` | compact CLI command |
+| `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 
 Run all tests: `busted tests/`
+
+---
+
+## demos/
+
+Example games demonstrating progressive language features. All runnable with `storybase run demos/<file>`.
+
+| File | Features demonstrated |
+|------|-----------------------|
+| `demo01_wanderer.sb` | module, Int state, scene narration, `->`, `inc!`, `{expr}` |
+| `demo02_merchant.sb` | type enum, multiple state paths, fn, choice guards, `match`, `if/else` |
+| `demo03_quest.sb` | Bool flags, `fn` with `pre:`, `when`, `if/else`, Class enum, XP system |
+| `demo04_expedition.sb` | entity family (`state crew/{m}`), `spawn!`/`despawn!`, `for`/`path-list`, `path-exists?`, `count-where` |
+| `demo05_siege.sb` | time-model, actor + behavior, `send!`, schedule, `cancel-schedule!`, `verify-always` |
 
 ---
 
