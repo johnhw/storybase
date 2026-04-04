@@ -43,7 +43,7 @@ Commands:
   verify  <file>              Run all verify blocks in a .sb file
   migrate <save.log>          Apply outstanding schema migrations to a save log
   extract-symbols <file>      Scan symbol literals; suggest type declarations
-  compact <save.log>          Emit snapshot + delta log for faster replay
+  compact <game.sb> <save.log> Emit snapshot + delta log for faster replay
   help                        Show this help text
 
 Options (compile / run):

@@ -8,7 +8,7 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-04)
 
-**Phase 7/8 in progress** — 882 tests passing.
+**Phase 7/8 in progress** — 889 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -35,10 +35,11 @@ Milestone goals are marked **M**.
 - `storybase compact <game.sb> <save.log>` CLI — collapses full log into snapshot entries for fast replay
 - `game:counterfactual(fn)` Lua interop — isolated branch, fn mutates copy, returns frozen snapshot
 - `log:query_at(path, time)` — seq-number and axis-table time bounds implemented
-- Tests: +141 new tests (741→882)
+- Import resolver: `import "file.sb"` splices declarations before checker, with cycle detection (IMPORT_CYCLE error), transitive imports
+- Tests: +148 new tests (741→889)
 
 **Remaining gaps (Phase 7+):**
-- Import/resolve imported names — Phase 7
+- `as Alias` namespacing for imports (currently flat merge) — Phase 8
 - Log snapshot + delta replay — Phase 8
 - Conflict logging in transaction log — Phase 8
 - `schedule!` and `cancel-schedule!` appear in transaction log — Phase 8
@@ -91,7 +92,7 @@ Milestone goals are marked **M**.
 - [x] Module header: `module name version: N`
 - [x] `import "file"` (flat)
 - [x] `import "file" as Alias` (namespaced)
-- [ ] Import cycle detection (compile error) — deferred to Phase 7
+- [x] Import cycle detection (IMPORT_CYCLE error) — done (2026-04-04)
 - [x] `schema-version: N`
 - [x] `engine-config:` block with all known keys
 - [x] `time-model:` block (`axes:`, `wrap:`)
@@ -142,7 +143,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] Collect all relation names
 - [ ] Collect all scene names (auto-generate `SceneId` enum) — deferred to Phase 7
 - [x] Resolve forward references within the same compilation unit (pass1 collects all names before pass2 resolves)
-- [ ] Resolve imported names (flat and namespaced) — deferred to Phase 7
+- [x] Resolve imported names (flat merge; `as Alias` parsed but not namespaced) — done (2026-04-04)
 - [x] Error: duplicate type/state/scene/relation name
 - [x] Error: undefined type reference
 
