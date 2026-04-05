@@ -593,9 +593,9 @@ end
 --- Classify all fn_decl nodes as pure or transaction.
 local function pass3_infer_purity(acc, program)
   local k = ast.K
+  -- First pass: classify by direct mutation primitives
   for _, node in ipairs(program.decls) do
     if node.kind == k.FN_DECL then
-      -- Check body for mutations
       local body_has_mut = false
       for _, s in ipairs(node.body or {}) do
         if has_mutation(s) then body_has_mut = true; break end
@@ -618,6 +618,250 @@ local function pass3_infer_purity(acc, program)
         end
       end
     end
+  end
+
+  -- Second pass: transitive promotion — a fn that calls a transaction fn is also a transaction.
+  -- Repeat until no more promotions occur (handles arbitrarily deep call chains).
+  local changed = true
+  while changed do
+    changed = false
+    -- Build current transaction set
+    local is_tx = {}
+    for _, node in ipairs(program.decls) do
+      if node.kind == k.FN_DECL and node.is_transaction then
+        is_tx[node.name] = true
+      end
+    end
+    for _, node in ipairs(program.decls) do
+      if node.kind == k.FN_DECL and not node.is_transaction then
+        -- Check if body calls any known transaction fn
+        for _, s in ipairs(node.body or {}) do
+          local calls = {}
+          -- collect_fn_calls is defined later; use local inline search
+          local function scan(n)
+            if not n or type(n) ~= "table" then return end
+            if n.kind == k.FN_CALL and n.name and is_tx[n.name] then
+              node.is_transaction = true; changed = true
+              return
+            end
+            for _, f in ipairs({ "body","then_body","else_body","condition","expr",
+                                  "left","right","value","amount","inner_expr" }) do
+              scan(n[f])
+            end
+            for _, list_f in ipairs({ "arms","choices","clauses" }) do
+              if type(n[list_f]) == "table" then
+                for _, child in ipairs(n[list_f]) do scan(child) end
+              end
+            end
+            if type(n.args) == "table" then
+              for _, a in ipairs(n.args) do scan(a) end
+            end
+          end
+          scan(s)
+          if node.is_transaction then break end
+        end
+      end
+    end
+  end
+end
+
+-- ============================================================
+-- Pass 3b — Transaction-in-pure-context checks + uses-bounded tag
+-- ============================================================
+
+--- Collect all FN_CALL names (with positions) in an AST subtree.
+local function collect_fn_calls(node, result)
+  if not node or type(node) ~= "table" then return end
+  if node.kind == ast.K.FN_CALL and node.name then
+    result[#result+1] = { name = node.name, pos = node.pos }
+  end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        collect_fn_calls(child, result)
+        if type(child) == "table" then
+          if child.guard then collect_fn_calls(child.guard, result) end
+          if child.body then
+            if type(child.body) == "table" and not child.body.kind then
+              for _, s in ipairs(child.body) do collect_fn_calls(s, result) end
+            else collect_fn_calls(child.body, result) end
+          end
+        end
+      end
+    end
+  end
+  local NODE_FIELDS = { "condition", "expr", "left", "right",
+                        "base", "value", "amount", "inner_expr" }
+  for _, field in ipairs(NODE_FIELDS) do
+    collect_fn_calls(node[field], result)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do collect_fn_calls(a, result) end
+  end
+  if type(node.clauses) == "table" then
+    for _, c in ipairs(node.clauses) do
+      collect_fn_calls(c.condition, result)
+      if type(c.body) == "table" then
+        for _, s in ipairs(c.body) do collect_fn_calls(s, result) end
+      end
+    end
+  end
+end
+
+--- Recursively visit all nodes, calling fn for FIND_EXPR and VERIFY_DECL.
+local function walk_pure_contexts(node, fn)
+  if not node or type(node) ~= "table" then return end
+  if node.kind == ast.K.FIND_EXPR or node.kind == ast.K.VERIFY_DECL then
+    fn(node)
+  end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        walk_pure_contexts(child, fn)
+        if type(child) == "table" then
+          if child.guard then walk_pure_contexts(child.guard, fn) end
+          if child.body then
+            if type(child.body) == "table" and not child.body.kind then
+              for _, s in ipairs(child.body) do walk_pure_contexts(s, fn) end
+            else walk_pure_contexts(child.body, fn) end
+          end
+        end
+      end
+    end
+  end
+  local NODE_FIELDS = { "condition", "expr", "left", "right",
+                        "base", "value", "amount", "inner_expr" }
+  for _, field in ipairs(NODE_FIELDS) do
+    walk_pure_contexts(node[field], fn)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do walk_pure_contexts(a, fn) end
+  end
+end
+
+--- Check transaction/pure-context constraints and annotate uses_bounded.
+--- Runs after pass3_infer_purity so fn_decl.is_transaction is already set.
+---
+--- Errors emitted:
+---   TRANSACTION_IN_PURE   — transaction fn called inside a pure fn body
+---   TRANSACTION_IN_FIND   — transaction fn called inside a find where clause
+---   TRANSACTION_IN_VERIFY — transaction fn called inside a verify condition
+--- Annotations:
+---   fn_decl.uses_bounded = true  — fn (directly) calls a bounded computation
+local function pass3b_check_call_purity(acc, program)
+  local k = ast.K
+
+  -- Build fn classification and bounded-name sets from top-level decls
+  local fn_is_transaction = {}   -- fn_name → bool
+  local bounded_names     = {}   -- bounded_decl names → true
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then
+      fn_is_transaction[node.name] = node.is_transaction or false
+    elseif node.kind == k.BOUNDED_DECL then
+      bounded_names[node.name] = true
+    end
+  end
+
+  -- Check each fn_decl for TRANSACTION_IN_PURE (in pre:/post:) and uses_bounded
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then
+      -- TRANSACTION_IN_PURE: pre:/post: block calls a transaction function.
+      -- (Direct mutations in pre:/post: are already caught by PURE_CALLS_MUT in pass3.)
+      for _, e in ipairs(node.pre or {}) do
+        local calls = {}; collect_fn_calls(e, calls)
+        for _, call in ipairs(calls) do
+          if fn_is_transaction[call.name] == true then
+            err(acc, ast.E.TRANSACTION_IN_PURE,
+              "pre: condition of '" .. (node.name or "?") ..
+              "' calls transaction function '" .. call.name .. "'",
+              call.pos or node.pos)
+            break
+          end
+        end
+      end
+      for _, e in ipairs(node.post or {}) do
+        local calls = {}; collect_fn_calls(e, calls)
+        for _, call in ipairs(calls) do
+          if fn_is_transaction[call.name] == true then
+            err(acc, ast.E.TRANSACTION_IN_PURE,
+              "post: condition of '" .. (node.name or "?") ..
+              "' calls transaction function '" .. call.name .. "'",
+              call.pos or node.pos)
+            break
+          end
+        end
+      end
+
+      -- uses_bounded tag: fn directly calls a bounded computation
+      local all_calls = {}
+      for _, stmt in ipairs(node.body or {}) do collect_fn_calls(stmt, all_calls) end
+      for _, call in ipairs(all_calls) do
+        if bounded_names[call.name] then
+          node.uses_bounded = true
+          break
+        end
+      end
+    end
+  end
+
+  -- Walk all decls for FIND_EXPR and VERIFY_DECL nodes anywhere in the tree
+  for _, decl in ipairs(program.decls) do
+    walk_pure_contexts(decl, function(node)
+      if node.kind == k.FIND_EXPR then
+        -- TRANSACTION_IN_FIND: transaction fn in find where/or-where clause
+        for _, clause in ipairs(node.clauses or {}) do
+          if clause.kind == "where" or clause.kind == "or_where" then
+            local calls = {}
+            collect_fn_calls(clause.condition, calls)
+            for _, call in ipairs(calls) do
+              if fn_is_transaction[call.name] == true then
+                err(acc, ast.E.TRANSACTION_IN_FIND,
+                  "transaction function '" .. call.name .. "' called in find where clause",
+                  call.pos or node.pos)
+                break
+              end
+            end
+          end
+        end
+      elseif node.kind == k.VERIFY_DECL then
+        -- TRANSACTION_IN_VERIFY: transaction fn in pure-context verify clauses.
+        -- "after" clauses have a call expression that IS a transaction (intentional),
+        -- so we only check the assertion body of after:, not the call itself.
+        -- For always/requires/from_any_state/when: check both condition and body.
+        -- NOTE: AST verify_clause nodes use `clause_kind` (not `kind`) for type.
+        for _, clause in ipairs(node.clauses or {}) do
+          local exprs = {}
+          if clause.clause_kind == "after" then
+            -- Only check assertion body; clause.condition is the intentional transaction call
+            if type(clause.body) == "table" then
+              for _, e in ipairs(clause.body) do exprs[#exprs+1] = e end
+            end
+          else
+            -- always/requires/from_any_state/when: fully pure context
+            if clause.condition then exprs[#exprs+1] = clause.condition end
+            if type(clause.body) == "table" then
+              for _, e in ipairs(clause.body) do exprs[#exprs+1] = e end
+            end
+          end
+          for _, expr in ipairs(exprs) do
+            local calls = {}
+            collect_fn_calls(expr, calls)
+            for _, call in ipairs(calls) do
+              if fn_is_transaction[call.name] == true then
+                err(acc, ast.E.TRANSACTION_IN_VERIFY,
+                  "transaction function '" .. call.name .. "' called in verify condition",
+                  call.pos or node.pos)
+                break
+              end
+            end
+          end
+        end
+      end
+    end)
   end
 end
 
@@ -1199,6 +1443,7 @@ function M.check(ast_root, filename)
 
   pass2_check(acc, symtab, ast_root)
   pass3_infer_purity(acc, ast_root)
+  pass3b_check_call_purity(acc, ast_root)
   pass4_check_perceives(acc, ast_root)
   pass5_check_boundary(acc, symtab, ast_root)
   pass6_write_sets(acc, ast_root)

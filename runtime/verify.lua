@@ -75,7 +75,8 @@ end
 -- ============================================================
 
 --- BFS from the entry scene up to max_depth choices deep.
---- Returns a list of cache snapshots (flat tables, one per visited node).
+--- Returns a list of {cache, path} where cache is a state snapshot and
+--- path is a list of {scene, label} steps from the initial state.
 local function bfs_states(game_table, max_depth)
   local engine_mod = require("runtime.engine")
   local snapshots  = {}
@@ -92,7 +93,7 @@ local function bfs_states(game_table, max_depth)
   local init_cache = clone_cache(init_eng._state)
   local init_stack = { entry }
 
-  local queue = { { stack = init_stack, cache = init_cache, depth = 0 } }
+  local queue = { { stack = init_stack, cache = init_cache, depth = 0, path = {} } }
   local head  = 1
 
   while head <= #queue do
@@ -101,7 +102,7 @@ local function bfs_states(game_table, max_depth)
 
     if not seen[h] then
       seen[h] = true
-      snapshots[#snapshots+1] = item.cache
+      snapshots[#snapshots+1] = { cache = item.cache, path = item.path }
 
       if item.depth < max_depth then
         local scene_name = item.stack[#item.stack]
@@ -165,10 +166,14 @@ local function bfs_states(game_table, max_depth)
             end
 
             if #new_stack > 0 then
+              local new_path = {}
+              for _, step in ipairs(item.path) do new_path[#new_path+1] = step end
+              new_path[#new_path+1] = { scene = scene_name, label = ch.label }
               queue[#queue+1] = {
                 stack = new_stack,
                 cache = new_cache,
                 depth = item.depth + 1,
+                path  = new_path,
               }
             end
           end
@@ -201,7 +206,8 @@ local function run_always_check(verify_entry, game_table)
     return { pass = true, states_checked = 0 }
   end
 
-  for i, cache_snap in ipairs(snapshots) do
+  for i, snap_item in ipairs(snapshots) do
+    local cache_snap = snap_item.cache
     local fake_log   = log_mod.new()
     local fake_state = state_mod.new(game_table.schema, fake_log)
     for k, v in pairs(cache_snap) do fake_state._cache[k] = v end
@@ -229,12 +235,13 @@ local function run_always_check(verify_entry, game_table)
         end
       end
       return {
-        pass             = false,
-        fail_msg         = string.format(
+        pass                 = false,
+        fail_msg             = string.format(
           "verify-always violated at BFS state %d: {%s}",
           i, table.concat(snap_parts, ", ")),
-        counterexample   = cache_snap,
-        counterexample_n = i,
+        counterexample       = cache_snap,
+        counterexample_n     = i,
+        counterexample_path  = snap_item.path,
       }
     end
   end
@@ -337,7 +344,8 @@ local function run_can_reach_check(verify_entry, game_table)
   local snapshots = bfs_states(game_table, DEFAULT_BFS_DEPTH)
 
   -- For each snapshot, optionally filter by when: condition
-  for i, snap in ipairs(snapshots) do
+  for i, snap_item in ipairs(snapshots) do
+    local snap = snap_item.cache
     -- Apply when: filter
     if when_cond then
       local l  = log_mod.new()
@@ -384,12 +392,13 @@ local function run_can_reach_check(verify_entry, game_table)
           end
         end
         return {
-          pass           = false,
-          fail_msg       = string.format(
+          pass                = false,
+          fail_msg            = string.format(
             "from-any-state: condition failed at BFS state %d: {%s}",
             i, table.concat(snap_parts, ", ")),
-          counterexample = snap,
-          counterexample_n = i,
+          counterexample      = snap,
+          counterexample_n    = i,
+          counterexample_path = snap_item.path,
         }
       end
     end
@@ -425,10 +434,11 @@ function M.run_all(game_table)
     if has_always then
       local r = run_always_check(verify_entry, game_table)
       if not r.pass then
-        result.pass             = false
-        result.fail_msg         = r.fail_msg
-        result.counterexample   = r.counterexample
-        result.counterexample_n = r.counterexample_n
+        result.pass                 = false
+        result.fail_msg             = r.fail_msg
+        result.counterexample       = r.counterexample
+        result.counterexample_n     = r.counterexample_n
+        result.counterexample_path  = r.counterexample_path
       else
         result.states_checked = r.states_checked
       end
@@ -448,10 +458,11 @@ function M.run_all(game_table)
     if has_from_any_state and result.pass then
       local r = run_can_reach_check(verify_entry, game_table)
       if not r.pass then
-        result.pass             = false
-        result.fail_msg         = r.fail_msg
-        result.counterexample   = r.counterexample
-        result.counterexample_n = r.counterexample_n
+        result.pass                 = false
+        result.fail_msg             = r.fail_msg
+        result.counterexample       = r.counterexample
+        result.counterexample_n     = r.counterexample_n
+        result.counterexample_path  = r.counterexample_path
       end
     end
 

@@ -711,8 +711,26 @@ local function parse_relation_decl(p, doc)
         self:skip_to_eol(); return nil
       end
       self:expect("OP", ":", "expected ':' after relation key")
+      -- Parse optional value list: ['a, 'b, ...] or bare symbols/idents
+      local values = {}
+      if self:at("OP", "[") then
+        self:adv()  -- consume "["
+        while not self:at("OP", "]") and not self:at("NEWLINE")
+              and not self:at("EOF") do
+          local vpos = self:cur().pos
+          if self:at("SYMBOL") then
+            values[#values+1] = ast.symbol_lit(self:adv().value, vpos)
+          elseif self:at("IDENT") then
+            values[#values+1] = ast.type_named(self:adv().value, vpos)
+          else
+            self:adv()  -- skip unexpected token
+          end
+          self:match("OP", ",")
+        end
+        self:expect("OP", "]", "expected ']' to close relation value list")
+      end
       self:skip_to_eol()
-      return { key = key, values = {} }
+      return { key = key, values = values }
     end)
   else
     p:skip_to_eol()
@@ -915,6 +933,43 @@ local function parse_atom(p)
           elseif p:at("IDENT", "count") then
             p:adv()
             clauses[#clauses+1] = { kind = "count" }
+            p:skip_to_eol()
+          elseif p:at("IDENT", "within") then
+            -- within N hops of <relation> from <src>
+            p:adv()  -- consume "within"
+            local hops_node = parse_expr(p)
+            local hops = (hops_node and hops_node.kind == "int_lit") and hops_node.value or 1
+            -- expect "hops" ident
+            if p:at("IDENT", "hops") then p:adv() end
+            -- expect "of" ident
+            if p:at("IDENT", "of") then p:adv() end
+            -- relation name (bare ident or symbol)
+            local rel_name = nil
+            if p:at("IDENT") then
+              rel_name = p:adv().value
+            elseif p:at("SYMBOL") then
+              rel_name = p:adv().value
+            end
+            -- expect "from" ident
+            if p:at("IDENT", "from") then p:adv() end
+            local src_expr = parse_expr(p)
+            clauses[#clauses+1] = { kind = "within", hops = hops,
+                                    relation_name = rel_name, from = src_expr }
+            p:skip_to_eol()
+          elseif p:at("IDENT", "connected-to") then
+            -- connected-to <path> via <relation>
+            p:adv()  -- consume "connected-to"
+            local path_node = parse_expr(p)
+            -- expect "via" ident
+            if p:at("IDENT", "via") then p:adv() end
+            local rel_name = nil
+            if p:at("IDENT") then
+              rel_name = p:adv().value
+            elseif p:at("SYMBOL") then
+              rel_name = p:adv().value
+            end
+            clauses[#clauses+1] = { kind = "connected_to", path = path_node,
+                                    relation_name = rel_name }
             p:skip_to_eol()
           else
             p:skip_to_eol()
@@ -2311,12 +2366,22 @@ end
 local function parse_bounded_decl(p, doc)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD("bounded") or IDENT("bounded")
-  local name = p:at("IDENT") and p:adv().value or "?"
+  local params = {}
+  -- The name may be a plain IDENT, a hyphenated NAMED_ARG (e.g. "roll-die:"),
+  -- or an IDENT followed by optional params then ":".
+  local name
+  if p:at("NAMED_ARG") then
+    -- "roll-die:" → NAMED_ARG token: the name is its value; the colon is already consumed
+    name = p:adv().value
+    p:match("NEWLINE")
+    goto bounded_body
+  else
+    name = p:at("IDENT") and p:adv().value or "?"
+  end
   -- Optional parameter name.
   -- The lexer may have eaten the ':' from "paramname:" producing NAMED_ARG.
   -- If next token is NAMED_ARG, the param name is its value and ':' is consumed.
   -- If next token is IDENT followed by ':', parse param as IDENT.
-  local params = {}
   if p:at("NAMED_ARG") then
     -- "paramname:" → the ':' is already consumed; this doubles as the colon we need
     params[#params+1] = p:adv().value

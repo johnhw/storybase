@@ -67,6 +67,14 @@ function M.run(args)
       if r.fail_msg then
         io.stdout:write(string.format("        %s\n", r.fail_msg))
       end
+      -- Print counterexample action sequence if available
+      if r.counterexample_path and #r.counterexample_path > 0 then
+        io.stdout:write("        Counterexample path:\n")
+        for step_i, step in ipairs(r.counterexample_path) do
+          io.stdout:write(string.format("          %d. [%s] %s\n",
+            step_i, step.scene or "?", step.label or "?"))
+        end
+      end
     end
   end
 

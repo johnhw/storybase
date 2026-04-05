@@ -81,6 +81,39 @@ verify "gold never negative":
     assert.is_truthy(results[1].fail_msg)
   end)
 
+  it("includes counterexample_path when invariant is violated", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  count: Int(0, 100) = 0
+
+fn step:
+  inc! world/count 50
+
+scene main:
+  * Step
+    step
+    -> main
+
+verify "count stays small":
+  verify-always world/count < 50
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+    -- counterexample_path should be a list of {scene, label} steps
+    local path = results[1].counterexample_path
+    assert.is_not_nil(path, "expected counterexample_path to be present")
+    assert.is_true(type(path) == "table", "counterexample_path should be a table")
+    -- The path involves at least one Step choice
+    assert.is_true(#path >= 1, "counterexample_path should have at least one step")
+    assert.equals("main", path[1].scene)
+    assert.equals("Step", path[1].label)
+  end)
+
 end)
 
 -- ============================================================

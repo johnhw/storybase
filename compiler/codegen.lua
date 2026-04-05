@@ -386,12 +386,25 @@ local function emit_states(decls)
   return states
 end
 
---- Emit schema.relations list.
+--- Emit schema.relations list and a by-name map with adjacency data.
+--- Returns (relations_list, relations_by_name).
 local function emit_relations(decls)
-  local relations = {}
+  local relations      = {}
+  local relations_map  = {}  -- name → {name, data={src={dst=true,...}}}
   local k = ast.K
   for _, node in ipairs(decls) do
     if node.kind == k.RELATION_DECL then
+      -- Build adjacency data from initial_data
+      local data = {}
+      for _, entry in ipairs(node.initial_data or {}) do
+        local key_str = entry.key and (entry.key.value or entry.key.name) or "?"
+        local adj = {}
+        for _, v in ipairs(entry.values or {}) do
+          local dst = v.value or v.name or tostring(v)
+          adj[dst] = true
+        end
+        data[key_str] = adj
+      end
       table.insert(relations, {
         name          = node.name,
         from_type     = node.from_type,
@@ -399,9 +412,10 @@ local function emit_relations(decls)
         initial_count = #(node.initial_data or {}),
         doc           = node.doc,
       })
+      relations_map[node.name] = { name = node.name, data = data }
     end
   end
-  return relations
+  return relations, relations_map
 end
 
 --- Collect engine-config keys into a flat table.
@@ -494,6 +508,7 @@ local function emit_fns(decls)
         tags           = node.tags or {},
         body           = node.body or {},
         is_transaction = node.is_transaction or false,
+        uses_bounded   = node.uses_bounded   or false,
         doc            = node.doc,
       }
     end
@@ -664,7 +679,7 @@ function M.emit(typed_ast, opts)
     })
   end
   local states    = emit_states(decls)
-  local relations = emit_relations(decls)
+  local relations, relations_map = emit_relations(decls)
   local eng_cfg   = emit_engine_config(decls)
   local time_mdl  = emit_time_model(decls)
   local schema_v  = emit_schema_version(decls)
@@ -712,6 +727,7 @@ function M.emit(typed_ast, opts)
     scenes     = emit_scenes(decls),
     actors     = emit_actors(decls),
     schedules  = emit_schedules(decls),
+    relations  = relations_map,  -- name → {name, data={src={dst=true,...}}} for runtime queries
     -- In production builds, strip debug-only content
     verifies   = opts.production and {} or emit_verifies(decls),
     watches    = opts.production and {} or emit_watches(decls),

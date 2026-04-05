@@ -10,7 +10,7 @@ Milestone goals are marked **M**.
 
 **CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 979 tests passing.
+**Phase 7/8 in progress** — 1009 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -264,17 +264,18 @@ A separate types.lua is not needed for Phase 1.
 **Deviation:** `_` added to lexer `is_alpha` (required for wildcard in match arms; previously illegal char).
 **Deviation:** `match subject:` where `subject` is a bare identifier: the lexer tokenises `name:` as `NAMED_ARG`; `parse_match_expr` now handles both forms.
 
-### Checker — Pass 3 (Pure/Transaction Inference) ✅ DONE (2026-03-30)
+### Checker — Pass 3 (Pure/Transaction Inference) ✅ DONE (2026-04-05)
 
 - [x] Classify every function as pure or transaction — annotated on fn_decl as `is_transaction`
 - [x] Pure: calls no mutation primitives directly (transitive call-graph deferred)
 - [x] Transaction: calls any mutation primitive directly
 - [x] Error (PURE_CALLS_MUT): mutation primitive in `pre:` or `post:` block
-- [ ] Error: pure function called from write position — deferred to Phase 7
-- [ ] Error: transaction function called inside `find where` clause — deferred to Phase 7
-- [ ] Error: transaction function called inside `verify` condition — deferred to Phase 7
-- [ ] Lambda purity rule — deferred to Phase 7 (lambdas not yet parsed)
-- [ ] `uses-bounded` tag — deferred to Phase 6
+- [x] Transitive purity inference: fn calling transaction fn is promoted to transaction (2026-04-05)
+- [x] Error (TRANSACTION_IN_PURE): pre:/post: block calls a transaction fn (2026-04-05)
+- [x] Error (TRANSACTION_IN_FIND): transaction fn called inside `find where` clause (2026-04-05)
+- [x] Error (TRANSACTION_IN_VERIFY): transaction fn called inside `verify` condition (2026-04-05)
+- [ ] Lambda purity rule — deferred (lambdas not yet parsed)
+- [x] `uses-bounded` tag: auto-applied to fn calling a bounded computation (2026-04-05)
 
 ### Checker — Pass 4 (Write-Set Analysis)
 
@@ -524,15 +525,15 @@ A separate types.lua is not needed for Phase 1.
 - [x] `find family` base form (2026-04-03)
 - [x] `where <condition>` clause (multiple clauses are ANDed) (2026-04-03)
 - [x] `or-where <condition>` clause (disjunction with preceding where) (2026-04-03)
-- [ ] `within N hops of <relation> from <src>` reachability filter — Phase 8
-- [ ] `connected-to <path> via <relation>` any-hop adjacency filter — Phase 8
+- [x] `within N hops of <relation> from <src>` reachability filter (2026-04-05)
+- [x] `connected-to <path> via <relation>` any-hop adjacency filter (2026-04-05)
 - [x] `order-by <path> asc|desc` sort (2026-04-03)
 - [x] `limit N` cap result list (2026-04-03)
 - [x] `count` return integer instead of list (2026-04-03)
 - [x] `find` is a pure expression; result type is `List(SymbolOf(family), limit)` or `Int` (2026-04-03)
 - [x] Relation query: `adjacent?` — Set of nodes 1 hop from source (2026-04-03)
 - [x] Relation query: `reachable?` — Bool reachability check (2026-04-03)
-- [ ] Relation query: `reachable?` with `max-hops:` bound — Phase 8
+- [x] Relation query: `reachable?` with `max-hops:` bound (2026-04-05)
 - [x] Relation query: `shortest-path` — List of nodes (2026-04-03)
 - [x] Relation query: `reachable-set` with `max-hops:` bound (2026-04-03)
 - [x] Relation query: `inverse-adjacent?` — Set of nodes that lead into source (2026-04-03)
@@ -572,13 +573,13 @@ A separate types.lua is not needed for Phase 1.
 - [x] `requires <cond>` clause — skip verify if precondition not met (2026-04-03)
 - [x] `after <transition>:` clause — apply transition then check assertions (2026-04-03)
 - [x] `path@before` in `after:` blocks (2026-04-03)
-- [ ] Failure report: specific failing state, counterexample path, log excerpt — deferred to Phase 6
+- [x] Failure report: specific failing state + counterexample path (action sequence) — done (2026-04-05)
 
 ### CLI — Phase 5
 
 - [x] `storybase verify <file>` command (2026-04-03)
 - [x] Report pass / fail per named verify block (2026-04-03)
-- [ ] Print counterexample detail (state dump + action sequence) on failure — deferred to Phase 6
+- [x] Print counterexample detail (state dump + action sequence) on failure — done (2026-04-05)
 - [x] Exit code 0 if all pass, non-zero if any fail (2026-04-03)
 
 ### Tests — Phase 5

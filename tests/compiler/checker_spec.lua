@@ -975,3 +975,159 @@ scene other:
     assert.equal(0, #warns)
   end)
 end)
+
+-- ── Pass 3b: transaction-in-pure-context checks ───────────────────────────────
+
+describe("checker pass 3b — transaction in pure context", function()
+
+  it("transitively promotes fn to transaction when it calls a transaction fn", function()
+    -- mutate-b calls mutate-a (transaction) → mutate-b is also classified as transaction
+    local src = [[
+fn mutate-a:
+  inc! world/gold 1
+fn mutate-b:
+  mutate-a
+state world:
+  gold: Int(0, 9999) = 0
+]]
+    local tokens = require("compiler.lexer").tokenize(src, "test")
+    local tree   = require("compiler.parser").parse(tokens, "test")
+    local typed, _ = checker.check(tree, "test")
+    local fn_b
+    for _, n in ipairs(typed.decls) do
+      if n.kind == "fn_decl" and n.name == "mutate-b" then fn_b = n end
+    end
+    assert.is_not_nil(fn_b, "fn mutate-b not found")
+    assert.is_true(fn_b.is_transaction, "mutate-b should be transitively classified as transaction")
+  end)
+
+  it("does not error when a pure fn calls another pure fn", function()
+    check_ok([[
+fn double x:
+  x * 2
+fn quadruple x:
+  double (double x)
+]])
+  end)
+
+  it("emits TRANSACTION_IN_PURE when pre: block calls a transaction fn", function()
+    check_err([[
+state world:
+  gold: Int(0, 9999) = 0
+fn earn:
+  inc! world/gold 10
+fn spend amount:
+  pre: (earn)
+  dec! world/gold amount
+]], ast.E.TRANSACTION_IN_PURE)
+  end)
+
+  it("does not error for pre: calling a pure fn", function()
+    check_ok([[
+state world:
+  gold: Int(0, 9999) = 0
+fn enough?:
+  world/gold >= 10
+fn spend amount:
+  pre: (enough?)
+  dec! world/gold amount
+]])
+  end)
+
+  it("emits TRANSACTION_IN_FIND when transaction fn called in find where clause", function()
+    check_err([[
+family npcs:
+  health: Int(0, 100) = 100
+fn heal k:
+  set! npcs/{k}/health 100
+fn bad-find:
+  find npcs where: (heal 'a)
+]], ast.E.TRANSACTION_IN_FIND)
+  end)
+
+  it("does not error when pure fn called in find where clause", function()
+    check_ok([[
+family npcs:
+  health: Int(0, 100) = 100
+fn alive? k:
+  npcs/{k}/health > 0
+fn list-alive:
+  find npcs where: (alive? 'a)
+]])
+  end)
+
+  it("emits TRANSACTION_IN_VERIFY when transaction fn in verify always condition", function()
+    check_err([[
+state world:
+  gold: Int(0, 9999) = 0
+fn mutate:
+  inc! world/gold 1
+engine-config:
+  entry-scene: main
+scene main:
+  * Go
+    -> main
+verify "bad":
+  verify-always (mutate)
+]], ast.E.TRANSACTION_IN_VERIFY)
+  end)
+
+  it("does not error for transaction fn in verify after: call position", function()
+    check_ok([[
+state world:
+  gold: Int(0, 9999) = 0
+fn earn:
+  inc! world/gold 10
+engine-config:
+  entry-scene: main
+scene main:
+  * Go
+    -> main
+verify "earn ok":
+  after (earn):
+    world/gold > 0
+]])
+  end)
+
+end)
+
+-- ── Pass 3b: uses-bounded auto-tag ────────────────────────────────────────────
+
+describe("checker pass 3b — uses_bounded tag", function()
+
+  local function first_fn_with_name(src, name)
+    local typed, _ = compile(src)
+    if not typed then return nil end
+    for _, node in ipairs(typed.decls) do
+      if node.kind == "fn_decl" and node.name == name then return node end
+    end
+    return nil
+  end
+
+  it("tags a fn as uses_bounded when it calls a bounded computation", function()
+    local fn = first_fn_with_name([[
+bounded roll-die:
+  returns: Int(1, 6)
+  distribution: uniform
+  lua: math.random(1, 6)
+fn use-die:
+  roll-die
+]], "use-die")
+    assert.is_not_nil(fn, "fn 'use-die' not found")
+    assert.is_true(fn.uses_bounded == true, "expected uses_bounded=true")
+  end)
+
+  it("does not tag a fn that does not call any bounded computation", function()
+    local fn = first_fn_with_name([[
+bounded roll-die:
+  returns: Int(1, 6)
+  distribution: uniform
+  lua: math.random(1, 6)
+fn pure-fn:
+  42
+]], "pure-fn")
+    assert.is_not_nil(fn, "fn 'pure-fn' not found")
+    assert.is_falsy(fn.uses_bounded, "expected uses_bounded to be falsy")
+  end)
+
+end)
