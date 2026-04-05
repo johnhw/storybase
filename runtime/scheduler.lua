@@ -28,7 +28,7 @@ function M.new(state, log)
   ---@param name    string
   ---@param trigger table   {every?, at?, offset?} — lists of {axis, value} entries
   ---@param body    table   list of AST stmt nodes (schedule fn body)
-  function sched:register(name, trigger, body)
+  function sched:register(name, trigger, body, fn_body_name)
     local current  = self._state:get_time()
     local next_fire = {}  -- { axis → threshold } for "every" schedules
     local fire_at  = {}   -- { axis → threshold } for "at" schedules
@@ -57,6 +57,7 @@ function M.new(state, log)
       name       = name,
       trigger    = trigger,
       body       = body,
+      fn_body    = fn_body_name,  -- string name of body fn (for log replay)
       next_fire  = next_fire,
       fire_at    = fire_at,
       fired      = fired,
@@ -119,13 +120,24 @@ function M.new(state, log)
       -- ── Fire ────────────────────────────────────────────────
       if should_fire then
         if self._log then
+          -- Snapshot next_fire thresholds AFTER they were advanced above (for replay)
+          local nf_snap = {}
+          for axis, val in pairs(ss.next_fire) do nf_snap[axis] = val end
+          -- Snapshot which at: axes just fired
+          local fired_now = {}
+          for _, entry in ipairs(ss.trigger.at or {}) do
+            if ss.fired[entry.axis] then fired_now[#fired_now+1] = entry.axis end
+          end
           self._log:append({
-            kind = "schedule_fired",
-            fn   = "schedule:" .. name,
-            path = nil,
-            old  = nil,
-            new  = nil,
-            time = self._state:get_time(),
+            kind          = "schedule_fired",
+            fn            = "schedule:" .. name,
+            schedule_name = name,
+            path          = nil,
+            old           = nil,
+            new           = nil,
+            time          = self._state:get_time(),
+            next_fire     = nf_snap,
+            fired_axes    = fired_now,
           })
         end
         local ctx    = eval.new_ctx(self._state, fns, "schedule:" .. name)
@@ -140,6 +152,49 @@ function M.new(state, log)
   --- Create a named schedule dynamically (schedule! mutation).
   function sched:schedule(_name, _opts, _fn)
     -- Not yet implemented (Phase 5)
+  end
+
+  --- Replay schedule-related log entries to reconstruct dynamic schedule state.
+  --- Call after replaying state (so time is restored) but BEFORE first tick.
+  --- Handles: schedule_created (re-register dynamic), schedule_fired (advance thresholds),
+  ---           cancel_schedule (remove).  Static schedules already registered via register()
+  ---           have their thresholds corrected by schedule_fired entries.
+  ---@param entries table  full list of log entries from the save file
+  ---@param fns     table  game_table.fns (for looking up fn bodies)
+  function sched:replay_log(entries, fns)
+    for _, e in ipairs(entries or {}) do
+      if e.kind == "schedule_created" then
+        -- Re-register a dynamically created schedule
+        local fn   = e.fn_body and fns and fns[e.fn_body]
+        local body = fn and fn.body or {}
+        self._static[e.schedule_name] = {
+          name      = e.schedule_name,
+          trigger   = e.trigger or { every = {}, at = {}, offset = {} },
+          body      = body,
+          fn_body   = e.fn_body,
+          next_fire = e.next_fire or {},
+          fire_at   = e.fire_at  or {},
+          fired     = e.fired    or {},
+        }
+      elseif e.kind == "schedule_fired" and e.schedule_name then
+        -- Advance thresholds for any registered schedule (static or dynamic)
+        local ss = self._static[e.schedule_name]
+        if ss then
+          if e.next_fire then
+            for axis, val in pairs(e.next_fire) do
+              ss.next_fire[axis] = val
+            end
+          end
+          if e.fired_axes then
+            for _, axis in ipairs(e.fired_axes) do
+              ss.fired[axis] = true
+            end
+          end
+        end
+      elseif e.kind == "cancel_schedule" and e.schedule_name then
+        self._static[e.schedule_name] = nil
+      end
+    end
   end
 
   --- Cancel a named schedule.

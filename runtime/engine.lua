@@ -488,6 +488,13 @@ function M.new(game_table, opts)
     -- Post-action phases: message delivery, actor behaviors, scheduler
     self:post_action()
 
+    -- NPC speed: run N extra autonomous turns per player action
+    local cfg = self._game.schema and self._game.schema.engine_config
+    local npc_speed = tonumber(cfg and cfg["npc-speed"]) or 0
+    for _ = 1, npc_speed do
+      self:post_action()
+    end
+
     if signal then
       if signal.type == "goto" then
         self:goto_scene(signal.target)
@@ -538,6 +545,8 @@ function M.run(game_table, opts)
     else
       state_mod.replay(eng._state, save_data.entries or {})
     end
+    -- Replay schedule events so dynamic schedules and threshold advances are restored
+    eng._scheduler:replay_log(save_data.entries or {}, eng._game.fns)
     -- Restore scene stack
     if type(save_data.scene_stack) == "table" and #save_data.scene_stack > 0 then
       eng._scene_stack = save_data.scene_stack

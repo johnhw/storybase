@@ -1199,7 +1199,30 @@ eval_stmt = function(node, ctx)
       -- Retrieve fn body from fns table
       local fn = fn_name and ctx.fns and ctx.fns[fn_name]
       local body = fn and fn.body or {}
-      ctx.scheduler:register(name_val, trigger, body)
+      ctx.scheduler:register(name_val, trigger, body, fn_name)
+      -- Log schedule creation so save/load can replay it
+      if ctx.state and ctx.state._log then
+        local ss = ctx.scheduler._static[name_val]
+        local nf, fa, fi = {}, {}, {}
+        if ss then
+          for a, v in pairs(ss.next_fire or {}) do nf[a] = v end
+          for a, v in pairs(ss.fire_at   or {}) do fa[a] = v end
+          for a, v in pairs(ss.fired     or {}) do fi[a] = v end
+        end
+        ctx.state._log:append({
+          kind          = "schedule_created",
+          fn            = ctx.fn_name or "?",
+          path          = nil,
+          old           = nil,
+          new           = nil,
+          schedule_name = name_val,
+          trigger       = trigger,
+          fn_body       = fn_name,
+          next_fire     = nf,
+          fire_at       = fa,
+          fired         = fi,
+        })
+      end
     end
 
   elseif k == K.UNDO_MUT then

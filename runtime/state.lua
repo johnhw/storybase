@@ -574,10 +574,11 @@ end
 ---@param entries table  list of log entry tables (from log:entries())
 -- Entry kinds that are informational only and should not affect state during replay.
 local SKIP_ON_REPLAY = {
-  checkpoint      = true,
-  conflict        = true,
-  schedule_fired  = true,
-  cancel_schedule = true,
+  checkpoint       = true,
+  conflict         = true,
+  schedule_fired   = true,
+  cancel_schedule  = true,
+  schedule_created = true,
 }
 
 --- Restore state directly from a snapshot then replay only entries after snapshot.seq.

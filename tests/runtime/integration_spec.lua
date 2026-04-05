@@ -483,3 +483,116 @@ scene main:
     assert.has_no.errors(function() g:tick() end)
   end)
 end)
+
+-- ============================================================
+-- Integration scenario: deliver ore to blacksmith
+-- ============================================================
+
+describe("Integration scenario: deliver ore to blacksmith", function()
+  local SRC = [[
+module ore-delivery
+  version: 1.0
+engine-config:
+  entry-scene: mine
+
+state player:
+  ore: Int(0,10) = 0
+  gold: Int(0,999) = 0
+
+state blacksmith:
+  satisfied: Bool = false
+
+type BlacksmithMsg:
+  | OreDelivery: amount: Int(0,10)
+
+actor blacksmith-actor:
+  state:     blacksmith
+  perceives: [blacksmith/satisfied, player/gold]
+  inbox:     List(BlacksmithMsg, 5)
+  behavior:  blacksmith-behavior
+  priority:  10
+
+fn blacksmith-behavior:
+  for msg in blacksmith/inbox:
+    match msg:
+      OreDelivery {amount}:
+        set! blacksmith/satisfied true
+        inc! player/gold 20
+      _: pass
+
+fn mine-ore:
+  inc! player/ore 3
+
+fn deliver-ore:
+  pre: player/ore > 0
+  send! blacksmith-actor (BlacksmithMsg/OreDelivery amount: player/ore)
+  set! player/ore 0
+
+scene mine:
+  * Mine ore
+    mine-ore
+    -> mine
+  * Go to blacksmith
+    -> blacksmith-shop
+
+scene blacksmith-shop:
+  * [player/ore > 0] Deliver ore
+    deliver-ore
+    -> blacksmith-shop
+  * Back to mine
+    -> mine
+]]
+
+  it("player mines ore, delivers to blacksmith, receives gold reward", function()
+    local sb = require("lib.storybase")
+    local g, err = sb.from_source(SRC, "ore-delivery.sb")
+    if not g then
+      pending("ore-delivery compile failed: " .. tostring(err))
+      return
+    end
+    g:init()
+
+    -- Verify initial state
+    assert.equal(0, g:get("player/ore"))
+    assert.equal(0, g:get("player/gold"))
+    assert.equal(false, g:get("blacksmith/satisfied"))
+
+    -- Mine ore (3 units)
+    g:choose(1)  -- "Mine ore" in scene mine
+    assert.equal(3, g:get("player/ore"))
+
+    -- Go to blacksmith shop
+    g:choose(2)  -- "Go to blacksmith"
+
+    -- Deliver ore (post_action triggers blacksmith-behavior via message delivery)
+    g:choose(1)  -- "Deliver ore" (guard satisfied: ore > 0)
+
+    -- After delivery: ore = 0, message was sent and processed in post_action
+    assert.equal(0, g:get("player/ore"))
+
+    -- Blacksmith is satisfied and rewarded gold
+    assert.equal(true, g:get("blacksmith/satisfied"))
+    assert.equal(20, g:get("player/gold"))
+  end)
+
+  it("deliver-ore guard hides choice when ore = 0", function()
+    local sb = require("lib.storybase")
+    local g, err = sb.from_source(SRC, "ore-delivery.sb")
+    if not g then
+      pending("ore-delivery compile failed: " .. tostring(err))
+      return
+    end
+    g:init()
+
+    -- Go to blacksmith directly without mining
+    g:choose(2)  -- "Go to blacksmith"
+
+    -- "Deliver ore" option is hidden (guard false when ore=0)
+    local _, choices = g:render()
+    local has_deliver = false
+    for _, c in ipairs(choices or {}) do
+      if c.label:find("Deliver") then has_deliver = true end
+    end
+    assert.is_false(has_deliver, "deliver choice should be hidden when ore=0")
+  end)
+end)

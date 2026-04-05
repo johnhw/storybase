@@ -10,9 +10,24 @@ Milestone goals are marked **M**.
 
 **CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 900 tests passing.
+**Phase 7/8 in progress** — 979 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
+
+**Completed this session (2026-04-05, cleanup pass):**
+- Phase 4 block — all outstanding items resolved (979 tests):
+  - Perception snapshot compiler rule: pass4_check_perceives (was done, checkbox updated)
+  - Conflict logging: actors.lua:apply_deferred logs kind="conflict" (was done, checkbox updated)
+  - offset: and schedule! (were done in Phase 6, checkboxes updated)
+  - Schedule creation in log: eval.lua logs schedule_created on schedule!
+  - Schedule fired in log: now includes schedule_name + next_fire for replay
+  - Schedule cancel in log: was done, checkbox updated
+  - scheduler:replay_log() — reconstructs dynamic schedule state on load
+  - engine.lua: calls replay_log on load path
+  - NPC speed modeling: engine-config npc-speed:N runs N extra post_action per player turn
+  - Autonomous turn: was done (engine:autonomous_turn), checkbox updated
+  - Tests added: perceived enforcement, conflict logging, offset×2, schedule_created log, NPC speed×2
+  - Integration scenario 4: deliver ore to blacksmith (integration_spec.lua)
 
 **Completed this session (2026-04-04):**
 - Indexed list access `path[n]` / `ident[n]` — parser + eval
@@ -439,12 +454,12 @@ A separate types.lua is not needed for Phase 1.
 
 - [x] Actor registration at load time (from compiled game table)
 - [x] Perception snapshot: behavior reads delegate to real state via capture proxy (full perceives filtering deferred to Phase 6)
-- [ ] Perception snapshot: enforce compiler rule (behavior fn may only read perceived paths) — deferred to Phase 7
+- [x] Perception snapshot: enforce compiler rule (behavior fn may only read perceived paths) — done (pass4_check_perceives in checker.lua; 2026-04-05)
 - [x] Behavior function dispatch: call behavior fn with proxy as read/capture context
 - [x] Deferred mutation queue: collect all writes from all behavior functions
 - [x] Conflict detection: two actors writing the same path in the same turn
 - [x] Conflict resolution: higher-priority actor's write wins (set/clear); all apply (inc/dec/collection)
-- [ ] Conflict logging: all conflicts appended to transaction log — deferred to Phase 8
+- [x] Conflict logging: all conflicts appended to transaction log — done (actors.lua:apply_deferred; 2026-04-05)
 - [x] `send!` — enqueue typed `ActorMsg` to named actor's inbox
 - [x] Inbox bounded (`List(ActorMsg, N)`): runtime error if inbox is full (2026-04-03)
 - [x] Message delivery step: move pending messages from send queue into inboxes
@@ -457,12 +472,12 @@ A separate types.lua is not needed for Phase 1.
 - [x] Static `schedule` declarations registered at load time
 - [x] `every: [axis: +N]` trigger: fire at regular intervals
 - [x] `at: [axis: N]` trigger: fire once at absolute time
-- [ ] `offset: [axis: N]` applied to `every:` triggers — NOT done; deferred to Phase 6
-- [ ] `schedule!` imperative: create a named scheduled event from within a transaction fn — deferred to Phase 6
+- [x] `offset: [axis: N]` applied to `every:` triggers — done (scheduler.lua:register; 2026-04-03)
+- [x] `schedule!` imperative: create a named scheduled event from within a transaction fn — done (eval.lua SCHEDULE_MUT; 2026-04-03)
 - [x] `cancel-schedule!` imperative: cancel a named scheduled event (2026-04-03)
-- [ ] Pending schedule queue is itself discrete logged state — deferred to Phase 8
-- [ ] Schedule creation and cancellation appear in the transaction log — deferred to Phase 8
-- [ ] Scheduled event appears in the log when it fires — deferred to Phase 8
+- [x] Pending schedule queue is itself discrete logged state — done (schedule_created logged; scheduler:replay_log on load; 2026-04-05)
+- [x] Schedule creation and cancellation appear in the transaction log — done (schedule_created + cancel_schedule entries; 2026-04-05)
+- [x] Scheduled event appears in the log when it fires — done (schedule_fired entry with schedule_name + next_fire; 2026-04-05)
 
 ### Engine — Full Turn Lifecycle ✅ DONE
 
@@ -472,26 +487,26 @@ A separate types.lua is not needed for Phase 1.
 - [x] Step 4: Deferred mutations applied in priority order
 - [x] Step 5: Scheduled events whose trigger time has arrived are fired
 - [x] Step 6: Inbox clearing
-- [ ] Autonomous turn (no player input): steps 2–6 only — deferred to Phase 7
-- [ ] NPC speed modelling: run N autonomous turns per player turn — deferred to Phase 7
+- [x] Autonomous turn (no player input): steps 2–6 only — done (engine:autonomous_turn(); 2026-04-04)
+- [x] NPC speed modelling: run N autonomous turns per player turn — done (engine-config npc-speed; 2026-04-05)
 
 ### Tests — Phase 4 ✅ DONE
 
 - [x] `tests/runtime/actors_spec.lua` — capture proxy (basic delegation test)
-- [ ] `tests/runtime/actors_spec.lua` — perceived vs. unperceived path enforcement — deferred to Phase 7
+- [x] `tests/runtime/actors_spec.lua` — perceived vs. unperceived path enforcement — done (capture proxy returns nil; 2026-04-05)
 - [x] `tests/runtime/actors_spec.lua` — deferred mutations applied after all behaviors
 - [x] `tests/runtime/actors_spec.lua` — conflict detection and priority resolution
-- [ ] `tests/runtime/actors_spec.lua` — conflict logging — deferred to Phase 8
+- [x] `tests/runtime/actors_spec.lua` — conflict logging — done (log has kind="conflict"; 2026-04-05)
 - [x] `tests/runtime/actors_spec.lua` — inbox overflow runtime error (2026-04-03)
 - [x] `tests/runtime/actors_spec.lua` — inbox cleared each turn; unhandled msgs dropped
 - [x] `tests/runtime/actors_spec.lua` — `every:` fires at correct intervals
 - [x] `tests/runtime/actors_spec.lua` — `at:` fires once only
-- [ ] `tests/runtime/actors_spec.lua` — `offset:` applied correctly — deferred to Phase 6
+- [x] `tests/runtime/actors_spec.lua` — `offset:` applied correctly — done (2026-04-05)
 - [x] `tests/runtime/actors_spec.lua` — `cancel-schedule!` prevents future fires (2026-04-03)
-- [ ] `tests/runtime/actors_spec.lua` — pending queue appears in log — deferred to Phase 8
+- [x] `tests/runtime/actors_spec.lua` — pending queue appears in log — done (schedule_created entry; 2026-04-05)
 - [x] `tests/runtime/engine_spec.lua` — full six-step lifecycle (implicit in integration tests)
 - [x] `tests/runtime/engine_spec.lua` — autonomous turn (steps 2–6 only) — tested via game:tick in integration_spec (2026-04-04)
-- [ ] Integration scenario 4: deliver ore to blacksmith — deferred to Phase 8
+- [x] Integration scenario 4: deliver ore to blacksmith — done (integration_spec.lua; 2026-04-05)
 - [x] Integration scenario 5: random encounter with fixed seed (reproducible) (2026-04-04)
 - [x] Integration scenario 6: morning reset schedule fires (2026-04-04)
 - [x] Integration scenario 7: actor messaging (2026-04-04)
