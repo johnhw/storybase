@@ -909,3 +909,69 @@ fn read-only:
   end)
 
 end)
+
+-- ============================================================
+-- Recursive scene detection
+-- ============================================================
+
+describe("checker — recursive scene detection", function()
+  local function get_recursive_warns(src)
+    local _, diags = compile(src)
+    local found = {}
+    for _, d in ipairs(diags) do
+      if d.level == "warning" and d.code == ast.E.RECURSIVE_SCENE then
+        found[#found+1] = d
+      end
+    end
+    return found
+  end
+
+  it("emits WARN_RECURSIVE_SCENE when scene gotos itself", function()
+    local warns = get_recursive_warns([[
+scene loop:
+  -> loop
+]])
+    assert.equal(1, #warns)
+    assert.is_truthy(warns[1].message:find("loop"))
+  end)
+
+  it("emits WARN_RECURSIVE_SCENE when scene enters itself", function()
+    local warns = get_recursive_warns([[
+scene recurse:
+  => recurse
+]])
+    assert.equal(1, #warns)
+  end)
+
+  it("does not warn when goto targets a different scene", function()
+    local warns = get_recursive_warns([[
+scene a:
+  -> b
+scene b:
+  Done.
+]])
+    assert.equal(0, #warns)
+  end)
+
+  it("emits warning for self-goto inside when block", function()
+    local warns = get_recursive_warns([[
+state hp: Int(0, 100) = 100
+scene retry:
+  when hp > 0:
+    -> retry
+]])
+    assert.equal(1, #warns)
+  end)
+
+  it("does not warn for computed goto (dynamic target)", function()
+    local warns = get_recursive_warns([[
+state hp: Int(0, 100) = 100
+scene dynamic:
+  when hp > 0:
+    -> other
+scene other:
+  Done.
+]])
+    assert.equal(0, #warns)
+  end)
+end)

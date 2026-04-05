@@ -324,7 +324,6 @@ local MUT_KINDS = {
   [M.K.RELATE_MUT]          = true, [M.K.UNRELATE_MUT] = true,
   [M.K.SPAWN_MUT]           = true, [M.K.DESPAWN_MUT]  = true,
   [M.K.SEND_MUT]            = true, [M.K.TIME_INC_MUT] = true,
-  [M.K.TIME_SET_MUT]        = true,
   [M.K.UNDO_MUT]            = true,
   [M.K.GOTO_SCENE_MUT]      = true, [M.K.ENTER_SCENE_MUT] = true,
   [M.K.EXIT_SCENE_MUT]      = true,
@@ -733,13 +732,9 @@ end
 function M.send_mut(actor, msg, pos)
   return M.node(M.K.SEND_MUT, { actor = actor, msg = msg }, pos)
 end
---- axes is list of {axis, value} tables
+--- axes is list of {name, value, relative} tables
 function M.time_inc_mut(axes, pos)
   return M.node(M.K.TIME_INC_MUT, { axes = axes or {} }, pos)
-end
---- axes is list of {axis, value} tables (absolute set)
-function M.time_set_mut(axes, pos)
-  return M.node(M.K.TIME_SET_MUT, { axes = axes or {} }, pos)
 end
 function M.undo_mut(steps, pos)
   return M.node(M.K.UNDO_MUT, { steps = steps }, pos)

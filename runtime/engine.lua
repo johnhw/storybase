@@ -25,8 +25,7 @@ local sched_mod  = require("runtime.scheduler")
 --- Save format: a Lua table literal containing scene_stack + log entries.
 local SAVE_VERSION = 1
 
-local function write_save(path, scene_stack, log)
-  local log_mod2 = require("runtime.log")
+local function write_save(path, scene_stack, log, state_store)
   local f, err = io.open(path, "w")
   if not f then
     io.stderr:write("storybase: cannot write save file: " .. tostring(err) .. "\n")
@@ -45,12 +44,25 @@ local function write_save(path, scene_stack, log)
   f:write(table.concat(parts, ", ") .. "}\n")
   -- Log entries (table expression, no "return")
   f:write("save.entries =\n")
-  f:write(log_mod2.serialise_entries(log:entries()))
+  f:write(log_mod.serialise_entries(log:entries()))
   f:write("\n")
-  -- remove the unused variable warning; we only use log_mod2 here
-  local _ = log_mod2
   f:write("return save\n")
   f:close()
+
+  -- Write snapshot alongside save file for faster future loads
+  if state_store then
+    local snap_path = path .. ".snap"
+    local sf, serr = io.open(snap_path, "w")
+    if sf then
+      sf:write("-- StoryBase snapshot (v" .. SAVE_VERSION .. ")\n")
+      sf:write(log_mod.serialise_snapshot(
+        log:seq(), state_store._cache, state_store._time))
+      sf:close()
+    else
+      io.stderr:write("storybase: cannot write snapshot: " .. tostring(serr) .. "\n")
+    end
+  end
+
   return true
 end
 
@@ -511,7 +523,21 @@ function M.run(game_table, opts)
     local save_data = read_save(opts.load_path)
     if not save_data then return 1 end
     eng._state:init_defaults()
-    state_mod.replay(eng._state, save_data.entries or {})
+    -- Try snapshot-accelerated load first
+    local snap_path = opts.load_path .. ".snap"
+    local sf = io.open(snap_path, "r")
+    if sf then
+      local snap_src = sf:read("*a")
+      sf:close()
+      local ok, snap = pcall(log_mod.deserialise_snapshot, snap_src)
+      if ok and snap then
+        state_mod.replay_from_snapshot(eng._state, snap, save_data.entries or {})
+      else
+        state_mod.replay(eng._state, save_data.entries or {})
+      end
+    else
+      state_mod.replay(eng._state, save_data.entries or {})
+    end
     -- Restore scene stack
     if type(save_data.scene_stack) == "table" and #save_data.scene_stack > 0 then
       eng._scene_stack = save_data.scene_stack
@@ -528,7 +554,7 @@ function M.run(game_table, opts)
   end
 
   if opts.save_path then
-    if write_save(opts.save_path, eng._scene_stack, eng._log) then
+    if write_save(opts.save_path, eng._scene_stack, eng._log, eng._state) then
       io.stdout:write("[Saved to " .. opts.save_path .. "]\n")
     end
   end

@@ -388,3 +388,71 @@ describe("state store: time model", function()
     assert.equal(5, last.time.tick)
   end)
 end)
+
+-- ============================================================
+-- Snapshot-accelerated replay
+-- ============================================================
+
+describe("state: replay_from_snapshot", function()
+  local function make_store()
+    local l = log_mod.new()
+    local s = state_mod.new({}, l)
+    return s, l
+  end
+
+  it("restores cache from snapshot without replaying earlier entries", function()
+    local s, l = make_store()
+    -- Simulate first 3 mutations
+    s:set("player/hp",   100, "init")
+    s:set("player/gold", 50,  "init")
+    s:set("player/hp",   80,  "fight")  -- seq 3
+
+    -- Create snapshot at seq 3
+    local snap_str = log_mod.serialise_snapshot(l:seq(), s._cache, s._time)
+    local snap     = log_mod.deserialise_snapshot(snap_str)
+
+    -- More mutations after snapshot
+    s:set("player/hp",   60, "fight2")  -- seq 4
+    s:set("player/gold", 45, "buy")    -- seq 5
+
+    -- Fresh store; replay from snapshot + only entries 4-5
+    local s2, l2 = make_store()
+    state_mod.replay_from_snapshot(s2, snap, l:entries())
+
+    assert.equal(60, s2:get("player/hp"))
+    assert.equal(45, s2:get("player/gold"))
+  end)
+
+  it("snapshot with no delta entries restores snapshot state exactly", function()
+    local s, l = make_store()
+    s:set("x", 7, "f")
+
+    local snap = log_mod.deserialise_snapshot(
+      log_mod.serialise_snapshot(l:seq(), s._cache, s._time))
+
+    local s2 = make_store()
+    state_mod.replay_from_snapshot(s2, snap, {})
+    assert.equal(7, s2:get("x"))
+  end)
+
+  it("restores time from snapshot then advances via delta", function()
+    local schema = { time_model = { axes = {"tick"}, wrap = {} } }
+    local l = log_mod.new()
+    local s = state_mod.new(schema, l)
+    s:inc_time("tick", 10)
+    s:set("x", 1, "f")
+
+    local snap = log_mod.deserialise_snapshot(
+      log_mod.serialise_snapshot(l:seq(), s._cache, s._time))
+
+    s:inc_time("tick", 5)
+    s:set("x", 2, "g")
+
+    local l2 = log_mod.new()
+    local s2 = state_mod.new(schema, l2)
+    state_mod.replay_from_snapshot(s2, snap, l:entries())
+
+    assert.equal(2,  s2:get("x"))
+    assert.equal(15, s2:get_time().tick)
+  end)
+end)

@@ -253,6 +253,84 @@ function M.serialise_entries(entries)
   return table.concat(lines, "\n")
 end
 
+-- ============================================================
+-- Snapshot: full cache state at a given sequence number
+-- ============================================================
+
+--- Serialise a cache snapshot to a Lua chunk string.
+--- The snapshot records the full cache, current time, and the seq number
+--- at the moment of capture.  On load, only log entries with seq > snapshot.seq
+--- need to be replayed.
+---@param seq   integer  current log sequence number
+---@param cache table    flat path→value cache
+---@param time  table    current engine time (e.g. {day=0, tick=5})
+---@return string  Lua chunk starting with "return"
+function M.serialise_snapshot(seq, cache, time)
+  local parts = { "return {\n" }
+  parts[#parts + 1] = "  seq=" .. tostring(seq) .. ",\n"
+  -- time
+  parts[#parts + 1] = "  time={"
+  local tparts = {}
+  for k, v in pairs(time or {}) do
+    tparts[#tparts + 1] = k .. "=" .. tostring(v)
+  end
+  parts[#parts + 1] = table.concat(tparts, ", ") .. "},\n"
+  -- cache
+  parts[#parts + 1] = "  cache={\n"
+  local paths = {}
+  for p in pairs(cache or {}) do paths[#paths + 1] = p end
+  table.sort(paths)
+  for _, p in ipairs(paths) do
+    local v = cache[p]
+    -- Use the same ser_val logic via the module-level serialise_entries helper
+    -- but we need it inline here.  Use a small local serialiser.
+    parts[#parts + 1] = "    [" .. string.format("%q", p) .. "]="
+    if type(v) == "nil" then
+      parts[#parts + 1] = "nil"
+    elseif type(v) == "boolean" then
+      parts[#parts + 1] = tostring(v)
+    elseif type(v) == "number" then
+      parts[#parts + 1] = string.format("%.14g", v)
+    elseif type(v) == "string" then
+      parts[#parts + 1] = string.format("%q", v)
+    elseif type(v) == "table" then
+      -- Shallow serialise (arrays only — cache values are sets/lists)
+      local ap = {}
+      for i, x in ipairs(v) do
+        if type(x) == "string" then ap[i] = string.format("%q", x)
+        elseif type(x) == "number" then ap[i] = string.format("%.14g", x)
+        elseif type(x) == "boolean" then ap[i] = tostring(x)
+        else ap[i] = "nil" end
+      end
+      parts[#parts + 1] = "{" .. table.concat(ap, ",") .. "}"
+    else
+      parts[#parts + 1] = "nil"
+    end
+    parts[#parts + 1] = ",\n"
+  end
+  parts[#parts + 1] = "  },\n"
+  parts[#parts + 1] = "}\n"
+  return table.concat(parts)
+end
+
+--- Deserialise a snapshot string produced by M.serialise_snapshot().
+---@param str string
+---@return table  {seq=N, time={...}, cache={...}}
+function M.deserialise_snapshot(str)
+  local fn, err = load(str)
+  if not fn then
+    error("log.deserialise_snapshot: parse error: " .. tostring(err))
+  end
+  local snap = fn()
+  if type(snap) ~= "table" then
+    error("log.deserialise_snapshot: expected table")
+  end
+  snap.seq   = snap.seq   or 0
+  snap.time  = snap.time  or {}
+  snap.cache = snap.cache or {}
+  return snap
+end
+
 --- Deserialise a log string produced by log:serialise() and return a log instance.
 --- str must be a complete Lua chunk (starts with "return").
 ---@param str string  produced by log:serialise()

@@ -305,6 +305,17 @@ function M.new(schema, log)
     return t
   end
 
+  --- Set the named time axis to an absolute value.
+  ---@param axis  string  e.g. "tick"
+  ---@param value number
+  function store:set_time(axis, value)
+    if self._time[axis] ~= nil then
+      self._time[axis] = value
+    else
+      self._time[axis] = value
+    end
+  end
+
   --- Advance the named time axis by amount, applying wrap if configured.
   ---@param axis   string  e.g. "tick"
   ---@param amount number
@@ -568,6 +579,26 @@ local SKIP_ON_REPLAY = {
   schedule_fired  = true,
   cancel_schedule = true,
 }
+
+--- Restore state directly from a snapshot then replay only entries after snapshot.seq.
+--- This is faster than full replay for long logs.
+---@param store    table  state store (already init_defaults'd)
+---@param snapshot table  {seq=N, time={...}, cache={...}} from log.deserialise_snapshot
+---@param entries  table  full list of log entries (will skip seq <= snapshot.seq)
+function M.replay_from_snapshot(store, snapshot, entries)
+  -- Load snapshot cache directly (overwrite defaults)
+  for k in pairs(store._cache) do store._cache[k] = nil end
+  for k, v in pairs(snapshot.cache) do store._cache[k] = v end
+  -- Restore time
+  for k in pairs(store._time) do store._time[k] = 0 end
+  for k, v in pairs(snapshot.time) do store._time[k] = v end
+  -- Replay only delta entries after snapshot.seq
+  local delta = {}
+  for _, e in ipairs(entries) do
+    if e.seq > snapshot.seq then delta[#delta + 1] = e end
+  end
+  M.replay(store, delta)
+end
 
 function M.replay(store, entries)
   for _, e in ipairs(entries) do

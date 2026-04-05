@@ -30,7 +30,8 @@
       "Bash(/mnt/c/Users/john/Dropbox/devel/storybase/tests/runtime/state_spec.lua:*)",
       "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase add TODO.md todo.md)",
       "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase status --short)",
-      "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase commit -m ':*)"
+      "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase commit -m ':*)",
+      "Bash(grep -n \"spawn\\\\|despawn\\\\|path-list\\\\|path-exists\\\\|family\\\\|for.*in\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/*.sb)"
     ]
   }
 }

@@ -1081,6 +1081,59 @@ local function collect_writes(node, write_set, env, acc)
   end
 end
 
+-- ============================================================
+-- Pass: recursive scene detection
+-- ============================================================
+
+--- Walk a list of statements looking for scene_goto/scene_enter nodes whose
+--- target is the string `scene_name`.  Descends into when_stmt, for_stmt,
+--- while_stmt, choice bodies, and cond_expr branches.
+local function stmts_contain_self_nav(stmts, scene_name)
+  local k = ast.K
+  local function walk_stmt(node)
+    if not node then return false end
+    local nk = node.kind
+    if (nk == k.SCENE_GOTO or nk == k.SCENE_ENTER) then
+      if type(node.target) == "string" and node.target == scene_name then
+        return true
+      end
+    end
+    -- Descend into compound statements
+    if nk == k.WHEN_STMT then
+      if stmts_contain_self_nav(node.body or {}, scene_name) then return true end
+      if stmts_contain_self_nav(node.else_body or {}, scene_name) then return true end
+    elseif nk == k.FOR_STMT then
+      if stmts_contain_self_nav(node.body or {}, scene_name) then return true end
+    elseif nk == k.WHILE_STMT then
+      if stmts_contain_self_nav(node.body or {}, scene_name) then return true end
+    end
+    return false
+  end
+
+  for _, s in ipairs(stmts or {}) do
+    if walk_stmt(s) then return true end
+  end
+  return false
+end
+
+--- Emit WARN_RECURSIVE_SCENE for any scene that directly navigates to itself
+--- (via -> or =>) without an intervening player choice.
+local function pass_recursive_scenes(acc, program)
+  local k = ast.K
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.SCENE_DECL then
+      local name = node.name
+      -- Check top-level body
+      if stmts_contain_self_nav(node.body or {}, name) then
+        table.insert(acc.diags, ast.warning(
+          ast.E.RECURSIVE_SCENE,
+          "scene '" .. name .. "' navigates directly to itself — this creates an infinite loop",
+          node.pos))
+      end
+    end
+  end
+end
+
 --- Pass 6: annotate every FN_DECL and SCENE_DECL with a `write_set` table.
 --- Also emits WRITE_UNTYPED_VAR / WRITE_DYNAMIC_PATH diagnostics.
 local function pass6_write_sets(acc, program)
@@ -1149,6 +1202,7 @@ function M.check(ast_root, filename)
   pass4_check_perceives(acc, ast_root)
   pass5_check_boundary(acc, symtab, ast_root)
   pass6_write_sets(acc, ast_root)
+  pass_recursive_scenes(acc, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

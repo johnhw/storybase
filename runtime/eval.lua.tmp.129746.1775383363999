@@ -68,7 +68,6 @@ local K = {
   SEND_MUT           = "send_mut",
   UNDO_MUT           = "undo_mut",
   TIME_INC_MUT       = "time_inc_mut",
-  TIME_SET_MUT       = "time_set_mut",
   CANCEL_SCHEDULE_MUT = "cancel_schedule_mut",
   SCHEDULE_MUT        = "schedule_mut",
   PATH_AT_BEFORE        = "path_at_before",
@@ -76,7 +75,6 @@ local K = {
   IN_STATE_EXPR         = "in_state_expr",
   FIND_EXPR             = "find_expr",
   INDEX_EXPR            = "index_expr",
-  SLICE_EXPR            = "slice_expr",
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
@@ -1028,26 +1026,9 @@ eval_stmt = function(node, ctx)
 
   -- Mutation primitives
   if k == K.SET_MUT then
-    if node.path and node.path.kind == K.INDEX_EXPR then
-      -- Indexed list write: set! path[n] value
-      local list_path = eval_path(node.path.base, ctx)
-      local idx       = eval_expr(node.path.index, ctx)
-      local val       = eval_expr(node.value, ctx)
-      local list      = ctx.state:get(list_path) or {}
-      local len       = #list
-      if type(idx) == "number" then
-        if idx < 0 then idx = len + idx + 1 end
-        if idx >= 1 and idx <= len then
-          local new_list = {table.unpack(list)}
-          new_list[idx]  = val
-          ctx.state:set(list_path, new_list, ctx.fn_name)
-        end
-      end
-    else
-      local path = eval_path(node.path, ctx)
-      local val  = eval_expr(node.value, ctx)
-      ctx.state:set(path, val, ctx.fn_name)
-    end
+    local path = eval_path(node.path, ctx)
+    local val  = eval_expr(node.value, ctx)
+    ctx.state:set(path, val, ctx.fn_name)
 
   elseif k == K.INC_MUT then
     local path   = eval_path(node.path, ctx)
@@ -1217,15 +1198,6 @@ eval_stmt = function(node, ctx)
       local amount = eval_expr(ax.value, ctx)
       if type(amount) == "number" and type(ax.axis) == "string" then
         ctx.state:inc_time(ax.axis, amount)
-      end
-    end
-
-  elseif k == K.TIME_SET_MUT then
-    -- Set engine time clock to absolute values for each named axis
-    for _, ax in ipairs(node.axes or {}) do
-      local value = eval_expr(ax.value, ctx)
-      if type(value) == "number" and type(ax.axis) == "string" then
-        ctx.state:set_time(ax.axis, value)
       end
     end
 

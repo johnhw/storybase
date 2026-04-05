@@ -331,7 +331,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `despawn!(family, key)` — remove family member; subsequent reads return nil
 - [x] `path-exists?(path)` — Bool predicate
 - [x] `path-list(family)` — List of all instantiated keys
-- [ ] `clamp-event` hook fires in debug mode on every clamped inc!/dec! — NOT done; deferred to Phase 8
+- [x] `clamp-event` hook fires in debug mode on every clamped inc!/dec! — done (already implemented; checkbox not updated)
 
 ### Transaction Log (`runtime/log.lua`) ✅ PARTIAL (2026-04-01)
 
@@ -343,15 +343,15 @@ A separate types.lua is not needed for Phase 1.
 - [x] `query-changes(path, last-n)` — most recent N changes
 - [x] Serialise log to file (Lua table format) — done (log.serialise_entries, engine write_save)
 - [x] Deserialise log file and replay to reconstruct cache — done (state_mod.replay, engine read_save)
-- [ ] Snapshot: save full cache state at a given sequence number — NOT done; deferred to Phase 8
-- [ ] Load from snapshot + delta log (faster replay) — NOT done; deferred to Phase 8
+- [x] Snapshot: save full cache state at a given sequence number — done (log.serialise_snapshot, state.replay_from_snapshot; 2026-04-05)
+- [x] Load from snapshot + delta log (faster replay) — done (engine writes .snap alongside save; reads it on load; 2026-04-05)
 - [x] Round-trip test: serialise → deserialise → identical cache — done (log_spec.lua, engine_spec.lua)
 
 ### Engine (`runtime/engine.lua`) — Core ✅ PARTIAL (2026-04-01)
 
 - [x] Scene stack: push, pop, peek current scene
 - [x] `scene-stack-max` enforcement (runtime error on overflow)
-- [ ] Recursive scene detection (compile warning) — NOT done
+- [x] Recursive scene detection (compile warning) — done (pass_recursive_scenes in checker.lua; 2026-04-05)
 - [x] `->` goto: transition without stack change
 - [x] `->` computed goto: evaluate `SceneId` expression — done (Phase 3+; eval.lua SCENE_GOTO handles expr targets)
 - [x] `=>` enter: push caller, transition to named scene
@@ -365,7 +365,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] Inline narration expressions: evaluate `{expr}` and convert to display string
 - [x] Time model: declare axes and wrap behaviour at startup — done (state.lua init_time from schema.time_model)
 - [x] `time-inc!` with named axis and explicit value — done (Phase 3+)
-- [ ] Absolute time set via time literal — NOT done; deferred to Phase 7
+- [x] Absolute time set via time literal — done (time-set! mutation; 2026-04-05)
 - [x] Basic turn lifecycle: player action → post-action phases — done (full 6-step lifecycle in Phase 4)
 
 ### Save / Load ✅ DONE (2026-04-02)

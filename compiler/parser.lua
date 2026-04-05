@@ -1620,6 +1620,16 @@ local MUTATION_TABLE = {
     end
     p:skip_to_eol(); return ast.time_inc_mut(axes, pos)
   end,
+  ["time-set!"] = function(p, pos)
+    -- Absolute time set: time-set! tick: N day: M
+    local axes = {}
+    while p:at("NAMED_ARG") do
+      local nt = p:adv()
+      local val = parse_expr(p)
+      axes[#axes + 1] = { axis = nt.value, value = val }
+    end
+    p:skip_to_eol(); return ast.time_set_mut(axes, pos)
+  end,
   ["cancel-schedule!"] = function(p, pos)
     local name = p:at("IDENT") and p:adv().value
                  or (p:at("SYMBOL") and p:adv().value)

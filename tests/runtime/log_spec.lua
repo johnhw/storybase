@@ -261,3 +261,37 @@ describe("transaction log: query_at", function()
     assert.equal(1, l:query_at("x", {day=2, hour=10}))
   end)
 end)
+
+-- ============================================================
+-- Snapshot: serialise / deserialise
+-- ============================================================
+
+describe("snapshot: serialise / deserialise", function()
+  it("round-trips a simple cache and time", function()
+    local cache = { ["player/hp"] = 80, ["player/gold"] = 5 }
+    local time  = { day = 3, tick = 12 }
+    local str   = log_mod.serialise_snapshot(42, cache, time)
+    assert.is_string(str)
+    local snap = log_mod.deserialise_snapshot(str)
+    assert.equal(42, snap.seq)
+    assert.equal(3,  snap.time.day)
+    assert.equal(12, snap.time.tick)
+    assert.equal(80, snap.cache["player/hp"])
+    assert.equal(5,  snap.cache["player/gold"])
+  end)
+
+  it("round-trips an empty cache", function()
+    local str  = log_mod.serialise_snapshot(0, {}, {})
+    local snap = log_mod.deserialise_snapshot(str)
+    assert.equal(0, snap.seq)
+    assert.same({}, snap.cache)
+    assert.same({}, snap.time)
+  end)
+
+  it("round-trips a cache with list values", function()
+    local cache = { ["bag"] = {"sword", "potion"} }
+    local str  = log_mod.serialise_snapshot(5, cache, {})
+    local snap = log_mod.deserialise_snapshot(str)
+    assert.same({"sword", "potion"}, snap.cache["bag"])
+  end)
+end)

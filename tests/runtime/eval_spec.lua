@@ -649,6 +649,75 @@ scene start:
   end)
 end)
 
+-- ============================================================
+-- time-set! via eval
+-- ============================================================
+
+describe("eval_stmt: time_set_mut", function()
+  local log_mod   = require("runtime.log")
+  local state_mod = require("runtime.state")
+  local compiler  = require("compiler.compiler")
+
+  it("sets the engine time clock to an absolute value via time-set!", function()
+    local gt, diags = compiler.compile([[
+module t
+  version: 1.0
+schema-version: 1
+time-model:
+  axes: [day, tick]
+  wrap: [none, none]
+fn jump-to-day3:
+  time-set! day: 3 tick: 0
+scene start:
+  .
+  * Go
+    jump-to-day3
+    -> start
+]], "test")
+    assert.equal(0, #diags.errors)
+    local log   = log_mod.new()
+    local store = state_mod.new(gt.schema, log)
+    store:init_defaults(gt.schema)
+    -- Advance first, then set should override
+    store:inc_time("day", 10)
+    store:inc_time("tick", 99)
+    local fn = gt.fns["jump-to-day3"]
+    local c = eval.new_ctx(store, gt.fns, "jump-to-day3")
+    eval.eval_stmts(fn.body, c)
+    assert.equal(3, store:get_time().day)
+    assert.equal(0, store:get_time().tick)
+  end)
+
+  it("time-set! with a single axis leaves other axes unchanged", function()
+    local gt, diags = compiler.compile([[
+module t
+  version: 1.0
+schema-version: 1
+time-model:
+  axes: [day, hour]
+  wrap: [none, 24]
+fn reset-hour:
+  time-set! hour: 8
+scene start:
+  .
+  * Go
+    reset-hour
+    -> start
+]], "test")
+    assert.equal(0, #diags.errors)
+    local log   = log_mod.new()
+    local store = state_mod.new(gt.schema, log)
+    store:init_defaults(gt.schema)
+    store:inc_time("day", 5)
+    store:inc_time("hour", 20)
+    local fn = gt.fns["reset-hour"]
+    local c = eval.new_ctx(store, gt.fns, "reset-hour")
+    eval.eval_stmts(fn.body, c)
+    assert.equal(5, store:get_time().day)  -- unchanged
+    assert.equal(8, store:get_time().hour) -- set to 8
+  end)
+end)
+
 -- ── indexed list access ──────────────────────────────────────────────────────
 
 describe("eval — indexed list access", function()
