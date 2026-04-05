@@ -1131,3 +1131,153 @@ fn pure-fn:
   end)
 
 end)
+
+-- ── Pass 7: Contract Validation ───────────────────────────────────────────────
+
+describe("checker pass 7 — contract validation", function()
+
+  local function get_warns(src)
+    local _, diags = compile(src)
+    local warns = {}
+    for _, d in ipairs(diags) do
+      if d.level == "warning" then warns[#warns+1] = d end
+    end
+    return warns
+  end
+
+  -- PRE_NOT_BOOL
+
+  it("warns PRE_NOT_BOOL when pre: is an integer literal", function()
+    local _, diags = compile([[
+fn bad:
+  pre: 42
+  pass
+]])
+    local found
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.PRE_NOT_BOOL then found = d; break end
+    end
+    assert.is_not_nil(found, "expected PRE_NOT_BOOL warning")
+  end)
+
+  it("warns PRE_NOT_BOOL when pre: is a string literal", function()
+    local _, diags = compile([[
+fn bad:
+  pre: "hello"
+  pass
+]])
+    local found
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.PRE_NOT_BOOL then found = d; break end
+    end
+    assert.is_not_nil(found, "expected PRE_NOT_BOOL warning")
+  end)
+
+  it("does not warn PRE_NOT_BOOL for a comparison expression", function()
+    check_ok([[
+state world:
+  gold: Int(0, 9999) = 0
+fn spend:
+  pre: world/gold > 0
+  dec! world/gold 1
+]])
+  end)
+
+  it("does not warn PRE_NOT_BOOL for a Bool path", function()
+    check_ok([[
+state player:
+  alive: Bool = true
+fn act:
+  pre: player/alive
+  pass
+]])
+  end)
+
+  -- POST_NOT_BOOL
+
+  it("warns POST_NOT_BOOL when post: is a symbol literal", function()
+    local _, diags = compile([[
+fn bad:
+  post: 'foo
+  pass
+]])
+    local found
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.POST_NOT_BOOL then found = d; break end
+    end
+    assert.is_not_nil(found, "expected POST_NOT_BOOL warning")
+  end)
+
+  it("does not warn POST_NOT_BOOL for a comparison with path@before", function()
+    check_ok([[
+state world:
+  gold: Int(0, 9999) = 100
+fn earn amount:
+  post: world/gold >= world/gold@before
+  inc! world/gold amount
+]])
+  end)
+
+  -- PATH_BEFORE_INVALID
+
+  it("emits PATH_BEFORE_INVALID when path@before used in pre: block", function()
+    check_err([[
+state world:
+  gold: Int(0, 9999) = 100
+fn spend amount:
+  pre: world/gold >= world/gold@before
+  dec! world/gold amount
+]], ast.E.PATH_BEFORE_INVALID)
+  end)
+
+  it("emits PATH_BEFORE_INVALID when path@before used in fn body", function()
+    check_err([[
+state world:
+  gold: Int(0, 9999) = 100
+fn show:
+  world/gold@before
+]], ast.E.PATH_BEFORE_INVALID)
+  end)
+
+  it("does not error when path@before used in fn post: block", function()
+    check_ok([[
+state world:
+  gold: Int(0, 9999) = 100
+fn earn amount:
+  post: world/gold > world/gold@before
+  inc! world/gold amount
+]])
+  end)
+
+  it("emits PATH_BEFORE_INVALID when path@before used in verify always clause", function()
+    check_err([[
+state world:
+  gold: Int(0, 9999) = 100
+engine-config:
+  entry-scene: main
+scene main:
+  * Go
+    -> main
+verify "bad":
+  verify-always world/gold@before >= 0
+]], ast.E.PATH_BEFORE_INVALID)
+  end)
+
+  it("does not error when path@before used in verify after assertion body", function()
+    check_ok([[
+state world:
+  gold: Int(0, 9999) = 100
+fn earn:
+  inc! world/gold 10
+engine-config:
+  entry-scene: main
+scene main:
+  * Go
+    -> main
+verify "earn ok":
+  after (earn):
+    world/gold > world/gold@before
+]])
+  end)
+
+end)

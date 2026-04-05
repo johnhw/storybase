@@ -10,7 +10,7 @@ Milestone goals are marked **M**.
 
 **CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 1009 tests passing.
+**Phase 7/8 in progress** — 1020 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -289,15 +289,17 @@ A separate types.lua is not needed for Phase 1.
 - [x] Total game state-space size reported in compile summary
 - [x] `warn-untyped-symbol` for `Symbol` in any logic position — done (2026-04-05)
 
-### Checker — Pass 6 (Contract Validation)
+### Checker — Pass 7 (Contract Validation) ✅ DONE (2026-04-05)
 
-- [ ] All items deferred to Phase 7
+- [x] Warning (PRE_NOT_BOOL): pre: condition is obviously non-boolean (literal/arithmetic) (2026-04-05)
+- [x] Warning (POST_NOT_BOOL): post: condition is obviously non-boolean (literal/arithmetic) (2026-04-05)
+- [x] Error (PATH_BEFORE_INVALID): path@before outside fn post: block or verify after: assertion (2026-04-05)
 
-### Compiler Boundary Enforcement (requires expression type inference)
+### Compiler Boundary Enforcement (partial: direct path checks only)
 
-- [ ] Error: superficial value in any conditional — deferred (needs full expression type inference pass)
-- [ ] Error: superficial value passed where discrete type expected — deferred (needs full expression type inference pass)
-- [ ] Error: random source producing a superficial value — deferred (needs full expression type inference pass)
+- [x] Warning (SUPERFICIAL_IN_COND): superficial path in comparison — done (pass5_check_boundary)
+- [x] Warning (RANDOM_SUPERFICIAL): random assigned to superficial field — done (pass5_check_boundary)
+- [ ] Warning (SUPERFICIAL_PARAM): superficial value passed to fn expecting discrete — deferred (needs full expression type inference)
 
 ### Codegen — Full Functions ✅ DONE (2026-04-01)
 

@@ -1410,6 +1410,204 @@ local function pass6_write_sets(acc, program)
 end
 
 -- ============================================================
+-- Pass 7 — Contract Validation (pre:/post: type checking + path@before scope)
+-- ============================================================
+
+--- Return a human-readable reason string if node is obviously not a Bool expression.
+--- Returns nil when the type cannot be determined (e.g. fn call, binary comparison).
+local function non_bool_reason(node, path_map)
+  if not node then return nil end
+  local k = ast.K
+  if node.kind == k.INT_LIT    then return "integer literal" end
+  if node.kind == k.FLOAT_LIT  then return "float literal"   end
+  if node.kind == k.STRING_LIT then return "string literal"  end
+  if node.kind == k.SYMBOL_LIT then return "symbol literal"  end
+  if node.kind == k.PATH_EXPR  then
+    local texpr = lookup_path_type(node, path_map)
+    if texpr then
+      local kk = texpr.kind
+      if kk == k.TYPE_INT        then return "Int path"    end
+      if kk == k.TYPE_FLOAT      then return "Float path"  end
+      if kk == k.TYPE_STRING     then return "String path" end
+      if kk == k.TYPE_SYMBOL     then return "Symbol path" end
+      if kk == k.TYPE_SYMBOL_OF  then return "SymbolOf path" end
+      if kk == k.TYPE_ENUM       then return "Enum path"   end
+      if kk == k.TYPE_ENUM_INLINE then return "Enum path"  end
+      -- TYPE_BOOL → is a boolean, no issue
+    end
+  end
+  if node.kind == k.BINARY_OP then
+    local arith = {["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true, ["%"] = true}
+    if arith[node.op] then return "arithmetic expression" end
+  end
+  return nil  -- unknown or definitely Bool
+end
+
+--- Return true if node subtree contains any PATH_AT_BEFORE node.
+local function has_path_at_before(node)
+  if not node or type(node) ~= "table" then return false end
+  if node.kind == ast.K.PATH_AT_BEFORE then return true end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        if has_path_at_before(child) then return true end
+        if type(child) == "table" then
+          if has_path_at_before(child.guard)     then return true end
+          if has_path_at_before(child.condition) then return true end
+          if child.body then
+            if type(child.body) == "table" and not child.body.kind then
+              for _, s in ipairs(child.body) do
+                if has_path_at_before(s) then return true end
+              end
+            else if has_path_at_before(child.body) then return true end end
+          end
+        end
+      end
+    end
+  end
+  local NODE_FIELDS = { "condition", "expr", "left", "right",
+                        "base", "value", "amount", "inner_expr", "path" }
+  for _, field in ipairs(NODE_FIELDS) do
+    if has_path_at_before(node[field]) then return true end
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do
+      if has_path_at_before(a) then return true end
+    end
+  end
+  if type(node.clauses) == "table" then
+    for _, c in ipairs(node.clauses) do
+      if has_path_at_before(c.condition) then return true end
+      if type(c.body) == "table" then
+        for _, s in ipairs(c.body) do if has_path_at_before(s) then return true end end
+      end
+    end
+  end
+  return false
+end
+
+--- Pass 7: Contract Validation.
+---
+--- Checks:
+---   PRE_NOT_BOOL  (warning) — pre: condition is obviously not Bool
+---   POST_NOT_BOOL (warning) — post: condition is obviously not Bool
+---   PATH_BEFORE_INVALID (error) — path@before outside post: / verify after: assertion
+local function pass7_check_contracts(acc, symtab_data, program)
+  local k = ast.K
+  local path_map = build_path_type_map(program, symtab_data)
+
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then
+      -- PRE_NOT_BOOL
+      for _, e in ipairs(node.pre or {}) do
+        local reason = non_bool_reason(e, path_map)
+        if reason then
+          table.insert(acc.diags, ast.warning(
+            ast.E.PRE_NOT_BOOL,
+            "pre: condition of '" .. (node.name or "?") ..
+              "' is a " .. reason .. " (expected Bool expression)",
+            e.pos or node.pos,
+            "pre: conditions must evaluate to Bool"))
+        end
+      end
+      -- POST_NOT_BOOL
+      for _, e in ipairs(node.post or {}) do
+        local reason = non_bool_reason(e, path_map)
+        if reason then
+          table.insert(acc.diags, ast.warning(
+            ast.E.POST_NOT_BOOL,
+            "post: condition of '" .. (node.name or "?") ..
+              "' is a " .. reason .. " (expected Bool expression)",
+            e.pos or node.pos,
+            "post: conditions must evaluate to Bool"))
+        end
+      end
+      -- PATH_BEFORE_INVALID in pre: block
+      for _, e in ipairs(node.pre or {}) do
+        if has_path_at_before(e) then
+          table.insert(acc.diags, ast.error(
+            ast.E.PATH_BEFORE_INVALID,
+            "path@before in pre: block of '" .. (node.name or "?") ..
+              "' — path@before is only valid in post: blocks or verify after: assertions",
+            e.pos or node.pos))
+        end
+      end
+      -- PATH_BEFORE_INVALID in fn body
+      for _, s in ipairs(node.body or {}) do
+        if has_path_at_before(s) then
+          table.insert(acc.diags, ast.error(
+            ast.E.PATH_BEFORE_INVALID,
+            "path@before in body of '" .. (node.name or "?") ..
+              "' — path@before is only valid in post: blocks or verify after: assertions",
+            s.pos or node.pos))
+        end
+      end
+
+    elseif node.kind == k.SCENE_DECL then
+      -- PATH_BEFORE_INVALID anywhere in scene body/choices
+      for _, s in ipairs(node.body or {}) do
+        if has_path_at_before(s) then
+          table.insert(acc.diags, ast.error(
+            ast.E.PATH_BEFORE_INVALID,
+            "path@before used in scene '" .. (node.name or "?") ..
+              "' — only valid in fn post: blocks or verify after: assertions",
+            s.pos or node.pos))
+        end
+      end
+      for _, choice in ipairs(node.choices or {}) do
+        for _, s in ipairs(choice.body or {}) do
+          if has_path_at_before(s) then
+            table.insert(acc.diags, ast.error(
+              ast.E.PATH_BEFORE_INVALID,
+              "path@before used in scene '" .. (node.name or "?") ..
+                "' choice body — only valid in fn post: blocks or verify after: assertions",
+              s.pos or node.pos))
+          end
+        end
+      end
+
+    elseif node.kind == k.VERIFY_DECL then
+      -- PATH_BEFORE_INVALID: only valid in after: assertion bodies, not in the call
+      -- expression and not in other clause kinds
+      for _, clause in ipairs(node.clauses or {}) do
+        if clause.clause_kind == "after" then
+          -- The call expression (condition) must NOT contain path@before
+          if clause.condition and has_path_at_before(clause.condition) then
+            table.insert(acc.diags, ast.error(
+              ast.E.PATH_BEFORE_INVALID,
+              "path@before in after: call expression — only valid in the assertion body",
+              clause.condition.pos or node.pos))
+          end
+          -- The assertion body (clause.body) is allowed
+        else
+          -- All other clause kinds: path@before is invalid
+          if clause.condition and has_path_at_before(clause.condition) then
+            table.insert(acc.diags, ast.error(
+              ast.E.PATH_BEFORE_INVALID,
+              "path@before in verify " .. (clause.clause_kind or "?") ..
+                " clause — only valid in after: assertion bodies",
+              clause.condition.pos or node.pos))
+          end
+          if type(clause.body) == "table" then
+            for _, e in ipairs(clause.body) do
+              if has_path_at_before(e) then
+                table.insert(acc.diags, ast.error(
+                  ast.E.PATH_BEFORE_INVALID,
+                  "path@before in verify " .. (clause.clause_kind or "?") ..
+                    " clause — only valid in after: assertion bodies",
+                  e.pos or node.pos))
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -1447,6 +1645,7 @@ function M.check(ast_root, filename)
   pass4_check_perceives(acc, ast_root)
   pass5_check_boundary(acc, symtab, ast_root)
   pass6_write_sets(acc, ast_root)
+  pass7_check_contracts(acc, symtab, ast_root)
   pass_recursive_scenes(acc, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
