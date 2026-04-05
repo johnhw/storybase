@@ -156,7 +156,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] Collect all declared type names into symbol table
 - [x] Collect all state paths (scalar and family)
 - [x] Collect all relation names
-- [ ] Collect all scene names (auto-generate `SceneId` enum) — deferred to Phase 7
+- [x] Collect all scene names (auto-generate `SceneId` enum) — done (2026-04-05)
 - [x] Resolve forward references within the same compilation unit (pass1 collects all names before pass2 resolves)
 - [x] Resolve imported names (flat merge; `as Alias` parsed but not namespaced) — done (2026-04-04)
 - [x] Error: duplicate type/state/scene/relation name

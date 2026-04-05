@@ -50,7 +50,7 @@ describe("codegen — schema.types (enum)", function()
   it("emits an enum type descriptor", function()
     local sc = schema("type Status = alive | dead | unconscious")
     assert.is_not_nil(sc)
-    assert.are.equal(1, #sc.types)
+    assert.are.equal(2, #sc.types)  -- 1 user-declared + 1 auto SceneId
     local t = sc.types[1]
     assert.are.equal("enum", t.kind)
     assert.are.equal("Status", t.name)
@@ -195,6 +195,20 @@ describe("codegen — schema counts", function()
   it("scene_count is 0 in Phase 1", function()
     local sc = schema("type S = a | b")
     assert.are.equal(0, sc.scene_count)
+  end)
+
+  it("scene_names lists scene names alphabetically", function()
+    local sc = schema("scene beta:\n  B.\n  * Go\n    -> beta\nscene alpha:\n  A.\n  * Go\n    -> alpha")
+    assert.are.same({"alpha", "beta"}, sc.scene_names)
+  end)
+
+  it("SceneId type is appended to schema.types with auto flag", function()
+    local sc = schema("scene main:\n  Hello.\n  * Go\n    -> main")
+    local scene_id = sc.types[#sc.types]
+    assert.are.equal("SceneId", scene_id.name)
+    assert.are.equal("enum",    scene_id.kind)
+    assert.is_true(scene_id.auto)
+    assert.are.same({"main"}, scene_id.values)
   end)
 end)
 
@@ -424,8 +438,8 @@ relation exits: Location -> Set(Location, 6)
     -- Time model
     assert.are.same({"day","hour","tick"}, gt.schema.time_model.axes)
 
-    -- Types list
-    assert.are.equal(5, #gt.schema.types)
+    -- Types list: 5 user-declared + 1 auto SceneId
+    assert.are.equal(6, #gt.schema.types)
 
     -- States list
     assert.are.equal(3, #gt.schema.states)

@@ -27,6 +27,7 @@ local function new_symtab()
     types     = {},  -- name → TYPE_ENUM / TYPE_ALIAS / TYPE_RECORD / TYPE_VARIANT node
     states    = {},  -- path-string → STATE_SCALAR / STATE_RECORD / STATE_FAMILY node
     relations = {},  -- name → RELATION_DECL node
+    scenes    = {},  -- name → SCENE_DECL node
   }
 end
 
@@ -131,6 +132,17 @@ local function pass1_collect(acc, symtab, program)
           "relation '" .. name .. "' already declared", node.pos)
       else
         symtab.relations[name] = node
+      end
+
+    elseif kind == k.SCENE_DECL then
+      local name = node.name
+      if symtab.scenes[name] then
+        err(acc, ast.E.DUPLICATE_NAME,
+          "scene '" .. name .. "' already declared",
+          node.pos,
+          "previous declaration at line " .. symtab.scenes[name].pos.line)
+      else
+        symtab.scenes[name] = node
       end
     end
     -- MODULE_DECL, IMPORT_DECL, SCHEMA_VERSION, ENGINE_CONFIG, TIME_MODEL
@@ -911,6 +923,20 @@ function M.check(ast_root, filename)
   local symtab = new_symtab()
 
   pass1_collect(acc, symtab, ast_root)
+
+  -- Synthesise the auto-generated SceneId enum from all collected scene names.
+  -- This must happen after pass1 so all scenes are known, but before pass2 so
+  -- that TYPE_NAMED("SceneId") references can be resolved.
+  if not symtab.types["SceneId"] then
+    local scene_values = {}
+    for name in pairs(symtab.scenes) do
+      table.insert(scene_values, name)
+    end
+    table.sort(scene_values)
+    local auto_pos = { file = "<auto>", line = 0, col = 0 }
+    symtab.types["SceneId"] = ast.type_enum("SceneId", scene_values, nil, auto_pos)
+  end
+
   pass2_check(acc, symtab, ast_root)
   pass3_infer_purity(acc, ast_root)
   pass4_check_perceives(acc, ast_root)

@@ -650,9 +650,19 @@ function M.emit(typed_ast, opts)
   opts = opts or {}
   local diags   = {}
   local decls   = typed_ast.decls or {}
-  local symtab  = typed_ast.symtab or { types = {}, states = {}, relations = {} }
+  local symtab  = typed_ast.symtab or { types = {}, states = {}, relations = {}, scenes = {} }
 
   local types     = emit_types(decls)
+  -- Append the auto-generated SceneId enum at the end of the types list
+  local scene_id_decl = symtab.types and symtab.types["SceneId"]
+  if scene_id_decl and scene_id_decl.kind == ast.K.TYPE_ENUM then
+    table.insert(types, {
+      kind      = "enum",
+      name      = "SceneId",
+      values    = scene_id_decl.values,
+      auto      = true,   -- flag: generated, not user-declared
+    })
+  end
   local states    = emit_states(decls)
   local relations = emit_relations(decls)
   local eng_cfg   = emit_engine_config(decls)
@@ -660,17 +670,28 @@ function M.emit(typed_ast, opts)
   local schema_v  = emit_schema_version(decls)
   local ss_size   = compute_total_state_space(decls, symtab)
 
-  -- Count unique type/state/relation entries
-  local type_count     = 0
-  for _ in pairs(symtab.types)     do type_count     = type_count     + 1 end
+  -- Count unique type/state/relation entries (user-declared only; SceneId is auto-generated)
+  local k = ast.K
+  local type_count = 0
+  for _, d in ipairs(decls) do
+    if d.kind == k.TYPE_ENUM or d.kind == k.TYPE_ALIAS
+    or d.kind == k.TYPE_RECORD or d.kind == k.TYPE_VARIANT then
+      type_count = type_count + 1
+    end
+  end
   local path_count     = 0
   for _ in pairs(symtab.states)    do path_count     = path_count     + 1 end
   local relation_count = 0
   for _ in pairs(symtab.relations) do relation_count = relation_count + 1 end
   local scene_count = 0
+  local scene_names = {}
   for _, d in ipairs(decls) do
-    if d.kind == ast.K.SCENE_DECL then scene_count = scene_count + 1 end
+    if d.kind == ast.K.SCENE_DECL then
+      scene_count = scene_count + 1
+      table.insert(scene_names, d.name)
+    end
   end
+  table.sort(scene_names)
 
   local game_table = {
     schema = {
@@ -678,6 +699,7 @@ function M.emit(typed_ast, opts)
       type_count       = type_count,
       path_count       = path_count,
       scene_count      = scene_count,
+      scene_names      = scene_names,
       relation_count   = relation_count,
       state_space_size = ss_size == math.huge and "unbounded" or ss_size,
       types            = types,

@@ -119,6 +119,46 @@ describe("checker pass 1 — relation collection", function()
 end)
 
 -- ============================================================
+-- Pass 1 — Scene collection and SceneId enum
+-- ============================================================
+
+describe("checker pass 1 — scene collection and SceneId", function()
+  it("collects scene names into symtab.scenes", function()
+    local st = symtab("scene main:\n  Hello.\n  * Go\n    -> main")
+    assert.is_not_nil(st.scenes["main"])
+  end)
+
+  it("auto-generates SceneId enum with all scene names", function()
+    local st = symtab("scene main:\n  Hello.\n  * Go\n    -> main\nscene forest:\n  Trees.\n  * Back\n    -> main")
+    local scene_id = st.types["SceneId"]
+    assert.is_not_nil(scene_id)
+    assert.are.equal(ast.K.TYPE_ENUM, scene_id.kind)
+    -- values are sorted alphabetically
+    assert.are.same({"forest", "main"}, scene_id.values)
+  end)
+
+  it("emits DUPLICATE_NAME for duplicate scene", function()
+    check_err(
+      "scene main:\n  Hello.\n  * Go\n    -> main\nscene main:\n  Dup.\n  * Go\n    -> main",
+      ast.E.DUPLICATE_NAME
+    )
+  end)
+
+  it("SceneId is available as a valid type reference", function()
+    check_ok(
+      "scene a:\n  Hello.\n  * Go\n    -> a\nstate current-scene: SceneId"
+    )
+  end)
+
+  it("SceneId is empty enum when no scenes declared", function()
+    local st = symtab("type S = a | b")
+    local scene_id = st.types["SceneId"]
+    assert.is_not_nil(scene_id)
+    assert.are.same({}, scene_id.values)
+  end)
+end)
+
+-- ============================================================
 -- Pass 2 — Type resolution
 -- ============================================================
 
