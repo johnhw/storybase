@@ -84,6 +84,28 @@ describe("eval_expr: literals", function()
   end)
 end)
 
+describe("eval_expr: lambda expressions", function()
+  it("lambda_expr evaluates to a callable table", function()
+    local lam_node = { kind="lambda_expr", params={"x"}, body=int_lit(99) }
+    local result = eval.eval_expr(lam_node, ctx())
+    assert.is_not_nil(result)
+    assert.is_true(result._lambda)
+    assert.are.same({"x"}, result.params)
+  end)
+
+  it("count-where uses lambda predicate", function()
+    -- count-where pred list: count elements where pred returns true
+    local c = ctx({})
+    -- Build: (count-where fn(x): x > 2 [1, 2, 3, 4])
+    local pred = { kind="lambda_expr", params={"x"},
+                   body = binop(">", { kind="fn_call", name="x", args={} }, int_lit(2)) }
+    local lst  = { kind="list_lit",
+                   elements = { int_lit(1), int_lit(2), int_lit(3), int_lit(4) } }
+    local call = { kind="fn_call", name="count-where", args={ lst, pred } }
+    assert.are.equal(2, eval.eval_expr(call, c))
+  end)
+end)
+
 describe("eval_expr: set and map literals", function()
   it("set_lit evaluates to a list of symbol values", function()
     local result = eval.eval_expr(set_lit("alive", "dead"), ctx())

@@ -661,6 +661,34 @@ describe("parser — literal expressions", function()
   end)
 end)
 
+-- ── Lambda expressions ───────────────────────────────────────────────────────
+
+describe("parser — lambda expressions", function()
+  it("parses fn(x): body", function()
+    local s, _ = first_stmt("fn(x): x")
+    assert.are.equal(ast.K.EXPR_STMT, s.kind)
+    local lam = s.expr
+    assert.are.equal(ast.K.LAMBDA_EXPR, lam.kind)
+    assert.are.equal(1, #lam.params)
+    assert.are.equal("x", lam.params[1])
+  end)
+
+  it("parses fn(): body with no params", function()
+    local s, _ = first_stmt("fn(): 42")
+    assert.are.equal(ast.K.LAMBDA_EXPR, s.expr.kind)
+    assert.are.equal(0, #s.expr.params)
+  end)
+
+  it("parses fn(x, y): binary body", function()
+    local s, _ = first_stmt("fn(x, y): x + y")
+    local lam = s.expr
+    assert.are.equal(2, #lam.params)
+    assert.are.equal("x", lam.params[1])
+    assert.are.equal("y", lam.params[2])
+    assert.are.equal(ast.K.BINARY_OP, lam.body.kind)
+  end)
+end)
+
 -- ── Collection literals ───────────────────────────────────────────────────────
 
 describe("parser — collection literals", function()

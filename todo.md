@@ -230,7 +230,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `for var in expr: body` — done (Phase 3+)
 - [x] `while cond: body` — done (Phase 3+)
 - [x] `let name = expr ...: body` — done (Phase 3+)
-- [ ] Lambda expression `fn(params): body` — NOT done; deferred to Phase 7
+- [x] Lambda expression `fn(params): body` — done (already implemented; checkbox not updated; tests added 2026-04-05)
 - [x] Function declaration `fn name args: body`
 - [x] `pre:` and `post:` blocks inside function declarations
 - [x] `tags: [name, ...]` inside function declarations (parsed/skipped)
