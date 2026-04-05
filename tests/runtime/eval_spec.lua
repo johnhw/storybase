@@ -701,6 +701,39 @@ describe("eval — indexed list access", function()
     eval.eval_stmt(node, c)
     assert.is_nil(c.retval)
   end)
+
+  it("slice_expr returns sub-list", function()
+    local c = ctx({ ["items"] = {10, 20, 30, 40, 50} })
+    local slice = { kind="slice_expr",
+                    base  = path_expr({"items"}),
+                    from  = int_lit(2),
+                    to    = int_lit(4) }
+    local node = expr_stmt(slice)
+    eval.eval_stmt(node, c)
+    assert.are.same({20, 30, 40}, c.retval)
+  end)
+
+  it("set! path[n] value writes element back to list", function()
+    local c = ctx({ ["items"] = {10, 20, 30} })
+    local write_node = {
+      kind  = "set_mut",
+      path  = index_expr(path_expr({"items"}), int_lit(2)),
+      value = int_lit(99),
+    }
+    eval.eval_stmt(write_node, c)
+    assert.are.same({10, 99, 30}, c.state:get("items"))
+  end)
+
+  it("set! path[-1] value writes to last element", function()
+    local c = ctx({ ["items"] = {10, 20, 30} })
+    local write_node = {
+      kind  = "set_mut",
+      path  = index_expr(path_expr({"items"}), int_lit(-1)),
+      value = int_lit(99),
+    }
+    eval.eval_stmt(write_node, c)
+    assert.are.same({10, 20, 99}, c.state:get("items"))
+  end)
 end)
 
 -- ============================================================

@@ -1579,4 +1579,20 @@ describe("parser — indexed list access", function()
     assert.equal(ast.K.FN_CALL, node.index.kind)
     assert.equal("i",           node.index.name)
   end)
+
+  it("parses path[a:b] as slice_expr", function()
+    local body = parse_fn_body("  player/items[2:4]\n")
+    local node = (body[1].kind == "expr_stmt") and body[1].expr or body[1]
+    assert.equal(ast.K.SLICE_EXPR, node.kind)
+    assert.equal(2, node.from.value)
+    assert.equal(4, node.to.value)
+  end)
+
+  it("parses set! path[n] value as indexed write (index_expr in path)", function()
+    local body = parse_fn_body("  set! player/items[1] 'sword\n")
+    local node = body[1]
+    assert.equal("set_mut", node.kind)
+    assert.equal(ast.K.INDEX_EXPR, node.path.kind)
+    assert.equal(1, node.path.index.value)
+  end)
 end)

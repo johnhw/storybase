@@ -75,6 +75,7 @@ local K = {
   IN_STATE_EXPR         = "in_state_expr",
   FIND_EXPR             = "find_expr",
   INDEX_EXPR            = "index_expr",
+  SLICE_EXPR            = "slice_expr",
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
@@ -205,6 +206,24 @@ eval_expr = function(node, ctx)
     -- Support negative indices: -1 = last, -2 = second-to-last, etc.
     if idx < 0 then idx = #list + idx + 1 end
     return list[idx]
+
+  elseif k == K.SLICE_EXPR then
+    -- path[a:b]: return a sub-list from index a to index b (inclusive, 1-based)
+    local list = eval_expr(node.base, ctx)
+    if type(list) == "string" and ctx.state then
+      list = ctx.state:get(list)
+    end
+    if type(list) ~= "table" then return {} end
+    local len  = #list
+    local from = eval_expr(node.from, ctx) or 1
+    local to   = eval_expr(node.to,   ctx) or len
+    if from < 0 then from = len + from + 1 end
+    if to   < 0 then to   = len + to   + 1 end
+    from = math.max(1, from)
+    to   = math.min(len, to)
+    local result = {}
+    for i = from, to do result[#result+1] = list[i] end
+    return result
 
   elseif k == K.PATH_AT_BEFORE then
     -- path@before: read value from before-snapshot if available
@@ -1008,9 +1027,26 @@ eval_stmt = function(node, ctx)
 
   -- Mutation primitives
   if k == K.SET_MUT then
-    local path = eval_path(node.path, ctx)
-    local val  = eval_expr(node.value, ctx)
-    ctx.state:set(path, val, ctx.fn_name)
+    if node.path and node.path.kind == K.INDEX_EXPR then
+      -- Indexed list write: set! path[n] value
+      local list_path = eval_path(node.path.base, ctx)
+      local idx       = eval_expr(node.path.index, ctx)
+      local val       = eval_expr(node.value, ctx)
+      local list      = ctx.state:get(list_path) or {}
+      local len       = #list
+      if type(idx) == "number" then
+        if idx < 0 then idx = len + idx + 1 end
+        if idx >= 1 and idx <= len then
+          local new_list = {table.unpack(list)}
+          new_list[idx]  = val
+          ctx.state:set(list_path, new_list, ctx.fn_name)
+        end
+      end
+    else
+      local path = eval_path(node.path, ctx)
+      local val  = eval_expr(node.value, ctx)
+      ctx.state:set(path, val, ctx.fn_name)
+    end
 
   elseif k == K.INC_MUT then
     local path   = eval_path(node.path, ctx)

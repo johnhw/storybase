@@ -803,7 +803,7 @@ local function parse_atom(p)
       end
       p:expect("OP", "]", "expected ']' to close index")
       if idx2 then
-        return ast.index_expr(path_node, idx, tpos)  -- slices not yet supported; treat as [a]
+        return ast.slice_expr(path_node, idx, idx2, tpos)
       end
       return ast.index_expr(path_node, idx, tpos)
     end
@@ -1521,16 +1521,27 @@ parse_expr = function(p) return parse_or_expr(p) end
 
 local function parse_mut_path(p)
   local t = p:cur()
+  local base_node
   if t.kind == "PATH" then
-    p:adv(); return make_path_expr(t.value, t.pos)
+    p:adv(); base_node = make_path_expr(t.value, t.pos)
   elseif t.kind == "INTERP_PATH" then
-    p:adv(); return make_interp_path(t.value, t.pos)
+    p:adv(); base_node = make_interp_path(t.value, t.pos)
   elseif t.kind == "IDENT" then
     -- Single-segment path (no slash) used in mutation position
-    local v = p:adv(); return ast.path_expr({v.value}, v.pos)
+    local v = p:adv(); base_node = ast.path_expr({v.value}, v.pos)
+  else
+    p:emit_err(ast.E.BAD_EXPRESSION, "expected state path", t.pos)
+    return ast.path_expr({}, t.pos)
   end
-  p:emit_err(ast.E.BAD_EXPRESSION, "expected state path", t.pos)
-  return ast.path_expr({}, t.pos)
+  -- Check for indexed write: path[n] in mutation position
+  if p:at("OP", "[") then
+    local tpos = base_node.pos
+    p:adv()  -- consume "["
+    local idx = parse_expr(p)
+    p:expect("OP", "]", "expected ']' to close index")
+    return ast.index_expr(base_node, idx, tpos)
+  end
+  return base_node
 end
 
 -- ── Mutation primitives ──────────────────────────────────────────────────────

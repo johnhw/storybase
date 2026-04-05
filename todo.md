@@ -263,15 +263,15 @@ A separate types.lua is not needed for Phase 1.
 
 ### Checker — Pass 4 (Write-Set Analysis)
 
-- [ ] Compute static write-set for every transaction function — deferred to Phase 7
-- [ ] `{var}` interpolation legal in write position — deferred to Phase 7
-- [ ] Error: untyped variable in write position — deferred to Phase 7
+- [x] Compute static write-set for every transaction function — done (implemented as pass6_write_sets)
+- [x] `{var}` interpolation legal in write position — done (implemented as pass6_write_sets)
+- [x] Error: untyped variable in write position — done (WRITE_UNTYPED_VAR warning in pass6_write_sets)
 
 ### Checker — Pass 5 (State-Space Computation)
 
 - [x] Compute state-space size for all discrete types (done in Phase 1 codegen)
 - [x] Total game state-space size reported in compile summary
-- [ ] `warn-untyped-symbol` for `Symbol` in any logic position — deferred to Phase 7
+- [x] `warn-untyped-symbol` for `Symbol` in any logic position — done (2026-04-05)
 
 ### Checker — Pass 6 (Contract Validation)
 
@@ -279,9 +279,9 @@ A separate types.lua is not needed for Phase 1.
 
 ### Compiler Boundary Enforcement (requires expression type inference)
 
-- [ ] Error: superficial value in any conditional — deferred to Phase 7
-- [ ] Error: superficial value passed where discrete type expected — deferred to Phase 7
-- [ ] Error: random source producing a superficial value — deferred to Phase 7
+- [ ] Error: superficial value in any conditional — deferred (needs full expression type inference pass)
+- [ ] Error: superficial value passed where discrete type expected — deferred (needs full expression type inference pass)
+- [ ] Error: random source producing a superficial value — deferred (needs full expression type inference pass)
 
 ### Codegen — Full Functions ✅ DONE (2026-04-01)
 
@@ -301,8 +301,8 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/compiler/parser_spec.lua` — scene declarations: narration, choices, guards, goto, enter, exit
 - [x] `tests/compiler/parser_spec.lua` — integration: test02/test03 parse without errors
 - [x] `tests/compiler/checker_spec.lua` — pure/transaction inference (10 tests)
-- [ ] `tests/compiler/checker_spec.lua` — discrete/superficial boundary — deferred to Phase 7
-- [ ] `tests/compiler/checker_spec.lua` — write-set analysis — deferred to Phase 7
+- [x] `tests/compiler/checker_spec.lua` — discrete/superficial boundary — done (checker pass 5 tests exist)
+- [x] `tests/compiler/checker_spec.lua` — write-set analysis — done (checker pass 6 tests exist)
 
 **M Milestone:** `tests/test02_choices.sb` and `tests/test03_types.sb` compile without errors. ✅ DONE (2026-03-30)
 
@@ -325,8 +325,8 @@ A separate types.lua is not needed for Phase 1.
 - [x] `push!(path, value)` — append to List
 - [x] `pop!(path)` — remove and return last element of List; error if empty
 - [x] Indexed List read: `path[n]` (positive and negative indices) — INDEX_EXPR in eval.lua
-- [ ] Indexed List write: `path[n] = value` — deferred to Phase 8
-- [ ] List slice read: `path[a:b]` — deferred to Phase 8
+- [x] Indexed List write: `set! path[n] value` — done (2026-04-05)
+- [x] List slice read: `path[a:b]` — done (2026-04-05)
 - [x] `spawn!(family, key, record)` — instantiate family member; error if key exists
 - [x] `despawn!(family, key)` — remove family member; subsequent reads return nil
 - [x] `path-exists?(path)` — Bool predicate
