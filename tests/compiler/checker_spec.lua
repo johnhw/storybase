@@ -187,6 +187,14 @@ describe("checker pass 2 — type resolution", function()
     check_err("type L = a | b\nrelation r: NotDeclared -> Set(L, 4)", ast.E.UNDEFINED_TYPE)
   end)
 
+  it("accepts SymbolOf referencing a declared family", function()
+    check_ok("type Npc:\n  hp: Int(0,100)\nstate npcs/{npc}: Npc  max: 5\nstate target: SymbolOf(npcs)")
+  end)
+
+  it("emits UNDEFINED_TYPE for SymbolOf referencing unknown family", function()
+    check_err("state target: SymbolOf(nonexistent)", ast.E.UNDEFINED_TYPE)
+  end)
+
   it("resolves named type in state scalar", function()
     local typed = compile("type Status = alive | dead\nstate s: Status")
     local sd = typed.decls[2]

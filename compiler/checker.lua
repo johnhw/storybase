@@ -28,6 +28,7 @@ local function new_symtab()
     states    = {},  -- path-string → STATE_SCALAR / STATE_RECORD / STATE_FAMILY node
     relations = {},  -- name → RELATION_DECL node
     scenes    = {},  -- name → SCENE_DECL node
+    families  = {},  -- family_name → STATE_FAMILY node
   }
 end
 
@@ -123,6 +124,7 @@ local function pass1_collect(acc, symtab, program)
           "state family '" .. key .. "' already declared", node.pos)
       else
         symtab.states[key] = node
+        symtab.families[node.family] = node
       end
 
     elseif kind == k.RELATION_DECL then
@@ -205,8 +207,16 @@ local function resolve_type_expr(acc, symtab, texpr)
         "Int bounds out of order: min=" .. texpr.min .. " > max=" .. texpr.max,
         texpr.pos)
     end
+  elseif kind == k.TYPE_SYMBOL_OF then
+    -- Validate that the family name refers to a declared entity family
+    local fname = texpr.family
+    if fname and not symtab.families[fname] then
+      err(acc, ast.E.UNDEFINED_TYPE,
+        "SymbolOf references undeclared entity family '" .. fname .. "'",
+        texpr.pos)
+    end
   end
-  -- TYPE_BOOL, TYPE_ENUM_INLINE, TYPE_SYMBOL, TYPE_SYMBOL_OF,
+  -- TYPE_BOOL, TYPE_ENUM_INLINE, TYPE_SYMBOL,
   -- TYPE_STRING, TYPE_FLOAT: no sub-expressions to resolve
 end
 
