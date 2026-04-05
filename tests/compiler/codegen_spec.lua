@@ -257,6 +257,72 @@ describe("codegen — state-space size", function()
 end)
 
 -- ============================================================
+-- Discrete / superficial tag on type descriptors
+-- ============================================================
+
+describe("codegen — type_desc.discrete tag", function()
+  it("Bool is discrete", function()
+    local sc = schema("state x: Bool")
+    assert.is_true(sc.states[1].type_desc.discrete)
+  end)
+
+  it("Int is discrete", function()
+    local sc = schema("state x: Int(0, 10)")
+    assert.is_true(sc.states[1].type_desc.discrete)
+  end)
+
+  it("inline Enum is discrete", function()
+    local sc = schema("state x: Enum(a, b, c)")
+    assert.is_true(sc.states[1].type_desc.discrete)
+  end)
+
+  it("String is not discrete", function()
+    local sc = schema('state name: String = "x"')
+    assert.is_false(sc.states[1].type_desc.discrete)
+  end)
+
+  it("Float is not discrete", function()
+    local sc = schema("state x: Float")
+    assert.is_false(sc.states[1].type_desc.discrete)
+  end)
+
+  it("Symbol (untyped) is not discrete", function()
+    local sc = schema("state x: Symbol")
+    assert.is_false(sc.states[1].type_desc.discrete)
+  end)
+
+  it("Option of discrete is discrete", function()
+    local sc = schema("state x: Option(Int(0, 5))")
+    assert.is_true(sc.states[1].type_desc.discrete)
+  end)
+
+  it("Option of String is not discrete", function()
+    local sc = schema('state x: Option(String)')
+    assert.is_false(sc.states[1].type_desc.discrete)
+  end)
+
+  it("List of discrete is discrete", function()
+    local sc = schema("type E = a|b\nstate x: List(E, 3)")
+    assert.is_true(sc.states[1].type_desc.discrete)
+  end)
+
+  it("named enum type is discrete", function()
+    local sc = schema("type Status = alive|dead\nstate x: Status = 'alive")
+    assert.is_true(sc.states[1].type_desc.discrete)
+  end)
+
+  it("named record with all-discrete fields is discrete", function()
+    local sc = schema("type Pos:\n  x: Int(0, 10)\n  y: Int(0, 10)\nstate p: Pos")
+    assert.is_true(sc.states[1].type_desc.discrete)
+  end)
+
+  it("named record with a String field is not discrete", function()
+    local sc = schema('type Named:\n  label: String\n  hp: Int(0, 10)\nstate n: Named')
+    assert.is_false(sc.states[1].type_desc.discrete)
+  end)
+end)
+
+-- ============================================================
 -- Default value descriptors
 -- ============================================================
 

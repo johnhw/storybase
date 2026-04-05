@@ -141,35 +141,95 @@ end
 -- Schema section emitters
 -- ============================================================
 
---- Emit a compact serialisable descriptor for a type expression.
-local function emit_type_desc(texpr)
-  if not texpr then return { tag = "unknown" } end
-  local k = ast.K
+--- Determine whether a type expression node represents a discrete type.
+--- Discrete types have a finite, enumerable state-space (Bool, Int, Enum, Set, List, SymbolOf,
+--- and their combinations). Superficial types (String, Float, UList, UMap, Symbol) are unbounded.
+local is_discrete_texpr  -- forward declaration
+local is_discrete_decl   -- forward declaration
 
-  if texpr.kind == k.TYPE_BOOL    then return { tag = "bool" }
-  elseif texpr.kind == k.TYPE_INT then return { tag = "int", min = texpr.min, max = texpr.max }
-  elseif texpr.kind == k.TYPE_ENUM_INLINE then
-    return { tag = "enum", values = texpr.values }
-  elseif texpr.kind == k.TYPE_OPTION then
-    return { tag = "option", inner = emit_type_desc(texpr.inner) }
-  elseif texpr.kind == k.TYPE_SET then
-    return { tag = "set", inner = emit_type_desc(texpr.inner), max = texpr.max }
-  elseif texpr.kind == k.TYPE_LIST then
-    return { tag = "list", inner = emit_type_desc(texpr.inner), max = texpr.max }
-  elseif texpr.kind == k.TYPE_SYMBOL    then return { tag = "symbol" }
-  elseif texpr.kind == k.TYPE_SYMBOL_OF then return { tag = "symbol_of", family = texpr.family }
-  elseif texpr.kind == k.TYPE_STRING    then return { tag = "string" }
-  elseif texpr.kind == k.TYPE_FLOAT     then return { tag = "float" }
-  elseif texpr.kind == k.TYPE_ULIST then
-    return { tag = "ulist", inner = emit_type_desc(texpr.inner) }
-  elseif texpr.kind == k.TYPE_UMAP then
-    return { tag = "umap", key = emit_type_desc(texpr.key), val = emit_type_desc(texpr.val) }
-  elseif texpr.kind == k.TYPE_NAMED then
-    return { tag = "named", name = texpr.name }
-  elseif texpr.kind == k.TYPE_FN then
-    return { tag = "fn" }
+is_discrete_decl = function(decl)
+  if not decl then return true end
+  local k = ast.K
+  if decl.kind == k.TYPE_ENUM then
+    return true  -- finite named values
+  elseif decl.kind == k.TYPE_ALIAS then
+    return is_discrete_texpr(decl.type_expr)
+  elseif decl.kind == k.TYPE_RECORD then
+    for _, f in ipairs(decl.fields or {}) do
+      if f.kind == k.RECORD_FIELD and not is_discrete_texpr(f.type_expr) then
+        return false
+      end
+    end
+    return true
+  elseif decl.kind == k.TYPE_VARIANT then
+    for _, br in ipairs(decl.branches or {}) do
+      for _, f in ipairs(br.fields or {}) do
+        if f.kind == k.RECORD_FIELD and not is_discrete_texpr(f.type_expr) then
+          return false
+        end
+      end
+    end
+    return true
   end
-  return { tag = "unknown" }
+  return true  -- built-in marker or unknown → assume discrete
+end
+
+is_discrete_texpr = function(texpr)
+  if not texpr then return false end
+  local k = ast.K
+  if texpr.kind == k.TYPE_BOOL          then return true
+  elseif texpr.kind == k.TYPE_INT       then return true
+  elseif texpr.kind == k.TYPE_ENUM_INLINE then return true
+  elseif texpr.kind == k.TYPE_SYMBOL_OF then return true
+  elseif texpr.kind == k.TYPE_OPTION    then return is_discrete_texpr(texpr.inner)
+  elseif texpr.kind == k.TYPE_SET       then return is_discrete_texpr(texpr.inner)
+  elseif texpr.kind == k.TYPE_LIST      then return is_discrete_texpr(texpr.inner)
+  elseif texpr.kind == k.TYPE_NAMED     then return is_discrete_decl(texpr.resolved)
+  elseif texpr.kind == k.TYPE_SYMBOL    then return false
+  elseif texpr.kind == k.TYPE_STRING    then return false
+  elseif texpr.kind == k.TYPE_FLOAT     then return false
+  elseif texpr.kind == k.TYPE_ULIST     then return false
+  elseif texpr.kind == k.TYPE_UMAP      then return false
+  elseif texpr.kind == k.TYPE_FN        then return false
+  end
+  return false
+end
+
+--- Emit a compact serialisable descriptor for a type expression.
+--- Each descriptor includes a `discrete` boolean: true iff the type has a
+--- finite, enumerable state-space (suitable for search/verify).
+local function emit_type_desc(texpr)
+  if not texpr then return { tag = "unknown", discrete = false } end
+  local k = ast.K
+  local disc = is_discrete_texpr(texpr)
+
+  if texpr.kind == k.TYPE_BOOL    then return { tag = "bool", discrete = true }
+  elseif texpr.kind == k.TYPE_INT then
+    return { tag = "int", min = texpr.min, max = texpr.max, discrete = true }
+  elseif texpr.kind == k.TYPE_ENUM_INLINE then
+    return { tag = "enum", values = texpr.values, discrete = true }
+  elseif texpr.kind == k.TYPE_OPTION then
+    return { tag = "option", inner = emit_type_desc(texpr.inner), discrete = disc }
+  elseif texpr.kind == k.TYPE_SET then
+    return { tag = "set", inner = emit_type_desc(texpr.inner), max = texpr.max, discrete = disc }
+  elseif texpr.kind == k.TYPE_LIST then
+    return { tag = "list", inner = emit_type_desc(texpr.inner), max = texpr.max, discrete = disc }
+  elseif texpr.kind == k.TYPE_SYMBOL    then return { tag = "symbol",    discrete = false }
+  elseif texpr.kind == k.TYPE_SYMBOL_OF then
+    return { tag = "symbol_of", family = texpr.family, discrete = true }
+  elseif texpr.kind == k.TYPE_STRING    then return { tag = "string",    discrete = false }
+  elseif texpr.kind == k.TYPE_FLOAT     then return { tag = "float",     discrete = false }
+  elseif texpr.kind == k.TYPE_ULIST then
+    return { tag = "ulist", inner = emit_type_desc(texpr.inner), discrete = false }
+  elseif texpr.kind == k.TYPE_UMAP then
+    return { tag = "umap", key = emit_type_desc(texpr.key), val = emit_type_desc(texpr.val),
+             discrete = false }
+  elseif texpr.kind == k.TYPE_NAMED then
+    return { tag = "named", name = texpr.name, discrete = disc }
+  elseif texpr.kind == k.TYPE_FN then
+    return { tag = "fn", discrete = false }
+  end
+  return { tag = "unknown", discrete = false }
 end
 
 --- Emit a compact descriptor for a literal default value.

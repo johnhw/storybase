@@ -6,7 +6,9 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-04)
+## Current Status and Next Steps (2026-04-05)
+
+**CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
 **Phase 7/8 in progress** — 900 tests passing.
 
@@ -147,7 +149,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `RecordName`, `VariantName` (declared named types)
 - [x] `(T -> R)`, `(T U -> R)` (function/lambda types)
 - [x] State-space size computation for all discrete types (in codegen.lua)
-- [ ] Discrete / superficial tag on every type — deferred to Phase 7
+- [x] Discrete / superficial tag on every type — done (2026-04-05)
 
 ### Checker — Pass 1 (Schema Collection) ✅ DONE (2026-03-25)
 
