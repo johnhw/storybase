@@ -199,9 +199,9 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/compiler/parser_spec.lua` — error recovery (continues after bad declaration)
 - [x] `tests/compiler/checker_spec.lua` — pass 1: undefined type reference
 - [x] `tests/compiler/checker_spec.lua` — pass 1: duplicate name
-- [ ] `tests/compiler/checker_spec.lua` — pass 2: type mismatch in field default — deferred to Phase 6
+- [x] `tests/compiler/checker_spec.lua` — pass 2: type mismatch in field default — done (2026-04-05)
 - [x] `tests/compiler/checker_spec.lua` — pass 2: `with` mixin rules
-- [ ] `tests/compiler/checker_spec.lua` — pass 2: `warn-untyped-symbol` — deferred to Phase 6
+- [x] `tests/compiler/checker_spec.lua` — pass 2: `warn-untyped-symbol` — done (2026-04-05)
 - [x] `tests/compiler/codegen_spec.lua` — all schema section emitters (31 tests)
 
 **M Milestone:** `tests/test01_minimal.sb` compiles without errors or warnings. ✅ DONE (2026-03-26)
@@ -221,8 +221,8 @@ A separate types.lua is not needed for Phase 1.
 - [x] Inline path interpolation `{varname}` within a path segment
 - [x] Collection literal: set `(set)` (empty), `[]` empty list
 - [x] Collection literal: list `['a, 'b]`
-- [ ] Collection literal: set `{'a, 'b}` — NOT done; deferred to Phase 7 (map/set disambiguation complex)
-- [ ] Collection literal: map `{k: v, ...}` — NOT done; deferred to Phase 7
+- [x] Collection literal: set `{'a, 'b}` — done (2026-04-05)
+- [x] Collection literal: map `{k: v, ...}` — done (2026-04-05)
 - [x] `match expr: arm1: val, arm2: val, _: val` (expression and statement forms)
 - [x] `cond: cond1: body, cond2: body, _: body` — done (Phase 3+)
 - [x] `if cond: body` / `if cond: body else: body`
@@ -234,7 +234,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] Function declaration `fn name args: body`
 - [x] `pre:` and `post:` blocks inside function declarations
 - [x] `tags: [name, ...]` inside function declarations (parsed/skipped)
-- [ ] `path@before` expression in `post:` blocks — NOT done; deferred to Phase 7
+- [x] `path@before` expression in `post:` blocks — done (already implemented; checkbox not updated)
 - [x] All mutation primitives: `set!`, `inc!`, `dec!`, `add!`, `remove!`, `clear!`, `push!`, `pop!`
 - [x] Relation mutations: `relate!`, `unrelate!`
 - [x] `spawn!`, `despawn!`

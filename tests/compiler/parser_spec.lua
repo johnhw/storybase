@@ -661,6 +661,36 @@ describe("parser — literal expressions", function()
   end)
 end)
 
+-- ── Collection literals ───────────────────────────────────────────────────────
+
+describe("parser — collection literals", function()
+  it("parses set literal {'a, 'b}", function()
+    local s, _ = first_stmt("{'alive, 'dead}")
+    assert.are.equal(ast.K.EXPR_STMT, s.kind)
+    assert.are.equal(ast.K.SET_LIT, s.expr.kind)
+    assert.are.equal(2, #s.expr.elements)
+    assert.are.equal(ast.K.SYMBOL_LIT, s.expr.elements[1].kind)
+    assert.are.equal("alive", s.expr.elements[1].name)
+    assert.are.equal("dead",  s.expr.elements[2].name)
+  end)
+
+  it("parses empty map literal {}", function()
+    local s, _ = first_stmt("{}")
+    assert.are.equal(ast.K.EXPR_STMT, s.kind)
+    assert.are.equal(ast.K.MAP_LIT, s.expr.kind)
+    assert.are.equal(0, #s.expr.entries)
+  end)
+
+  it("parses map literal {k: v, ...}", function()
+    local s, _ = first_stmt("{name: player/name, hp: player/hp}")
+    assert.are.equal(ast.K.EXPR_STMT, s.kind)
+    assert.are.equal(ast.K.MAP_LIT, s.expr.kind)
+    assert.are.equal(2, #s.expr.entries)
+    assert.are.equal("name", s.expr.entries[1].name)
+    assert.are.equal("hp",   s.expr.entries[2].name)
+  end)
+end)
+
 -- ── Path expressions ──────────────────────────────────────────────────────────
 
 describe("parser — path expressions", function()

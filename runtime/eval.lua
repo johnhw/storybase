@@ -375,9 +375,10 @@ eval_expr = function(node, ctx)
     end
     return t
   elseif k == K.MAP_LIT then
+    -- entries are named_arg nodes with .name (key string) and .value (expr)
     local t = {}
     for _, entry in ipairs(node.entries or {}) do
-      local key = eval_expr(entry.key, ctx)
+      local key = entry.name  -- string key from named_arg
       local val = eval_expr(entry.value, ctx)
       t[key] = val
     end

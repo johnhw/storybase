@@ -983,6 +983,46 @@ local function parse_atom(p)
     end
     p:expect("OP", "]", "expected ']' to close list literal")
     return ast.list_lit(elems, tpos)
+
+  elseif t.kind == "OP" and t.value == "{" then
+    -- Set literal: {'a, 'b, ...}    — elements are symbol literals
+    -- Map literal: {key: val, ...}  — elements are NAMED_ARG pairs
+    -- Empty map:   {}
+    p:adv()  -- consume "{"
+    if p:at("OP", "}") then
+      -- Empty: treat as empty map literal
+      p:adv()
+      return ast.map_lit({}, tpos)
+    end
+    if p:at("SYMBOL") then
+      -- Set literal
+      local elems = {}
+      while not p:at("OP", "}") and not p:at("NEWLINE") and not p:at("EOF") do
+        table.insert(elems, parse_expr(p))
+        if not p:match("OP", ",") then break end
+      end
+      p:expect("OP", "}", "expected '}' to close set literal")
+      return ast.set_lit(elems, tpos)
+    elseif p:at("NAMED_ARG") then
+      -- Map literal: key: val, ...
+      local entries = {}
+      while p:at("NAMED_ARG") do
+        local kt = p:adv()  -- consume "key:"
+        local val = parse_expr(p)
+        table.insert(entries, ast.named_arg(kt.value, val, kt.pos))
+        p:match("OP", ",")
+        p:skip_newlines()
+      end
+      p:expect("OP", "}", "expected '}' to close map literal")
+      return ast.map_lit(entries, tpos)
+    else
+      -- Unrecognised; parse as empty map
+      p:emit_err(ast.E.BAD_EXPRESSION,
+        "expected symbol ('name) or 'key:' in set/map literal", p:cur().pos)
+      while not p:at("OP", "}") and not p:at("NEWLINE") and not p:at("EOF") do p:adv() end
+      p:match("OP", "}")
+      return ast.map_lit({}, tpos)
+    end
   end
   return nil
 end

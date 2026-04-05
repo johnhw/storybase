@@ -50,6 +50,18 @@ local function when_stmt(c, b)   return { kind="when_stmt", condition=c, body=b 
 -- Expression evaluation
 -- ============================================================
 
+local function set_lit(...)
+  local elems = {}
+  for _, v in ipairs({...}) do elems[#elems+1] = sym_lit(v) end
+  return { kind="set_lit", elements=elems }
+end
+
+local function map_lit(t)
+  local entries = {}
+  for k, v in pairs(t) do entries[#entries+1] = { kind="named_arg", name=k, value=str_lit(v) } end
+  return { kind="map_lit", entries=entries }
+end
+
 describe("eval_expr: literals", function()
   it("bool_lit true", function()
     assert.is_true(eval.eval_expr(bool_lit(true), ctx()))
@@ -69,6 +81,24 @@ describe("eval_expr: literals", function()
 
   it("string_lit", function()
     assert.equal("hello", eval.eval_expr(str_lit("hello"), ctx()))
+  end)
+end)
+
+describe("eval_expr: set and map literals", function()
+  it("set_lit evaluates to a list of symbol values", function()
+    local result = eval.eval_expr(set_lit("alive", "dead"), ctx())
+    assert.are.same({"alive", "dead"}, result)
+  end)
+
+  it("empty map literal evaluates to empty table", function()
+    local result = eval.eval_expr({ kind="map_lit", entries={} }, ctx())
+    assert.are.same({}, result)
+  end)
+
+  it("map_lit evaluates to a table with string keys", function()
+    local result = eval.eval_expr(map_lit({name="Alice", role="guard"}), ctx())
+    assert.are.equal("Alice", result["name"])
+    assert.are.equal("guard", result["role"])
   end)
 end)
 
