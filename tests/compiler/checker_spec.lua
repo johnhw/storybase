@@ -231,6 +231,72 @@ describe("checker pass 2 — Int bounds", function()
 end)
 
 -- ============================================================
+-- Pass 2 — Default value type-checking
+-- ============================================================
+
+describe("checker pass 2 — default value type-checking", function()
+  it("accepts correct Bool default", function()
+    check_ok("state active: Bool = true")
+  end)
+
+  it("rejects wrong-kind default for Bool", function()
+    check_err("state active: Bool = 42", ast.E.BAD_DEFAULT)
+  end)
+
+  it("accepts Int default within bounds", function()
+    check_ok("state hp: Int(0, 100) = 50")
+  end)
+
+  it("rejects Int default above maximum", function()
+    check_err("state hp: Int(0, 10) = 50", ast.E.BAD_DEFAULT)
+  end)
+
+  it("rejects wrong-kind default for Int", function()
+    check_err("state hp: Int(0, 100) = true", ast.E.BAD_DEFAULT)
+  end)
+
+  it("accepts valid enum default", function()
+    check_ok("type S = alive | dead\nstate status: S = 'alive")
+  end)
+
+  it("rejects out-of-range enum default", function()
+    check_err("type S = alive | dead\nstate status: S = 'unknown", ast.E.BAD_DEFAULT)
+  end)
+
+  it("accepts valid inline-enum default", function()
+    check_ok("state mode: Enum(fast, slow) = 'fast")
+  end)
+
+  it("rejects out-of-range inline-enum default", function()
+    check_err("state mode: Enum(fast, slow) = 'medium", ast.E.BAD_DEFAULT)
+  end)
+
+  it("accepts empty_set default for Set", function()
+    check_ok("type T = a | b\nstate flags: Set(T, 5) = (set)")
+  end)
+
+  it("rejects non-set default for Set", function()
+    check_err("type T = a | b\nstate flags: Set(T, 5) = 'a", ast.E.BAD_DEFAULT)
+  end)
+
+  it("accepts empty_list default for List", function()
+    check_ok("type T = a | b\nstate items: List(T, 5) = []")
+  end)
+
+  it("rejects non-list default for List", function()
+    check_err("type T = a | b\nstate items: List(T, 5) = 'a", ast.E.BAD_DEFAULT)
+  end)
+
+  it("checks defaults on record type fields", function()
+    check_err("type Rec:\n  hp: Int(0, 100) = 200", ast.E.BAD_DEFAULT)
+  end)
+
+  it("checks defaults on inline-record state fields", function()
+    check_err("state world:\n  hp: Int(0, 100) = 200", ast.E.BAD_DEFAULT)
+  end)
+end)
+
+-- ============================================================
 -- Pass 2 — Record mixin (with)
 -- ============================================================
 

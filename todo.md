@@ -165,7 +165,7 @@ A separate types.lua is not needed for Phase 1.
 ### Checker — Pass 2 (Basic Type-Check) ✅ DONE (2026-03-25)
 
 - [x] Field types reference declared types (or built-in type expressions)
-- [ ] Record field defaults are type-correct — deferred to Phase 7
+- [x] Record field defaults are type-correct — done (2026-04-05)
 - [x] `Int(min, max)` bounds well-formed (`min <= max`)
 - [x] `with` mixin: all fields spliced at the `with` point
 - [x] `with` mixin: default override accepted (override after mixin allowed; no error emitted)

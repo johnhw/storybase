@@ -210,6 +210,139 @@ local function resolve_type_expr(acc, symtab, texpr)
   -- TYPE_STRING, TYPE_FLOAT: no sub-expressions to resolve
 end
 
+--- Check that a default value node is compatible with a type expression.
+--- Emits BAD_DEFAULT if the default is incompatible.
+--- `label` is a human-readable description for the error message.
+local function check_default_value(acc, symtab, default_node, texpr, label)
+  if not default_node or not texpr then return end
+  local k = ast.K
+  local tk = texpr.kind
+  local dk = default_node.kind
+
+  if tk == k.TYPE_BOOL then
+    if dk ~= k.BOOL_LIT then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": expected Bool literal for Bool type", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_INT then
+    if dk ~= k.INT_LIT then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": expected integer literal for Int type", default_node.pos)
+    else
+      local v = default_node.value
+      local lo = texpr.min
+      local hi = texpr.max
+      if lo ~= nil and v < lo then
+        err(acc, ast.E.BAD_DEFAULT,
+          label .. ": default " .. v .. " is below Int minimum " .. lo, default_node.pos)
+      end
+      if hi ~= nil and v > hi then
+        err(acc, ast.E.BAD_DEFAULT,
+          label .. ": default " .. v .. " is above Int maximum " .. hi, default_node.pos)
+      end
+    end
+
+  elseif tk == k.TYPE_FLOAT then
+    if dk ~= k.FLOAT_LIT and dk ~= k.INT_LIT then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": expected numeric literal for Float type", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_STRING then
+    if dk ~= k.STRING_LIT and dk ~= k.MULTILINE_STRING then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": expected string literal for String type", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_SYMBOL then
+    if dk ~= k.SYMBOL_LIT then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": expected symbol literal ('name) for Symbol type", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_SYMBOL_OF then
+    if dk ~= k.SYMBOL_LIT then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": expected symbol literal ('name) for SymbolOf type", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_ENUM_INLINE then
+    if dk ~= k.SYMBOL_LIT then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": expected symbol literal for Enum type", default_node.pos)
+    else
+      local valid = {}
+      for _, v in ipairs(texpr.values or {}) do valid[v] = true end
+      if not valid[default_node.name] then
+        local vals = table.concat(texpr.values or {}, ", ")
+        err(acc, ast.E.BAD_DEFAULT,
+          label .. ": '" .. default_node.name .. "' is not a member of Enum(" .. vals .. ")",
+          default_node.pos)
+      end
+    end
+
+  elseif tk == k.TYPE_OPTION then
+    -- nil default (no node) is valid; otherwise check inner type
+    -- (EMPTY_SET/LIST also acceptable as "no value" for collections inside Option)
+
+  elseif tk == k.TYPE_SET then
+    if dk ~= k.EMPTY_SET then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": Set default must be (set)", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_LIST then
+    if dk ~= k.EMPTY_LIST then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": List default must be []", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_ULIST then
+    if dk ~= k.EMPTY_LIST then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": UList default must be []", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_UMAP then
+    if dk ~= k.EMPTY_MAP then
+      err(acc, ast.E.BAD_DEFAULT,
+        label .. ": UMap default must be {}", default_node.pos)
+    end
+
+  elseif tk == k.TYPE_NAMED then
+    local decl = texpr.resolved
+    if not decl then return end  -- undefined type already reported
+    if decl.builtin then return end  -- built-in alias: skip (no user can shadow them)
+
+    local decl_k = decl.kind
+    if decl_k == k.TYPE_ENUM then
+      if dk ~= k.SYMBOL_LIT then
+        err(acc, ast.E.BAD_DEFAULT,
+          label .. ": expected symbol literal for enum type '" .. decl.name .. "'",
+          default_node.pos)
+      else
+        local valid = {}
+        for _, v in ipairs(decl.values or {}) do valid[v] = true end
+        if not valid[default_node.name] then
+          err(acc, ast.E.BAD_DEFAULT,
+            label .. ": '" .. default_node.name .. "' is not a member of " .. decl.name,
+            default_node.pos)
+        end
+      end
+    elseif decl_k == k.TYPE_ALIAS then
+      check_default_value(acc, symtab, default_node, decl.type_expr, label)
+    elseif decl_k == k.TYPE_RECORD then
+      if dk ~= k.RECORD_CONSTRUCTOR then
+        err(acc, ast.E.BAD_DEFAULT,
+          label .. ": expected record constructor " .. decl.name .. "(...) for record type",
+          default_node.pos)
+      end
+    end
+    -- TYPE_VARIANT: any constructor accepted; full check would require matching branch name
+  end
+end
+
 --- Check record fields: resolve types, check mixin references, detect conflicts.
 --- Returns a flat field-name set (the "effective" fields after mixin expansion).
 local function check_record_fields(acc, symtab, fields, record_name)
@@ -288,23 +421,43 @@ local function check_decl(acc, symtab, node)
 
   elseif node.kind == k.TYPE_RECORD then
     check_record_fields(acc, symtab, node.fields or {}, node.name)
+    -- Check field defaults
+    for _, field in ipairs(node.fields or {}) do
+      if field.kind == k.RECORD_FIELD and field.default then
+        check_default_value(acc, symtab, field.default, field.type_expr,
+          "field '" .. field.name .. "' in " .. node.name)
+      end
+    end
 
   elseif node.kind == k.TYPE_VARIANT then
     for _, branch in ipairs(node.branches or {}) do
       if branch.kind == k.VARIANT_BRANCH then
         for _, field in ipairs(branch.fields or {}) do
           resolve_type_expr(acc, symtab, field.type_expr)
+          if field.kind == k.RECORD_FIELD and field.default then
+            check_default_value(acc, symtab, field.default, field.type_expr,
+              "field '" .. field.name .. "' in variant branch '" .. (branch.name or "?") .. "'")
+          end
         end
       end
     end
 
   elseif node.kind == k.STATE_SCALAR then
     resolve_type_expr(acc, symtab, node.type_expr)
+    if node.default then
+      check_default_value(acc, symtab, node.default, node.type_expr,
+        "state '" .. (node.path and node.path.segments and
+                       table.concat(node.path.segments, "/") or "?") .. "'")
+    end
 
   elseif node.kind == k.STATE_RECORD then
     for _, field in ipairs(node.fields or {}) do
       if field.kind == k.RECORD_FIELD then
         resolve_type_expr(acc, symtab, field.type_expr)
+        if field.default then
+          check_default_value(acc, symtab, field.default, field.type_expr,
+            "inline-record field '" .. field.name .. "'")
+        end
       end
     end
 
