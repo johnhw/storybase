@@ -173,7 +173,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `with` mixin: conflicting field from two different `with` sources → error
 - [x] Entity family `max: N` stored and used for state-space computation
 - [x] `SymbolOf(Family)` — family name resolves to a declared entity family — done (2026-04-05)
-- [ ] `warn-untyped-symbol` for bare `Symbol` in any discrete position — deferred to Phase 7
+- [x] `warn-untyped-symbol` for bare `Symbol` in any discrete position — done (2026-04-05)
 
 ### Codegen (`compiler/codegen.lua`) ✅ DONE (2026-03-26)
 

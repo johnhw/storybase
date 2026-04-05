@@ -39,6 +39,16 @@ local function symtab(src)
   return typed.symtab
 end
 
+local function check_warn(src, expected_code)
+  local _, diags = compile(src)
+  for _, d in ipairs(diags) do
+    if d.level == "warning" and d.code == expected_code then return d end
+  end
+  local found = {}
+  for _, d in ipairs(diags) do found[#found+1] = d.level .. ":" .. d.code end
+  error("expected warning " .. expected_code .. " but got: " .. table.concat(found, ", "))
+end
+
 -- ============================================================
 -- Pass 1 — Schema collection
 -- ============================================================
@@ -393,6 +403,32 @@ describe("checker pass 2 — variant branch fields", function()
 end)
 
 -- ============================================================
+-- Pass 2 — warn-untyped-symbol
+-- ============================================================
+
+describe("checker pass 2 — warn-untyped-symbol", function()
+  it("emits WARN_UNTYPED_SYMBOL for bare Symbol in state scalar", function()
+    local d = check_warn("state tag: Symbol", ast.E.UNTYPED_SYMBOL)
+    assert.is_not_nil(d)
+  end)
+
+  it("emits WARN_UNTYPED_SYMBOL for Symbol in record field", function()
+    local d = check_warn("type Rec:\n  tag: Symbol", ast.E.UNTYPED_SYMBOL)
+    assert.is_not_nil(d)
+  end)
+
+  it("does not warn for SymbolOf(family)", function()
+    local _, diags = compile(
+      "type Npc:\n  hp: Int(0,100)\nstate npcs/{npc}: Npc  max: 5\nstate target: SymbolOf(npcs)")
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.UNTYPED_SYMBOL then
+        error("unexpected WARN_UNTYPED_SYMBOL")
+      end
+    end
+  end)
+end)
+
+-- ============================================================
 -- Integration
 -- ============================================================
 
@@ -515,19 +551,6 @@ fn take-damage amount:
 end)
 
 -- ── Pass 4: perceives enforcement ─────────────────────────────────────────────
-
-local function check_warn(src, expected_code)
-  local _, diags = compile(src)
-  for _, d in ipairs(diags) do
-    if d.level == "warning" and d.code == expected_code then return d end
-  end
-  error("expected warning " .. expected_code .. " but got: "
-    .. table.concat((function()
-        local t = {}
-        for _, d in ipairs(diags) do t[#t+1] = d.level .. ":" .. d.code end
-        return t
-      end)(), ", "))
-end
 
 describe("checker: perceives enforcement (pass 4)", function()
   local ACTOR_SRC = [[

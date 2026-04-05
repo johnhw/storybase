@@ -215,9 +215,15 @@ local function resolve_type_expr(acc, symtab, texpr)
         "SymbolOf references undeclared entity family '" .. fname .. "'",
         texpr.pos)
     end
+
+  elseif kind == k.TYPE_SYMBOL then
+    -- Warn: bare Symbol has no declared membership; prefer SymbolOf(Family) or a named enum.
+    table.insert(acc.diags, ast.warning(
+      ast.E.UNTYPED_SYMBOL,
+      "bare Symbol type has no declared membership — prefer SymbolOf(Family) or a named enum type",
+      texpr.pos))
   end
-  -- TYPE_BOOL, TYPE_ENUM_INLINE, TYPE_SYMBOL,
-  -- TYPE_STRING, TYPE_FLOAT: no sub-expressions to resolve
+  -- TYPE_BOOL, TYPE_ENUM_INLINE, TYPE_STRING, TYPE_FLOAT: no sub-expressions to resolve
 end
 
 --- Check that a default value node is compatible with a type expression.
