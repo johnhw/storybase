@@ -343,10 +343,42 @@ local function check_default_value(acc, symtab, default_node, texpr, label)
   end
 end
 
+--- Compare two type expression nodes for structural equality.
+--- Returns true iff they describe the same type.
+local function types_equal(a, b)
+  if not a or not b then return a == b end
+  if a.kind ~= b.kind then return false end
+  local k = ast.K
+  if a.kind == k.TYPE_INT then
+    return a.min == b.min and a.max == b.max
+  elseif a.kind == k.TYPE_NAMED then
+    return a.name == b.name
+  elseif a.kind == k.TYPE_ENUM_INLINE then
+    if #a.values ~= #b.values then return false end
+    for i, v in ipairs(a.values) do
+      if v ~= b.values[i] then return false end
+    end
+    return true
+  elseif a.kind == k.TYPE_OPTION or a.kind == k.TYPE_SET or a.kind == k.TYPE_LIST
+      or a.kind == k.TYPE_ULIST then
+    if a.kind == k.TYPE_SET or a.kind == k.TYPE_LIST then
+      if a.max ~= b.max then return false end
+    end
+    return types_equal(a.inner, b.inner)
+  elseif a.kind == k.TYPE_UMAP then
+    return types_equal(a.key, b.key) and types_equal(a.val, b.val)
+  elseif a.kind == k.TYPE_SYMBOL_OF then
+    return a.family == b.family
+  else
+    -- TYPE_BOOL, TYPE_STRING, TYPE_FLOAT, TYPE_SYMBOL: equal iff same kind (already checked)
+    return true
+  end
+end
+
 --- Check record fields: resolve types, check mixin references, detect conflicts.
 --- Returns a flat field-name set (the "effective" fields after mixin expansion).
 local function check_record_fields(acc, symtab, fields, record_name)
-  local seen = {}       -- fieldname → source (record_name or mixin name)
+  local seen      = {}   -- fieldname → {src=name, texpr=type_expr_node}
   local mixin_sources = {} -- track which mixin contributes which fields
 
   for _, item in ipairs(fields) do
@@ -356,17 +388,23 @@ local function check_record_fields(acc, symtab, fields, record_name)
       resolve_type_expr(acc, symtab, item.type_expr)
       local fname = item.name
       if seen[fname] then
-        -- Override from within the same record body is allowed (e.g. after with)
-        -- only if the previous contributor was a mixin (not the record itself).
-        local prev_src = seen[fname]
-        if prev_src == record_name then
+        local prev = seen[fname]
+        if prev.src == record_name then
           err(acc, ast.E.DUPLICATE_NAME,
             "field '" .. fname .. "' declared twice in '" .. record_name .. "'",
             item.pos)
+        else
+          -- Override of a mixin field: allowed only if the type is identical.
+          if not types_equal(item.type_expr, prev.texpr) then
+            err(acc, ast.E.TYPE_MISMATCH,
+              "field '" .. fname .. "' in '" .. record_name ..
+              "' overrides mixin field with a different type",
+              item.pos)
+          end
+          -- Default override (same type): silently accepted.
         end
-        -- Override after mixin: allowed (default override). No error.
       else
-        seen[fname] = record_name
+        seen[fname] = { src = record_name, texpr = item.type_expr }
       end
 
     elseif item.kind == k.WITH_MIXIN then
@@ -386,15 +424,15 @@ local function check_record_fields(acc, symtab, fields, record_name)
             local fname = mf.name
             if seen[fname] then
               local prev = seen[fname]
-              if prev ~= record_name and prev ~= mixin_name then
+              if prev.src ~= record_name and prev.src ~= mixin_name then
                 -- Two different mixins contribute the same field
                 err(acc, ast.E.CONFLICTING_WITH,
                   "field '" .. fname .. "' appears in both '" ..
-                  prev .. "' and '" .. mixin_name .. "'",
+                  prev.src .. "' and '" .. mixin_name .. "'",
                   item.pos)
               end
             else
-              seen[fname] = mixin_name
+              seen[fname] = { src = mixin_name, texpr = mf.type_expr }
               mixin_sources[fname] = mixin_name
             end
           end

@@ -169,7 +169,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `Int(min, max)` bounds well-formed (`min <= max`)
 - [x] `with` mixin: all fields spliced at the `with` point
 - [x] `with` mixin: default override accepted (override after mixin allowed; no error emitted)
-- [ ] `with` mixin: type override rejected — deferred to Phase 7
+- [x] `with` mixin: type override rejected — done (2026-04-05)
 - [x] `with` mixin: conflicting field from two different `with` sources → error
 - [x] Entity family `max: N` stored and used for state-space computation
 - [ ] `SymbolOf(Family)` — family name resolves to a declared entity family — deferred to Phase 7

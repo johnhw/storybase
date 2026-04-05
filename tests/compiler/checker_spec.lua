@@ -339,6 +339,26 @@ type Child:
 ]])
   end)
 
+  it("emits TYPE_MISMATCH when mixin field is overridden with different type", function()
+    check_err([[
+type Base:
+  hp: Int(0, 100)
+type Child:
+  with Base
+  hp: Bool
+]], ast.E.TYPE_MISMATCH)
+  end)
+
+  it("emits TYPE_MISMATCH when mixin field override has different Int bounds", function()
+    check_err([[
+type Base:
+  hp: Int(0, 100)
+type Child:
+  with Base
+  hp: Int(0, 200)
+]], ast.E.TYPE_MISMATCH)
+  end)
+
   it("attaches resolved mixin declaration to with_mixin node", function()
     local typed = compile("type Base:\n  hp: Int(0,100)\ntype Child:\n  with Base")
     local child = typed.decls[2]
