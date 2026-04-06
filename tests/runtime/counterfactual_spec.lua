@@ -7,6 +7,7 @@ local compiler_mod = require("compiler.compiler")
 local state_mod    = require("runtime.state")
 local log_mod      = require("runtime.log")
 local eval_mod     = require("runtime.eval")
+local actors_mod   = require("runtime.actors")
 
 -- ============================================================
 -- Helpers
@@ -278,5 +279,282 @@ scene main:
     -- The important assertion is live mana is unchanged.
     eval_mod.call_fn("can-afford-drain", {}, ctx)
     assert.equals(15, ctx.state._cache["world/mana"])
+  end)
+end)
+
+-- ============================================================
+-- Nesting depth limit
+-- ============================================================
+
+describe("counterfactual nesting depth", function()
+  -- The depth limit is tested directly by pre-setting counterfactual_depth on ctx,
+  -- because transitions inside a counterfactual are evaluated inside pcall and
+  -- errors would be silently swallowed.
+
+  it("raises an error when depth exceeds max-counterfactual-depth", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+  max-counterfactual-depth: 1
+
+state world:
+  hp: Int(0,100) = 50
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+    ctx.game = gt
+    -- Simulate being already at depth 1 (inside an outer counterfactual)
+    ctx.counterfactual_depth = 1
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = nil,
+      transitions = {},
+      simulate    = false,
+    }
+    -- Trying to create depth 2 (1+1 > limit 1) must error
+    local ok, err = pcall(eval_mod.eval_expr, node, ctx)
+    assert.is_false(ok, "expected error from depth limit")
+    assert.is_truthy(tostring(err):find("max%-counterfactual%-depth"), tostring(err))
+  end)
+
+  it("allows nesting exactly at the configured limit", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+  max-counterfactual-depth: 2
+
+state world:
+  hp: Int(0,100) = 50
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+    ctx.game = gt
+    -- At depth 1, limit is 2 → depth 2 (1+1) is allowed
+    ctx.counterfactual_depth = 1
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = nil,
+      transitions = {},
+      simulate    = false,
+    }
+    local ok, gs = pcall(eval_mod.eval_expr, node, ctx)
+    assert.is_true(ok, tostring(gs))
+    assert.is_table(gs)
+    assert.equals(50, gs:get("world/hp"))
+  end)
+end)
+
+-- ============================================================
+-- Counterfactual log entry
+-- ============================================================
+
+describe("counterfactual log entry", function()
+  it("appends a counterfactual entry to the live log", function()
+    local src = [[
+module cft
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0,9999) = 100
+
+fn spend:
+  dec! world/gold 30
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+    -- Trigger a counterfactual with one transition (spend)
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = nil,
+      transitions = {
+        { kind = "fn_call", name = "spend", args = {} },
+      },
+      simulate    = false,
+    }
+    eval_mod.eval_expr(node, ctx)
+    -- The live log should have exactly one entry with kind="counterfactual"
+    local found = false
+    for _, entry in ipairs(ctx.state._log._entries) do
+      if entry.kind == "counterfactual" then
+        found = true
+        assert.is_true(type(entry.transitions) == "table")
+        assert.equals("spend", entry.transitions[1])
+        assert.is_false(entry.simulate)
+      end
+    end
+    assert.is_true(found, "expected counterfactual log entry")
+  end)
+
+  it("log entry records simulate=true when simulate flag set", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0,9999) = 100
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+    ctx.game = gt
+    -- simulate requires ctx.actors to be truthy
+    ctx.actors = actors_mod.new(ctx.state, ctx.state._log)
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = nil,
+      transitions = {},
+      simulate    = true,
+    }
+    eval_mod.eval_expr(node, ctx)
+    local found = false
+    for _, entry in ipairs(ctx.state._log._entries) do
+      if entry.kind == "counterfactual" then
+        found = true
+        assert.is_true(entry.simulate)
+      end
+    end
+    assert.is_true(found, "expected counterfactual log entry with simulate=true")
+  end)
+end)
+
+-- ============================================================
+-- simulate: true includes actor steps
+-- ============================================================
+
+describe("counterfactual simulate: true", function()
+  it("actor behavior runs on branched state, live state unchanged", function()
+    local src = [[
+module cft
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  enemy_hp: Int(0,100) = 50
+
+actor enemy:
+  state: world/enemy_hp
+  behavior: enemy-tick
+  priority: 1
+
+fn enemy-tick:
+  inc! world/enemy_hp 5
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+    ctx.game = gt
+    ctx.actors = actors_mod.new(ctx.state, ctx.state._log)
+    for _, a in pairs(gt.actors or {}) do ctx.actors:register(a) end
+
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = nil,
+      transitions = {},
+      simulate    = true,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    -- Enemy behavior inc! world/enemy_hp 5 should have run on branch
+    assert.equals(55, gs:get("world/enemy_hp"))
+    -- Live state unchanged
+    assert.equals(50, ctx.state._cache["world/enemy_hp"])
+  end)
+
+  it("without actors, simulate: true still returns valid GameState", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0,9999) = 100
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+    -- ctx.actors is nil → simulate block is skipped
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = nil,
+      transitions = {},
+      simulate    = true,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    assert.is_table(gs)
+    assert.equals(100, gs:get("world/gold"))
+  end)
+end)
+
+-- ============================================================
+-- find ... in-state: gs
+-- ============================================================
+
+describe("find ... in-state: gs", function()
+  it("find query redirected to snapshot returns entities from that snapshot", function()
+    -- Use single-value entity family (the multi-field record form has a known
+    -- codegen limitation with template path segments and table.concat).
+    local src = [[
+module cft
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state npcs/{npc}: Int(0,100) max: 8
+
+fn spawn-npc name:
+  spawn! npcs name
+
+fn count-npcs-in-snap:
+  pure
+  let snap = counterfactual do:
+    spawn-npc "hero"
+  find npcs in-state: snap
+
+scene main:
+  * Go
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+    ctx.game = gt
+    local result = eval_mod.call_fn("count-npcs-in-snap", {}, ctx)
+    -- The snapshot should contain "hero"; live state should not
+    assert.is_table(result)
+    local found_hero = false
+    for _, k in ipairs(result) do
+      if k == "hero" then found_hero = true end
+    end
+    assert.is_true(found_hero, "expected 'hero' in snapshot find results")
+    -- Live state still has no npc "hero"
+    assert.is_nil(ctx.state._cache["npcs/hero"])
   end)
 end)

@@ -120,6 +120,7 @@ local function child_ctx(parent, fn_name)
     scheduler = parent.scheduler,  -- propagate scheduler for cancel-schedule!
     game      = parent.game,       -- propagate compiled game table
     scene_stack = parent.scene_stack,
+    counterfactual_depth = parent.counterfactual_depth,  -- propagate nesting depth
   }
   -- Copy parent vars into child (shadowing allowed)
   for k, v in pairs(parent.vars) do
@@ -236,6 +237,17 @@ eval_expr = function(node, ctx)
     return ctx.state:get(path)
 
   elseif k == K.COUNTERFACTUAL_EXPR then
+    -- Enforce max-counterfactual-depth nesting limit
+    local cf_depth = (ctx.counterfactual_depth or 0) + 1
+    local max_depth = ctx.game and ctx.game.schema
+      and ctx.game.schema.engine_config
+      and ctx.game.schema.engine_config["max-counterfactual-depth"]
+      or 10
+    if cf_depth > max_depth then
+      error("max-counterfactual-depth exceeded: nesting depth " .. cf_depth
+            .. " exceeds limit of " .. max_depth)
+    end
+
     -- Create a branched GameState by deep-copying current cache and applying transitions
     local log_mod   = require("runtime.log")
     local state_mod = require("runtime.state")
@@ -256,8 +268,9 @@ eval_expr = function(node, ctx)
     end
     -- Apply transition function calls to the copy
     local cf_ctx = M.new_ctx(cf_state, ctx.fns, "counterfactual")
-    cf_ctx.actors    = ctx.actors
-    cf_ctx.scheduler = ctx.scheduler
+    cf_ctx.actors              = ctx.actors
+    cf_ctx.scheduler           = ctx.scheduler
+    cf_ctx.counterfactual_depth = cf_depth  -- propagate nesting depth
     for _, trans_expr in ipairs(node.transitions or {}) do
       pcall(eval_expr, trans_expr, cf_ctx)
     end
@@ -283,6 +296,21 @@ eval_expr = function(node, ctx)
       sim_actors:apply_deferred()
       sim_sched:tick(ctx.fns)
       sim_actors:clear_inboxes()
+    end
+    -- Append counterfactual trace entry to live log (debug/audit trail)
+    if ctx.state and ctx.state._log then
+      local trans_names = {}
+      for _, t in ipairs(node.transitions or {}) do
+        if t.kind == "fn_call" and t.name then
+          trans_names[#trans_names+1] = t.name
+        end
+      end
+      ctx.state._log:append({
+        kind        = "counterfactual",
+        transitions = trans_names,
+        simulate    = node.simulate or false,
+        fn          = ctx.fn_name or "?",
+      })
     end
     -- Return an immutable GameState object (read-only wrapper)
     return {
@@ -407,7 +435,34 @@ eval_expr = function(node, ctx)
   -- find query expression
   elseif k == K.FIND_EXPR then
     local query_mod = require("runtime.query")
-    return query_mod.find(ctx, node.family, node.clauses)
+    -- Check for in-state: clause — redirect find to a GameState's cache
+    local find_ctx = ctx
+    for _, clause in ipairs(node.clauses or {}) do
+      if clause.kind == "in_state" then
+        local gs = eval_expr(clause.state_expr, ctx)
+        if gs and type(gs) == "table" and gs._cache then
+          local log_mod2   = require("runtime.log")
+          local state_mod2 = require("runtime.state")
+          local flog   = log_mod2.new()
+          local fstate = state_mod2.new(ctx.state and ctx.state._schema or {}, flog)
+          fstate._cache = gs._cache
+          fstate._time  = gs._time or {}
+          find_ctx = {
+            state     = fstate,
+            fns       = ctx.fns,
+            vars      = ctx.vars or {},
+            fn_name   = "find-in-state",
+            signal    = nil,
+            retval    = nil,
+            game      = ctx.game,
+            actors    = ctx.actors,
+            scheduler = ctx.scheduler,
+          }
+        end
+        break
+      end
+    end
+    return query_mod.find(find_ctx, node.family, node.clauses)
 
   -- Record constructor: TypeName(field: val, ...)
   elseif k == K.RECORD_CONSTRUCTOR then
@@ -595,6 +650,71 @@ local BUILTINS = {
   ["tostring"] = function(args, ctx)
     return tostring(eval_expr(args[1], ctx))
   end,
+  -- ── Relation query builtins ──────────────────────────────────────────────────
+  -- Relation name is the first arg, passed as a bare IDENT (0-arg fn_call returns its name).
+  -- e.g. `adjacent? exits 'village` → rel_name="exits", source="village"
+
+  ["adjacent?"] = function(args, ctx)
+    local query_mod = require("runtime.query")
+    local rel_name  = eval_expr(args[1], ctx)   -- bare ident → string
+    local source    = eval_expr(args[2], ctx)
+    if type(rel_name) ~= "string" or not ctx.game then return {} end
+    local rel = ctx.game.relations and ctx.game.relations[rel_name]
+    return query_mod.adjacent(rel, source)
+  end,
+
+  ["reachable?"] = function(args, ctx)
+    local query_mod = require("runtime.query")
+    local rel_name  = eval_expr(args[1], ctx)
+    local source    = eval_expr(args[2], ctx)
+    local target    = eval_expr(args[3], ctx)
+    local max_hops  = nil
+    for i = 4, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "max-hops" then
+        local v = eval_expr(a.value, ctx); if type(v) == "number" then max_hops = v end
+      end
+    end
+    if type(rel_name) ~= "string" or not ctx.game then return false end
+    local rel = ctx.game.relations and ctx.game.relations[rel_name]
+    return query_mod.reachable(rel, source, target, max_hops)
+  end,
+
+  ["shortest-path"] = function(args, ctx)
+    local query_mod = require("runtime.query")
+    local rel_name  = eval_expr(args[1], ctx)
+    local source    = eval_expr(args[2], ctx)
+    local target    = eval_expr(args[3], ctx)
+    if type(rel_name) ~= "string" or not ctx.game then return nil end
+    local rel = ctx.game.relations and ctx.game.relations[rel_name]
+    return query_mod.shortest_path(rel, source, target)
+  end,
+
+  ["reachable-set"] = function(args, ctx)
+    local query_mod = require("runtime.query")
+    local rel_name  = eval_expr(args[1], ctx)
+    local source    = eval_expr(args[2], ctx)
+    local max_hops  = nil
+    for i = 3, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "max-hops" then
+        local v = eval_expr(a.value, ctx); if type(v) == "number" then max_hops = v end
+      end
+    end
+    if type(rel_name) ~= "string" or not ctx.game then return {} end
+    local rel = ctx.game.relations and ctx.game.relations[rel_name]
+    return query_mod.reachable_set(rel, source, max_hops)
+  end,
+
+  ["inverse-adjacent?"] = function(args, ctx)
+    local query_mod = require("runtime.query")
+    local rel_name  = eval_expr(args[1], ctx)
+    local source    = eval_expr(args[2], ctx)
+    if type(rel_name) ~= "string" or not ctx.game then return {} end
+    local rel = ctx.game.relations and ctx.game.relations[rel_name]
+    return query_mod.inverse_adjacent(rel, source)
+  end,
+
   ["path-exists?"] = function(args, ctx)
     local arg = args[1]
     local path
@@ -616,8 +736,9 @@ local BUILTINS = {
     local cond_expr = args[1]
     local depth     = 20
     local budget    = nil
+    local strategy  = "bfs"
 
-    -- Check for depth: and budget: named args
+    -- Check for depth:, budget:, strategy: named args
     for i = 2, #args do
       local a = args[i]
       if a and a.kind == K.NAMED_ARG then
@@ -627,6 +748,9 @@ local BUILTINS = {
         elseif a.name == "budget" then
           local b = eval_expr(a.value, ctx)
           if type(b) == "number" then budget = b end
+        elseif a.name == "strategy" then
+          local s = eval_expr(a.value, ctx)
+          if type(s) == "string" then strategy = s end
         end
       end
     end
@@ -670,7 +794,7 @@ local BUILTINS = {
       return ok and result
     end
 
-    return search_mod.can_reach(ctx.game, cache, stack, condition_fn, depth, budget)
+    return search_mod.can_reach(ctx.game, cache, stack, condition_fn, depth, budget, strategy)
   end,
 
   ["find-path"] = function(args, ctx)
@@ -683,6 +807,7 @@ local BUILTINS = {
     local cond_expr = args[1]
     local depth     = 20
     local budget    = nil
+    local strategy  = "bfs"
 
     for i = 2, #args do
       local a = args[i]
@@ -693,6 +818,9 @@ local BUILTINS = {
         elseif a.name == "budget" then
           local b = eval_expr(a.value, ctx)
           if type(b) == "number" then budget = b end
+        elseif a.name == "strategy" then
+          local s = eval_expr(a.value, ctx)
+          if type(s) == "string" then strategy = s end
         end
       end
     end
@@ -734,7 +862,7 @@ local BUILTINS = {
     end
 
     -- find_path returns a list of {scene, label, index} steps or nil
-    local path = search_mod.find_path(ctx.game, cache, stack, condition_fn, depth, budget)
+    local path = search_mod.find_path(ctx.game, cache, stack, condition_fn, depth, budget, strategy)
     if not path then return nil end
     -- Convert to a list of label strings for easy consumption
     local labels = {}

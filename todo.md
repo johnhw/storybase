@@ -10,7 +10,7 @@ Milestone goals are marked **M**.
 
 **CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 1020 tests passing.
+**Phase 7/8 in progress** — 1027 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -631,12 +631,12 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] Replay log to tick T then apply transition sequence to a private cache copy (2026-04-03)
 - [x] `GameState` value is immutable (no side effects on live state) (2026-04-03)
 - [x] `(in-state gs) path` — redirect a path read to the GameState copy (2026-04-03)
-- [ ] `(in-state gs)` redirect works in all pure query operations (`find`, `can-reach?`, etc.)
-- [ ] `find ... in-state: gs` clause
-- [ ] `simulate: true` — include actor steps and scheduled events in the branch
-- [ ] Nesting depth limit: enforce `max-counterfactual-depth` from engine-config
+- [x] `(in-state gs)` redirect works in all pure query operations (`find`, `can-reach?`, etc.) (2026-04-06)
+- [x] `find ... in-state: gs` clause — parser + eval; redirects find to snapshot cache (2026-04-06)
+- [x] `simulate: true` — include actor steps and scheduled events in the branch (2026-04-06)
+- [x] Nesting depth limit: enforce `max-counterfactual-depth` from engine-config (2026-04-06)
 - [ ] GameState garbage-collected when it leaves scope
-- [ ] Log: append `counterfactual(from: T, transitions: [...])` entry (visible in debug)
+- [x] Log: append `counterfactual(from: T, transitions: [...])` entry (visible in debug) (2026-04-06)
 
 ### Bounded Computations
 
@@ -680,8 +680,10 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `tests/runtime/counterfactual_spec.lua` — branched state differs from live state (2026-04-03)
 - [x] `tests/runtime/counterfactual_spec.lua` — `(in-state)` path redirect (2026-04-03)
 - [x] `tests/runtime/counterfactual_spec.lua` — mutations in branch do not affect live state (2026-04-03)
-- [ ] `tests/runtime/counterfactual_spec.lua` — `simulate: true` includes actor steps
-- [ ] `tests/runtime/counterfactual_spec.lua` — nesting depth limit enforced
+- [x] `tests/runtime/counterfactual_spec.lua` — `simulate: true` includes actor steps (2026-04-06)
+- [x] `tests/runtime/counterfactual_spec.lua` — nesting depth limit enforced (2026-04-06)
+- [x] `tests/runtime/counterfactual_spec.lua` — log entry appended (2026-04-06)
+- [x] `tests/runtime/counterfactual_spec.lua` — `find ... in-state: gs` redirects to snapshot (2026-04-06)
 - [ ] `tests/fuzz/counterfactual_fuzz_spec.lua` — isolation holds under random transitions
 - [x] `tests/runtime/migrate_spec.lua` — rename (2026-04-03)
 - [x] `tests/runtime/migrate_spec.lua` — add and drop (2026-04-03)

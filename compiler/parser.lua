@@ -890,6 +890,9 @@ local function parse_atom(p)
           local lim_tok = parse_expr(p)
           local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or 10
           clauses[#clauses+1] = { kind = "limit", value = lim_val }
+        elseif na.value == "in-state" then
+          local state_expr = parse_expr(p)
+          clauses[#clauses+1] = { kind = "in_state", state_expr = state_expr }
         end
         -- unknown NAMED_ARG: skip
       end
@@ -928,6 +931,9 @@ local function parse_atom(p)
               local lim_tok = parse_expr(p)
               local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or 10
               clauses[#clauses+1] = { kind = "limit", value = lim_val }
+            elseif na.value == "in-state" then
+              local state_expr = parse_expr(p)
+              clauses[#clauses+1] = { kind = "in_state", state_expr = state_expr }
             end
             p:skip_to_eol()
           elseif p:at("IDENT", "count") then
@@ -1636,7 +1642,8 @@ local MUTATION_TABLE = {
   end,
   ["spawn!"]   = function(p, pos)
     local fam = p:at("IDENT") and p:adv().value or "?"
-    local key = parse_expr(p); local rec = parse_expr(p)
+    local key = parse_expr(p)
+    local rec = (not p:at("NEWLINE") and not p:at("EOF")) and parse_expr(p) or nil
     p:skip_to_eol(); return ast.spawn_mut(fam, key, rec, pos)
   end,
   ["despawn!"] = function(p, pos)
