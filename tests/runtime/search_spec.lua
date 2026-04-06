@@ -565,3 +565,200 @@ describe("search — time budget", function()
     assert.is_nil(result)
   end)
 end)
+
+-- ============================================================
+-- DFS strategy tests
+-- ============================================================
+
+describe("search DFS strategy", function()
+
+  local src_dfs = [[
+module dfs-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+  * Stop
+    -> end-scene
+
+scene end-scene:
+  Finished.
+]]
+
+  it("can_reach with strategy dfs finds reachable state", function()
+    local gt, errs = compiler_mod.compile(src_dfs, "dfs-test.sb")
+    assert.equal(0, #(errs or {}))
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 20 end,
+      5, nil, "dfs"
+    )
+    assert.is_true(reached)
+  end)
+
+  it("can_reach with strategy dfs returns false when not reachable", function()
+    local gt, errs = compiler_mod.compile(src_dfs, "dfs-test.sb")
+    assert.equal(0, #(errs or {}))
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 999 end,
+      3, nil, "dfs"
+    )
+    assert.is_false(reached)
+  end)
+
+  it("find_path with strategy dfs finds a valid path", function()
+    local gt, errs = compiler_mod.compile(src_dfs, "dfs-test.sb")
+    assert.equal(0, #(errs or {}))
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    local path = search_mod.find_path(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 10 end,
+      5, nil, "dfs"
+    )
+    assert.is_not_nil(path)
+    assert.is_true(#path >= 1)
+    -- First step should be Earn (increments gold by 10)
+    assert.equal("Earn", path[1].label)
+  end)
+
+  it("find_path with strategy dfs returns nil when unreachable", function()
+    local gt, errs = compiler_mod.compile(src_dfs, "dfs-test.sb")
+    assert.equal(0, #(errs or {}))
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    local path = search_mod.find_path(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 999 end,
+      2, nil, "dfs"
+    )
+    assert.is_nil(path)
+  end)
+end)
+
+-- ============================================================
+-- Bounded computation branching in BFS
+-- ============================================================
+
+describe("search — bounded computation branching", function()
+  it("can_reach finds goal reachable only via a specific bounded outcome", function()
+    -- The scene has one choice: roll-die.  The game increments gold by the
+    -- bounded result.  The goal (gold >= 5) is only reachable if the die
+    -- can roll >= 5.  Without branching, a fixed handler returning 1 would
+    -- miss this; with branching the BFS tries all values 1–6.
+    local src = [[
+module bounded-search
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0,100) = 0
+
+bounded roll-die:
+  returns: Int(1,6)
+  distribution: uniform
+  reads: []
+
+fn do-roll:
+  let result = roll-die 0
+  set! world/gold result
+
+scene main:
+  * Roll
+    do-roll
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    -- No handler registered — BFS should inject outcomes 1–6 automatically
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    -- Goal: gold >= 5 — reachable if the die ever rolls 5 or 6
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 5 end,
+      3
+    )
+    assert.is_true(reached, "expected BFS to find gold >= 5 via bounded branching")
+  end)
+
+  it("can_reach reports false when goal is impossible under all bounded outcomes", function()
+    local src = [[
+module bounded-search2
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0,100) = 0
+
+bounded roll-die:
+  returns: Int(1,3)
+  distribution: uniform
+  reads: []
+
+fn do-roll:
+  let result = roll-die 0
+  set! world/gold result
+
+scene main:
+  * Roll
+    do-roll
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    -- Goal: gold >= 5 — impossible since die only rolls 1–3
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 5 end,
+      3
+    )
+    assert.is_false(reached, "expected BFS to report unreachable when all outcomes < 5")
+  end)
+end)

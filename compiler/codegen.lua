@@ -619,7 +619,7 @@ local function emit_bounded(decls)
     if node.kind == ast.K.BOUNDED_DECL then
       bounded[node.name] = {
         name         = node.name,
-        returns      = node.returns_type,
+        returns      = emit_type_desc(node.returns_type),
         distribution = node.distribution,
         reads        = node.reads or {},
         lua          = node.lua_name,

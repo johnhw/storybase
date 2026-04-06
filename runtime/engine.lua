@@ -201,7 +201,7 @@ function M.new(game_table, opts)
   ---@param fn_name string  name to record in log entries
   ---@return table
   function eng:make_ctx(fn_name)
-    local ctx       = eval.new_ctx(self._state, self._fns, fn_name)
+    local ctx       = eval.new_ctx(self._state, self._fns, fn_name, self._game)
     ctx.actors      = self._actors
     ctx.scheduler   = self._scheduler
     return ctx

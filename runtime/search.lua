@@ -54,6 +54,68 @@ local function hash_state(cache, stack)
   return table.concat(parts, ";")
 end
 
+-- ============================================================
+-- Bounded computation branching helpers
+-- ============================================================
+
+--- Return the list of discrete values for a bounded declaration's return type.
+--- Returns nil if the range is not enumerable or is too large (> 200 values).
+local MAX_BOUNDED_OUTCOMES = 200
+
+local function bounded_return_values(decl)
+  local r = decl and decl.returns
+  if not r or type(r) ~= "table" then return nil end
+  if r.tag == "int" then
+    local lo = r.min or 0
+    local hi = r.max or 1
+    if type(lo) ~= "number" or type(hi) ~= "number" then return nil end
+    if hi - lo + 1 > MAX_BOUNDED_OUTCOMES then return nil end
+    local vals = {}
+    for v = lo, hi do vals[#vals + 1] = v end
+    return vals
+  end
+  return nil
+end
+
+--- Build a list of {name → value} handler maps to inject during BFS expansion.
+--- One map per combination of outcomes for all bounded decls.
+--- If there are no enumerable bounded decls, returns {{}}.
+local function bounded_outcome_combos(bounded_decls)
+  if not bounded_decls or not next(bounded_decls) then return {{}} end
+
+  local names = {}
+  local val_lists = {}
+  for name, decl in pairs(bounded_decls) do
+    local vals = bounded_return_values(decl)
+    if vals and #vals > 0 then
+      names[#names + 1] = name
+      val_lists[name]   = vals
+    end
+  end
+  if #names == 0 then return {{}} end
+
+  -- Sort names for deterministic order
+  table.sort(names)
+
+  -- Cartesian product (capped at MAX_BOUNDED_OUTCOMES total)
+  local combos = {{}}
+  for _, name in ipairs(names) do
+    local new_combos = {}
+    for _, combo in ipairs(combos) do
+      for _, val in ipairs(val_lists[name]) do
+        local c = {}
+        for k, v in pairs(combo) do c[k] = v end
+        c[name] = val
+        new_combos[#new_combos + 1] = c
+        if #new_combos >= MAX_BOUNDED_OUTCOMES then break end
+      end
+      if #new_combos >= MAX_BOUNDED_OUTCOMES then break end
+    end
+    combos = new_combos
+  end
+  return combos
+end
+
 local function restore_engine(eng, cache, stack)
   for k in pairs(eng._state._cache) do eng._state._cache[k] = nil end
   for k, v in pairs(cache) do
@@ -73,17 +135,20 @@ end
 -- BFS can_reach
 -- ============================================================
 
---- BFS over (cache, stack) states, returning true if condition_fn is
+--- Search over (cache, stack) states, returning true if condition_fn is
 --- satisfied by any reachable state within depth steps.
+--- Supports BFS (breadth-first) or DFS (depth-first) strategies.
 ---@param game_table    table     Compiled game table
 ---@param initial_cache table     Initial state cache snapshot
 ---@param initial_stack table     Initial scene stack (list of scene names)
 ---@param condition_fn  function  Predicate: condition_fn(cache) → bool
----@param depth         integer?  Max BFS depth (default 20)
+---@param depth         integer?  Max search depth (default 20)
 ---@param budget        number?   Max wall-clock seconds (nil = no limit)
+---@param strategy      string?   "bfs" (default) or "dfs"
 ---@return boolean, boolean  reached, timed_out
-function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, depth, budget)
-  depth = depth or DEFAULT_DEPTH
+function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, depth, budget, strategy)
+  depth    = depth    or DEFAULT_DEPTH
+  strategy = strategy or "bfs"
 
   local engine_mod = require("runtime.engine")
   local seen       = {}
@@ -95,10 +160,19 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, dep
   if condition_fn(initial_cache) then return true, false end
 
   local queue = { { cache = clone_flat(initial_cache), stack = initial_stack, d = 0 } }
-  local head  = 1
+  local head  = 1  -- used only by BFS (FIFO); DFS pops from end
 
-  while head <= #queue do
-    local item = queue[head]; head = head + 1
+  while (strategy == "bfs" and head <= #queue) or
+        (strategy == "dfs" and #queue >= head) do
+
+    -- BFS: dequeue from front; DFS: pop from back
+    local item
+    if strategy == "dfs" then
+      item = table.remove(queue)
+    else
+      item = queue[head]; head = head + 1
+    end
+
     iter_count = iter_count + 1
 
     -- Time-budget check (every BUDGET_CHECK_N iterations)
@@ -128,46 +202,69 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn, dep
     if not ok then goto next_item end
     local choices = choices_or_err or {}
 
+    -- Pre-compute bounded outcome combos (once per scene-item, not per choice)
+    local b_combos = bounded_outcome_combos(game_table.bounded)
+
     for _, ch in ipairs(choices) do
-      local eng2 = engine_mod.new(game_table, { io_out = io_sink })
-      eng2:register_actors_schedules()
-      restore_engine(eng2, item.cache, item.stack)
+      for _, outcome_map in ipairs(b_combos) do
+        -- Inject bounded handlers for this outcome combination
+        local saved_handlers = game_table._bounded_handlers
+        if next(outcome_map) ~= nil then
+          local new_h = {}
+          for k, v in pairs(saved_handlers or {}) do new_h[k] = v end
+          for bname, bval in pairs(outcome_map) do
+            local bval_cap = bval
+            new_h[bname] = function() return bval_cap end
+          end
+          game_table._bounded_handlers = new_h
+        end
 
-      local ok2, sig = pcall(function()
-        return eng2:do_choice(scene_name, ch.index)
-      end)
+        local eng2 = engine_mod.new(game_table, { io_out = io_sink })
+        eng2:register_actors_schedules()
+        restore_engine(eng2, item.cache, item.stack)
 
-      if ok2 then
-        pcall(function() eng2:post_action() end)
+        local ok2, sig = pcall(function()
+          return eng2:do_choice(scene_name, ch.index)
+        end)
 
-        -- Build new cache snapshot
-        local new_cache = clone_cache(eng2._state)
-        local new_stack = {}
-        for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
+        -- Restore handlers
+        game_table._bounded_handlers = saved_handlers
 
-        -- Apply navigation signal
-        if sig then
-          if sig.type == "goto" and sig.target then
-            if #new_stack > 0 then new_stack[#new_stack] = sig.target
-            else new_stack[1] = sig.target end
-          elseif sig.type == "enter" and sig.target then
-            new_stack[#new_stack + 1] = sig.target
-          elseif sig.type == "exit" then
-            new_stack[#new_stack] = nil
+        if ok2 then
+          pcall(function() eng2:post_action() end)
+
+          -- Build new cache snapshot
+          local new_cache = clone_cache(eng2._state)
+          local new_stack = {}
+          for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
+
+          -- Apply navigation signal
+          if sig then
+            if sig.type == "goto" and sig.target then
+              if #new_stack > 0 then new_stack[#new_stack] = sig.target
+              else new_stack[1] = sig.target end
+            elseif sig.type == "enter" and sig.target then
+              new_stack[#new_stack + 1] = sig.target
+            elseif sig.type == "exit" then
+              new_stack[#new_stack] = nil
+            end
+          end
+
+          -- Check condition
+          if condition_fn(new_cache) then
+            game_table._bounded_handlers = saved_handlers
+            return true
+          end
+
+          if #new_stack > 0 then
+            queue[#queue + 1] = {
+              cache = new_cache,
+              stack = new_stack,
+              d     = item.d + 1,
+            }
           end
         end
-
-        -- Check condition
-        if condition_fn(new_cache) then return true end
-
-        if #new_stack > 0 then
-          queue[#queue + 1] = {
-            cache = new_cache,
-            stack = new_stack,
-            d     = item.d + 1,
-          }
-        end
-      end
+      end  -- outcome_map loop
     end
 
     ::next_item::
@@ -180,17 +277,20 @@ end
 -- BFS find_path
 -- ============================================================
 
---- BFS over (cache, stack) states, returning the sequence of choice labels
+--- Search over (cache, stack) states, returning the sequence of choice labels
 --- that leads to a state satisfying condition_fn, or nil if unreachable.
+--- Supports BFS (breadth-first) or DFS (depth-first) strategies.
 ---@param game_table    table     Compiled game table
 ---@param initial_cache table     Initial state cache snapshot
 ---@param initial_stack table     Initial scene stack
 ---@param condition_fn  function  Predicate: condition_fn(cache) → bool
----@param depth         integer?  Max BFS depth (default 20)
+---@param depth         integer?  Max search depth (default 20)
 ---@param budget        number?   Max wall-clock seconds (nil = no limit)
----@return table?  Ordered list of {scene, choice_label, choice_index} or nil (nil on budget exhaust)
-function M.find_path(game_table, initial_cache, initial_stack, condition_fn, depth, budget)
-  depth = depth or DEFAULT_DEPTH
+---@param strategy      string?   "bfs" (default) or "dfs"
+---@return table?  Ordered list of {scene, choice_label, choice_index} or nil
+function M.find_path(game_table, initial_cache, initial_stack, condition_fn, depth, budget, strategy)
+  depth    = depth    or DEFAULT_DEPTH
+  strategy = strategy or "bfs"
 
   local engine_mod = require("runtime.engine")
   local seen       = {}
@@ -208,10 +308,18 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn, dep
     d     = 0,
     path  = {},  -- list of {scene, label, index}
   } }
-  local head = 1
+  local head = 1  -- used by BFS only
 
-  while head <= #queue do
-    local item = queue[head]; head = head + 1
+  while (strategy == "bfs" and head <= #queue) or
+        (strategy == "dfs" and #queue >= head) do
+
+    local item
+    if strategy == "dfs" then
+      item = table.remove(queue)
+    else
+      item = queue[head]; head = head + 1
+    end
+
     iter_count = iter_count + 1
 
     -- Time-budget check
@@ -241,53 +349,73 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn, dep
     if not ok then goto next_item end
     local choices = choices_or_err or {}
 
+    -- Pre-compute bounded outcome combos (once per scene-item)
+    local b_combos2 = bounded_outcome_combos(game_table.bounded)
+
     for _, ch in ipairs(choices) do
-      local eng2 = engine_mod.new(game_table, { io_out = io_sink })
-      eng2:register_actors_schedules()
-      restore_engine(eng2, item.cache, item.stack)
+      for _, outcome_map in ipairs(b_combos2) do
+        -- Inject bounded handlers for this outcome combination
+        local saved_handlers = game_table._bounded_handlers
+        if next(outcome_map) ~= nil then
+          local new_h = {}
+          for k, v in pairs(saved_handlers or {}) do new_h[k] = v end
+          for bname, bval in pairs(outcome_map) do
+            local bval_cap = bval
+            new_h[bname] = function() return bval_cap end
+          end
+          game_table._bounded_handlers = new_h
+        end
 
-      local ok2, sig = pcall(function()
-        return eng2:do_choice(scene_name, ch.index)
-      end)
+        local eng2 = engine_mod.new(game_table, { io_out = io_sink })
+        eng2:register_actors_schedules()
+        restore_engine(eng2, item.cache, item.stack)
 
-      if ok2 then
-        pcall(function() eng2:post_action() end)
+        local ok2, sig = pcall(function()
+          return eng2:do_choice(scene_name, ch.index)
+        end)
 
-        local new_cache = clone_cache(eng2._state)
-        local new_stack = {}
-        for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
+        -- Restore handlers
+        game_table._bounded_handlers = saved_handlers
 
-        if sig then
-          if sig.type == "goto" and sig.target then
-            if #new_stack > 0 then new_stack[#new_stack] = sig.target
-            else new_stack[1] = sig.target end
-          elseif sig.type == "enter" and sig.target then
-            new_stack[#new_stack + 1] = sig.target
-          elseif sig.type == "exit" then
-            new_stack[#new_stack] = nil
+        if ok2 then
+          pcall(function() eng2:post_action() end)
+
+          local new_cache = clone_cache(eng2._state)
+          local new_stack = {}
+          for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
+
+          if sig then
+            if sig.type == "goto" and sig.target then
+              if #new_stack > 0 then new_stack[#new_stack] = sig.target
+              else new_stack[1] = sig.target end
+            elseif sig.type == "enter" and sig.target then
+              new_stack[#new_stack + 1] = sig.target
+            elseif sig.type == "exit" then
+              new_stack[#new_stack] = nil
+            end
+          end
+
+          -- Build extended path
+          local new_path = {}
+          for _, step in ipairs(item.path) do new_path[#new_path + 1] = step end
+          new_path[#new_path + 1] = {
+            scene  = scene_name,
+            label  = ch.label,
+            index  = ch.index,
+          }
+
+          if condition_fn(new_cache) then return new_path end
+
+          if #new_stack > 0 then
+            queue[#queue + 1] = {
+              cache = new_cache,
+              stack = new_stack,
+              d     = item.d + 1,
+              path  = new_path,
+            }
           end
         end
-
-        -- Build extended path
-        local new_path = {}
-        for _, step in ipairs(item.path) do new_path[#new_path + 1] = step end
-        new_path[#new_path + 1] = {
-          scene  = scene_name,
-          label  = ch.label,
-          index  = ch.index,
-        }
-
-        if condition_fn(new_cache) then return new_path end
-
-        if #new_stack > 0 then
-          queue[#queue + 1] = {
-            cache = new_cache,
-            stack = new_stack,
-            d     = item.d + 1,
-            path  = new_path,
-          }
-        end
-      end
+      end  -- outcome_map loop
     end
 
     ::next_item::

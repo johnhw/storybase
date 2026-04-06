@@ -604,7 +604,9 @@ bounded classify-intent text:
     assert.is_not_nil(gt.bounded["classify-intent"])
     local b = gt.bounded["classify-intent"]
     assert.equal("classify-intent", b.name)
-    assert.equal("Mood", b.returns)
+    -- returns is now a type_desc table; for a named type like Mood, tag="named"
+    assert.is_table(b.returns)
+    assert.equal("Mood", (b.returns or {}).name)
     assert.equal("uniform", b.distribution)
     assert.equal("game.nlp.classify", b.lua)
   end)
@@ -637,7 +639,7 @@ state world:
   x: Int(0, 100) = 5
 
 bounded add-noise value:
-  returns:      Int
+  returns:      Int(0,200)
   distribution: uniform
   reads:        [world/x]
   lua:          "test.noise"

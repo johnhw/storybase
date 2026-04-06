@@ -10,7 +10,7 @@ Milestone goals are marked **M**.
 
 **CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 1027 tests passing.
+**Phase 7/8 in progress** — 1029 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -645,9 +645,9 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] Call dispatch in eval.lua: calls `game._bounded_handlers[name](arg, snap)` (2026-04-03)
 - [x] Lua handler registration via `game:register_bounded(name, fn)` public API (2026-04-04, lib/storybase.lua)
 - [ ] Log result as a random-draw entry `{source, result, seed}` — Phase 8
-- [ ] `uses-bounded` tag auto-applied to any function calling a `bounded` computation
-- [ ] Search: branch over `uniform` distribution
-- [ ] Search: branch over `conditioned-on path` distribution using current path value as prior
+- [x] `uses-bounded` tag auto-applied to any function calling a `bounded` computation (2026-04-05, checker pass3b)
+- [x] Search: branch over `uniform` distribution — BFS enumerates all Int outcomes (2026-04-06)
+- [x] Search: branch over `conditioned-on path` distribution — same enumeration; conditioned-on treated as uniform for search purposes (2026-04-06)
 
 ### Undo
 

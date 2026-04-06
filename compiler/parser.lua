@@ -2417,7 +2417,7 @@ local function parse_bounded_decl(p, doc)
       if ct.kind == "NAMED_ARG" then
         local na = p:adv()
         if na.value == "returns" then
-          if p:at("IDENT") then returns_type = p:adv().value end
+          returns_type = parse_type_expr(p)
         elseif na.value == "distribution" then
           -- distribution: uniform  or  distribution: conditioned-on path
           if p:at("IDENT") then
