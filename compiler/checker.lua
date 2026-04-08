@@ -710,6 +710,31 @@ local function collect_fn_calls(node, result)
   end
 end
 
+--- Recursively visit all LAMBDA_EXPR nodes in a subtree, calling fn(lambda_node).
+local function walk_lambdas(node, fn)
+  if not node or type(node) ~= "table" then return end
+  if node.kind == ast.K.LAMBDA_EXPR then fn(node) end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
+                        "clauses", "bindings" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      if v.kind then
+        walk_lambdas(v, fn)  -- single node stored in a list field
+      else
+        for _, child in ipairs(v) do walk_lambdas(child, fn) end
+      end
+    end
+  end
+  for _, scalar in ipairs({ "condition", "expr", "left", "right", "value",
+                             "amount", "inner_expr", "guard" }) do
+    walk_lambdas(node[scalar], fn)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do walk_lambdas(a, fn) end
+  end
+end
+
 --- Recursively visit all nodes, calling fn for FIND_EXPR and VERIFY_DECL.
 local function walk_pure_contexts(node, fn)
   if not node or type(node) ~= "table" then return end
@@ -860,6 +885,30 @@ local function pass3b_check_call_purity(acc, program)
             end
           end
         end
+      end
+    end)
+  end
+
+  -- Lambda purity: a lambda body may not contain mutation primitives.
+  -- (LAMBDA_CALLS_MUT — lambdas are always pure per spec §2.3)
+  for _, decl in ipairs(program.decls) do
+    walk_lambdas(decl, function(lam)
+      local body_has_mut = false
+      if type(lam.body) == "table" then
+        if lam.body.kind then
+          -- Single expression body (e.g. fn(x): expr)
+          body_has_mut = has_mutation(lam.body)
+        else
+          -- List of statements (multi-line lambda body)
+          for _, s in ipairs(lam.body) do
+            if has_mutation(s) then body_has_mut = true; break end
+          end
+        end
+      end
+      if body_has_mut then
+        err(acc, ast.E.LAMBDA_CALLS_MUT,
+          "lambda body contains a mutation primitive; lambdas must be pure",
+          lam.pos)
       end
     end)
   end

@@ -10,7 +10,7 @@ Milestone goals are marked **M**.
 
 **CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 1041 tests passing.
+**Phase 7/8 in progress** — 1046 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -274,7 +274,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] Error (TRANSACTION_IN_PURE): pre:/post: block calls a transaction fn (2026-04-05)
 - [x] Error (TRANSACTION_IN_FIND): transaction fn called inside `find where` clause (2026-04-05)
 - [x] Error (TRANSACTION_IN_VERIFY): transaction fn called inside `verify` condition (2026-04-05)
-- [ ] Lambda purity rule — deferred (lambdas not yet parsed)
+- [x] Lambda purity rule (LAMBDA_CALLS_MUT) — lambdas may not contain mutation primitives
 - [x] `uses-bounded` tag: auto-applied to fn calling a bounded computation (2026-04-05)
 
 ### Checker — Pass 4 (Write-Set Analysis)

@@ -1281,3 +1281,59 @@ verify "earn ok":
   end)
 
 end)
+
+-- ── Pass 3b: lambda purity ────────────────────────────────────────────────────
+
+describe("checker pass 3b — lambda purity (LAMBDA_CALLS_MUT)", function()
+  local BASE = [[
+state world:
+  count: Int(0, 100) = 0
+engine-config:
+  entry-scene: main
+scene main:
+  * Go
+    -> main
+]]
+
+  it("pure lambda (single expression) compiles without error", function()
+    check_ok(BASE .. [[
+fn run:
+  let f = fn(x): x > 0:
+    pass
+]])
+  end)
+
+  it("pure lambda (multi-line body) compiles without error", function()
+    check_ok(BASE .. [[
+fn run:
+  let f = fn(x):
+    x > 0:
+    pass
+]])
+  end)
+
+  it("emits LAMBDA_CALLS_MUT when lambda body contains set!", function()
+    check_err(BASE .. [[
+fn run:
+  let f = fn(x): set! world/count 1:
+    pass
+]], ast.E.LAMBDA_CALLS_MUT)
+  end)
+
+  it("emits LAMBDA_CALLS_MUT when lambda body contains inc!", function()
+    check_err(BASE .. [[
+fn run:
+  let f = fn(x): inc! world/count 1:
+    pass
+]], ast.E.LAMBDA_CALLS_MUT)
+  end)
+
+  it("lambda passed as argument with mutation is also caught", function()
+    check_err(BASE .. [[
+fn run:
+  let items = [1, 2, 3]:
+    let f = fn(x): set! world/count 1:
+      pass
+]], ast.E.LAMBDA_CALLS_MUT)
+  end)
+end)
