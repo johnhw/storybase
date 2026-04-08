@@ -7,6 +7,7 @@ local query     = require("runtime.query")
 local eval_mod  = require("runtime.eval")
 local state_mod = require("runtime.state")
 local log_mod   = require("runtime.log")
+local compiler  = require("compiler.compiler")
 
 -- ============================================================
 -- Helpers
@@ -303,5 +304,268 @@ describe("query.inverse_adjacent", function()
   it("returns empty for unknown target", function()
     local rel = { data = { a = { b = true } } }
     assert.same({}, query.inverse_adjacent(rel, "z"))
+  end)
+end)
+
+-- ============================================================
+-- Relation builtins via eval (language-level integration)
+-- ============================================================
+
+-- Helper: build a ctx with a compiled game that has an "exits" relation
+-- exits: village→[forest,cave], forest→[village,mountain], cave→[village]
+local function make_ctx_with_game(extra_state)
+  local src = [[
+state world:
+  day: Int(0,100) = 0
+
+type Place = village | forest | cave | mountain
+
+relation exits: Place -> Set(Place, 4):
+  'village: ['forest, 'cave]
+  'forest:  ['village, 'mountain]
+  'cave:    ['village]
+]]
+  local gt, diags = compiler.compile(src, "relation-test")
+  assert.is_false(diags:has_errors(), table.concat(
+    (function() local t={}; for _,e in ipairs(diags.errors) do t[#t+1]=e.message end; return t end)(), "; "))
+  local l = log_mod.new()
+  local s = state_mod.new(gt.schema, l)
+  s:init_defaults()
+  for k, v in pairs(extra_state or {}) do s:set(k, v) end
+  local c = eval_mod.new_ctx(s, gt.fns, "test")
+  c.game = gt
+  return c
+end
+
+local K = require("compiler.ast").K
+
+local function fn_call_node(name, ...)
+  return { kind = K.FN_CALL, name = name, args = { ... } }
+end
+
+local function sym_node(v)
+  return { kind = K.SYMBOL_LIT, name = v }
+end
+
+local function str_node(v)
+  return { kind = K.STRING_LIT, value = v }
+end
+
+local function named_arg_node(name, val)
+  return { kind = K.NAMED_ARG, name = name, value = val }
+end
+
+local function int_node(n)
+  return { kind = K.INT_LIT, value = n }
+end
+
+-- Bare ident node (0-arg fn_call → returns name as string)
+local function ident_node(name)
+  return { kind = K.FN_CALL, name = name, args = {} }
+end
+
+describe("eval: adjacent? builtin", function()
+  it("returns adjacent set as table with bool values", function()
+    local c = make_ctx_with_game()
+    local node = fn_call_node("adjacent?", ident_node("exits"), sym_node("village"))
+    local result = eval_mod.eval_expr(node, c)
+    assert.is_table(result)
+    assert.is_true(result["forest"])
+    assert.is_true(result["cave"])
+    assert.is_nil(result["village"])
+  end)
+
+  it("returns empty table for node with no outgoing edges", function()
+    local c = make_ctx_with_game()
+    -- 'mountain has no outgoing exits in this relation
+    local node = fn_call_node("adjacent?", ident_node("exits"), sym_node("mountain"))
+    local result = eval_mod.eval_expr(node, c)
+    assert.same({}, result)
+  end)
+end)
+
+describe("eval: reachable? builtin", function()
+  it("returns true for direct connection", function()
+    local c = make_ctx_with_game()
+    local node = fn_call_node("reachable?", ident_node("exits"), sym_node("village"), sym_node("forest"))
+    assert.is_true(eval_mod.eval_expr(node, c))
+  end)
+
+  it("returns true for multi-hop path", function()
+    local c = make_ctx_with_game()
+    -- village → forest → mountain
+    local node = fn_call_node("reachable?", ident_node("exits"), sym_node("village"), sym_node("mountain"))
+    assert.is_true(eval_mod.eval_expr(node, c))
+  end)
+
+  it("returns false when no path exists", function()
+    local c = make_ctx_with_game()
+    -- mountain has no outgoing edges, so mountain → village is false
+    local node = fn_call_node("reachable?", ident_node("exits"), sym_node("mountain"), sym_node("village"))
+    assert.is_false(eval_mod.eval_expr(node, c))
+  end)
+
+  it("respects max-hops: named arg", function()
+    local c = make_ctx_with_game()
+    -- village → forest → mountain needs 2 hops; max-hops: 1 should fail
+    local node_1hop = fn_call_node("reachable?",
+      ident_node("exits"), sym_node("village"), sym_node("mountain"),
+      named_arg_node("max-hops", int_node(1)))
+    local node_2hop = fn_call_node("reachable?",
+      ident_node("exits"), sym_node("village"), sym_node("mountain"),
+      named_arg_node("max-hops", int_node(2)))
+    assert.is_false(eval_mod.eval_expr(node_1hop, c))
+    assert.is_true(eval_mod.eval_expr(node_2hop, c))
+  end)
+end)
+
+describe("eval: shortest-path builtin", function()
+  it("returns path list including endpoints", function()
+    local c = make_ctx_with_game()
+    local node = fn_call_node("shortest-path", ident_node("exits"), sym_node("village"), sym_node("mountain"))
+    local result = eval_mod.eval_expr(node, c)
+    assert.equal(3, #result)
+    assert.equal("village", result[1])
+    assert.equal("mountain", result[3])
+    assert.equal("forest", result[2])
+  end)
+
+  it("returns nil when no path", function()
+    local c = make_ctx_with_game()
+    local node = fn_call_node("shortest-path", ident_node("exits"), sym_node("mountain"), sym_node("village"))
+    assert.is_nil(eval_mod.eval_expr(node, c))
+  end)
+end)
+
+describe("eval: reachable-set builtin", function()
+  it("returns all reachable nodes from source", function()
+    local c = make_ctx_with_game()
+    local node = fn_call_node("reachable-set", ident_node("exits"), sym_node("cave"))
+    local result = eval_mod.eval_expr(node, c)
+    -- cave → village → forest → mountain, cave
+    assert.is_true(result["village"])
+    assert.is_true(result["forest"])
+    assert.is_true(result["mountain"])
+    assert.is_nil(result["cave"])  -- source excluded
+  end)
+
+  it("respects max-hops: named arg", function()
+    local c = make_ctx_with_game()
+    local node = fn_call_node("reachable-set", ident_node("exits"), sym_node("village"),
+      named_arg_node("max-hops", int_node(1)))
+    local result = eval_mod.eval_expr(node, c)
+    assert.is_true(result["forest"])
+    assert.is_true(result["cave"])
+    assert.is_nil(result["mountain"])  -- 2 hops away
+  end)
+end)
+
+describe("eval: inverse-adjacent? builtin", function()
+  it("returns set of nodes pointing to target", function()
+    local c = make_ctx_with_game()
+    -- village is pointed to by: forest and cave
+    local node = fn_call_node("inverse-adjacent?", ident_node("exits"), sym_node("village"))
+    local result = eval_mod.eval_expr(node, c)
+    assert.is_true(result["forest"])
+    assert.is_true(result["cave"])
+    assert.is_nil(result["village"])
+  end)
+
+  it("returns empty for node not pointed to by anyone", function()
+    local c = make_ctx_with_game()
+    -- 'village is pointed to by forest and cave; 'unknown has no incoming edges
+    local node = fn_call_node("inverse-adjacent?", ident_node("exits"), sym_node("unknown"))
+    local result = eval_mod.eval_expr(node, c)
+    assert.same({}, result)
+  end)
+end)
+
+-- ============================================================
+-- find: within N hops / connected-to clauses
+-- (uses make_ctx with manually-set state paths + injected game.relations)
+-- ============================================================
+
+-- Build a ctx with places family members set and exits relation injected
+local function make_places_ctx(state_vals, rel_data)
+  local c = make_ctx(state_vals)
+  c.game = {
+    relations = {
+      exits = { name = "exits", data = rel_data }
+    }
+  }
+  return c
+end
+
+describe("find: within N hops clause", function()
+  it("filters family members within N hops of source", function()
+    -- places family: village, forest, cave, mountain, dungeon (set via state paths)
+    -- exits: village→[forest,cave], forest→[village,mountain], cave→[village]
+    -- dungeon has no connections → unreachable from village
+    local c = make_places_ctx({
+      ["places/village/name"] = "village",
+      ["places/forest/name"]  = "forest",
+      ["places/cave/name"]    = "cave",
+      ["places/mountain/name"] = "mountain",
+      ["places/dungeon/name"] = "dungeon",
+    }, {
+      village = { forest = true, cave = true },
+      forest  = { village = true, mountain = true },
+      cave    = { village = true },
+    })
+
+    -- within 1 hop of village: directly forest and cave
+    local src_expr = sym_node("village")
+    local clauses = {
+      { kind = "within", relation_name = "exits", hops = 1, from = src_expr }
+    }
+    local result = query.find(c, "places", clauses)
+    table.sort(result)
+    assert.same({ "cave", "forest" }, result)
+  end)
+
+  it("within 2 hops includes transitively reachable members", function()
+    -- village → forest → mountain; dungeon unreachable
+    local c = make_places_ctx({
+      ["places/village/name"]  = "village",
+      ["places/forest/name"]   = "forest",
+      ["places/mountain/name"] = "mountain",
+      ["places/dungeon/name"]  = "dungeon",
+    }, {
+      village = { forest = true },
+      forest  = { mountain = true },
+    })
+
+    local src_expr = sym_node("village")
+    local clauses2 = { { kind = "within", relation_name = "exits", hops = 2, from = src_expr } }
+    local result2 = query.find(c, "places", clauses2)
+    table.sort(result2)
+    assert.same({ "forest", "mountain" }, result2)
+
+    local clauses1 = { { kind = "within", relation_name = "exits", hops = 1, from = src_expr } }
+    local result1 = query.find(c, "places", clauses1)
+    table.sort(result1)
+    assert.same({ "forest" }, result1)
+  end)
+end)
+
+describe("find: connected-to clause", function()
+  it("filters to members connected in either direction", function()
+    -- village → forest; cave → village; dungeon isolated
+    local c = make_places_ctx({
+      ["places/village/name"] = "village",
+      ["places/forest/name"]  = "forest",
+      ["places/cave/name"]    = "cave",
+      ["places/dungeon/name"] = "dungeon",
+    }, {
+      village = { forest = true },
+      cave    = { village = true },
+    })
+
+    -- connected-to village: forest (village→forest) and cave (cave→village)
+    local target_expr = sym_node("village")
+    local clauses = { { kind = "connected_to", relation_name = "exits", path = target_expr } }
+    local result = query.find(c, "places", clauses)
+    table.sort(result)
+    assert.same({ "cave", "forest" }, result)
   end)
 end)

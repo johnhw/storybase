@@ -182,6 +182,7 @@ M.K.WATCH_DECL          = "watch_decl"
 M.K.WATCH_WHEN_DECL     = "watch_when_decl"
 M.K.SCENE_DECL          = "scene_decl"
 M.K.MACRO_DECL          = "macro_decl"
+M.K.MACRO_CALL_STMT     = "macro_call_stmt"
 M.K.MIGRATION_DECL      = "migration_decl"
 M.K.DEFGRID_DECL        = "defgrid_decl"
 
@@ -532,6 +533,11 @@ end
 function M.macro_decl(name, params, body, doc, pos)
   return M.node(M.K.MACRO_DECL,
     { name = name, params = params or {}, body = body, doc = doc }, pos)
+end
+
+function M.macro_call_stmt(name, args, body, pos)
+  return M.node(M.K.MACRO_CALL_STMT,
+    { name = name, args = args or {}, body = body or {} }, pos)
 end
 
 function M.migration_decl(from_ver, to_ver, ops, pos)

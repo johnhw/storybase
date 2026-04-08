@@ -1816,8 +1816,37 @@ parse_stmt = function(p)
     end
   end
 
+  -- Macro call with body block.  Two syntactic cases:
+  --   Case A: "name:" NEWLINE INDENT body — NAMED_ARG("name") token, no expr args
+  --   Case B: "name arg1 arg2:" NEWLINE INDENT body — FN_CALL then OP(":")
+  -- We detect Case A early (before parse_expr), since the lexer ate the ":".
+  if t.kind == "NAMED_ARG" then
+    local nx = p:peek()
+    -- If the next non-whitespace token is NEWLINE then INDENT, it's a body block.
+    -- p:peek() skips the current token and returns the one after.
+    if nx and (nx.kind == "NEWLINE" or nx.kind == "INDENT") then
+      local name = t.value
+      p:adv()  -- consume NAMED_ARG
+      p:match("NEWLINE")
+      if p:at("INDENT") then
+        local mac_body = parse_body_items(p, false)
+        return ast.macro_call_stmt(name, {}, mac_body, tpos)
+      end
+      -- Fallback: treat as regular 0-arg fn_call expression statement
+      p:skip_to_eol()
+      return ast.expr_stmt(ast.fn_call(name, {}, tpos), tpos)
+    end
+  end
+
   -- Expression as statement (function call, path reference, etc.)
   local e = parse_expr(p)
+  -- Case B: FN_CALL expression immediately followed by OP(":") + body block
+  if e and e.kind == ast.K.FN_CALL and p:at("OP", ":") then
+    p:adv()  -- consume ":"
+    p:match("NEWLINE")
+    local mac_body = parse_body_items(p, false)
+    return ast.macro_call_stmt(e.name, e.args, mac_body, tpos)
+  end
   p:skip_to_eol()
   return ast.expr_stmt(e, tpos)
 end
@@ -2460,6 +2489,32 @@ local function parse_bounded_decl(p, doc)
   return ast.bounded_decl(name, params, returns_type, distribution, reads, lua_name, doc, tpos)
 end
 
+--- Parse a `macro name param1 param2...: body` declaration.
+--- The colon that separates params from body is eaten by the lexer as a
+--- NAMED_ARG token for the last identifier before it.  So both forms work:
+---   macro foo x y:       → params ["x","y"],  "y:" is NAMED_ARG("y") NEWLINE
+---   macro foo body:      → params ["body"],   "body:" is NAMED_ARG("body") NEWLINE
+local function parse_macro_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "macro"
+  local name = p:at("IDENT") and p:adv().value or "?"
+  local params = {}
+  -- Collect params: plain IDENT tokens, terminated by NAMED_ARG (which eats the `:`)
+  while p:at("IDENT") or p:at("NAMED_ARG") do
+    local t = p:adv()
+    params[#params + 1] = t.value
+    if t.kind == "NAMED_ARG" then break end  -- "name:" ate the ':'
+  end
+  -- If ended on a plain IDENT (no NAMED_ARG seen), there might still be a `:` or NAMED_ARG
+  -- If the last consumed was IDENT and we still see OP(":"), consume it
+  if #params > 0 then
+    p:match("OP", ":")  -- optional fallback if somehow `:` was not in NAMED_ARG
+  end
+  p:match("NEWLINE")
+  local body = parse_body_items(p, false)  -- code (not scene) mode
+  return ast.macro_decl(name, params, body, doc, tpos)
+end
+
 --- Parse a `verify "label": clauses` declaration.
 local function parse_verify_decl(p, doc)
   local tpos = p:cur().pos
@@ -2613,8 +2668,8 @@ local function parse_decl(p, doc)
     elseif t.value == "watch"
         or t.value == "watch-when" then return parse_watch_decl(p, doc)
     elseif t.value == "bounded"    then return parse_bounded_decl(p, doc)
+    elseif t.value == "macro"      then return parse_macro_decl(p, doc)
     else
-      -- macro — later phases
       p:skip_to_eol()
       p:skip_block()
       return nil

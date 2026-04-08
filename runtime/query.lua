@@ -24,11 +24,12 @@ function M.find(ctx, family, clauses)
   local keys = ctx.state:path_list(family)
 
   -- Extract clause info
-  local where_conditions = {}
-  local order_path       = nil
-  local order_dir        = "asc"
-  local limit            = nil
-  local count_only       = false
+  local where_conditions   = {}
+  local relation_filters   = {}  -- within / connected-to clauses
+  local order_path         = nil
+  local order_dir          = "asc"
+  local limit              = nil
+  local count_only         = false
 
   for _, clause in ipairs(clauses or {}) do
     if clause.kind == "where" or clause.kind == "or_where" then
@@ -40,11 +41,34 @@ function M.find(ctx, family, clauses)
       limit = clause.value
     elseif clause.kind == "count" then
       count_only = true
+    elseif clause.kind == "within" or clause.kind == "connected_to" then
+      relation_filters[#relation_filters + 1] = clause
     end
   end
 
   -- Filter: evaluate where conditions with var bound to each key
   local var_name = family  -- e.g. "npc" in "find npc" (family name is the var binding)
+
+  -- Pre-evaluate relation filters (src values don't change per-key)
+  -- Each entry: {kind, relation, hops?, src_val?, path_val?}
+  local compiled_rel_filters = {}
+  for _, rf in ipairs(relation_filters) do
+    local rel = (ctx.game and ctx.game.relations and rf.relation_name)
+                and ctx.game.relations[rf.relation_name] or nil
+    if rf.kind == "within" then
+      local ok_src, src_val = pcall(eval_mod.eval_expr, rf.from, ctx)
+      compiled_rel_filters[#compiled_rel_filters+1] = {
+        kind = "within", relation = rel, hops = rf.hops,
+        src  = ok_src and src_val or nil,
+      }
+    elseif rf.kind == "connected_to" then
+      local ok_pv, path_val = pcall(eval_mod.eval_expr, rf.path, ctx)
+      compiled_rel_filters[#compiled_rel_filters+1] = {
+        kind = "connected_to", relation = rel,
+        target = ok_pv and path_val or nil,
+      }
+    end
+  end
 
   local results = {}
   for _, key in ipairs(keys) do
@@ -58,6 +82,25 @@ function M.find(ctx, family, clauses)
         if not ok or not v then
           passes = false
           break
+        end
+      end
+    end
+
+    -- Relation filters: within N hops / connected-to
+    if passes and #compiled_rel_filters > 0 then
+      for _, rf in ipairs(compiled_rel_filters) do
+        if rf.kind == "within" then
+          -- key must be reachable from rf.src within rf.hops hops (source excluded)
+          if key == rf.src or not M.reachable(rf.relation, rf.src, key, rf.hops) then
+            passes = false; break
+          end
+        elseif rf.kind == "connected_to" then
+          -- key must be directly connected to rf.target (in either direction), target excluded
+          if key == rf.target
+            or (not M.reachable(rf.relation, key, rf.target, nil)
+                and not M.reachable(rf.relation, rf.target, key, nil)) then
+            passes = false; break
+          end
         end
       end
     end
@@ -118,24 +161,23 @@ function M.reachable(relation, source, target, max_hops)
   local data = relation.data or {}
   max_hops = max_hops or 100
 
-  local visited = {}
-  local queue   = { source }
+  if source == target then return true end
+
+  local visited = { [source] = true }
+  local queue   = { { node = source, depth = 0 } }
   local head    = 1
-  local depth   = 0
 
-  visited[source] = true
-
-  while head <= #queue and depth <= max_hops do
-    local current = queue[head]; head = head + 1
-    local neighbours = data[current] or {}
+  while head <= #queue do
+    local item    = queue[head]; head = head + 1
+    if item.depth >= max_hops then break end
+    local neighbours = data[item.node] or {}
     for neighbour in pairs(neighbours) do
       if neighbour == target then return true end
       if not visited[neighbour] then
         visited[neighbour] = true
-        queue[#queue + 1] = neighbour
+        queue[#queue + 1] = { node = neighbour, depth = item.depth + 1 }
       end
     end
-    depth = depth + 1
   end
 
   return false

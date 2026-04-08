@@ -719,7 +719,11 @@ end)
 -- ============================================================
 
 describe("debug: TCP transport", function()
-  local socket = require("socket")
+  local socket_ok, socket = pcall(require, "socket")
+  if not socket_ok then
+    pending("LuaSocket not installed — skipping TCP transport tests")
+    return
+  end
 
   it("accepts a TCP connection and responds to get-state", function()
     local gt, errs = compile(MINIMAL_SRC)
