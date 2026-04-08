@@ -10,7 +10,7 @@ Milestone goals are marked **M**.
 
 **CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 1029 tests passing.
+**Phase 7/8 in progress** — 1041 tests passing.
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -771,12 +771,12 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 
 ### Macro System
 
-- [ ] `macro name params: body` declaration parsing
-- [ ] Macro expansion pre-pass (before type-check)
-- [ ] Hygienic expansion (generated names do not collide with user names)
-- [ ] Error: macro in body expands another macro defined in the same compilation unit
-- [ ] Error: recursive macro invocation (direct or mutual)
-- [ ] Expanded form is what the type checker and log see
+- [x] `macro name params: body` declaration parsing
+- [x] Macro expansion pre-pass (before type-check)
+- [x] Hygienic expansion (generated names do not collide with user names)
+- [x] Error: macro in body expands another macro defined in the same compilation unit
+- [x] Error: recursive macro invocation (direct or mutual)
+- [x] Expanded form is what the type checker and log see
 
 ### Lua Interop (`lib/storybase.lua`)
 
@@ -818,10 +818,10 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 
 ### Tests — Phase 8
 
-- [ ] `tests/compiler/macro_spec.lua` — basic expansion
-- [ ] `tests/compiler/macro_spec.lua` — hygiene (no name collision)
-- [ ] `tests/compiler/macro_spec.lua` — same-unit expansion restriction enforced
-- [ ] `tests/compiler/macro_spec.lua` — recursive macro error
+- [x] `tests/compiler/macro_spec.lua` — basic expansion
+- [x] `tests/compiler/macro_spec.lua` — hygiene (no name collision)
+- [x] `tests/compiler/macro_spec.lua` — same-unit expansion restriction enforced
+- [x] `tests/compiler/macro_spec.lua` — recursive macro error
 - [ ] `tests/lib/interop_spec.lua` — all public API methods: call, get, find, on, choose, eval
 - [ ] `tests/lib/interop_spec.lua` — counterfactual API from Lua
 - [ ] `tests/lib/interop_spec.lua` — register_bounded and call convention

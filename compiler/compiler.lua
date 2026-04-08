@@ -332,8 +332,6 @@ local function expand_macros(ast_root, diags, filename)
       macros[decl.name] = decl
     end
   end
-  if not next(macros) then return end  -- no macros → nothing to do
-
   -- Check for cross-unit macro use in macro bodies
   for mname, mdecl in pairs(macros) do
     for _, stmt in ipairs(mdecl.body or {}) do
