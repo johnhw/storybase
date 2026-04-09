@@ -1086,7 +1086,18 @@ call_fn = function(name, args, ctx)
       for _, path in ipairs(bounded_def.reads or {}) do
         snap[path] = ctx.state:get(path)
       end
-      return ctx.game._bounded_handlers[name](first_arg, snap)
+      local result = ctx.game._bounded_handlers[name](first_arg, snap)
+      -- Log as a random-draw entry for audit/replay
+      if ctx.state and ctx.state._log then
+        ctx.state._log:append({
+          kind   = "random_draw",
+          source = name,
+          result = result,
+          reads  = snap,
+          fn     = ctx.fn_name or "?",
+        })
+      end
+      return result
     end
     -- Fallback: no handler registered, return nil
     return nil

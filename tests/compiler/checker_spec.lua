@@ -752,6 +752,39 @@ fn randomize:
     end
   end)
 
+  it("warns SUPERFICIAL_PARAM when String path passed to user-defined fn", function()
+    local _, diags = compile([[
+state world:
+  label: String = "hello"
+  count: Int(0, 10) = 0
+fn use-label n:
+  pass
+fn caller:
+  use-label world/label
+]])
+    local found
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.SUPERFICIAL_PARAM then found = d; break end
+    end
+    assert.is_not_nil(found, "expected SUPERFICIAL_PARAM warning")
+    assert.is_truthy(found.message:find("label"))
+    assert.is_truthy(found.message:find("use%-label"))
+  end)
+
+  it("does not warn SUPERFICIAL_PARAM when Int path passed to user-defined fn", function()
+    local _, diags = compile([[
+state world:
+  count: Int(0, 10) = 0
+fn use-count n:
+  pass
+fn caller:
+  use-count world/count
+]])
+    for _, d in ipairs(diags) do
+      assert.is_not_equal(ast.E.SUPERFICIAL_PARAM, d.code)
+    end
+  end)
+
 end)
 
 -- ============================================================

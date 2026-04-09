@@ -692,3 +692,51 @@ scene main:
     assert.equal(2, eng._state:get("world/tick"))
   end)
 end)
+
+-- ============================================================
+-- Bounded computation: random_draw log entry
+-- ============================================================
+
+describe("engine: bounded computation logs random_draw entry", function()
+
+  local src = [[
+module bounded-log-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  roll: Int(1, 6) = 1
+bounded roll-die:
+  distribution: uniform
+  returns: Int(1, 6)
+scene main:
+  * Roll
+    set! world/roll (roll-die)
+    -> main
+]]
+
+  it("appends a random_draw log entry when bounded fn is called", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+
+    local io_out = { write = function() end }
+    local eng = engine_mod.new(gt, { io_out = io_out })
+    -- Register the bounded handler to return 4
+    gt._bounded_handlers = gt._bounded_handlers or {}
+    gt._bounded_handlers["roll-die"] = function(_arg, _snap) return 4 end
+    eng:init()
+    eng:do_choice("main", 1)  -- choice "Roll"
+
+    -- Find a random_draw entry in the log
+    local found
+    for _, entry in ipairs(eng._state._log._entries or {}) do
+      if entry.kind == "random_draw" and entry.source == "roll-die" then
+        found = entry
+        break
+      end
+    end
+    assert.is_not_nil(found, "expected random_draw log entry for roll-die")
+    assert.equal(4, found.result)
+  end)
+
+end)

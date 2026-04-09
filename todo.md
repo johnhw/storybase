@@ -312,7 +312,7 @@ A separate types.lua is not needed for Phase 1.
 
 - [x] Warning (SUPERFICIAL_IN_COND): superficial path in comparison — done (pass5_check_boundary)
 - [x] Warning (RANDOM_SUPERFICIAL): random assigned to superficial field — done (pass5_check_boundary)
-- [ ] Warning (SUPERFICIAL_PARAM): superficial value passed to fn expecting discrete — deferred (needs full expression type inference)
+- [x] Warning (SUPERFICIAL_PARAM): superficial path passed to user-defined fn — done 2026-04-09 (simplified: warns on any superficial PATH_EXPR arg; typed params not in parser)
 
 ### Codegen — Full Functions ✅ DONE (2026-04-01)
 
@@ -631,8 +631,8 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `find family` base form + `where`, `or-where`, `order-by`, `limit`, `count` clauses (2026-04-03)
 - [x] Relation queries: `adjacent`, `reachable` (BFS), `shortest-path`, `reachable-set`, `inverse-adjacent` (2026-04-03)
 - [x] `can-reach?` with `depth:` — Bool future-state BFS search (2026-04-03)
-- [ ] `find-path` — action sequence or nil — Phase 7
-- [ ] `probability` — Float — Phase 7
+- [x] `find-path` — action sequence or nil — done (eval.lua:810, search.lua)
+- [x] `probability` — Float — done (eval.lua:925, search.lua; returns (prob, approx))
 - [x] `schedule!` imperative: create a named scheduled event from within a fn (2026-04-03)
 - [x] `offset:` applied to `every:` schedule triggers (2026-04-03)
 - [x] `from-any-state:` clause in verify — runs check exprs from every BFS state (2026-04-03)
@@ -648,7 +648,7 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `find ... in-state: gs` clause — parser + eval; redirects find to snapshot cache (2026-04-06)
 - [x] `simulate: true` — include actor steps and scheduled events in the branch (2026-04-06)
 - [x] Nesting depth limit: enforce `max-counterfactual-depth` from engine-config (2026-04-06)
-- [ ] GameState garbage-collected when it leaves scope
+- [x] GameState garbage-collected when it leaves scope — Lua GC handles this; GameState holds only a deep-copied cache with no live-state references
 - [x] Log: append `counterfactual(from: T, transitions: [...])` entry (visible in debug) (2026-04-06)
 
 ### Bounded Computations
@@ -657,7 +657,7 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] Codegen emits `game_table.bounded` table with declaration metadata (2026-04-03)
 - [x] Call dispatch in eval.lua: calls `game._bounded_handlers[name](arg, snap)` (2026-04-03)
 - [x] Lua handler registration via `game:register_bounded(name, fn)` public API (2026-04-04, lib/storybase.lua)
-- [ ] Log result as a random-draw entry `{source, result, seed}` — Phase 8
+- [x] Log result as a random-draw entry `{source, result, reads, fn}` — done 2026-04-09 (eval.lua bounded handler; kind="random_draw")
 - [x] `uses-bounded` tag auto-applied to any function calling a `bounded` computation (2026-04-05, checker pass3b)
 - [x] Search: branch over `uniform` distribution — BFS enumerates all Int outcomes (2026-04-06)
 - [x] Search: branch over `conditioned-on path` distribution — same enumeration; conditioned-on treated as uniform for search purposes (2026-04-06)
@@ -697,7 +697,7 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [x] `tests/runtime/counterfactual_spec.lua` — nesting depth limit enforced (2026-04-06)
 - [x] `tests/runtime/counterfactual_spec.lua` — log entry appended (2026-04-06)
 - [x] `tests/runtime/counterfactual_spec.lua` — `find ... in-state: gs` redirects to snapshot (2026-04-06)
-- [ ] `tests/fuzz/counterfactual_fuzz_spec.lua` — isolation holds under random transitions
+- [x] `tests/fuzz/counterfactual_fuzz_spec.lua` — isolation holds under random transitions — done 2026-04-09 (3 property tests)
 - [x] `tests/runtime/migrate_spec.lua` — rename (2026-04-03)
 - [x] `tests/runtime/migrate_spec.lua` — add and drop (2026-04-03)
 - [x] `tests/runtime/migrate_spec.lua` — rename-enum (2026-04-03)

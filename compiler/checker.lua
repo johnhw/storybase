@@ -1128,97 +1128,125 @@ local COMPARISON_OPS = {
   ["<="] = true, [">="] = true,
 }
 
---- Recursively walk a node tree emitting boundary warnings.
-local function walk_boundary(node, path_map, symtab_data, acc)
-  if not node or type(node) ~= "table" or not node.kind then return end
+
+--- Build a map fn_name → list of {name, type_expr} for all user fn declarations.
+local function build_fn_param_map(program)
+  local map = {}
+  local k = ast.K
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL and node.name then
+      map[node.name] = node.params or {}
+    end
+  end
+  return map
+end
+
+local function pass5_check_boundary(acc, symtab_data, program)
+  local path_map    = build_path_type_map(program, symtab_data)
+  local fn_param_map = build_fn_param_map(program)
   local k = ast.K
 
-  if node.kind == k.BINARY_OP and COMPARISON_OPS[node.op] then
-    -- Check both sides for superficial path reads
-    for _, side in ipairs({ node.left, node.right }) do
-      if side and side.kind == k.PATH_EXPR then
-        local texpr = lookup_path_type(side, path_map)
-        if texpr and is_superficial_texpr(texpr, symtab_data) then
-          local pstr = table.concat(side.segments or {}, "/")
-          table.insert(acc.diags, ast.warning(
-            ast.E.SUPERFICIAL_IN_COND,
-            "'" .. pstr .. "' has a superficial type in a comparison expression",
-            side.pos,
-            "String/Float/Symbol values cannot drive state-space search; use a discrete type"))
-        end
-      end
-    end
-  end
+  -- Patch walk_boundary to receive fn_param_map via upvalue
+  local _walk
+  _walk = function(node)
+    if not node or type(node) ~= "table" or not node.kind then return end
 
-  if node.kind == k.SET_MUT then
-    local val = node.value
-    if val and val.kind == k.FN_CALL and
-       (val.name == "random-choice" or val.name == "random-element") then
-      local texpr = lookup_path_type(node.path, path_map)
-      if texpr and is_superficial_texpr(texpr, symtab_data) then
-        local pstr = node.path and path_key(node.path) or "?"
-        table.insert(acc.diags, ast.warning(
-          ast.E.RANDOM_SUPERFICIAL,
-          "random output assigned to superficial path '" .. pstr .. "'",
-          node.pos,
-          "random values should only be assigned to discrete types (Int, Bool, Enum)"))
-      end
-    end
-  end
-
-  -- Recurse into all child fields
-  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices" }
-  for _, field in ipairs(LIST_FIELDS) do
-    local v = node[field]
-    if type(v) == "table" then
-      for _, child in ipairs(v) do
-        walk_boundary(child, path_map, symtab_data, acc)
-        -- Also walk choice.guard for scene choices
-        if child and type(child) == "table" and child.guard then
-          walk_boundary(child.guard, path_map, symtab_data, acc)
-        end
-        -- Walk match/cond arm bodies
-        if child and type(child) == "table" and child.body then
-          if type(child.body) == "table" and not child.body.kind then
-            for _, s in ipairs(child.body) do
-              walk_boundary(s, path_map, symtab_data, acc)
-            end
-          else
-            walk_boundary(child.body, path_map, symtab_data, acc)
+    if node.kind == k.BINARY_OP and COMPARISON_OPS[node.op] then
+      for _, side in ipairs({ node.left, node.right }) do
+        if side and side.kind == k.PATH_EXPR then
+          local texpr = lookup_path_type(side, path_map)
+          if texpr and is_superficial_texpr(texpr, symtab_data) then
+            local pstr = table.concat(side.segments or {}, "/")
+            table.insert(acc.diags, ast.warning(
+              ast.E.SUPERFICIAL_IN_COND,
+              "'" .. pstr .. "' has a superficial type in a comparison expression",
+              side.pos,
+              "String/Float/Symbol values cannot drive state-space search; use a discrete type"))
           end
         end
       end
     end
-  end
-  local NODE_FIELDS = { "condition", "expr", "left", "right",
-                        "base", "value", "amount", "msg", "inner_expr" }
-  for _, field in ipairs(NODE_FIELDS) do
-    walk_boundary(node[field], path_map, symtab_data, acc)
-  end
-  if type(node.args) == "table" then
-    for _, a in ipairs(node.args) do walk_boundary(a, path_map, symtab_data, acc) end
-  end
-end
 
-local function pass5_check_boundary(acc, symtab_data, program)
-  local path_map = build_path_type_map(program, symtab_data)
-  local k = ast.K
+    if node.kind == k.SET_MUT then
+      local val = node.value
+      if val and val.kind == k.FN_CALL and
+         (val.name == "random-choice" or val.name == "random-element") then
+        local texpr = lookup_path_type(node.path, path_map)
+        if texpr and is_superficial_texpr(texpr, symtab_data) then
+          local pstr = node.path and path_key(node.path) or "?"
+          table.insert(acc.diags, ast.warning(
+            ast.E.RANDOM_SUPERFICIAL,
+            "random output assigned to superficial path '" .. pstr .. "'",
+            node.pos,
+            "random values should only be assigned to discrete types (Int, Bool, Enum)"))
+        end
+      end
+    end
+
+    -- SUPERFICIAL_PARAM: superficial path arg passed to a user-defined fn.
+    -- fn params have no declared types in the current parser, so we warn whenever
+    -- a superficial PATH_EXPR is passed to any user-declared fn.
+    if node.kind == k.FN_CALL and fn_param_map[node.name] then
+      for _, arg in ipairs(node.args or {}) do
+        if arg.kind == k.PATH_EXPR then
+          local arg_texpr = lookup_path_type(arg, path_map)
+          if arg_texpr and is_superficial_texpr(arg_texpr, symtab_data) then
+            local pstr = table.concat(arg.segments or {}, "/")
+            table.insert(acc.diags, ast.warning(
+              ast.E.SUPERFICIAL_PARAM,
+              "superficial path '" .. pstr .. "' passed as argument to fn '" .. node.name .. "'",
+              arg.pos,
+              "superficial types (String, Float, Symbol) cannot participate in state-space search"))
+          end
+        end
+      end
+    end
+
+    -- Recurse into all child fields
+    local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices" }
+    for _, field in ipairs(LIST_FIELDS) do
+      local v = node[field]
+      if type(v) == "table" then
+        for _, child in ipairs(v) do
+          _walk(child)
+          if child and type(child) == "table" and child.guard then
+            _walk(child.guard)
+          end
+          if child and type(child) == "table" and child.body then
+            if type(child.body) == "table" and not child.body.kind then
+              for _, s in ipairs(child.body) do _walk(s) end
+            else
+              _walk(child.body)
+            end
+          end
+        end
+      end
+    end
+    local NODE_FIELDS = { "condition", "expr", "left", "right",
+                          "base", "value", "amount", "msg", "inner_expr" }
+    for _, field in ipairs(NODE_FIELDS) do
+      _walk(node[field])
+    end
+    if type(node.args) == "table" then
+      for _, a in ipairs(node.args) do _walk(a) end
+    end
+  end
 
   for _, node in ipairs(program.decls) do
     if node.kind == k.FN_DECL then
       for _, stmt in ipairs(node.body or {}) do
-        walk_boundary(stmt, path_map, symtab_data, acc)
+        _walk(stmt)
       end
     elseif node.kind == k.SCENE_DECL then
       for _, stmt in ipairs(node.body or {}) do
-        walk_boundary(stmt, path_map, symtab_data, acc)
+        _walk(stmt)
       end
       for _, choice in ipairs(node.choices or {}) do
         if choice.guard then
-          walk_boundary(choice.guard, path_map, symtab_data, acc)
+          _walk(choice.guard)
         end
         for _, stmt in ipairs(choice.body or {}) do
-          walk_boundary(stmt, path_map, symtab_data, acc)
+          _walk(stmt)
         end
       end
     end
