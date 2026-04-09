@@ -645,6 +645,11 @@ local BUILTINS = {
   ["random-int"] = function(args, ctx)
     local lo = eval_expr(args[1], ctx) or 0
     local hi = eval_expr(args[2], ctx) or 0
+    -- Allow search engine to inject deterministic outcomes for branching
+    if ctx.game and ctx.game._random_inject then
+      local v = ctx.game._random_inject(lo, hi)
+      if v ~= nil then return v end
+    end
     return math.random(lo, hi)
   end,
   ["tostring"] = function(args, ctx)
@@ -755,7 +760,7 @@ local BUILTINS = {
       end
     end
 
-    -- Snapshot current state
+    -- Snapshot current state (cache + time axes)
     local cache = {}
     for k, v in pairs(ctx.state._cache) do
       if type(v) == "table" then
@@ -765,6 +770,9 @@ local BUILTINS = {
       else
         cache[k] = v
       end
+    end
+    for axis, val in pairs(ctx.state._time or {}) do
+      cache["__time/" .. axis] = val
     end
 
     -- Scene stack: from ctx if available, otherwise use entry scene
@@ -780,7 +788,9 @@ local BUILTINS = {
     local function condition_fn(snap_cache)
       local l          = log_mod.new()
       local fake_state = state_mod.new(ctx.game.schema or {}, l)
-      for k, v in pairs(snap_cache) do fake_state._cache[k] = v end
+      for k, v in pairs(snap_cache) do
+        if not k:match("^__time/") then fake_state._cache[k] = v end
+      end
       local fake_ctx = {
         state    = fake_state,
         fns      = ctx.fns,
@@ -835,6 +845,9 @@ local BUILTINS = {
         cache[k] = v
       end
     end
+    for axis, val in pairs(ctx.state._time or {}) do
+      cache["__time/" .. axis] = val
+    end
 
     local stack = ctx.scene_stack
     if not stack then
@@ -847,7 +860,9 @@ local BUILTINS = {
     local function condition_fn(snap_cache)
       local l          = log_mod.new()
       local fake_state = state_mod.new(ctx.game.schema or {}, l)
-      for k, v in pairs(snap_cache) do fake_state._cache[k] = v end
+      for k, v in pairs(snap_cache) do
+        if not k:match("^__time/") then fake_state._cache[k] = v end
+      end
       local fake_ctx = {
         state    = fake_state,
         fns      = ctx.fns,
@@ -884,11 +899,12 @@ local BUILTINS = {
         local d = eval_expr(a.value, ctx); if type(d) == "number" then depth = d end
       end
     end
-    -- Build initial BFS snapshot
+    -- Build initial BFS snapshot (cache + time axes)
     local cache = {}
     for k, v in pairs(ctx.state._cache) do
       cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
     end
+    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}
@@ -897,7 +913,7 @@ local BUILTINS = {
     local function negated_fn(snap)
       local l = log_mod.new()
       local fs = state_mod.new(ctx.game.schema or {}, l)
-      for k, v in pairs(snap) do fs._cache[k] = v end
+      for k, v in pairs(snap) do if not k:match("^__time/") then fs._cache[k] = v end end
       local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="verify-always", signal=nil, retval=nil, game=ctx.game }
       local ok, result = pcall(eval_expr, cond_expr, fc)
       return ok and not result  -- negated: looking for states where cond is FALSE
@@ -926,6 +942,7 @@ local BUILTINS = {
     for k, v in pairs(ctx.state._cache) do
       cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
     end
+    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}
@@ -933,7 +950,7 @@ local BUILTINS = {
     local function condition_fn(snap)
       local l = log_mod.new()
       local fs = state_mod.new(ctx.game.schema or {}, l)
-      for k, v in pairs(snap) do fs._cache[k] = v end
+      for k, v in pairs(snap) do if not k:match("^__time/") then fs._cache[k] = v end end
       local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="probability", signal=nil, retval=nil, game=ctx.game }
       local ok, result = pcall(eval_expr, cond_expr, fc)
       return ok and result
@@ -962,6 +979,7 @@ local BUILTINS = {
     for k, v in pairs(ctx.state._cache) do
       cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
     end
+    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}
@@ -969,7 +987,7 @@ local BUILTINS = {
     local function condition_fn(snap)
       local l = log_mod.new()
       local fs = state_mod.new(ctx.game.schema or {}, l)
-      for k, v in pairs(snap) do fs._cache[k] = v end
+      for k, v in pairs(snap) do if not k:match("^__time/") then fs._cache[k] = v end end
       local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="optimal-path", signal=nil, retval=nil, game=ctx.game }
       local ok, result = pcall(eval_expr, cond_expr, fc)
       return ok and result
@@ -979,7 +997,7 @@ local BUILTINS = {
       cost_fn = function(snap)
         local l = log_mod.new()
         local fs = state_mod.new(ctx.game.schema or {}, l)
-        for k, v in pairs(snap) do fs._cache[k] = v end
+        for k, v in pairs(snap) do if not k:match("^__time/") then fs._cache[k] = v end end
         local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="optimal-path-cost", signal=nil, retval=nil, game=ctx.game }
         local ok, result = pcall(eval_expr, by_expr, fc)
         return (ok and type(result) == "number") and result or 1
@@ -1010,6 +1028,7 @@ local BUILTINS = {
     for k, v in pairs(ctx.state._cache) do
       cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
     end
+    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}
@@ -1019,7 +1038,7 @@ local BUILTINS = {
     local function violation_fn(snap)
       local l = log_mod.new()
       local fs = state_mod.new(ctx.game.schema or {}, l)
-      for k, v in pairs(snap) do fs._cache[k] = v end
+      for k, v in pairs(snap) do if not k:match("^__time/") then fs._cache[k] = v end end
       local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="find-counterexample", signal=nil, retval=nil, game=ctx.game }
       local ok, result = pcall(eval_expr, cond_expr, fc)
       if ok and not result then

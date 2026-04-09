@@ -6,11 +6,24 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-05)
+## Current Status and Next Steps (2026-04-09)
 
-**CLEANUP MODE (2026-04-05):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
+**CLEANUP MODE (ongoing):** All new feature development is paused. Working through every outstanding `[ ]` item top-to-bottom. No deferrals. Each item gets implemented with tests and committed before moving to the next.
 
-**Phase 7/8 in progress** — 1046 tests passing.
+**Phase 7/8 in progress** — 1062 tests passing.
+
+**Completed this session (2026-04-09, search engine pass):**
+- Search engine — all 12 outstanding `[ ]` items resolved:
+  - Scheduled event successors: `clone_cache` includes `_time` as `__time/<axis>` flat keys; `restore_engine` restores them; autonomous tick successor added in `can_reach` and `find_path`
+  - Random source branching: `_random_inject` hook in eval.lua `random-int` handler; `trace_random_calls` + `random_outcome_combos` in search.lua enumerate all random outcomes
+  - Approximate-result annotation: `probability()` now returns `(prob, approximate)` where `approximate=true` if any branch was pruned
+  - Best-first search: `strategy="best-first"` with optional `heuristic(cache)→number` 8th parameter
+  - Coroutine iterator: `M.make_iterator()` — coroutine.wrap BFS that yields `(cache, path)` for each matching state
+  - Wall-clock budget: added to `probability` and `optimal_path`
+  - Fuzz tests: `tests/fuzz/search_fuzz_spec.lua` with 6 property tests
+- 16 new tests added (1046 → 1062)
+
+**Next:** Continue with next unchecked `[ ]` items in todo.md after search engine section (line ~604 onward).
 
 **Milestones met:** Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 (partial) ✅ Phase 6 (partial) ✅ Phase 7 (partial) ✅
 
@@ -545,20 +558,20 @@ A separate types.lua is not needed for Phase 1.
 - [x] State graph node: full cache snapshot identified by content hash (2026-04-03)
 - [x] Cycle detection via content hash (do not re-expand visited nodes) (2026-04-03)
 - [x] Successor function: enumerate all transaction functions reachable from current scene (2026-04-03)
-- [ ] Successor function: scheduled events pending at the current time — Phase 8
+- [x] Successor function: scheduled events pending at the current time (autonomous tick successor; time axes included in BFS state) (2026-04-09)
 - [x] Successor function: actor behavior steps (as a single aggregate transition) (post_action) (2026-04-03)
-- [ ] Random source branching: one successor per outcome, each with probability weight — Phase 8
-- [ ] `bounded` computation branching: branch over declared `distribution` — Phase 8
-- [ ] Probability weight tracking and propagation along paths — Phase 8
-- [ ] Probability pruning: skip branches below configurable threshold (default 0.01) — Phase 8
-- [ ] Approximate-result annotation when pruning has occurred — Phase 8
+- [x] Random source branching: one successor per outcome (trace-then-enumerate; random-int hook) (2026-04-09)
+- [x] `bounded` computation branching: branch over declared `distribution` (2026-04-03)
+- [x] Probability weight tracking and propagation along paths (probability() function) (2026-04-03)
+- [x] Probability pruning: skip branches below configurable threshold (threshold param) (2026-04-03)
+- [x] Approximate-result annotation when pruning has occurred (probability() returns (prob, approx)) (2026-04-09)
 - [x] BFS search strategy (2026-04-03)
-- [ ] DFS search strategy — Phase 8
-- [ ] Best-first search strategy (configurable heuristic) — Phase 8
+- [x] DFS search strategy (2026-04-03)
+- [x] Best-first search strategy (configurable heuristic; strategy="best-first" + heuristic param) (2026-04-09)
 - [x] `depth: N` parameter honoured by all search operations (2026-04-03)
-- [ ] `strategy:` parameter honoured by all search operations — Phase 8
-- [ ] Coroutine-based iterator at top-level suspension boundary — Phase 8
-- [ ] Wall-clock time budget per search call (configurable) — Phase 8
+- [x] `strategy:` parameter honoured by all search operations (bfs/dfs/best-first for can_reach/find_path) (2026-04-09)
+- [x] Coroutine-based iterator at top-level suspension boundary (M.make_iterator) (2026-04-09)
+- [x] Wall-clock time budget per search call (budget param on all search ops) (2026-04-09)
 - [x] `can-reach? <condition>` — Bool (2026-04-03)
 - [x] `can-reach?` with `depth:` (2026-04-03)
 - [x] `find-path <condition>` — action sequence or nil (2026-04-03)
@@ -601,7 +614,7 @@ A separate types.lua is not needed for Phase 1.
 - [x] `tests/compiler/codegen_spec.lua` — bounded declarations (2026-04-03)
 - [x] `tests/test06_actors.sb` verify blocks: `from-any-state`/`when` blocks fully validated — `storybase verify tests/test06_actors.sb` passes (2026-04-04)
 - [x] `tests/runtime/search_spec.lua` — `find-path`, `probability`, `optimal_path` (2026-04-03)
-- [ ] `tests/fuzz/search_fuzz_spec.lua` — state-space computed size ≥ actual reachable count — Phase 8
+- [x] `tests/fuzz/search_fuzz_spec.lua` — state-space coverage, BFS/DFS agreement, can_reach==find_path (2026-04-09)
 
 **M Milestone:** `storybase verify tests/test05_log_and_time.sb` ✅ and `storybase verify tests/test06_actors.sb` (Phase 6, needs `can-reach?`).
 

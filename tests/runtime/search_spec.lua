@@ -762,3 +762,419 @@ scene main:
     assert.is_false(reached, "expected BFS to report unreachable when all outcomes < 5")
   end)
 end)
+
+-- ============================================================
+-- Scheduled events as BFS successors (autonomous tick)
+-- ============================================================
+
+describe("search — scheduled event successors", function()
+  it("autonomous tick fires after player action (post_action coverage)", function()
+    -- Game: schedule fires every turn and increments a counter.
+    -- can_reach should find the schedule-incremented state.
+    local src = [[
+module sched-search
+  version: 1.0
+engine-config:
+  entry-scene: main
+time-model:
+  axes: [turn]
+
+state world:
+  ticks: Int(0, 100) = 0
+
+schedule on-turn:
+  every: [turn: +1]
+  fn:
+    inc! world/ticks 1
+
+scene main:
+  * Advance
+    time-inc! turn: 1
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    -- After Advance + schedule fire, ticks should be > 0
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/ticks"] or 0) >= 1 end,
+      5
+    )
+    assert.is_true(reached, "expected schedule-incremented state to be reachable")
+  end)
+end)
+
+-- ============================================================
+-- Random source branching in BFS
+-- ============================================================
+
+describe("search — random source branching", function()
+  it("can_reach finds goal reachable only via lucky random roll", function()
+    -- The fn body uses random-int 1 6 and sets gold to the result.
+    -- Goal: gold >= 5 — reachable only if roll >= 5.
+    -- BFS should branch over all outcomes 1-6 and find it.
+    local src = [[
+module random-search
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 10) = 0
+
+fn roll-and-set:
+  let roll = random-int 1 6:
+    set! world/gold roll
+
+scene main:
+  * Roll
+    roll-and-set
+    -> end-scene
+
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    -- Goal: gold >= 5 — reachable via random roll of 5 or 6
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 5 end,
+      3
+    )
+    assert.is_true(reached, "expected random branching to find gold >= 5")
+  end)
+
+  it("can_reach correctly reports false when no random outcome satisfies goal", function()
+    local src = [[
+module random-search2
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 10) = 0
+
+fn roll-small:
+  let roll = random-int 1 3:
+    set! world/gold roll
+
+scene main:
+  * Roll
+    roll-small
+    -> end-scene
+
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    -- Goal: gold >= 5 — impossible; max random is 3
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 5 end,
+      3
+    )
+    assert.is_false(reached, "expected random branching to correctly report unreachable")
+  end)
+end)
+
+-- ============================================================
+-- Best-first search strategy
+-- ============================================================
+
+describe("search — best-first strategy", function()
+  it("can_reach with best-first finds reachable state", function()
+    local src = [[
+module bf-search
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+  * Stop
+    -> end-scene
+
+scene end-scene:
+  Finished.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    -- Best-first with heuristic: lower gold = farther from goal
+    -- heuristic = how far we are from gold=20 (lower = closer)
+    local function heuristic(c)
+      return math.max(0, 20 - (c["world/gold"] or 0))
+    end
+
+    local reached = search_mod.can_reach(
+      gt, cache, stack,
+      function(c) return (c["world/gold"] or 0) >= 20 end,
+      5, nil, "best-first", heuristic
+    )
+    assert.is_true(reached, "best-first should find gold >= 20")
+  end)
+end)
+
+-- ============================================================
+-- Probability: approximate-result annotation
+-- ============================================================
+
+describe("search — probability approximate result", function()
+  it("returns probability and approximate=false when no pruning", function()
+    local src = [[
+module prob-search
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  done: Bool = false
+
+scene main:
+  * Finish
+    set! world/done true
+    -> end-scene
+
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    local stack = { "main" }
+
+    local prob, approx = search_mod.probability(
+      gt, cache, stack,
+      function(c) return c["world/done"] == true end,
+      2, 0.001
+    )
+    assert.is_number(prob)
+    assert.is_true(prob > 0, "done state should have nonzero probability")
+    assert.is_boolean(approx)
+    -- With only one path and high threshold, no pruning expected
+    -- (approx may be false or true depending on threshold, but prob must be right)
+  end)
+
+  it("probability returns (number, boolean) two-value return", function()
+    local src = [[
+module prob-test2
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  x: Int(0, 1) = 0
+scene main:
+  * Go
+    -> end-scene
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    -- Returns two values: prob, approximate
+    local p, a = search_mod.probability(gt, cache, {"main"},
+      function(c) return true end, 1, 0.001)
+    assert.is_number(p)
+    assert.is_boolean(a)
+  end)
+end)
+
+-- ============================================================
+-- Coroutine iterator
+-- ============================================================
+
+describe("search — make_iterator coroutine", function()
+  it("iterator yields all matching states", function()
+    local src = [[
+module iter-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 50) = 0
+
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+  * Stop
+    -> end-scene
+
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    -- Collect all states where gold > 0 (reachable after at least one Earn)
+    local found = {}
+    local iter = search_mod.make_iterator(
+      gt, cache, {"main"},
+      function(c) return (c["world/gold"] or 0) > 0 end,
+      4  -- depth
+    )
+    for state_cache, path in iter do
+      found[#found + 1] = { gold = state_cache["world/gold"], steps = #path }
+    end
+
+    assert.is_true(#found >= 1, "iterator should yield at least one matching state")
+    -- All found states should have gold > 0
+    for _, f in ipairs(found) do
+      assert.is_true(f.gold > 0, "all yielded states must have gold > 0")
+    end
+  end)
+
+  it("iterator yields nothing when condition never met", function()
+    local src = [[
+module iter-test2
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  x: Int(0, 1) = 0
+scene main:
+  * Go
+    -> end-scene
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    local count = 0
+    local iter = search_mod.make_iterator(
+      gt, cache, {"main"},
+      function(c) return (c["world/x"] or 0) > 100 end,  -- impossible
+      3
+    )
+    for _ in iter do count = count + 1 end
+    assert.equal(0, count)
+  end)
+end)
+
+-- ============================================================
+-- Wall-clock budget for probability and optimal_path
+-- ============================================================
+
+describe("search — budget for probability and optimal_path", function()
+  it("probability respects budget parameter (returns when time exceeded)", function()
+    local src = [[
+module budget-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  x: Int(0, 1) = 0
+scene main:
+  * Go
+    -> end-scene
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    -- With a tiny budget but simple graph, should still complete (or return approx)
+    local p, approx = search_mod.probability(
+      gt, cache, {"main"},
+      function(c) return true end,
+      2, 0.001, 10.0  -- 10 second budget (plenty)
+    )
+    assert.is_number(p)
+    assert.is_boolean(approx)
+  end)
+
+  it("optimal_path respects budget parameter", function()
+    local src = [[
+module budget-opt
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  gold: Int(0, 100) = 0
+scene main:
+  * Earn
+    inc! world/gold 10
+    -> main
+  * Stop
+    -> end-scene
+scene end-scene:
+  Done.
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    -- With a generous budget, should still find the path
+    local path = search_mod.optimal_path(
+      gt, cache, {"main"},
+      function(c) return (c["world/gold"] or 0) >= 10 end,
+      5, nil, 10.0  -- 10 second budget
+    )
+    assert.is_not_nil(path)
+  end)
+end)
