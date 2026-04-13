@@ -790,3 +790,259 @@ describe("debug: TCP transport", function()
     assert.is_not_nil(resp.entries)
   end)
 end)
+
+-- ============================================================
+-- Hot reload: schema migration
+-- ============================================================
+
+describe("debug: hot reload schema migration", function()
+  local BASE_SRC = [[
+module reload-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type Status = alive | dead
+
+state player:
+  health: Int(0, 100) = 50
+  status: Status      = :alive
+
+scene main:
+  * Go
+    -> main
+]]
+
+  local function make_eng(src)
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, "compile errors: " .. tostring(errs[1] and errs[1].message))
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+    return eng, srv
+  end
+
+  it("reload with same schema returns ok", function()
+    local _, srv = make_eng(BASE_SRC)
+    local resp = srv:handle_command("reload", { src = BASE_SRC })
+    assert.is_true(resp.ok)
+  end)
+
+  it("reload fires 'reload' event", function()
+    local _, srv = make_eng(BASE_SRC)
+    local fired = {}
+    srv:on("reload", function(p) fired[#fired+1] = p end)
+    srv:handle_command("reload", { src = BASE_SRC })
+    assert.equal(1, #fired)
+  end)
+
+  it("reload: enum value removed from Status — error if current value invalid", function()
+    local eng, srv = make_eng(BASE_SRC)
+    -- Set player/status to :alive (valid in old schema, valid in new enum)
+    eng._state._cache["player/status"] = "dead"
+    -- New source removes 'dead' from Status
+    local NEW_SRC = [[
+module reload-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type Status = alive | zombie
+
+state player:
+  health: Int(0, 100) = 50
+  status: Status      = :alive
+
+scene main:
+  * Go
+    -> main
+]]
+    local resp = srv:handle_command("reload", { src = NEW_SRC })
+    assert.is_false(resp.ok, "expected error when enum value is invalid")
+    assert.is_not_nil(resp.error)
+    assert.is_not_nil(resp.error:find("status"))
+  end)
+
+  it("reload: enum value added — current :alive value remains valid", function()
+    local _, srv = make_eng(BASE_SRC)
+    -- New source adds 'zombie' to Status enum
+    local NEW_SRC = [[
+module reload-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type Status = alive | dead | zombie
+
+state player:
+  health: Int(0, 100) = 50
+  status: Status      = :alive
+
+scene main:
+  * Go
+    -> main
+]]
+    local resp = srv:handle_command("reload", { src = NEW_SRC })
+    assert.is_true(resp.ok)
+  end)
+
+  it("reload: new field added to record — does not error", function()
+    local _, srv = make_eng(BASE_SRC)
+    local NEW_SRC = [[
+module reload-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type Status = alive | dead
+
+state player:
+  health: Int(0, 100) = 50
+  status: Status      = :alive
+  mana:   Int(0, 100) = 0
+
+scene main:
+  * Go
+    -> main
+]]
+    local resp = srv:handle_command("reload", { src = NEW_SRC })
+    assert.is_true(resp.ok)
+  end)
+
+  it("reload: removed field dropped silently from cache", function()
+    local eng, srv = make_eng(BASE_SRC)
+    eng._state._cache["player/health"] = 42
+    -- New source drops 'health'
+    local NEW_SRC = [[
+module reload-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type Status = alive | dead
+
+state player:
+  status: Status = :alive
+
+scene main:
+  * Go
+    -> main
+]]
+    local resp = srv:handle_command("reload", { src = NEW_SRC })
+    assert.is_true(resp.ok)
+    assert.is_nil(eng._state._cache["player/health"])
+  end)
+
+  it("reload: Int range narrowed — error if current value out of range", function()
+    local eng, srv = make_eng(BASE_SRC)
+    eng._state._cache["player/health"] = 80
+    -- New source narrows health to Int(0, 50)
+    local NEW_SRC = [[
+module reload-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type Status = alive | dead
+
+state player:
+  health: Int(0, 50) = 25
+  status: Status     = :alive
+
+scene main:
+  * Go
+    -> main
+]]
+    local resp = srv:handle_command("reload", { src = NEW_SRC })
+    assert.is_false(resp.ok)
+    assert.is_not_nil(resp.error)
+  end)
+end)
+
+-- ============================================================
+-- Emitted events: spawn, despawn, message-sent, schedule-fired
+-- ============================================================
+
+describe("debug: emitted events", function()
+  local ACTOR_SRC = [[
+module event-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state npcs/{npc}: Bool = true  max: 10
+
+fn spawn-npc name:
+  spawn! npcs name
+
+fn remove-npc name:
+  despawn! npcs name
+
+scene main:
+  * Go
+    -> main
+]]
+
+  local function make_eng_with_events(src)
+    local gt, errs = compile(src or ACTOR_SRC)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+    return eng, srv
+  end
+
+  it("spawn-event emitted on spawn!", function()
+    local eng, srv = make_eng_with_events()
+    local events = {}
+    srv:on("spawn-event", function(p) events[#events+1] = p end)
+    local ctx = eng:make_ctx("test")
+    eng._state:spawn("npcs", "guard", {}, "test")
+    assert.equal(1, #events)
+    assert.equal("npcs",  events[1].family)
+    assert.equal("guard", events[1].key)
+  end)
+
+  it("despawn-event emitted on despawn!", function()
+    local eng, srv = make_eng_with_events()
+    eng._state:spawn("npcs", "guard", {}, "test")
+    local events = {}
+    srv:on("despawn-event", function(p) events[#events+1] = p end)
+    eng._state:despawn("npcs", "guard", "test")
+    assert.equal(1, #events)
+    assert.equal("npcs",  events[1].family)
+    assert.equal("guard", events[1].key)
+  end)
+
+  it("clamp-event emitted when Int value is clamped", function()
+    local SRC = [[
+module clamp-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  hp: Int(0, 10) = 5
+scene main:
+  * Go -> main
+]]
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local events = {}
+    srv:on("clamp-event", function(p) events[#events+1] = p end)
+    -- Decrement below minimum (0): should clamp
+    eng._state:dec("world/hp", 100, "test")
+    assert.equal(1, #events)
+    assert.equal("world/hp", events[1].path)
+    assert.equal(0, events[1].clamped)
+  end)
+end)

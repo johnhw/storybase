@@ -269,11 +269,165 @@ function M.new(engine, opts)
         return { ok = false, error = tostring(new_gt) }
       end
 
+      -- Schema migration: apply field additions, removals, type changes
+      -- transactionally (collect all changes, then apply or error).
+      local old_schema = eng._game and eng._game.schema or {}
+      local new_schema = new_gt.schema or {}
+      local changes = {}
+      local schema_errors = {}
+
+      -- Build old and new state path info
+      local function build_state_map(schema)
+        local m = {}
+        for _, s in ipairs(schema.states or {}) do
+          if s.kind == "scalar" then
+            m[s.path] = { kind = "scalar", type_desc = s.type_desc, default = s.default }
+          elseif s.kind == "record" then
+            for _, f in ipairs(s.fields or {}) do
+              if f.name then
+                m[s.path .. "/" .. f.name] = { kind = "field", type_desc = f.type_desc, default = f.default }
+              end
+            end
+          elseif s.kind == "family" then
+            -- Store family type for per-member field checks
+            m["__family__" .. s.family] = { kind = "family", type_desc = s.type_desc, fields = s.fields or {} }
+          end
+        end
+        return m
+      end
+
+      local old_map = build_state_map(old_schema)
+      local new_map = build_state_map(new_schema)
+
+      local function resolve_default(d)
+        if not d then return nil end
+        if d.tag == "int" or d.tag == "float" or d.tag == "bool" or d.tag == "string" then
+          return d.value
+        elseif d.tag == "symbol" then return d.name
+        elseif d.tag == "empty_set" or d.tag == "empty_list" or d.tag == "empty_map" then
+          return {}
+        end
+        return nil
+      end
+
+      -- Build name → type_def lookup from new schema types
+      local new_type_defs = {}
+      for _, t in ipairs(new_schema.types or {}) do
+        if t.name then new_type_defs[t.name] = t end
+      end
+
+      -- Resolve a type descriptor (follow named references)
+      local function resolve_td(td)
+        if not td then return nil end
+        if td.tag == "named" then return new_type_defs[td.name] end
+        return td
+      end
+
+      -- Validate current values against new schema
+      local cache = eng._state and eng._state._cache or {}
+      for path, cur_val in pairs(cache) do
+        local ni = new_map[path]
+        if ni then
+          local td = resolve_td(ni.type_desc)
+          -- Range narrowing: Int type range check
+          if td and td.tag == "int" and type(cur_val) == "number" then
+            if (td.min and cur_val < td.min) or (td.max and cur_val > td.max) then
+              schema_errors[#schema_errors+1] = string.format(
+                "path %s value %s out of new range [%s, %s]",
+                path, tostring(cur_val), tostring(td.min), tostring(td.max))
+            end
+          end
+          -- Enum validation: named enum check
+          if td and td.kind == "enum" and type(cur_val) == "string" then
+            local valid = false
+            for _, v in ipairs(td.values or {}) do
+              if v == cur_val then valid = true; break end
+            end
+            if not valid then
+              schema_errors[#schema_errors+1] = string.format(
+                "path %s value '%s' not valid in new enum", path, cur_val)
+            end
+          end
+        end
+      end
+
+      if #schema_errors > 0 then
+        return { ok = false, error = table.concat(schema_errors, "; ") }
+      end
+
+      -- Build list of transactional cache changes
+      -- New fields: initialise with default
+      for path, ni in pairs(new_map) do
+        if ni.kind ~= "family" and not old_map[path] then
+          local def_val = resolve_default(ni.default)
+          if def_val ~= nil then
+            changes[#changes+1] = { op = "set", path = path, value = def_val }
+          end
+        end
+      end
+      -- New family fields: find all existing member instances and init
+      for fname, ni in pairs(new_map) do
+        if ni.kind == "family" then
+          local old_fi = old_map[fname]
+          local old_fields = {}
+          for _, f in ipairs(old_fi and old_fi.fields or {}) do
+            old_fields[f.name] = true
+          end
+          for _, f in ipairs(ni.fields or {}) do
+            if f.name and not old_fields[f.name] then
+              -- New field for this family; apply to all current instances
+              local family = fname:sub(#"__family__" + 1)
+              local prefix = family .. "/"
+              local seen_keys = {}
+              for p in pairs(cache) do
+                if p:sub(1, #prefix) == prefix then
+                  local rest = p:sub(#prefix + 1)
+                  local key  = rest:match("^([^/]+)")
+                  if key and not seen_keys[key] then
+                    seen_keys[key] = true
+                    local field_path = family .. "/" .. key .. "/" .. f.name
+                    if cache[field_path] == nil then
+                      local def_val = resolve_default(f.default)
+                      if def_val ~= nil then
+                        changes[#changes+1] = { op = "set", path = field_path, value = def_val }
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      -- Removed fields: drop silently
+      for path, _ in pairs(old_map) do
+        if old_map[path].kind ~= "family" and not new_map[path] then
+          if cache[path] ~= nil then
+            changes[#changes+1] = { op = "drop", path = path }
+          end
+        end
+      end
+
+      -- Apply all changes atomically
+      for _, ch in ipairs(changes) do
+        if ch.op == "set" then
+          eng._state._cache[ch.path] = ch.value
+        elseif ch.op == "drop" then
+          eng._state._cache[ch.path] = nil
+        end
+      end
+
       -- Hot-reload: update fns and scenes in place, preserve state
       eng._fns   = new_gt.fns   or {}
       eng._scenes = new_gt.scenes or {}
       eng._game  = new_gt
-      return { ok = true }
+
+      local tick = eng._state and eng._state._time and eng._state._time.tick or 0
+      local outcome = #changes > 0 and "migrated" or "unchanged"
+      -- Emit reload event
+      srv:emit("reload", { file = payload.file, outcome = outcome,
+                            changes = #changes, tick = tick })
+      return { ok = true, outcome = outcome, changes = #changes }
 
     else
       return { error = "unknown command: " .. tostring(cmd) }

@@ -119,6 +119,7 @@ local function child_ctx(parent, fn_name)
     actors    = parent.actors,     -- propagate actor registry for send!
     scheduler = parent.scheduler,  -- propagate scheduler for cancel-schedule!
     game      = parent.game,       -- propagate compiled game table
+    debug     = parent.debug,      -- propagate debug server for event emission
     scene_stack = parent.scene_stack,
     counterfactual_depth = parent.counterfactual_depth,  -- propagate nesting depth
   }
@@ -1151,6 +1152,14 @@ call_fn = function(name, args, ctx)
     ctx.state:push_checkpoint(name)
   end
 
+  -- Emit fn-call debug event (dev mode only)
+  if ctx.debug and not (ctx.game and ctx.game.production) then
+    local tick = ctx.state and ctx.state._time and ctx.state._time.tick or 0
+    pcall(function()
+      ctx.debug:emit("fn-call", { name = name, args = arg_vals, tick = tick })
+    end)
+  end
+
   -- Execute body
   eval_stmts(fn.body, sub)
 
@@ -1333,6 +1342,12 @@ eval_stmt = function(node, ctx)
     local msg = eval_expr(node.msg, ctx)
     if ctx.actors then
       ctx.actors:send(actor_name, msg)
+    end
+    if ctx.debug then
+      local tick = ctx.state and ctx.state._time and ctx.state._time.tick or 0
+      pcall(function()
+        ctx.debug:emit("message-sent", { actor = actor_name, msg = msg, tick = tick })
+      end)
     end
 
   elseif k == K.CANCEL_SCHEDULE_MUT then

@@ -204,6 +204,7 @@ function M.new(game_table, opts)
     local ctx       = eval.new_ctx(self._state, self._fns, fn_name, self._game)
     ctx.actors      = self._actors
     ctx.scheduler   = self._scheduler
+    ctx.debug       = self._debug   -- may be nil (no debug server attached)
     return ctx
   end
 
@@ -390,6 +391,19 @@ function M.new(game_table, opts)
       srv:emit("clamp-event", { path = path, attempted = attempted,
                                  clamped = clamped, fn = fn_name, tick = tick })
     end
+    -- Wire spawn/despawn events through state store
+    self._state._spawn_hook = function(family, key, init, fn_name)
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      srv:emit("spawn-event", { family = family, key = key, init = init,
+                                 fn = fn_name, tick = tick })
+    end
+    self._state._despawn_hook = function(family, key, fn_name)
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      srv:emit("despawn-event", { family = family, key = key,
+                                   fn = fn_name, tick = tick })
+    end
+    -- Wire schedule-fired events through the scheduler
+    self._scheduler._debug_server = srv
   end
 
   --- Run post-action phases (steps 2–6 of the turn lifecycle).

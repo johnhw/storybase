@@ -140,6 +140,13 @@ function M.new(state, log)
             fired_axes    = fired_now,
           })
         end
+        -- Emit debug event if server is attached
+        if self._debug_server then
+          local tick = self._state:get_time().tick or 0
+          pcall(function()
+            self._debug_server:emit("schedule-fired", { name = name, tick = tick })
+          end)
+        end
         local ctx    = eval.new_ctx(self._state, fns, "schedule:" .. name)
         local ok, _err = pcall(eval.eval_stmts, ss.body, ctx)
         local _ = ok  -- result unused; errors are silent

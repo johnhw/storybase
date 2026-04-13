@@ -394,3 +394,96 @@ scene done:
     end)
   end)
 end)
+
+-- ── game:register_bounded ─────────────────────────────────────────────────────
+
+describe("game:register_bounded", function()
+  local BOUNDED_SRC = [[
+module bounded-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+
+state world:
+  luck: Int(0, 100) = 50
+
+bounded roll-die:
+  reads: [world/luck]
+
+fn apply-roll:
+  let result = roll-die
+  set! world/luck result
+
+scene main:
+  * Roll
+    apply-roll
+    -> main
+]]
+
+  local function make_bounded()
+    local g = sb.from_source(BOUNDED_SRC, "bounded-test")
+    assert.is_not_nil(g)
+    return g
+  end
+
+  it("register_bounded stores handler before init", function()
+    local g = make_bounded()
+    g:register_bounded("roll-die", function(_, _) return 42 end)
+    g:init()
+    g:call("apply-roll")
+    assert.equal(42, g:get("world/luck"))
+  end)
+
+  it("register_bounded stores handler after init", function()
+    local g = make_bounded()
+    g:init()
+    g:register_bounded("roll-die", function(_, _) return 77 end)
+    g:call("apply-roll")
+    assert.equal(77, g:get("world/luck"))
+  end)
+
+  it("handler receives state snapshot of declared reads", function()
+    local g = make_bounded()
+    local received_snap = nil
+    g:register_bounded("roll-die", function(_, snap)
+      received_snap = snap
+      return snap["world/luck"] or 0
+    end)
+    g:init()
+    g:call("apply-roll")
+    assert.is_not_nil(received_snap)
+    assert.is_not_nil(received_snap["world/luck"])
+  end)
+
+  it("multiple bounded handlers can coexist", function()
+    -- Register two different bounded computations in one game
+    local SRC2 = [[
+module multi-bounded
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  a: Int(0, 100) = 10
+  b: Int(0, 100) = 20
+bounded get-a:
+  reads: [world/a]
+bounded get-b:
+  reads: [world/b]
+fn apply-both:
+  set! world/a get-a
+  set! world/b get-b
+scene main:
+  * Go -> main
+]]
+    local g = sb.from_source(SRC2, "multi-bounded")
+    assert.is_not_nil(g)
+    g:register_bounded("get-a", function(_, _) return 99 end)
+    g:register_bounded("get-b", function(_, _) return 88 end)
+    g:init()
+    g:call("apply-both")
+    assert.equal(99, g:get("world/a"))
+    assert.equal(88, g:get("world/b"))
+  end)
+end)

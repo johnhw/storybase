@@ -495,7 +495,10 @@ end
 
 --- Emit the fns table: name → fn descriptor with params, pre, post, body, is_transaction.
 --- The body/pre/post fields are AST node trees that the runtime evaluator interprets.
-local function emit_fns(decls)
+--- When opts.production is true (and opts.strict_contracts is not), pre/post are stripped.
+local function emit_fns(decls, opts)
+  opts = opts or {}
+  local strip_contracts = opts.production and not opts.strict_contracts
   local fns = {}
   local k = ast.K
   for _, node in ipairs(decls) do
@@ -503,8 +506,8 @@ local function emit_fns(decls)
       fns[node.name] = {
         name           = node.name,
         params         = node.params or {},
-        pre            = node.pre or {},
-        post           = node.post or {},
+        pre            = strip_contracts and {} or (node.pre or {}),
+        post           = strip_contracts and {} or (node.post or {}),
         tags           = node.tags or {},
         body           = node.body or {},
         is_transaction = node.is_transaction or false,
@@ -723,7 +726,7 @@ function M.emit(typed_ast, opts)
       engine_config    = eng_cfg,
       time_model       = time_mdl,
     },
-    fns        = emit_fns(decls),
+    fns        = emit_fns(decls, opts),
     scenes     = emit_scenes(decls),
     actors     = emit_actors(decls),
     schedules  = emit_schedules(decls),

@@ -513,6 +513,12 @@ function M.new(schema, log)
       self._cache[sentinel] = true
       _log_entry(self, sentinel, nil, true, fn)
     end
+    -- Optional debug spawn hook
+    if self._spawn_hook then
+      local init_rec = {}
+      for field, val in pairs(rec) do init_rec[field] = val end
+      pcall(self._spawn_hook, family, key_str, init_rec, fn)
+    end
   end
 
   --- Remove a family member and all its paths.
@@ -533,6 +539,10 @@ function M.new(schema, log)
       local old = self._cache[p]
       self._cache[p] = nil
       _log_entry(self, p, old, nil, fn)
+    end
+    -- Optional debug despawn hook
+    if self._despawn_hook then
+      pcall(self._despawn_hook, family, key_str, fn)
     end
   end
 

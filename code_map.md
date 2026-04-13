@@ -194,6 +194,8 @@ store:init_defaults()            -- apply schema defaults to cache
 - `store._cache` — flat `{[path]=value}` table (read directly by search/verify BFS)
 - `store._log` — transaction log object
 - `store._clamp_hook` — optional `function(path, attempted, clamped, fn_name)` called on clamp
+- `store._spawn_hook` — optional `function(family, key, init, fn_name)` called after spawn
+- `store._despawn_hook` — optional `function(family, key, fn_name)` called after despawn
 
 ---
 
@@ -221,6 +223,7 @@ ctx = {
   retval           = nil,
   before_snapshot  = nil,         -- set during verify after-check
   scene_stack      = {},          -- used by search builtins
+  debug            = srv?,        -- debug server (nil in production/non-debug)
 }
 ```
 
@@ -379,8 +382,9 @@ srv:check_watches()                  -- evaluate watch conditions, emit "watch-t
 srv:handle_command(cmd, payload)     -- dispatch incoming command (e.g. "get-state", "undo")
 ```
 
-**Built-in events:** `state-changed`, `watch-triggered`, `clamp-event`, `scene-entered`, `choice-made`  
-**Commands (from client):** `get-state`, `get-log`, `undo`, `set-watch`, `eval`
+**Built-in events:** `mutation`, `scene-change`, `clamp-event`, `spawn-event`, `despawn-event`, `message-sent`, `schedule-fired`, `fn-call`, `reload`, `watch-fired`
+**Commands (from client):** `get-state`, `eval`, `get-log`, `time-travel`, `set-breakpoint`, `clear-breakpoint`, `reload`
+**Hot reload schema migration:** `reload` command validates Int range, enum values, adds new fields, drops removed fields atomically
 
 ---
 
@@ -507,11 +511,14 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/log_spec.lua` | Log append, query, serialise/deserialise, query_at |
 | `tests/runtime/query_spec.lua` | Relation queries |
 | `tests/runtime/counterfactual_spec.lua` | Counterfactual branching |
-| `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec |
+| `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec; hot reload schema migration; spawn/despawn events |
 | `tests/runtime/migrate_spec.lua` | Migration runner |
 | `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |
 | `tests/cli/compact_spec.lua` | compact CLI command |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
+| `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
+| `tests/fuzz/log_fuzz_spec.lua` | Property test: log serialise/deserialise round-trip; replay determinism |
+| `tests/fuzz/perf_benchmark_spec.lua` | Performance benchmark: can_reach depth=50, probability, find_path |
 
 Run all tests: `busted tests/`
 
