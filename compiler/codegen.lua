@@ -632,6 +632,24 @@ local function emit_bounded(decls)
   return bounded
 end
 
+--- Emit defgrid declarations into game_table.grids.
+--- Returns a name-keyed table of grid descriptors.
+local function emit_grids(decls)
+  local grids = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.DEFGRID_DECL then
+      grids[node.name] = {
+        name        = node.name,
+        width       = node.width  or 0,
+        height      = node.height or 0,
+        cell_type   = node.cell_type,
+        default_val = node.default_val,
+      }
+    end
+  end
+  return grids
+end
+
 local function emit_migrations(decls)
   local migrations = {}
   for _, node in ipairs(decls) do
@@ -736,6 +754,7 @@ function M.emit(typed_ast, opts)
     watches    = opts.production and {} or emit_watches(decls),
     migrations = emit_migrations(decls),
     bounded    = emit_bounded(decls),
+    grids      = emit_grids(decls),
     production = opts.production or false,
   }
 

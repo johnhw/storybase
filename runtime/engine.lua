@@ -12,11 +12,12 @@
 -- Phase 3: steps 1 and 6 (player action + time tick) are implemented.
 -- Steps 2-5 are deferred to later phases.
 
-local state_mod  = require("runtime.state")
-local log_mod    = require("runtime.log")
-local eval       = require("runtime.eval")
-local actors_mod = require("runtime.actors")
-local sched_mod  = require("runtime.scheduler")
+local state_mod    = require("runtime.state")
+local log_mod      = require("runtime.log")
+local eval         = require("runtime.eval")
+local actors_mod   = require("runtime.actors")
+local sched_mod    = require("runtime.scheduler")
+local tilegrid_mod = require("runtime.tilegrid")
 
 -- ============================================================
 -- Save / load helpers
@@ -128,6 +129,7 @@ function M.new(game_table, opts)
     _scheduler   = sched,
     _io_out      = opts.io_out or io.stdout,
     _io_in       = opts.io_in  or io.stdin,
+    _grids       = {},  -- name → {cells, width, height, cell_type, default_val}
   }
 
   -- ── Scene stack ─────────────────────────────────────────────
@@ -205,6 +207,7 @@ function M.new(game_table, opts)
     ctx.actors      = self._actors
     ctx.scheduler   = self._scheduler
     ctx.debug       = self._debug   -- may be nil (no debug server attached)
+    ctx.grids       = self._grids   -- tile grid data (may be empty table)
     return ctx
   end
 
@@ -366,12 +369,33 @@ function M.new(game_table, opts)
   function eng:init()
     self._state:init_defaults()
     self:register_actors_schedules()
+    self:init_grids()
 
     local entry = self._game.schema
       and self._game.schema.engine_config
       and self._game.schema.engine_config["entry-scene"]
     if entry then
       self._scene_stack = { entry }
+    end
+  end
+
+  --- Initialise all declared tile grids with their default cell values.
+  --- Called automatically by eng:init().
+  function eng:init_grids()
+    local gdefs = self._game.grids or {}
+    for name, gdef in pairs(gdefs) do
+      local w   = gdef.width  or 0
+      local h   = gdef.height or 0
+      local def = gdef.default_val
+      if w > 0 and h > 0 then
+        self._grids[name] = {
+          cells       = tilegrid_mod.new(w, h, def),
+          width       = w,
+          height      = h,
+          cell_type   = gdef.cell_type,
+          default_val = def,
+        }
+      end
     end
   end
 

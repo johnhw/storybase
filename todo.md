@@ -6,9 +6,31 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-09)
+## Current Status and Next Steps (2026-04-13)
 
-**Phase 8 COMPLETE** — 1105 tests passing. All Phase 7 deferred items and Phase 8 items are done.
+**Tile Grid Extension COMPLETE** — 1214 tests passing.
+
+**Completed this session (2026-04-13):**
+- `runtime/tilegrid.lua` — new module: storage helpers (new, idx, in_bounds, get, set),
+  `within_range` (chebyshev/manhattan/euclidean), `visible_from` (float-step raycasting),
+  `find_path` (A* with min-heap, 4/8-directional, configurable blocked set),
+  `occupied_by` (entity family position lookup)
+- Compiler pipeline wired for `defgrid` declarations:
+  - `ast.lua` — `defgrid_decl` constructor added
+  - `parser.lua` — `parse_defgrid_decl`, dispatched from IDENT branch
+  - `checker.lua` — duplicate detection, dimension/cell-type validation; `symtab.grids` added
+  - `codegen.lua` — `emit_grids` → `game_table.grids`
+- Engine integration:
+  - `engine.lua` — `_grids` field, `init_grids()`, grids exposed in `make_ctx()` as `ctx.grids`
+- Eval builtins: `grid-get`, `grid-set!`, `grid-width`, `grid-height`, `within-range?`,
+  `visible-from?` (with `solid:` named arg), `path-to` (with `blocked:` / `diag:` named args),
+  `occupied-by`
+- Tests:
+  - `tests/runtime/tilegrid_spec.lua` — 83 unit tests covering all algorithms
+  - `tests/compiler/defgrid_spec.lua` — 26 tests covering parser, checker, codegen, engine integration
+
+**Previously COMPLETE (2026-04-09):**
+Phase 8 COMPLETE — 1105 tests passing. All Phase 7 deferred items and Phase 8 items are done.
 
 **Completed this session (2026-04-09, Phase 8 pass):**
 - Debug server events fully wired:
@@ -844,12 +866,12 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 
 ### Tile Grid Extension (optional)
 
-- [ ] `defgrid name: dimensions: W x H  cell-type: T` declaration
-- [ ] Grid as discrete state (one `T` per cell)
-- [ ] `visible-from? grid pos1 pos2` — raycasting Bool
-- [ ] `within-range? grid pos1 pos2 range: N` — Bool
-- [ ] `path-to grid pos1 pos2` — A* List of positions
-- [ ] `occupied-by grid pos` — entity key or nil
+- [x] `defgrid name: dimensions: W x H  cell-type: T` declaration — parser+checker+codegen+engine (2026-04-13)
+- [x] Grid as discrete state (one `T` per cell) — flat array in `engine._grids[name].cells` (2026-04-13)
+- [x] `visible-from? grid pos1 pos2` — raycasting Bool — float-step ray, `solid:` named arg (2026-04-13)
+- [x] `within-range? grid pos1 pos2 range: N` — Bool — chebyshev/manhattan/euclidean metrics (2026-04-13)
+- [x] `path-to grid pos1 pos2` — A* List of positions — 4/8-dir, `blocked:` / `diag:` args (2026-04-13)
+- [x] `occupied-by grid pos` — entity key or nil — scans family/{key}/x,y paths (2026-04-13)
 
 ### Tests — Phase 8
 

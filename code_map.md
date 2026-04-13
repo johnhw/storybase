@@ -242,6 +242,15 @@ verify-always    → bool  (BFS negation check)
 probability      → float  (weighted BFS, optional depth:/threshold:)
 optimal-path     → [{scene, label, index}, ...]  (Dijkstra, optional by:/depth:)
 find-counterexample → frozen GameState | nil
+-- Tile grid builtins (require ctx.grids populated by engine):
+grid-get         grid-name x y → cell value
+grid-set!        grid-name x y value → nil (mutation)
+grid-width       grid-name → integer
+grid-height      grid-name → integer
+within-range?    grid-name x1 y1 x2 y2 [range: N] [metric: str] → bool
+visible-from?    grid-name x1 y1 x2 y2 [solid: {values}] → bool
+path-to          grid-name x1 y1 x2 y2 [blocked: {values}] [diag: bool] → [{x,y}] | nil
+occupied-by      grid-name family-name x y → key | nil
 ```
 
 **Dispatch order in `call_fn`:** vars → BUILTINS → bounded defs → user fns → bare string fallback
@@ -278,7 +287,9 @@ eng:out(s)                    -- write to io_out
 eng:inp()                     → string  -- read from io_in
 ```
 
-**Internal fields:** `eng._state` (store), `eng._log`, `eng._fns`, `eng._scenes`, `eng._scene_stack`, `eng._actors`, `eng._sched`, `eng._rng`
+**Internal fields:** `eng._state`, `eng._log`, `eng._fns`, `eng._scenes`, `eng._scene_stack`, `eng._actors`, `eng._scheduler`, `eng._grids`
+**Grid initialisation:** `eng:init_grids()` — creates flat cell arrays from `game_table.grids`; called by `eng:init()`.
+**ctx.grids:** populated in `make_ctx()`; points to `eng._grids` (name → `{cells,width,height,cell_type,default_val}`)
 
 ---
 
@@ -403,6 +414,24 @@ sched:cancel(name)                   -- cancel schedule; logs kind="cancel_sched
 
 ---
 
+### `runtime/tilegrid.lua` (~260 lines)
+Optional tile grid extension algorithms. Required by eval.lua grid builtins.
+
+- `M.new(width, height, default_value)` → flat 1-indexed cell array (size = w×h)
+- `M.idx(width, height, x, y)` → integer (1-based) | nil (OOB)
+- `M.in_bounds(width, height, x, y)` → bool
+- `M.get(cells, width, height, x, y)` → value | nil
+- `M.set(cells, width, height, x, y, value)` → bool (false = OOB)
+- `M.within_range(x1, y1, x2, y2, range, metric?)` → bool (metrics: chebyshev|manhattan|euclidean)
+- `M.visible_from(cells, w, h, x1, y1, x2, y2, opaque_set?)` → bool (float-step ray, tests intermediate cells only)
+- `M.find_path(cells, w, h, x1, y1, x2, y2, blocked_set?, allow_diag?)` → `[{x,y},...]` | nil (A* with binary min-heap)
+- `M.occupied_by(state_cache, family, x, y)` → key string | nil (scans `family/KEY/x` + `family/KEY/y` paths)
+
+**Coordinate system:** 0-based (x, y); (0,0) = top-left.
+**Cell storage:** `cells[y*width + x + 1]` (1-based flat Lua array).
+
+---
+
 ### `runtime/counterfactual.lua` (60 lines)
 - `M.create(live_state, log, from_tick, transitions, simulate, depth, max_depth)` → counterfactual state
 - Branches a copy of state at `from_tick`, replays `transitions`, optionally runs actor+scheduler (`simulate=true`)
@@ -500,6 +529,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/checker_spec.lua` | Checker passes 1-6 (schema, types, purity, perceives, boundary, write-sets) |
 | `tests/compiler/codegen_spec.lua` | Game table emission; production build mode |
 | `tests/compiler/import_spec.lua` | Import resolver (basic, FILE_NOT_FOUND, IMPORT_CYCLE, transitive) |
+| `tests/compiler/defgrid_spec.lua` | defgrid parser, checker, codegen, engine integration (26 tests) |
 | `tests/lib/storybase_spec.lua` | Public Lua interop API; find(), counterfactual() |
 | `tests/runtime/integration_spec.lua` | End-to-end gameplay scenarios (walk, combat, guarded shop, save/load) |
 | `tests/runtime/state_spec.lua` | Store CRUD, clamping, undo, spawn/despawn |
@@ -513,6 +543,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/counterfactual_spec.lua` | Counterfactual branching |
 | `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec; hot reload schema migration; spawn/despawn events |
 | `tests/runtime/migrate_spec.lua` | Migration runner |
+| `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |
 | `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |
 | `tests/cli/compact_spec.lua` | compact CLI command |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |

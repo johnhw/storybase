@@ -2489,6 +2489,67 @@ local function parse_bounded_decl(p, doc)
   return ast.bounded_decl(name, params, returns_type, distribution, reads, lua_name, doc, tpos)
 end
 
+--- Parse a `defgrid name: body` declaration.
+--- Syntax:
+---   defgrid world-map:
+---     dimensions: W x H
+---     cell-type:  TypeName
+---     default:    cell_value   (optional)
+local function parse_defgrid_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume IDENT("defgrid")
+
+  -- Grid name: may arrive as NAMED_ARG("name") (colon already consumed)
+  -- or as IDENT("name") followed by OP(":").
+  local name
+  if p:at("NAMED_ARG") then
+    name = p:adv().value
+  elseif p:at("IDENT") then
+    name = p:adv().value
+    p:expect("OP", ":", "expected ':' after defgrid name")
+  else
+    p:emit_err(ast.E.UNEXPECTED_TOKEN, "expected grid name after 'defgrid'", p:cur().pos)
+    name = "?"
+  end
+  p:match("NEWLINE")
+
+  local width       = nil
+  local height      = nil
+  local cell_type   = nil
+  local default_val = nil
+
+  if p:at("INDENT") then
+    p:adv()
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+      local ct = p:cur()
+      if ct.kind == "NAMED_ARG" then
+        local na = p:adv()
+        if na.value == "dimensions" then
+          -- dimensions: W x H   (two INTEGER tokens separated by IDENT("x"))
+          if p:at("INTEGER") then width  = p:adv().value end
+          p:match("IDENT")   -- consume "x"
+          if p:at("INTEGER") then height = p:adv().value end
+        elseif na.value == "cell-type" then
+          if p:at("IDENT") then cell_type = p:adv().value end
+        elseif na.value == "default" then
+          -- Accept a bare identifier or a symbol literal
+          if p:at("SYMBOL") then
+            default_val = p:adv().value
+          elseif p:at("IDENT") then
+            default_val = p:adv().value
+          end
+        end
+      end
+      p:skip_to_eol()
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+
+  return ast.defgrid_decl(name, width, height, cell_type, default_val, doc, tpos)
+end
+
 --- Parse a `macro name param1 param2...: body` declaration.
 --- The colon that separates params from body is eaten by the lexer as a
 --- NAMED_ARG token for the last identifier before it.  So both forms work:
@@ -2687,7 +2748,9 @@ local function parse_decl(p, doc)
     end
 
   elseif t.kind == "IDENT" then
-    if t.value == "migration" then return parse_migration_decl(p, doc) end
+    if     t.value == "migration" then return parse_migration_decl(p, doc)
+    elseif t.value == "defgrid"   then return parse_defgrid_decl(p, doc)
+    end
     -- unknown top-level identifier — skip
     p:emit_err(ast.E.UNEXPECTED_TOKEN,
       "unexpected IDENT '" .. t.value .. "' at top level", t.pos)

@@ -545,6 +545,24 @@ function M.migration_decl(from_ver, to_ver, ops, pos)
     { from_ver = from_ver, to_ver = to_ver, ops = ops or {} }, pos)
 end
 
+--- defgrid declaration: a named tile grid with fixed dimensions and cell type.
+---   name        string   Grid identifier (e.g. "world-map")
+---   width       integer  Number of columns (x-extent)
+---   height      integer  Number of rows    (y-extent)
+---   cell_type   string   Name of the enum/type used for cell values
+---   default_val string?  Default cell value (symbol string, optional)
+---   doc         string?  Documentation string
+function M.defgrid_decl(name, width, height, cell_type, default_val, doc, pos)
+  return M.node(M.K.DEFGRID_DECL, {
+    name        = name,
+    width       = width,
+    height      = height,
+    cell_type   = cell_type,
+    default_val = default_val,
+    doc         = doc,
+  }, pos)
+end
+
 -- ── Type expressions ──────────────────────────────────────────
 
 function M.type_bool(pos)              return M.node(M.K.TYPE_BOOL, {}, pos) end

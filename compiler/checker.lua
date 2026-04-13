@@ -29,6 +29,7 @@ local function new_symtab()
     relations = {},  -- name → RELATION_DECL node
     scenes    = {},  -- name → SCENE_DECL node
     families  = {},  -- family_name → STATE_FAMILY node
+    grids     = {},  -- name → DEFGRID_DECL node
   }
 end
 
@@ -145,6 +146,17 @@ local function pass1_collect(acc, symtab, program)
           "previous declaration at line " .. symtab.scenes[name].pos.line)
       else
         symtab.scenes[name] = node
+      end
+
+    elseif kind == k.DEFGRID_DECL then
+      local name = node.name
+      if symtab.grids[name] then
+        err(acc, ast.E.DUPLICATE_NAME,
+          "defgrid '" .. name .. "' already declared",
+          node.pos,
+          "previous declaration at line " .. symtab.grids[name].pos.line)
+      else
+        symtab.grids[name] = node
       end
     end
     -- MODULE_DECL, IMPORT_DECL, SCHEMA_VERSION, ENGINE_CONFIG, TIME_MODEL
@@ -526,6 +538,31 @@ local function check_decl(acc, symtab, node)
       node.from_type_resolved = ft_node.resolved
     end
     resolve_type_expr(acc, symtab, node.to_type_expr)
+
+  elseif node.kind == k.DEFGRID_DECL then
+    -- Validate dimensions
+    if not node.width or node.width <= 0 then
+      err(acc, ast.E.BAD_DECLARATION,
+        "defgrid '" .. (node.name or "?") .. "': dimensions width must be a positive integer",
+        node.pos)
+    end
+    if not node.height or node.height <= 0 then
+      err(acc, ast.E.BAD_DECLARATION,
+        "defgrid '" .. (node.name or "?") .. "': dimensions height must be a positive integer",
+        node.pos)
+    end
+    -- Validate cell-type reference (must be a declared type or a built-in)
+    if node.cell_type then
+      if not BUILTIN_TYPES[node.cell_type] and not symtab.types[node.cell_type] then
+        err(acc, ast.E.UNDEFINED_TYPE,
+          "defgrid '" .. (node.name or "?") .. "': undefined cell-type '" .. node.cell_type .. "'",
+          node.pos)
+      end
+    else
+      err(acc, ast.E.BAD_DECLARATION,
+        "defgrid '" .. (node.name or "?") .. "': missing cell-type declaration",
+        node.pos)
+    end
   end
   -- MODULE_DECL, IMPORT_DECL, SCHEMA_VERSION, ENGINE_CONFIG, TIME_MODEL:
   -- no type-check needed in Phase 1

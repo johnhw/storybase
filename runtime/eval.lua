@@ -1057,6 +1057,134 @@ local BUILTINS = {
       path_exists = function(self, path) return self._cache[path] ~= nil end,
     }
   end,
+
+  -- ── Tile grid builtins ────────────────────────────────────────────────────
+  -- Grid name is always the first argument, passed as a bare IDENT (0-arg call
+  -- returns the name as a string — same pattern as relation query builtins).
+
+  --- grid-get grid-name x y → cell value (or nil if OOB)
+  ["grid-get"] = function(args, ctx)
+    local tg = require("runtime.tilegrid")
+    local name = eval_expr(args[1], ctx)
+    local x    = eval_expr(args[2], ctx)
+    local y    = eval_expr(args[3], ctx)
+    local g = ctx.grids and ctx.grids[name]
+    if not g then return nil end
+    return tg.get(g.cells, g.width, g.height, x, y)
+  end,
+
+  --- grid-set! grid-name x y value → nil (mutates grid in place)
+  ["grid-set!"] = function(args, ctx)
+    local tg = require("runtime.tilegrid")
+    local name  = eval_expr(args[1], ctx)
+    local x     = eval_expr(args[2], ctx)
+    local y     = eval_expr(args[3], ctx)
+    local value = eval_expr(args[4], ctx)
+    local g = ctx.grids and ctx.grids[name]
+    if not g then return nil end
+    tg.set(g.cells, g.width, g.height, x, y, value)
+    return nil
+  end,
+
+  --- grid-width grid-name → integer width (or 0 if unknown)
+  ["grid-width"] = function(args, ctx)
+    local name = eval_expr(args[1], ctx)
+    local g = ctx.grids and ctx.grids[name]
+    return g and g.width or 0
+  end,
+
+  --- grid-height grid-name → integer height (or 0 if unknown)
+  ["grid-height"] = function(args, ctx)
+    local name = eval_expr(args[1], ctx)
+    local g = ctx.grids and ctx.grids[name]
+    return g and g.height or 0
+  end,
+
+  --- within-range? grid-name x1 y1 x2 y2 [range: N] [metric: "chebyshev"|"manhattan"|"euclidean"]
+  --- → Bool
+  ["within-range?"] = function(args, ctx)
+    local tg    = require("runtime.tilegrid")
+    local _name = eval_expr(args[1], ctx)  -- grid name unused for range check
+    local x1    = eval_expr(args[2], ctx)
+    local y1    = eval_expr(args[3], ctx)
+    local x2    = eval_expr(args[4], ctx)
+    local y2    = eval_expr(args[5], ctx)
+    local range  = 1
+    local metric = "chebyshev"
+    for i = 6, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG then
+        local v = eval_expr(a.value, ctx)
+        if a.name == "range"  and type(v) == "number" then range  = v end
+        if a.name == "metric" and type(v) == "string" then metric = v end
+      end
+    end
+    return tg.within_range(x1, y1, x2, y2, range, metric)
+  end,
+
+  --- visible-from? grid-name x1 y1 x2 y2 [solid: {values}]
+  --- → Bool (true = unobstructed line of sight)
+  ["visible-from?"] = function(args, ctx)
+    local tg   = require("runtime.tilegrid")
+    local name = eval_expr(args[1], ctx)
+    local x1   = eval_expr(args[2], ctx)
+    local y1   = eval_expr(args[3], ctx)
+    local x2   = eval_expr(args[4], ctx)
+    local y2   = eval_expr(args[5], ctx)
+    local g = ctx.grids and ctx.grids[name]
+    if not g then return false end
+    local opaque_set = nil
+    for i = 6, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "solid" then
+        local v = eval_expr(a.value, ctx)
+        if type(v) == "table" then
+          opaque_set = {}
+          for _, cell_val in ipairs(v) do opaque_set[cell_val] = true end
+        end
+      end
+    end
+    return tg.visible_from(g.cells, g.width, g.height, x1, y1, x2, y2, opaque_set)
+  end,
+
+  --- path-to grid-name x1 y1 x2 y2 [blocked: {values}] [diag: true|false]
+  --- → List of {x,y} steps (excluding start, including end), or nil if unreachable
+  ["path-to"] = function(args, ctx)
+    local tg   = require("runtime.tilegrid")
+    local name = eval_expr(args[1], ctx)
+    local x1   = eval_expr(args[2], ctx)
+    local y1   = eval_expr(args[3], ctx)
+    local x2   = eval_expr(args[4], ctx)
+    local y2   = eval_expr(args[5], ctx)
+    local g = ctx.grids and ctx.grids[name]
+    if not g then return nil end
+    local blocked_set = nil
+    local allow_diag  = true
+    for i = 6, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG then
+        local v = eval_expr(a.value, ctx)
+        if a.name == "blocked" and type(v) == "table" then
+          blocked_set = {}
+          for _, cell_val in ipairs(v) do blocked_set[cell_val] = true end
+        elseif a.name == "diag" then
+          allow_diag = v and true or false
+        end
+      end
+    end
+    return tg.find_path(g.cells, g.width, g.height, x1, y1, x2, y2, blocked_set, allow_diag)
+  end,
+
+  --- occupied-by grid-name family-name x y → entity key string or nil
+  ["occupied-by"] = function(args, ctx)
+    local tg     = require("runtime.tilegrid")
+    local _name  = eval_expr(args[1], ctx)  -- grid name (for context, unused in query)
+    local family = eval_expr(args[2], ctx)
+    local x      = eval_expr(args[3], ctx)
+    local y      = eval_expr(args[4], ctx)
+    if not ctx.state then return nil end
+    return tg.occupied_by(ctx.state._cache, family, x, y)
+  end,
 }
 
 --- Dispatch a function call by name.
