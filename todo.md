@@ -8,6 +8,8 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-14)
 
+**Documentation COMPLETE** — all 20 docs written (README + 5 tutorials + 6 how-to guides + 5 reference pages + 3 explanation pages).
+
 **CLI fixes + integration test suite COMPLETE** — 1292 tests passing.
 
 **Completed this session (2026-04-14):**
@@ -946,86 +948,47 @@ They should be able to compile and run a simple game within 5 minutes of reading
 A one-page quickstart guide with a minimal example of running the engine. The goal is to get users up and running as fast as possible, without needing to understand the full language or engine.
 It should also include installation and requirements, and point to the full documentation for next steps. There should be a short description of what StoryBase is and what it's for (and particularly its novel features), but the focus is on getting a simple game running quickly.
 
+- [x] `README.md` — DONE (2026-04-14)
+
 ### Tutorials (`docs/tutorial/`)
 
 Each tutorial is self-contained and builds on the previous. A reader should be able to follow all
 five in sequence and have a working, moderately complex game at the end.
 
-- [ ] `01_hello_world.md` — Minimal interactive fiction: one scene, one choice, a state mutation.
-  Covers: module header, `state`, `scene`, `*` choices, `->` goto, `set!`.
-- [ ] `02_state_and_choices.md` — Add guarded choices and branching narrative.
-  Covers: `Int`/`Bool`/enum types, `[guard]` choice guards, conditional narration `when`, `inc!`/`dec!`.
-- [ ] `03_functions_and_actors.md` — Extract reusable logic; add an NPC with behaviour.
-  Covers: `fn`, `pre:`, `post:`, `actor`, `behavior`, `send!`, `inbox`, `perceives`.
-- [ ] `04_search_and_verify.md` — Test your game mechanically.
-  Covers: `verify`, `watch`, `can-reach?`, `find-path`, `probability`, `from-any-state:`, `when:`.
-- [ ] `05_tile_grids.md` — Build a tactical map mini-game.
-  Covers: `defgrid`, `grid-get`/`grid-set!`, `within-range?`, `visible-from?`, `path-to`, `occupied-by`.
+- [x] `01_hello_world.md` — DONE (2026-04-14)
+- [x] `02_state_and_choices.md` — DONE (2026-04-14)
+- [x] `03_functions_and_actors.md` — DONE (2026-04-14)
+- [x] `04_search_and_verify.md` — DONE (2026-04-14)
+- [x] `05_tile_grids.md` — DONE (2026-04-14)
 
 ### How-to Guides (`docs/howto/`)
 
 Short, focused recipes. Each answers exactly one question.
 
-- [ ] `save_and_load.md` — How to save and restore game state (`--save`/`--load`, snapshot files,
-  `storybase compact`).
-- [ ] `schema_migration.md` — How to evolve the schema without breaking saves (`migration A -> B:`,
-  `rename`, `add`, `drop`, `transform`, `rename-enum`).
-- [ ] `debug_server.md` — How to connect the debug server and inspect live state (TCP JSON protocol,
-  `get-state`, `time-travel`, hot reload, watch events).
-- [ ] `lua_embedding.md` — How to embed StoryBase in a Lua host (`sb.load`, `game:call`,
-  `game:choose`, `game:on`, `game:counterfactual`, `game:register_bounded`).
-- [ ] `bounded_computations.md` — How to register and call Lua-backed bounded computations
-  (`bounded` declaration, `game:register_bounded`, search integration).
-- [ ] `production_builds.md` — How to strip debug content for release (`--production`, what is
-  removed, `strict-contracts:` override).
+- [x] `save_and_load.md` — DONE (2026-04-14)
+- [x] `schema_migration.md` — DONE (2026-04-14)
+- [x] `debug_server.md` — DONE (2026-04-14)
+- [x] `lua_embedding.md` — DONE (2026-04-14)
+- [x] `bounded_computations.md` — DONE (2026-04-14)
+- [x] `production_builds.md` — DONE (2026-04-14)
 
 ### Reference (`docs/reference/`)
 
 Exhaustive, scannable specifications. No prose explanations of why — only what and how.
 
-- [ ] `language.md` — Complete StoryBase syntax reference. Sections:
-  - Tokens and lexical rules (identifiers, keywords, operators, literals, paths)
-  - Declarations (`module`, `import`, `schema-version`, `engine-config`, `time-model`, `type`,
-    `state`, `relation`, `fn`, `scene`, `actor`, `schedule`, `verify`, `watch`, `bounded`,
-    `macro`, `defgrid`, `migration`)
-  - Expressions (literals, paths, interpolation, binary/unary ops, `match`, `cond`, `if`,
-    `counterfactual`, `in-state`, `find`, `can-reach?`, `find-path`, `probability`, `optimal-path`)
-  - Statements (`set!`, `inc!`, `dec!`, `add!`, `remove!`, `clear!`, `push!`, `pop!`,
-    `spawn!`, `despawn!`, `send!`, `schedule!`, `cancel-schedule!`, `time-inc!`, `time-set!`,
-    `undo!`, `let`, `for`, `while`, `when`, `if/else`, `match`, `pass`)
-  - Type expressions (`Bool`, `Int`, `Option`, `Set`, `List`, `Symbol`, `SymbolOf`, `String`,
-    `Float`, `UList`, `UMap`, record, variant, function type)
-  - Scene navigation (`->`, `=>`, `<-`, `goto-scene!`, `enter-scene!`, `exit-scene!`)
-  - Error codes table (all `UPPER_SNAKE` codes with brief descriptions)
-- [ ] `builtins.md` — Every built-in function: signature, arguments (including named args),
-  return type, side effects, examples. Grouped by category:
-  - State queries (`path-exists?`, `path-list`, `count-where`, `any?`, `all?`)
-  - Collections (`min`, `max`, `tostring`, `random-int`)
-  - Relations (`adjacent`, `reachable`, `shortest-path`, `reachable-set`, `inverse-adjacent`)
-  - Search (`can-reach?`, `find-path`, `probability`, `optimal-path`, `verify-always`,
-    `find-counterexample`)
-  - Tile grid (`grid-get`, `grid-set!`, `grid-width`, `grid-height`, `within-range?`,
-    `visible-from?`, `path-to`, `occupied-by`)
-- [ ] `cli.md` — All CLI subcommands with every flag: `compile`, `run`, `verify`, `migrate`,
-  `extract-symbols`, `compact`, `help`. Include exit codes and output formats.
-- [ ] `lua_api.md` — `lib/storybase.lua` public API. Every method on `sb` and `game` objects:
-  signature, parameters, return values, events emitted. Include the `game:find` options table.
-- [ ] `tile_grid.md` — `defgrid` declaration syntax, `runtime/tilegrid` algorithm details
-  (storage layout, coordinate conventions, metric options, A* parameters, LOS algorithm).
+- [x] `language.md` — DONE (2026-04-14)
+- [x] `builtins.md` — DONE (2026-04-14)
+- [x] `cli.md` — DONE (2026-04-14)
+- [x] `lua_api.md` — DONE (2026-04-14)
+- [x] `tile_grid.md` — DONE (2026-04-14)
 
 ### Explanation (`docs/explanation/`)
 
 Background reading for users who want to understand the system deeply.
 
-- [ ] `design_philosophy.md` — Why StoryBase exists; the five core principles (logic/presentation
-  separation, transaction log as ground truth, bounded search over futures, structured actors,
-  first-class debugging). Why each constraint was chosen and what it enables.
-- [ ] `architecture.md` — Compiler pipeline (lexer → parser → checker passes → codegen), runtime
-  components (engine, state, log, eval, scheduler, actors, search, debug), how they interact.
-  Reference `code_map.md` for file-level detail; this doc explains *why* the split is made.
-- [ ] `search_model.md` — How bounded future-state search works: why discrete types make it
-  finite, BFS/DFS strategies, random-source branching, time budgets, approximate results,
-  coroutine iterator. When to use `can-reach?` vs `find-path` vs `probability` vs `optimal-path`.
+- [x] `design_philosophy.md` — DONE (2026-04-14)
+- [x] `architecture.md` — DONE (2026-04-14)
+- [x] `search_model.md` — DONE (2026-04-14)
 
 - Write a series of example games, from a very basic test toy to a relatively complete (but still basic) adventure with multiple scenes, NPCs, and a complex state machine.
   - To execute this task, write down specifications for each of the games (say 5), including a list of features that the game demonstrates. 
