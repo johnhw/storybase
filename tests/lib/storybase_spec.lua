@@ -487,3 +487,112 @@ scene main:
     assert.equal(88, g:get("world/b"))
   end)
 end)
+
+-- ============================================================
+-- game:set / game:reset
+-- ============================================================
+
+describe("game:set and game:reset", function()
+  local SRC = [[
+module set-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+schema-version: 1
+state world:
+  count: Int(0, 99) = 0
+scene s:
+  * Go -> s
+]]
+
+  it("set changes a state path value", function()
+    local g = sb.from_source(SRC, "set-test")
+    assert.is_not_nil(g)
+    g:init()
+    assert.equal(0, g:get("world/count"))
+    g:set("world/count", 42)
+    assert.equal(42, g:get("world/count"))
+  end)
+
+  it("set before init errors", function()
+    local g = sb.from_source(SRC, "set-test")
+    assert.is_not_nil(g)
+    assert.has_error(function() g:set("world/count", 1) end)
+  end)
+
+  it("reset restores state to defaults", function()
+    local g = sb.from_source(SRC, "set-test")
+    assert.is_not_nil(g)
+    g:init()
+    g:set("world/count", 77)
+    assert.equal(77, g:get("world/count"))
+    g:reset()
+    assert.equal(0, g:get("world/count"))
+  end)
+end)
+
+-- ============================================================
+-- game:on event system
+-- ============================================================
+
+describe("game:on event callbacks", function()
+  local SRC = [[
+module event-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  x: Int(0, 99) = 0
+scene main:
+  * Inc
+    inc! world/x 1
+    -> main
+  * Done -> end-scene
+scene end-scene:
+  All done.
+]]
+
+  it("on('choice') fires once per choose call", function()
+    local g = sb.from_source(SRC, "event-test")
+    assert.is_not_nil(g)
+    g:init()
+    local fired = 0
+    g:on("choice", function() fired = fired + 1 end)
+    g:choose(1)
+    g:choose(1)
+    assert.equal(2, fired)
+  end)
+
+  it("on('choice') payload contains index and scene", function()
+    local g = sb.from_source(SRC, "event-test")
+    assert.is_not_nil(g)
+    g:init()
+    local payload
+    g:on("choice", function(p) payload = p end)
+    g:choose(1)
+    assert.is_not_nil(payload)
+    assert.equal(1,      payload.index)
+    assert.equal("main", payload.scene)
+  end)
+
+  it("multiple on() handlers all fire", function()
+    local g = sb.from_source(SRC, "event-test")
+    assert.is_not_nil(g)
+    g:init()
+    local a, b = 0, 0
+    g:on("choice", function() a = a + 1 end)
+    g:on("choice", function() b = b + 1 end)
+    g:choose(1)
+    assert.equal(1, a)
+    assert.equal(1, b)
+  end)
+
+  it("handler error does not crash the game", function()
+    local g = sb.from_source(SRC, "event-test")
+    assert.is_not_nil(g)
+    g:init()
+    g:on("choice", function() error("boom") end)
+    assert.has_no_error(function() g:choose(1) end)
+  end)
+end)
