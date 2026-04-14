@@ -1211,3 +1211,112 @@ scene s:
     assert.equal(15, st:get("world/result"))
   end)
 end)
+
+-- ============================================================
+-- relate! / unrelate! mutations
+-- ============================================================
+
+describe("eval_stmt: relate_mut / unrelate_mut", function()
+  local compiler = require("compiler.compiler")
+  local query_mod = require("runtime.query")
+
+  local function make_relate_eng(extra_fn)
+    extra_fn = extra_fn or ""
+    local src = [[
+module rel-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+relation edges: Symbol -> Set(Symbol, 10)
+fn do-relate:
+  relate! edges 'a 'b
+fn do-unrelate:
+  unrelate! edges 'a 'b
+]] .. extra_fn .. [[
+scene s:
+  * go -> s
+]]
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    return c, gt
+  end
+
+  it("relate! adds an edge to the relation", function()
+    local c, gt = make_relate_eng()
+    eval.call_fn("do-relate", {}, c)
+    local rel = gt.relations and gt.relations["edges"]
+    local adj = query_mod.adjacent(rel, "a")
+    assert.is_truthy(adj["b"])
+  end)
+
+  it("relate! is idempotent (adding same edge twice is fine)", function()
+    local c, gt = make_relate_eng()
+    eval.call_fn("do-relate", {}, c)
+    eval.call_fn("do-relate", {}, c)
+    local rel = gt.relations and gt.relations["edges"]
+    local adj = query_mod.adjacent(rel, "a")
+    assert.is_truthy(adj["b"])
+  end)
+
+  it("unrelate! removes an edge that was added", function()
+    local c, gt = make_relate_eng()
+    eval.call_fn("do-relate", {}, c)
+    eval.call_fn("do-unrelate", {}, c)
+    local rel = gt.relations and gt.relations["edges"]
+    local adj = query_mod.adjacent(rel, "a")
+    assert.is_falsy(adj["b"])
+  end)
+
+  it("unrelate! is a no-op when edge does not exist", function()
+    local c, gt = make_relate_eng()
+    -- no relate! first
+    assert.has_no_error(function() eval.call_fn("do-unrelate", {}, c) end)
+  end)
+
+  it("reachable? reflects relate! changes", function()
+    local c, gt = make_relate_eng()
+    local rel = gt.relations and gt.relations["edges"]
+    assert.is_false(query_mod.reachable(rel, "a", "b"))
+    eval.call_fn("do-relate", {}, c)
+    assert.is_true(query_mod.reachable(rel, "a", "b"))
+  end)
+end)
+
+-- ============================================================
+-- random-int builtin
+-- ============================================================
+
+describe("eval: random-int builtin", function()
+  it("returns a value within [min, max]", function()
+    local c = ctx({})
+    local node = fn_call("random-int",
+      { kind="int_lit", value=1 },
+      { kind="int_lit", value=6 })
+    for _ = 1, 20 do
+      local v = eval.eval_expr(node, c)
+      assert.is_true(v >= 1 and v <= 6, "value " .. tostring(v) .. " out of range")
+    end
+  end)
+
+  it("returns exactly min when min == max", function()
+    local c = ctx({})
+    local node = fn_call("random-int",
+      { kind="int_lit", value=5 },
+      { kind="int_lit", value=5 })
+    local v = eval.eval_expr(node, c)
+    assert.equal(5, v)
+  end)
+
+  it("_random_inject is used when set", function()
+    local c = ctx({})
+    -- Inject a fixed RNG that always returns 42
+    c.game = { _random_inject = function() return 42 end }
+    local node = fn_call("random-int",
+      { kind="int_lit", value=1 },
+      { kind="int_lit", value=100 })
+    local v = eval.eval_expr(node, c)
+    assert.equal(42, v)
+  end)
+end)

@@ -1389,6 +1389,30 @@ eval_stmt = function(node, ctx)
     local key    = eval_expr(node.key, ctx)
     ctx.state:despawn(family, key, ctx.fn_name)
 
+  elseif k == K.RELATE_MUT then
+    local rel_name = node.rel  -- string
+    local source   = eval_expr(node.a, ctx)
+    local target   = eval_expr(node.b, ctx)
+    if ctx.game and ctx.game.relations and rel_name then
+      local rel = ctx.game.relations[rel_name]
+      if rel then
+        rel.data = rel.data or {}
+        rel.data[source] = rel.data[source] or {}
+        rel.data[source][target] = true
+      end
+    end
+
+  elseif k == K.UNRELATE_MUT then
+    local rel_name = node.rel  -- string
+    local source   = eval_expr(node.a, ctx)
+    local target   = eval_expr(node.b, ctx)
+    if ctx.game and ctx.game.relations and rel_name then
+      local rel = ctx.game.relations[rel_name]
+      if rel and rel.data and rel.data[source] then
+        rel.data[source][target] = nil
+      end
+    end
+
   -- Control flow
   elseif k == K.WHEN_STMT then
     local cond = eval_expr(node.condition, ctx)
