@@ -9,3 +9,19 @@
 - You must record progress in todo.md, including what has been completed, any new tasks, and any context that might be required for a future agent picking up the project. 
 - At the top of todo.md, write and update a plan for what needs to be completed next, and update it as you go. This should provide sufficient context for a future agent to pick up the project and continue working on it without needing to read through all of the commit history.
 - Write documentation as you go.
+
+## Testing Regime
+
+### Fast unit/integration tests (run frequently, before every commit)
+`busted tests/`
+Runs ~1292 tests in a few seconds. Covers compiler, runtime, library API, and CLI unit tests.
+
+### CLI integration tests (run before commits that touch the CLI or demo files)
+`busted tests/cli/cli_integration_spec.lua`
+~77 tests covering every CLI subcommand against all test*.sb and demo*.sb files.
+Uses `--auto --steps N` for non-interactive run tests.
+
+### CLI non-interactive mode
+`lua5.4 cli/main.lua run --auto demos/demo01_wanderer.sb`
+`lua5.4 cli/main.lua run --auto --steps 10 demos/demo05_siege.sb`
+The `--auto` flag always picks choice 1. `--steps N` limits turns to avoid precondition violations in demos with finite game states.

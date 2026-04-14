@@ -80,7 +80,7 @@ local function diag_summary(diags)
 end
 
 -- Flags that are boolean (do not consume the next token as a value).
-local BOOL_FLAGS = { production = true }
+local BOOL_FLAGS = { production = true, auto = true }
 
 --- Parse a flat argument list into {flags, positional}.
 --- Flags are --name or --name value pairs; positional are the rest.
@@ -189,11 +189,31 @@ local function cmd_run(args)
     return 1
   end
 
+  -- --auto [--steps N]: play automatically (always pick choice 1).
+  -- --steps N: limit auto play to N turns (implies --auto).
+  local auto_steps = flags["steps"] and tonumber(flags["steps"])
+  local is_auto = flags["auto"] == true or auto_steps ~= nil
+
+  local io_in = io.stdin
+  if is_auto then
+    local remaining = auto_steps  -- nil means unlimited
+    io_in = {
+      read = function(_, _fmt)
+        if remaining ~= nil then
+          if remaining <= 0 then return nil end
+          remaining = remaining - 1
+        end
+        return "1"
+      end,
+    }
+  end
+
   local opts = {
     seed       = flags["seed"] and tonumber(flags["seed"]),
     production = flags["production"] == true,
     save_path  = flags["save"],
     load_path  = flags["load"],
+    io_in      = io_in,
   }
 
   return engine.run(game_table, opts) or 0
@@ -267,6 +287,8 @@ storybase run [options] <file>
     --seed N       Fix the random seed for reproducible runs
     --save <path>  Save the game log to <path> on exit
     --load <path>  Load a saved game log from <path> before starting
+    --auto         Auto-play: always select choice 1 until game ends
+    --steps N      Auto-play for at most N turns (implies --auto)
 ]],
   ["verify"] = [[
 storybase verify <file>
@@ -367,7 +389,9 @@ function M.main(argv)
 end
 
 -- Run when invoked directly as:  lua cli/main.lua <args>
-if arg then
+-- Guard: do NOT auto-run when require()'d by the test suite or another module.
+-- When required, package.loaded["cli.main"] is being set, so we detect that.
+if arg and arg[0] and arg[0]:find("[/\\]?main%.lua$") then
   os.exit(M.main(arg))
 end
 

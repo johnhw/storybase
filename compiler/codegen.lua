@@ -328,8 +328,56 @@ local function emit_types(decls)
   return types
 end
 
+--- Collect all fields for a named record type, resolving `with` mixins.
+--- decls_by_name: {name → decl_node}
+--- Returns an ordered list of RECORD_FIELD-like tables with name, type_expr, default,
+--- or nil if the type is not a record.
+local function collect_type_record_fields(type_name, decls_by_name, visited)
+  visited = visited or {}
+  if visited[type_name] then return nil end   -- cycle guard
+  visited[type_name] = true
+
+  local decl = decls_by_name[type_name]
+  if not decl or decl.kind ~= ast.K.TYPE_RECORD then return nil end
+
+  local fields    = {}   -- ordered
+  local seen      = {}   -- name → index for override
+
+  for _, f in ipairs(decl.fields or {}) do
+    if f.kind == ast.K.WITH_MIXIN then
+      local mixin = collect_type_record_fields(f.type_name, decls_by_name, visited)
+      if mixin then
+        for _, mf in ipairs(mixin) do
+          if not seen[mf.name] then
+            seen[mf.name] = #fields + 1
+            fields[#fields + 1] = mf
+          end
+          -- with-mixin fields that are already present are kept (subtype override comes later)
+        end
+      end
+    elseif f.kind == ast.K.RECORD_FIELD and f.name then
+      if seen[f.name] then
+        fields[seen[f.name]] = f   -- override mixin default
+      else
+        seen[f.name] = #fields + 1
+        fields[#fields + 1] = f
+      end
+    end
+  end
+
+  return fields
+end
+
 --- Emit schema.states list from all state declarations.
+--- When a STATE_SCALAR references a named record type, expand it to kind="record"
+--- so that init_defaults creates individual sub-paths (player/name, etc.).
 local function emit_states(decls)
+  -- Build a name → decl index for record-type lookup
+  local decls_by_name = {}
+  for _, d in ipairs(decls) do
+    if d.name then decls_by_name[d.name] = d end
+  end
+
   local states = {}
   local k = ast.K
   for _, node in ipairs(decls) do
@@ -340,13 +388,51 @@ local function emit_states(decls)
       else
         path_str = "?"
       end
-      table.insert(states, {
-        kind      = "scalar",
-        path      = path_str,
-        type_desc = emit_type_desc(node.type_expr),
-        default   = emit_default(node.default),
-        doc       = node.doc,
-      })
+
+      -- Check if the type is a named record: if so, expand to kind="record"
+      local named_type = node.type_expr and node.type_expr.kind == k.TYPE_NAMED
+                         and node.type_expr.name
+      local type_fields = named_type and collect_type_record_fields(named_type, decls_by_name)
+
+      if type_fields then
+        -- Build constructor override map from the default expression
+        local overrides = {}
+        local ctor_node = node.default
+        if ctor_node and ctor_node.kind == k.RECORD_CONSTRUCTOR then
+          for _, f in ipairs(ctor_node.fields or {}) do
+            if f.kind == k.NAMED_ARG and f.name then
+              overrides[f.name] = f.value
+            end
+          end
+        end
+
+        -- Produce fields list: type defaults, overridden by constructor values
+        local out_fields = {}
+        for _, tf in ipairs(type_fields) do
+          local default_node = overrides[tf.name] or tf.default
+          table.insert(out_fields, {
+            name      = tf.name,
+            type_desc = emit_type_desc(tf.type_expr),
+            default   = emit_default(default_node),
+          })
+        end
+
+        table.insert(states, {
+          kind   = "record",
+          path   = path_str,
+          fields = out_fields,
+          doc    = node.doc,
+        })
+      else
+        -- Scalar (non-record named type, or inline type)
+        table.insert(states, {
+          kind      = "scalar",
+          path      = path_str,
+          type_desc = emit_type_desc(node.type_expr),
+          default   = emit_default(node.default),
+          doc       = node.doc,
+        })
+      end
 
     elseif node.kind == k.STATE_RECORD then
       local path_str

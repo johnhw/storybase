@@ -31,15 +31,11 @@ function M.run(args)
   -- 1. Compile game file
   local compiler = require("compiler.compiler")
   local gt, diags = compiler.compile_file(game_file)
-  local has_errors = false
-  for _, d in ipairs(diags or {}) do
-    if d.level == "error" then
-      io.stderr:write(string.format("%s:%d:%d: error: %s\n",
-        d.file or "?", d.line or 0, d.col or 0, d.message))
-      has_errors = true
-    end
+  for _, d in ipairs(diags and diags.errors or {}) do
+    io.stderr:write(string.format("%s:%d:%d: error: %s\n",
+      d.file or "?", d.line or 0, d.col or 0, d.message))
   end
-  if has_errors or not gt then
+  if diags:has_errors() or not gt then
     io.stderr:write("Compilation failed.\n")
     return 1
   end

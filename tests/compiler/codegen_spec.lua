@@ -119,14 +119,25 @@ end)
 -- ============================================================
 
 describe("codegen — schema.states", function()
-  it("emits a scalar state descriptor", function()
-    local sc = schema("type P:\n  hp: Int(0,100)\nstate player: P")
+  it("emits a scalar state descriptor (non-record named type → scalar)", function()
+    -- Only non-record named types (aliases, enums) stay as kind="scalar"
+    local sc = schema("type HP = Int(0,100)\nstate player/health: HP")
     local s = sc.states[1]
     assert.are.equal("scalar", s.kind)
-    assert.are.equal("player", s.path)
+    assert.are.equal("player/health", s.path)
     assert.are.equal("named", s.type_desc.tag)
-    assert.are.equal("P", s.type_desc.name)
+    assert.are.equal("HP", s.type_desc.name)
     assert.is_nil(s.default)
+  end)
+
+  it("named record type in state is expanded to kind='record'", function()
+    -- state player: P  where P is a record type → expand to kind="record"
+    local sc = schema("type P:\n  hp: Int(0,100) = 50\nstate player: P")
+    local s = sc.states[1]
+    assert.are.equal("record", s.kind)
+    assert.are.equal("player", s.path)
+    assert.are.equal(1, #s.fields)
+    assert.are.equal("hp", s.fields[1].name)
   end)
 
   it("emits a scalar state with default", function()
@@ -325,14 +336,29 @@ describe("codegen — type_desc.discrete tag", function()
     assert.is_true(sc.states[1].type_desc.discrete)
   end)
 
-  it("named record with all-discrete fields is discrete", function()
+  it("named record with all-discrete fields: fields each have discrete type_desc", function()
+    -- When state uses a named record type it is expanded to kind="record";
+    -- each field's type_desc should be discrete.
     local sc = schema("type Pos:\n  x: Int(0, 10)\n  y: Int(0, 10)\nstate p: Pos")
-    assert.is_true(sc.states[1].type_desc.discrete)
+    local s = sc.states[1]
+    assert.are.equal("record", s.kind, "Pos should expand to record kind")
+    for _, f in ipairs(s.fields) do
+      assert.is_true(f.type_desc and f.type_desc.discrete,
+        "field " .. (f.name or "?") .. " should have discrete type_desc")
+    end
   end)
 
-  it("named record with a String field is not discrete", function()
+  it("named record with a String field: String field is not discrete", function()
     local sc = schema('type Named:\n  label: String\n  hp: Int(0, 10)\nstate n: Named')
-    assert.is_false(sc.states[1].type_desc.discrete)
+    local s = sc.states[1]
+    assert.are.equal("record", s.kind, "Named should expand to record kind")
+    local label_field = nil
+    for _, f in ipairs(s.fields) do
+      if f.name == "label" then label_field = f end
+    end
+    assert.is_not_nil(label_field, "should have label field")
+    assert.is_false(label_field.type_desc and label_field.type_desc.discrete,
+      "String label field should not be discrete")
   end)
 end)
 

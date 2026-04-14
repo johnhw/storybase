@@ -474,11 +474,12 @@ rng:weighted(weights, list) → value
 
 ## cli/
 
-### `cli/main.lua` (~380 lines)
+### `cli/main.lua` (~400 lines)
 - `M.main(argv)` — top-level dispatcher
 - Subcommands: `compile`, `run`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
-- Flags: `--save` / `--load` / `--seed N` for `run`; `--production` for `compile`/`run`
+- Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` for `run`; `--production` for `compile`/`run`
 - `BOOL_FLAGS` set prevents boolean flags from eating the following positional arg
+- `--auto` / `--steps N`: non-interactive run mode; fake `io_in` always returns "1"; `--steps N` limits turns
 - Per-subcommand help: `storybase help <subcommand>` shows detailed usage
 
 ### `cli/verify_cmd.lua` (79 lines)
@@ -546,6 +547,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |
 | `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |
 | `tests/cli/compact_spec.lua` | compact CLI command |
+| `tests/cli/cli_integration_spec.lua` | Full CLI integration tests: all subcommands against all test*.sb + demo*.sb files (77 tests; run before CLI/demo commits) |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
 | `tests/fuzz/log_fuzz_spec.lua` | Property test: log serialise/deserialise round-trip; replay determinism |

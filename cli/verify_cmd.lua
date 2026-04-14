@@ -22,13 +22,11 @@ function M.run(args)
   local compiler = require("compiler.compiler")
   local game_table, diags = compiler.compile(src, filepath)
 
-  local has_errors = false
-  for _, d in ipairs(diags or {}) do
+  for _, d in ipairs(diags and diags.all or {}) do
     local loc = string.format("%s:%d:%d", d.file or "?", d.line or 0, d.col or 0)
     io.stderr:write(string.format("%s: %s: %s\n", loc, d.level, d.message))
-    if d.level == "error" then has_errors = true end
   end
-  if has_errors then
+  if diags:has_errors() then
     io.stderr:write("Compilation failed; cannot verify.\n")
     return 1
   end

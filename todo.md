@@ -6,7 +6,23 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-13)
+## Current Status and Next Steps (2026-04-14)
+
+**CLI fixes + integration test suite COMPLETE** — 1292 tests passing.
+
+**Completed this session (2026-04-14):**
+- Fixed `cli/verify_cmd.lua`: was treating diagnostic accumulator as plain array; now uses `diags.all` and `diags:has_errors()`
+- Fixed `cli/migrate_cmd.lua`: same diags-as-array bug; also fixed undefined `has_errors` local
+- Fixed `cli/main.lua`:
+  - Added `--auto` / `--steps N` non-interactive run mode (fake `io_in` reader always returns "1")
+  - Added `auto = true` to `BOOL_FLAGS` so `--auto` doesn't consume the next positional arg
+  - Fixed require guard: `if arg and arg[0] and arg[0]:find("[/\\]?main%.lua$")` (was `if arg then` which auto-executed when required by busted)
+- Fixed `compiler/codegen.lua`: `state player: Player = Player(...)` (named record type) now expands to `kind="record"` with all type fields and proper defaults; previously only constructor fields were produced, causing `state:get("player/gold")` → nil
+  - Added `collect_type_record_fields(type_name, decls_by_name, visited)` helper for recursive `with` mixin resolution
+- Updated `tests/compiler/codegen_spec.lua`: added "named record type in state is expanded to kind='record'" test; updated discrete/scalar tests
+- Created `tests/cli/cli_integration_spec.lua`: 77 tests covering all CLI subcommands against all test*.sb and demo*.sb files; uses per-file `--steps N` limits to avoid precondition violations
+- Updated `CLAUDE.md` with Testing Regime section documenting fast vs CLI integration test commands
+- Updated `code_map.md` to document `tests/cli/cli_integration_spec.lua`
 
 **Tile Grid Extension COMPLETE** — 1214 tests passing.
 
@@ -899,16 +915,117 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 - [ ] All error codes use `UPPER_SNAKE` constants defined in `compiler/ast.lua` or `runtime/engine.lua`
 - [ ] `busted tests/` passes with zero failures before each phase milestone is signed off
 
-## Long term tasks (after engine is stable)
+## Documentation (after engine is stable)
 
-- Write documentation, including a public API reference and a guide for writing games.
-  - This should include an API spec (complete), a tutorial-style guide to writing games with the engine, a how-to guide, and a reference for the language syntax and semantics.
-  - Read https://danielsieger.com/blog/2023/04/24/framework-for-better-documentation.html for ideas on structuring the documentation before starting. Write a summary of the key points in this todo list to guide the writing process.
-  - Remember to create todo points for each aspect of the documentation.
-  - The API spec should cover all public functions and their expected inputs, outputs, and side effects. It should also include examples of how to use each function in the context of a game.
-  - The tutorial guide should walk through the process of creating a game from start to finish, demonstrating how to use the various features of the engine. It should start with a simple game and gradually introduce more complex features, showing how they can be used together to create engaging interactive fiction.
-  - The language reference should provide a comprehensive overview of the syntax and semantics of the StoryBase language, including all expression forms, control flow constructs, mutation primitives, and scene declaration features. It should also include examples of each construct in use.
-  - The documentation should be written in a clear and accessible style, with plenty of examples and explanations to help new users understand how to use the engine effectively. It should also be kept up to date with any changes or additions to the engine's features.
+### Framework for Better Documentation (Diátaxis)
+
+Documentation is divided into **four types**, each serving a different audience and purpose:
+
+- **Tutorials** — learning-oriented. Step-by-step lessons that guide a complete beginner through
+  building something concrete. The goal is skill acquisition, not completeness. Never assume prior
+  knowledge; every step must produce a visible, working result.
+- **How-to guides** — goal-oriented. Short recipes that answer "how do I do X?" for a user who
+  already knows the basics. Stay focused on the task; avoid explaining why unless it affects the
+  choice. Each guide solves exactly one problem.
+- **Reference** — information-oriented. Precise, exhaustive technical specifications (API docs,
+  language grammar, CLI flags). Assume the reader knows what they want; optimise for scanning, not
+  reading. Include common pitfalls and edge cases.
+- **Explanation** — understanding-oriented. Background on design decisions, architecture, and
+  concepts. For experienced users who want to reason about the system, not just use it. Does not
+  contain procedures; contains context and rationale.
+
+All four types live in `docs/`. Keep them strictly separated: do not mix tutorial prose into
+reference pages, or explanation into how-to guides.
+
+Also write a quickstart guide (README.md) that gets users up and running with a minimal example, then points them to the full documentation for next steps.
+They should be able to compile and run a simple game within 5 minutes of reading the quickstart, without needing to understand the full language or engine.
+
+---
+
+## Quickstart (README.md)
+A one-page quickstart guide with a minimal example of running the engine. The goal is to get users up and running as fast as possible, without needing to understand the full language or engine.
+It should also include installation and requirements, and point to the full documentation for next steps. There should be a short description of what StoryBase is and what it's for (and particularly its novel features), but the focus is on getting a simple game running quickly.
+
+### Tutorials (`docs/tutorial/`)
+
+Each tutorial is self-contained and builds on the previous. A reader should be able to follow all
+five in sequence and have a working, moderately complex game at the end.
+
+- [ ] `01_hello_world.md` — Minimal interactive fiction: one scene, one choice, a state mutation.
+  Covers: module header, `state`, `scene`, `*` choices, `->` goto, `set!`.
+- [ ] `02_state_and_choices.md` — Add guarded choices and branching narrative.
+  Covers: `Int`/`Bool`/enum types, `[guard]` choice guards, conditional narration `when`, `inc!`/`dec!`.
+- [ ] `03_functions_and_actors.md` — Extract reusable logic; add an NPC with behaviour.
+  Covers: `fn`, `pre:`, `post:`, `actor`, `behavior`, `send!`, `inbox`, `perceives`.
+- [ ] `04_search_and_verify.md` — Test your game mechanically.
+  Covers: `verify`, `watch`, `can-reach?`, `find-path`, `probability`, `from-any-state:`, `when:`.
+- [ ] `05_tile_grids.md` — Build a tactical map mini-game.
+  Covers: `defgrid`, `grid-get`/`grid-set!`, `within-range?`, `visible-from?`, `path-to`, `occupied-by`.
+
+### How-to Guides (`docs/howto/`)
+
+Short, focused recipes. Each answers exactly one question.
+
+- [ ] `save_and_load.md` — How to save and restore game state (`--save`/`--load`, snapshot files,
+  `storybase compact`).
+- [ ] `schema_migration.md` — How to evolve the schema without breaking saves (`migration A -> B:`,
+  `rename`, `add`, `drop`, `transform`, `rename-enum`).
+- [ ] `debug_server.md` — How to connect the debug server and inspect live state (TCP JSON protocol,
+  `get-state`, `time-travel`, hot reload, watch events).
+- [ ] `lua_embedding.md` — How to embed StoryBase in a Lua host (`sb.load`, `game:call`,
+  `game:choose`, `game:on`, `game:counterfactual`, `game:register_bounded`).
+- [ ] `bounded_computations.md` — How to register and call Lua-backed bounded computations
+  (`bounded` declaration, `game:register_bounded`, search integration).
+- [ ] `production_builds.md` — How to strip debug content for release (`--production`, what is
+  removed, `strict-contracts:` override).
+
+### Reference (`docs/reference/`)
+
+Exhaustive, scannable specifications. No prose explanations of why — only what and how.
+
+- [ ] `language.md` — Complete StoryBase syntax reference. Sections:
+  - Tokens and lexical rules (identifiers, keywords, operators, literals, paths)
+  - Declarations (`module`, `import`, `schema-version`, `engine-config`, `time-model`, `type`,
+    `state`, `relation`, `fn`, `scene`, `actor`, `schedule`, `verify`, `watch`, `bounded`,
+    `macro`, `defgrid`, `migration`)
+  - Expressions (literals, paths, interpolation, binary/unary ops, `match`, `cond`, `if`,
+    `counterfactual`, `in-state`, `find`, `can-reach?`, `find-path`, `probability`, `optimal-path`)
+  - Statements (`set!`, `inc!`, `dec!`, `add!`, `remove!`, `clear!`, `push!`, `pop!`,
+    `spawn!`, `despawn!`, `send!`, `schedule!`, `cancel-schedule!`, `time-inc!`, `time-set!`,
+    `undo!`, `let`, `for`, `while`, `when`, `if/else`, `match`, `pass`)
+  - Type expressions (`Bool`, `Int`, `Option`, `Set`, `List`, `Symbol`, `SymbolOf`, `String`,
+    `Float`, `UList`, `UMap`, record, variant, function type)
+  - Scene navigation (`->`, `=>`, `<-`, `goto-scene!`, `enter-scene!`, `exit-scene!`)
+  - Error codes table (all `UPPER_SNAKE` codes with brief descriptions)
+- [ ] `builtins.md` — Every built-in function: signature, arguments (including named args),
+  return type, side effects, examples. Grouped by category:
+  - State queries (`path-exists?`, `path-list`, `count-where`, `any?`, `all?`)
+  - Collections (`min`, `max`, `tostring`, `random-int`)
+  - Relations (`adjacent`, `reachable`, `shortest-path`, `reachable-set`, `inverse-adjacent`)
+  - Search (`can-reach?`, `find-path`, `probability`, `optimal-path`, `verify-always`,
+    `find-counterexample`)
+  - Tile grid (`grid-get`, `grid-set!`, `grid-width`, `grid-height`, `within-range?`,
+    `visible-from?`, `path-to`, `occupied-by`)
+- [ ] `cli.md` — All CLI subcommands with every flag: `compile`, `run`, `verify`, `migrate`,
+  `extract-symbols`, `compact`, `help`. Include exit codes and output formats.
+- [ ] `lua_api.md` — `lib/storybase.lua` public API. Every method on `sb` and `game` objects:
+  signature, parameters, return values, events emitted. Include the `game:find` options table.
+- [ ] `tile_grid.md` — `defgrid` declaration syntax, `runtime/tilegrid` algorithm details
+  (storage layout, coordinate conventions, metric options, A* parameters, LOS algorithm).
+
+### Explanation (`docs/explanation/`)
+
+Background reading for users who want to understand the system deeply.
+
+- [ ] `design_philosophy.md` — Why StoryBase exists; the five core principles (logic/presentation
+  separation, transaction log as ground truth, bounded search over futures, structured actors,
+  first-class debugging). Why each constraint was chosen and what it enables.
+- [ ] `architecture.md` — Compiler pipeline (lexer → parser → checker passes → codegen), runtime
+  components (engine, state, log, eval, scheduler, actors, search, debug), how they interact.
+  Reference `code_map.md` for file-level detail; this doc explains *why* the split is made.
+- [ ] `search_model.md` — How bounded future-state search works: why discrete types make it
+  finite, BFS/DFS strategies, random-source branching, time budgets, approximate results,
+  coroutine iterator. When to use `can-reach?` vs `find-path` vs `probability` vs `optimal-path`.
 
 - Write a series of example games, from a very basic test toy to a relatively complete (but still basic) adventure with multiple scenes, NPCs, and a complex state machine.
   - To execute this task, write down specifications for each of the games (say 5), including a list of features that the game demonstrates. 
