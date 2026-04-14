@@ -456,3 +456,115 @@ describe("state: replay_from_snapshot", function()
     assert.equal(15, s2:get_time().tick)
   end)
 end)
+
+-- ============================================================
+-- Checkpoint / undo
+-- ============================================================
+
+describe("state store: push_checkpoint / undo", function()
+  it("undo with no checkpoints returns false", function()
+    local s = new_store()
+    assert.is_false(s:undo())
+  end)
+
+  it("undo restores state to checkpoint", function()
+    local s = new_store()
+    s:set("player/health", 80, "f")
+    s:push_checkpoint("before_battle")
+    s:set("player/health", 30, "damage")
+    assert.equal(30, s:get("player/health"))
+    assert.is_true(s:undo())
+    assert.equal(80, s:get("player/health"))
+  end)
+
+  it("undo drops the used checkpoint so a second undo fails", function()
+    local s = new_store()
+    s:set("player/health", 80, "f")
+    s:push_checkpoint("cp")
+    s:set("player/health", 10, "g")
+    s:undo()
+    assert.is_false(s:undo())
+  end)
+
+  it("undo steps=2 reverts two checkpoints back", function()
+    local s = new_store()
+    s:set("player/health", 100, "f")
+    s:push_checkpoint("cp1")
+    s:set("player/health", 70, "g")
+    s:push_checkpoint("cp2")
+    s:set("player/health", 40, "h")
+    assert.is_true(s:undo(2))
+    assert.equal(100, s:get("player/health"))
+  end)
+
+  it("push_checkpoint writes a checkpoint marker to the log", function()
+    local s, l = new_store()
+    s:push_checkpoint("my_fn")
+    local found = false
+    for _, e in ipairs(l:entries()) do
+      if e.kind == "checkpoint" and e.fn == "my_fn" then found = true end
+    end
+    assert.is_true(found)
+  end)
+end)
+
+-- ============================================================
+-- Hook callbacks
+-- ============================================================
+
+describe("state store: _clamp_hook", function()
+  it("fires when inc saturates at max", function()
+    local s = new_store()
+    s:init_defaults()
+    local fired_path, fired_attempted, fired_clamped
+    s._clamp_hook = function(path, attempted, clamped)
+      fired_path      = path
+      fired_attempted = attempted
+      fired_clamped   = clamped
+    end
+    s:inc("player/health", 999, "f")
+    assert.equal("player/health", fired_path)
+    assert.equal(1049,            fired_attempted) -- 50 + 999
+    assert.equal(100,             fired_clamped)
+  end)
+
+  it("fires when dec saturates at min", function()
+    local s = new_store()
+    s:init_defaults()
+    local fired_clamped
+    s._clamp_hook = function(_, _, clamped) fired_clamped = clamped end
+    s:dec("player/health", 999, "f")
+    assert.equal(0, fired_clamped)
+  end)
+
+  it("does not fire when no saturation occurs", function()
+    local s = new_store()
+    s:init_defaults()
+    local fired = false
+    s._clamp_hook = function() fired = true end
+    s:inc("player/health", 10, "f")
+    assert.is_false(fired)
+  end)
+end)
+
+describe("state store: _spawn_hook / _despawn_hook", function()
+  it("_spawn_hook fires after spawn with family / key / record", function()
+    local s = new_store()
+    local fam, key_s, rec
+    s._spawn_hook = function(f, k, r) fam = f; key_s = k; rec = r end
+    s:spawn("party", "hero", { health = 90, status = "alive" }, "f")
+    assert.equal("party",  fam)
+    assert.equal("hero",   key_s)
+    assert.equal(90, rec.health)
+  end)
+
+  it("_despawn_hook fires after despawn with family / key", function()
+    local s = new_store()
+    s:spawn("party", "hero", { health = 90, status = "alive" }, "f")
+    local fam, key_s
+    s._despawn_hook = function(f, k) fam = f; key_s = k end
+    s:despawn("party", "hero", "g")
+    assert.equal("party", fam)
+    assert.equal("hero",  key_s)
+  end)
+end)
