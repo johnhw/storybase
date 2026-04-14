@@ -252,3 +252,111 @@ scene s:
     assert.is_true(paths["player"], "expected player record from main")
   end)
 end)
+
+-- ── Duplicate name across import ───────────────────────────────────────────────
+
+describe("import resolver: duplicate names", function()
+  it("duplicate type name from import produces DUPLICATE_NAME error", function()
+    local lib = tmpfile([[
+module dup-lib
+  version: 1.0
+type Color = red | green
+]])
+    local main = tmpfile(string.format([[
+module dup-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+import %q
+type Color = blue | yellow
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    local found = false
+    for _, e in ipairs(diags.errors or {}) do
+      if e.code == "DUPLICATE_NAME" then found = true end
+    end
+    assert.is_true(found, "expected DUPLICATE_NAME error for duplicate type")
+  end)
+
+  it("duplicate state path from import produces DUPLICATE_NAME error", function()
+    local lib = tmpfile([[
+module state-lib
+  version: 1.0
+state counter: Int(0,9) = 0
+]])
+    local main = tmpfile(string.format([[
+module state-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+import %q
+state counter: Int(0,99) = 0
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    local found = false
+    for _, e in ipairs(diags.errors or {}) do
+      if e.code == "DUPLICATE_NAME" then found = true end
+    end
+    assert.is_true(found, "expected DUPLICATE_NAME for duplicate state path")
+  end)
+end)
+
+-- ── compile() with absolute import path ──────────────────────────────────────
+
+describe("import resolver: compile() with absolute import path", function()
+  it("resolves absolute import path in source string", function()
+    local lib = tmpfile([[
+module abs-lib
+  version: 1.0
+type Rarity = common | rare
+]])
+    -- Build source that imports the absolute path
+    local src = string.format([[
+module abs-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+import %q
+state item:
+  rarity: Rarity = 'common
+scene s:
+  Done.
+]], lib)
+
+    -- Compile as a string; import path is absolute so it resolves fine
+    local gt, diags = compiler.compile(src, "abs-main.sb")
+    os.remove(lib)
+    assert.is_not_nil(gt)
+    assert.is_false(diags:has_errors())
+    assert.is_not_nil(gt.fns or gt.schema)
+  end)
+
+  it("imported relation is visible in main schema", function()
+    local lib = tmpfile([[
+module rel-lib
+  version: 1.0
+relation edges: Symbol -> Set(Symbol, 5)
+]])
+    local src = string.format([[
+module rel-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+import %q
+scene s:
+  Done.
+]], lib)
+    local gt, diags = compiler.compile(src, "rel-main.sb")
+    os.remove(lib)
+    assert.is_not_nil(gt)
+    assert.is_false(diags:has_errors())
+    assert.is_not_nil(gt.relations and gt.relations["edges"],
+      "imported relation should be in game table")
+  end)
+end)
