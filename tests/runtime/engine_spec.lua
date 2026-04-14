@@ -740,3 +740,209 @@ scene main:
   end)
 
 end)
+
+-- ============================================================
+-- => (enter) and <- (exit) navigation
+-- ============================================================
+
+describe("engine: => enter and <- exit navigation", function()
+
+  local src = [[
+module nav-test
+  version: 1.0
+engine-config:
+  entry-scene: lobby
+state world:
+  visited: Bool = false
+scene lobby:
+  Welcome to the lobby.
+  * Enter shop
+    => shop
+scene shop:
+  You are in the shop.
+  * Leave shop
+    <-
+]]
+
+  local function make_eng()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, "compile errors: " .. tostring(errs[1] and errs[1].message))
+    local io_out = { write = function() end }
+    local eng = engine_mod.new(gt, { io_out = io_out })
+    eng:init()
+    return eng
+  end
+
+  it("=> choice returns 'enter' signal with target", function()
+    local eng = make_eng()
+    local signal = eng:do_choice("lobby", 1)
+    assert.is_not_nil(signal)
+    assert.equal("enter", signal.type)
+    assert.equal("shop",  signal.target)
+  end)
+
+  it("after enter_scene, current_scene is the pushed scene", function()
+    local eng = make_eng()
+    local signal = eng:do_choice("lobby", 1)
+    eng:enter_scene(signal.target)
+    assert.equal("shop", eng:current_scene())
+  end)
+
+  it("stack has two entries after push", function()
+    local eng = make_eng()
+    eng:enter_scene("shop")
+    assert.equal(2, #eng._scene_stack)
+  end)
+
+  it("<- choice returns 'exit' signal", function()
+    local eng = make_eng()
+    eng:enter_scene("shop")
+    local signal = eng:do_choice("shop", 1)
+    assert.is_not_nil(signal)
+    assert.equal("exit", signal.type)
+  end)
+
+  it("exit_scene restores previous scene", function()
+    local eng = make_eng()
+    eng:enter_scene("shop")
+    eng:exit_scene()
+    assert.equal("lobby", eng:current_scene())
+  end)
+
+  it("exit_scene on single-scene stack does not error and leaves empty stack", function()
+    local eng = make_eng()
+    eng:exit_scene()  -- pops the only scene
+    -- stack is now empty — current_scene returns nil
+    assert.is_nil(eng:current_scene())
+  end)
+
+end)
+
+-- ============================================================
+-- Conditional narration (if/else in scene body)
+-- ============================================================
+
+describe("engine: conditional narration in scene body", function()
+
+  local src = [[
+module cond-narr
+  version: 1.0
+engine-config:
+  entry-scene: room
+state world:
+  flag: Bool = false
+scene room:
+  if world/flag:
+    Flag is set.
+  else:
+    Flag is not set.
+  * Toggle
+    set! world/flag true
+    -> room
+  * Nothing -> room
+]]
+
+  local function make_eng()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, "compile errors: " .. tostring(errs[1] and errs[1].message))
+    local io_out = { write = function() end }
+    local eng = engine_mod.new(gt, { io_out = io_out })
+    eng:init()
+    return eng
+  end
+
+  it("renders else branch when flag is false", function()
+    local eng = make_eng()
+    local narr = eng:render_scene("room")
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("not set"))
+  end)
+
+  it("renders then branch after flag is set", function()
+    local eng = make_eng()
+    eng:do_choice("room", 1)  -- Toggle sets flag=true
+    local narr = eng:render_scene("room")
+    local text = table.concat(narr, " ")
+    assert.is_falsy(text:find("not set"))
+    assert.is_truthy(text:find("Flag is set"))
+  end)
+
+end)
+
+-- ============================================================
+-- post_action: actor behaviors run after do_choice
+-- ============================================================
+
+describe("engine: post_action runs actor behaviors", function()
+
+  local src = [[
+module post-act-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  counter: Int(0, 99) = 0
+actor inc-actor:
+  priority: 1
+  perceives: []
+  behavior: inc-fn
+fn inc-fn:
+  inc! world/counter 1
+scene main:
+  * Tick -> main
+]]
+
+  it("post_action increments counter via actor behavior", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, "compile errors")
+    local io_out = { write = function() end }
+    local eng = engine_mod.new(gt, { io_out = io_out })
+    eng:init()
+    assert.equal(0, eng._state:get("world/counter"))
+    eng:post_action()
+    assert.equal(1, eng._state:get("world/counter"))
+    eng:post_action()
+    assert.equal(2, eng._state:get("world/counter"))
+  end)
+
+end)
+
+-- ============================================================
+-- npc-speed: extra post_action passes per player turn
+-- ============================================================
+
+describe("engine: npc-speed runs extra actor passes", function()
+
+  local src = [[
+module npc-speed-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+  npc-speed: 2
+state world:
+  counter: Int(0, 99) = 0
+actor inc-actor:
+  priority: 1
+  perceives: []
+  behavior: inc-fn
+fn inc-fn:
+  inc! world/counter 1
+scene main:
+  * Tick -> main
+]]
+
+  it("step with npc-speed 2 runs 3 actor passes (1 normal + 2 extra)", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, "compile errors")
+    local lines_in = {"1", "1"}  -- two turns
+    local eng = engine_mod.new(gt, {
+      io_out = { write = function() end },
+      io_in  = make_input(lines_in),
+    })
+    eng:init()
+    assert.equal(0, eng._state:get("world/counter"))
+    eng:step()  -- 1 step → 1+2=3 post_action calls → counter=3
+    assert.equal(3, eng._state:get("world/counter"))
+  end)
+
+end)
