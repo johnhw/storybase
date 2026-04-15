@@ -486,6 +486,72 @@ describe("eval: match_expr", function()
     })
     assert.is_nil(eval.eval_expr(node, c))
   end)
+
+  it("matches integer arm", function()
+    local c = ctx({})
+    local node = match_expr(int_lit(7), {
+      { int_lit(1),  str_lit("one")   },
+      { int_lit(7),  str_lit("seven") },
+      { "_",         str_lit("other") },
+    })
+    assert.equal("seven", eval.eval_expr(node, c))
+  end)
+end)
+
+-- ============================================================
+-- record_constructor
+-- ============================================================
+
+describe("eval_expr: record_constructor", function()
+  it("builds a table with __variant tag and named fields", function()
+    local c = ctx({})
+    local node = {
+      kind      = "record_constructor",
+      type_name = "Msg/ping",
+      fields    = {
+        { kind = "named_arg", name = "value", value = int_lit(42) },
+        { kind = "named_arg", name = "text",  value = str_lit("hello") },
+      },
+    }
+    local result = eval.eval_expr(node, c)
+    assert.is_table(result)
+    assert.equal("Msg/ping", result.__variant)
+    assert.equal(42,         result.value)
+    assert.equal("hello",    result.text)
+  end)
+
+  it("builds a table with no fields", function()
+    local c = ctx({})
+    local node = {
+      kind      = "record_constructor",
+      type_name = "Status/ok",
+      fields    = {},
+    }
+    local result = eval.eval_expr(node, c)
+    assert.equal("Status/ok", result.__variant)
+  end)
+
+  it("match_expr matches record_constructor by __variant", function()
+    local c = ctx({})
+    -- Build the subject: a record with __variant = "Msg/ping"
+    local subject_node = {
+      kind      = "record_constructor",
+      type_name = "Msg/ping",
+      fields    = { { kind = "named_arg", name = "n", value = int_lit(7) } },
+    }
+    -- Build the match: arm pattern is a record_constructor with same type_name
+    local pattern = {
+      kind      = "record_constructor",
+      type_name = "Msg/ping",
+      fields    = { { kind = "named_arg", name = "n", value = fn_call("n") } },
+    }
+    local arms = {
+      { kind = "match_arm", pattern = pattern, body = int_lit(99) },
+      { kind = "match_arm", pattern = "_",     body = int_lit(0)  },
+    }
+    local node = { kind = "match_expr", expr = subject_node, arms = arms }
+    assert.equal(99, eval.eval_expr(node, c))
+  end)
 end)
 
 -- ============================================================
