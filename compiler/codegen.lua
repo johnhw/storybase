@@ -19,6 +19,8 @@ local ast = require("compiler.ast")
 -- ============================================================
 
 --- Compute the state-space size of a type expression node.
+local state_space_size_of_decl  -- forward declaration (mutual recursion)
+
 --- Returns a non-negative integer, or math.huge for unbounded types.
 --- Returns 0 for types that cannot be resolved (undefined references).
 local function state_space_size(texpr, symtab)

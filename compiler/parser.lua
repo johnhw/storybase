@@ -1504,6 +1504,12 @@ local function parse_primary(p)
       if not arg then break end
       args[#args + 1] = arg
     end
+    -- Collect trailing named-arg tokens: e.g. `within-range? g x1 y1 x2 y2 range: 3`
+    while p:at("NAMED_ARG") do
+      local na = p:adv()
+      local val = parse_atom(p)
+      args[#args + 1] = ast.named_arg(na.value, val, na.pos)
+    end
     -- Check for trailing lambda argument: fn(params): expr
     if p:at("KEYWORD", "fn") then
       local lam = parse_lambda(p)
@@ -2677,7 +2683,11 @@ local function parse_verify_decl(p, doc)
       p:expect("OP", ":", "expected ':' after when-condition")
       p:match("NEWLINE")
       -- when body is sub-clauses (for now, just skip)
-      if p:at("INDENT") then p:adv(); while not p:at("DEDENT") and not p:at("EOF") do p:skip_to_eol() end; if p:at("DEDENT") then p:adv() end end
+      if p:at("INDENT") then
+        p:adv()
+        while not p:at("DEDENT") and not p:at("EOF") do p:skip_to_eol() end
+        if p:at("DEDENT") then p:adv() end
+      end
       clauses[#clauses+1] = ast.verify_clause("when", cond, {}, cpos)
 
     else

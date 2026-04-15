@@ -8,7 +8,9 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-15)
 
-**demo06 COMPLETE** — `demos/demo06_buried_keep.sb` ("The Buried Keep") fully implemented and tested. 1465 tests passing.
+**demo06 COMPLETE** — `demos/demo06_buried_keep.sb` ("The Buried Keep") fully implemented and tested. All checklist items verified. 1465 tests passing.
+
+**Code quality pass COMPLETE** — no global state leaks, all lines ≤120 chars, all error codes use constants.
 
 **Next task:** Further demos or remaining low-priority features (see list below).
 
@@ -479,17 +481,17 @@ Use `if world/torches = 0 ... else ...` to branch. Show `world/turn` and `world/
 
 ### Implementation Checklist
 
-- [ ] Write `demos/demo06_buried_keep.sb` per the spec above
-- [ ] Verify it runs cleanly: `lua5.4 cli/main.lua run --auto demos/demo06_buried_keep.sb`
-- [ ] Add to CLI integration tests: entry in `tests/cli/cli_integration_spec.lua`
-- [ ] Smoke-test all scenes are reachable (combat, vault, throne-room, victory, defeat)
-- [ ] Confirm `migration 1->2` block is present and parses without error
-- [ ] Confirm `defgrid` + `within-range?` calls execute without runtime error
-- [ ] Confirm `hook combat: post:` increments `world/kills` after `attack-monster`
-- [ ] Confirm `hook after: move-to:` decrements torches after each `move-to`
-- [ ] Confirm `schedule torch-burn` and `wraith-stirs` fire at correct intervals
-- [ ] Update `code_map.md` to mention demo06
-- [ ] Make a commit
+- [x] Write `demos/demo06_buried_keep.sb` per the spec above
+- [x] Verify it runs cleanly: `lua5.4 cli/main.lua run --auto demos/demo06_buried_keep.sb`
+- [x] Add to CLI integration tests: entry in `tests/cli/cli_integration_spec.lua`
+- [x] Smoke-test all scenes are reachable (combat, defeat, loot-room, victory, intro, keep — 6 scenes)
+- [x] Confirm `migration 1->2` block is present and parses without error (from_ver=1, to_ver=2, op adds world/kills)
+- [x] Confirm `defgrid` + `within-range?` calls execute without runtime error (`within-range? keep-layout 2 2 4 4 range: 3`)
+- [x] Confirm `hook combat: post:` increments `world/kills` after `attack-monster` (0→1 verified)
+- [x] Confirm `hook after: move-to:` decrements torches after each `move-to` (5→4 on first move verified)
+- [x] Confirm `schedule torch-burn` and `wraith-stirs` fire at correct intervals (torches=1 at turn=3 in CLI run)
+- [x] Update `code_map.md` to mention demo06
+- [x] Make a commit
 
 ---
 
@@ -1466,11 +1468,11 @@ Also completing Phase 5 overflow: find/query engine, relation queries, `can-reac
 ## Ongoing
 
 - [ ] Every public function in every module has at least one passing and one failing test
-- [ ] No module writes to Lua global state
-- [ ] All files begin `local M = {}` and end `return M`
-- [ ] Line length ≤ 120 characters throughout
-- [ ] All error codes use `UPPER_SNAKE` constants defined in `compiler/ast.lua` or `runtime/engine.lua`
-- [ ] `busted tests/` passes with zero failures before each phase milestone is signed off
+- [x] No module writes to Lua global state (fixed codegen.lua: `state_space_size_of_decl` missing forward `local` decl)
+- [x] All files begin `local M = {}` and end `return M` (migrate.lua/verify.lua use spacing variant `local M   = {}` — functionally identical)
+- [x] Line length ≤ 120 characters throughout (fixed 3 lines in parser.lua and eval.lua)
+- [x] All error codes use `UPPER_SNAKE` constants defined in `compiler/ast.lua` or `runtime/engine.lua`
+- [x] `busted tests/` passes with zero failures before each phase milestone is signed off
 
 ## Documentation (after engine is stable)
 

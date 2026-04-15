@@ -1217,7 +1217,10 @@ local BUILTINS = {
         local l = log_mod.new()
         local fs = state_mod.new(ctx.game.schema or {}, l)
         for k, v in pairs(snap) do if not k:match("^__time/") then fs._cache[k] = v end end
-        local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="optimal-path-cost", signal=nil, retval=nil, game=ctx.game }
+        local fc = {
+          state=fs, fns=ctx.fns, vars={}, fn_name="optimal-path-cost",
+          signal=nil, retval=nil, game=ctx.game,
+        }
         local ok, result = pcall(eval_expr, by_expr, fc)
         return (ok and type(result) == "number") and result or 1
       end
@@ -1258,7 +1261,10 @@ local BUILTINS = {
       local l = log_mod.new()
       local fs = state_mod.new(ctx.game.schema or {}, l)
       for k, v in pairs(snap) do if not k:match("^__time/") then fs._cache[k] = v end end
-      local fc = { state=fs, fns=ctx.fns, vars={}, fn_name="find-counterexample", signal=nil, retval=nil, game=ctx.game }
+      local fc = {
+        state=fs, fns=ctx.fns, vars={}, fn_name="find-counterexample",
+        signal=nil, retval=nil, game=ctx.game,
+      }
       local ok, result = pcall(eval_expr, cond_expr, fc)
       if ok and not result then
         found_snap = snap

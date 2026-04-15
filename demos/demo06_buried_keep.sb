@@ -414,6 +414,9 @@ scene keep:
     The Sunstone pulses in the inventory, warm and urgent.
     Get back to the entrance to escape.
 
+  when within-range? keep-layout 2 2 4 4 range: 3:
+    The keep's central passages are within reach.
+
   when all-party-dead?:
     -> defeat
 
