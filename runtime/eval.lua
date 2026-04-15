@@ -94,13 +94,14 @@ local K = {
 ---@return table
 function M.new_ctx(state, fns, fn_name, game)
   return {
-    state   = state,
-    fns     = fns or {},
-    vars    = {},
-    fn_name = fn_name or "?",
-    signal  = nil,
-    retval  = nil,
-    game    = game,
+    state      = state,
+    fns        = fns or {},
+    vars       = {},
+    fn_name    = fn_name or "?",
+    signal     = nil,
+    retval     = nil,
+    game       = game,
+    engine_ref = nil,  -- set by engine:make_ctx; used for engine/ pseudo-paths
   }
 end
 
@@ -118,8 +119,9 @@ local function child_ctx(parent, fn_name)
     retval  = nil,
     actors    = parent.actors,     -- propagate actor registry for send!
     scheduler = parent.scheduler,  -- propagate scheduler for cancel-schedule!
-    game      = parent.game,       -- propagate compiled game table
-    debug     = parent.debug,      -- propagate debug server for event emission
+    game       = parent.game,       -- propagate compiled game table
+    debug      = parent.debug,      -- propagate debug server for event emission
+    engine_ref = parent.engine_ref, -- propagate engine reference for engine/ paths
     scene_stack = parent.scene_stack,
     counterfactual_depth = parent.counterfactual_depth,  -- propagate nesting depth
   }
@@ -189,6 +191,27 @@ eval_expr = function(node, ctx)
     -- Check local vars first (single-segment paths can be loop/let vars)
     if #(node.segments or {}) == 1 and ctx.vars[node.segments[1]] ~= nil then
       return ctx.vars[node.segments[1]]
+    end
+    -- Engine pseudo-paths: engine/current-scene, engine/tick, etc.
+    if path == "engine/current-scene" then
+      local eng = ctx.engine_ref
+      return eng and eng:current_scene() or nil
+    elseif path == "engine/scene-stack" then
+      local eng = ctx.engine_ref
+      if not eng then return {} end
+      local s = {}
+      for _, v in ipairs(eng._scene_stack or {}) do s[#s+1] = v end
+      return s
+    elseif path == "engine/tick" then
+      if ctx.state and ctx.state._time then return ctx.state._time.tick or 0 end
+      return 0
+    elseif path == "engine/time" then
+      if ctx.state and ctx.state._time then
+        local t = {}
+        for k, v in pairs(ctx.state._time) do t[k] = v end
+        return t
+      end
+      return {}
     end
     return ctx.state:get(path)
 
@@ -653,8 +676,163 @@ local BUILTINS = {
     end
     return math.random(lo, hi)
   end,
+  ["random-bool"] = function(args, ctx)
+    local p = eval_expr(args[1], ctx) or 0.5
+    -- Search engine injection: treat as random-int 0 1 (0=false, 1=true)
+    if ctx.game and ctx.game._random_inject then
+      local v = ctx.game._random_inject(0, 1)
+      if v ~= nil then return v == 1 end
+    end
+    return math.random() < p
+  end,
+  ["random-enum"] = function(args, ctx)
+    -- arg[1] is the enum type name (bare ident evaluates to its string name)
+    local type_name = eval_expr(args[1], ctx)
+    -- Look up enum values from the compiled schema
+    local values = nil
+    if ctx.game and ctx.game.schema and ctx.game.schema.types then
+      for _, t in ipairs(ctx.game.schema.types) do
+        if t.name == type_name and (t.kind == "enum" or t.kind == "alias") then
+          -- For enum: t.values; for alias: may be inline enum in type_desc
+          if t.values then values = t.values
+          elseif t.type_desc and t.type_desc.values then values = t.type_desc.values end
+          break
+        end
+      end
+    end
+    if not values or #values == 0 then return nil end
+    -- Search engine injection: index 0..#values-1 maps to enum values
+    local idx
+    if ctx.game and ctx.game._random_inject then
+      local v = ctx.game._random_inject(0, #values - 1)
+      if v ~= nil then idx = v end
+    end
+    if idx == nil then idx = math.random(0, #values - 1) end
+    return values[idx + 1]
+  end,
+  ["random-choice"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    if type(list) ~= "table" or #list == 0 then return nil end
+    local idx
+    if ctx.game and ctx.game._random_inject then
+      local v = ctx.game._random_inject(0, #list - 1)
+      if v ~= nil then idx = v end
+    end
+    if idx == nil then idx = math.random(0, #list - 1) end
+    return list[idx + 1]
+  end,
+  ["random-weighted"] = function(args, ctx)
+    local weights = eval_expr(args[1], ctx)
+    local list    = eval_expr(args[2], ctx)
+    if type(list) ~= "table" or #list == 0 then return nil end
+    -- Search engine injection: treat as uniform random-choice (weights ignored in BFS)
+    local idx
+    if ctx.game and ctx.game._random_inject then
+      local v = ctx.game._random_inject(0, #list - 1)
+      if v ~= nil then idx = v end
+    end
+    if idx == nil then
+      -- Weighted selection at runtime
+      if type(weights) == "table" and #weights == #list then
+        local total = 0
+        for _, w in ipairs(weights) do total = total + (type(w) == "number" and w or 0) end
+        if total > 0 then
+          local r = math.random() * total
+          local cum = 0
+          for i, w in ipairs(weights) do
+            cum = cum + (type(w) == "number" and w or 0)
+            if r <= cum then idx = i - 1; break end
+          end
+        end
+      end
+      idx = idx or math.random(0, #list - 1)
+    end
+    return list[idx + 1]
+  end,
   ["tostring"] = function(args, ctx)
     return tostring(eval_expr(args[1], ctx))
+  end,
+  -- ── String / numeric stdlib ──────────────────────────────────────────────────
+  ["str"] = function(args, ctx)
+    -- Concatenate any number of arguments into a String (superficial)
+    local parts = {}
+    for _, arg in ipairs(args) do
+      local v = eval_expr(arg, ctx)
+      parts[#parts + 1] = tostring(v ~= nil and v or "")
+    end
+    return table.concat(parts)
+  end,
+  ["abs"] = function(args, ctx)
+    local v = eval_expr(args[1], ctx) or 0
+    return math.abs(v)
+  end,
+  ["clamp"] = function(args, ctx)
+    local v  = eval_expr(args[1], ctx) or 0
+    local lo = eval_expr(args[2], ctx) or 0
+    local hi = eval_expr(args[3], ctx) or 0
+    return math.max(lo, math.min(hi, v))
+  end,
+  ["int-to-str"] = function(args, ctx)
+    local v = eval_expr(args[1], ctx)
+    return tostring(v ~= nil and v or "")
+  end,
+  ["str-to-int"] = function(args, ctx)
+    local s = eval_expr(args[1], ctx)
+    local n = tonumber(s)
+    if n then return math.floor(n) end
+    return nil  -- Option(Int) — nil means "not a valid integer"
+  end,
+  -- ── Collection stdlib ────────────────────────────────────────────────────────
+  ["size"] = function(args, ctx)
+    local v = eval_expr(args[1], ctx)
+    if type(v) == "table" then return #v end
+    return 0
+  end,
+  ["empty?"] = function(args, ctx)
+    local v = eval_expr(args[1], ctx)
+    if type(v) ~= "table" then return true end
+    return #v == 0
+  end,
+  ["union"] = function(args, ctx)
+    local a = eval_expr(args[1], ctx)
+    local b = eval_expr(args[2], ctx)
+    if type(a) ~= "table" then a = {} end
+    if type(b) ~= "table" then b = {} end
+    -- Sets are lists; union = deduplicated merge
+    local seen = {}
+    local result = {}
+    for _, v in ipairs(a) do
+      if not seen[tostring(v)] then seen[tostring(v)] = true; result[#result+1] = v end
+    end
+    for _, v in ipairs(b) do
+      if not seen[tostring(v)] then seen[tostring(v)] = true; result[#result+1] = v end
+    end
+    return result
+  end,
+  ["intersect"] = function(args, ctx)
+    local a = eval_expr(args[1], ctx)
+    local b = eval_expr(args[2], ctx)
+    if type(a) ~= "table" then return {} end
+    if type(b) ~= "table" then return {} end
+    local b_set = {}
+    for _, v in ipairs(b) do b_set[tostring(v)] = v end
+    local result = {}
+    for _, v in ipairs(a) do
+      if b_set[tostring(v)] ~= nil then result[#result+1] = v end
+    end
+    return result
+  end,
+  ["list-get"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local idx  = eval_expr(args[2], ctx) or 1
+    if type(list) ~= "table" then return nil end
+    if idx < 0 then idx = #list + idx + 1 end
+    return list[idx]  -- nil if out of bounds → Option(T)
+  end,
+  ["list-size"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    if type(list) ~= "table" then return 0 end
+    return #list
   end,
   -- ── Relation query builtins ──────────────────────────────────────────────────
   -- Relation name is the first arg, passed as a bare IDENT (0-arg fn_call returns its name).
@@ -1280,6 +1458,31 @@ call_fn = function(name, args, ctx)
     ctx.state:push_checkpoint(name)
   end
 
+  -- Collect hooks that apply to this function call (by tag or by fn name)
+  local hooks = ctx.game and ctx.game.hooks or {}
+  local fn_tags_set = {}
+  for _, tag in ipairs(fn.tags or {}) do fn_tags_set[tag] = true end
+
+  local pre_hooks  = {}  -- bodies to run before the fn body
+  local post_hooks = {}  -- bodies to run after the fn body
+  for _, h in ipairs(hooks) do
+    if h.hook_kind == "tag_pre" and fn_tags_set[h.target] then
+      pre_hooks[#pre_hooks+1] = h.body
+    elseif h.hook_kind == "tag_post" and fn_tags_set[h.target] then
+      post_hooks[#post_hooks+1] = h.body
+    elseif h.hook_kind == "fn_before" and h.target == name then
+      pre_hooks[#pre_hooks+1] = h.body
+    elseif h.hook_kind == "fn_after" and h.target == name then
+      post_hooks[#post_hooks+1] = h.body
+    end
+  end
+
+  -- Run pre-hooks (observe-only context; mutations not allowed but not enforced here)
+  for _, hbody in ipairs(pre_hooks) do
+    local hctx = child_ctx(sub, name .. ":pre-hook")
+    eval_stmts(hbody, hctx)
+  end
+
   -- Emit fn-call debug event (dev mode only)
   if ctx.debug and not (ctx.game and ctx.game.production) then
     local tick = ctx.state and ctx.state._time and ctx.state._time.tick or 0
@@ -1287,6 +1490,9 @@ call_fn = function(name, args, ctx)
       ctx.debug:emit("fn-call", { name = name, args = arg_vals, tick = tick })
     end)
   end
+
+  -- Record log length before body execution (for `changes` in post-hooks)
+  local log_seq_before = ctx.state and ctx.state._log and #(ctx.state._log._entries or {}) or 0
 
   -- Execute body
   eval_stmts(fn.body, sub)
@@ -1298,6 +1504,25 @@ call_fn = function(name, args, ctx)
       if not ok then
         error("Postcondition failed in " .. name)
       end
+    end
+  end
+
+  -- Run post-hooks with `changes` variable set to mutations made during body
+  if #post_hooks > 0 then
+    local changes = {}
+    if ctx.state and ctx.state._log then
+      local entries = ctx.state._log._entries or {}
+      for i = log_seq_before + 1, #entries do
+        local e = entries[i]
+        if e and e.path then
+          changes[#changes+1] = { path = e.path, old = e.old, new = e.new }
+        end
+      end
+    end
+    for _, hbody in ipairs(post_hooks) do
+      local hctx = child_ctx(sub, name .. ":post-hook")
+      hctx.vars["changes"] = changes
+      eval_stmts(hbody, hctx)
     end
   end
 

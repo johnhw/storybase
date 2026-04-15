@@ -1386,3 +1386,457 @@ describe("eval: random-int builtin", function()
     assert.equal(42, v)
   end)
 end)
+
+describe("random-bool builtin", function()
+  it("returns a boolean", function()
+    local c = ctx({})
+    local node = fn_call("random-bool", { kind="float_lit", value=0.5 })
+    local v = eval.eval_expr(node, c)
+    assert.is_true(v == true or v == false)
+  end)
+
+  it("always returns true when p=1.0", function()
+    local c = ctx({})
+    local node = fn_call("random-bool", { kind="float_lit", value=1.0 })
+    for _ = 1, 10 do
+      assert.is_true(eval.eval_expr(node, c))
+    end
+  end)
+
+  it("always returns false when p=0.0", function()
+    local c = ctx({})
+    local node = fn_call("random-bool", { kind="float_lit", value=0.0 })
+    for _ = 1, 10 do
+      assert.is_false(eval.eval_expr(node, c))
+    end
+  end)
+
+  it("respects _random_inject: 1 → true", function()
+    local c = ctx({})
+    c.game = { _random_inject = function() return 1 end }
+    local node = fn_call("random-bool", { kind="float_lit", value=0.5 })
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
+  it("respects _random_inject: 0 → false", function()
+    local c = ctx({})
+    c.game = { _random_inject = function() return 0 end }
+    local node = fn_call("random-bool", { kind="float_lit", value=0.5 })
+    assert.is_false(eval.eval_expr(node, c))
+  end)
+end)
+
+describe("random-enum builtin", function()
+  local function make_ctx_with_schema(enum_name, values)
+    local c = ctx({})
+    c.game = {
+      schema = {
+        types = { { kind="enum", name=enum_name, values=values } }
+      },
+    }
+    return c
+  end
+
+  it("returns a value from the enum", function()
+    local c = make_ctx_with_schema("Status", {"alive", "dead", "unknown"})
+    local node = fn_call("random-enum", { kind="fn_call", name="Status", args={} })
+    local v = eval.eval_expr(node, c)
+    assert.is_true(v == "alive" or v == "dead" or v == "unknown")
+  end)
+
+  it("respects _random_inject: index 0 → first value", function()
+    local c = make_ctx_with_schema("Loc", {"village", "forest", "castle"})
+    c.game._random_inject = function() return 0 end
+    local node = fn_call("random-enum", { kind="fn_call", name="Loc", args={} })
+    assert.equal("village", eval.eval_expr(node, c))
+  end)
+
+  it("respects _random_inject: index 2 → third value", function()
+    local c = make_ctx_with_schema("Loc", {"village", "forest", "castle"})
+    c.game._random_inject = function() return 2 end
+    local node = fn_call("random-enum", { kind="fn_call", name="Loc", args={} })
+    assert.equal("castle", eval.eval_expr(node, c))
+  end)
+
+  it("returns nil for unknown type name", function()
+    local c = ctx({})
+    c.game = { schema = { types = {} } }
+    local node = fn_call("random-enum", { kind="fn_call", name="NoSuchType", args={} })
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+end)
+
+describe("random-choice builtin", function()
+  it("returns an element from the list", function()
+    local c = ctx({})
+    local node = fn_call("random-choice", {
+      kind="list_lit",
+      elements={ { kind="symbol_lit", name="a" },
+                 { kind="symbol_lit", name="b" },
+                 { kind="symbol_lit", name="c" } }
+    })
+    local v = eval.eval_expr(node, c)
+    assert.is_true(v == "a" or v == "b" or v == "c")
+  end)
+
+  it("respects _random_inject: 0 → first element", function()
+    local c = ctx({})
+    c.game = { _random_inject = function() return 0 end }
+    local node = fn_call("random-choice", {
+      kind="list_lit",
+      elements={ { kind="symbol_lit", name="x" }, { kind="symbol_lit", name="y" } }
+    })
+    assert.equal("x", eval.eval_expr(node, c))
+  end)
+
+  it("returns nil for empty list", function()
+    local c = ctx({})
+    local node = fn_call("random-choice", { kind="list_lit", elements={} })
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+end)
+
+describe("random-weighted builtin", function()
+  it("returns an element from the list", function()
+    local c = ctx({})
+    local node = fn_call("random-weighted",
+      { kind="list_lit", elements={ { kind="float_lit", value=1.0 },
+                                    { kind="float_lit", value=2.0 } } },
+      { kind="list_lit", elements={ { kind="symbol_lit", name="rare" },
+                                    { kind="symbol_lit", name="common" } } }
+    )
+    local v = eval.eval_expr(node, c)
+    assert.is_true(v == "rare" or v == "common")
+  end)
+
+  it("respects _random_inject: index 1 → second element", function()
+    local c = ctx({})
+    c.game = { _random_inject = function() return 1 end }
+    local node = fn_call("random-weighted",
+      { kind="list_lit", elements={ { kind="float_lit", value=1.0 },
+                                    { kind="float_lit", value=1.0 } } },
+      { kind="list_lit", elements={ { kind="symbol_lit", name="a" },
+                                    { kind="symbol_lit", name="b" } } }
+    )
+    assert.equal("b", eval.eval_expr(node, c))
+  end)
+end)
+
+describe("str builtin", function()
+  it("concatenates string args", function()
+    local c = ctx({})
+    local node = fn_call("str",
+      { kind="string_lit", value="Hello " },
+      { kind="string_lit", value="World" })
+    assert.equal("Hello World", eval.eval_expr(node, c))
+  end)
+
+  it("converts non-string args with tostring", function()
+    local c = ctx({})
+    local node = fn_call("str",
+      { kind="string_lit", value="HP: " },
+      { kind="int_lit", value=42 })
+    assert.equal("HP: 42", eval.eval_expr(node, c))
+  end)
+
+  it("works with zero args", function()
+    local c = ctx({})
+    local node = fn_call("str")
+    assert.equal("", eval.eval_expr(node, c))
+  end)
+
+  it("works with three args", function()
+    local c = ctx({})
+    local node = fn_call("str",
+      { kind="string_lit", value="a" },
+      { kind="string_lit", value="b" },
+      { kind="string_lit", value="c" })
+    assert.equal("abc", eval.eval_expr(node, c))
+  end)
+end)
+
+describe("stdlib: numeric builtins", function()
+  it("abs returns absolute value of positive", function()
+    local c = ctx({})
+    assert.equal(5, eval.eval_expr(fn_call("abs", int_lit(5)), c))
+  end)
+
+  it("abs returns absolute value of negative", function()
+    local c = ctx({})
+    assert.equal(7, eval.eval_expr(fn_call("abs", int_lit(-7)), c))
+  end)
+
+  it("clamp clamps to [lo, hi]", function()
+    local c = ctx({})
+    assert.equal(5, eval.eval_expr(fn_call("clamp", int_lit(5), int_lit(0), int_lit(10)), c))
+    assert.equal(0, eval.eval_expr(fn_call("clamp", int_lit(-3), int_lit(0), int_lit(10)), c))
+    assert.equal(10, eval.eval_expr(fn_call("clamp", int_lit(15), int_lit(0), int_lit(10)), c))
+  end)
+
+  it("int-to-str converts integer to string", function()
+    local c = ctx({})
+    assert.equal("42", eval.eval_expr(fn_call("int-to-str", int_lit(42)), c))
+  end)
+
+  it("str-to-int parses valid integer string", function()
+    local c = ctx({})
+    assert.equal(7, eval.eval_expr(fn_call("str-to-int", str_lit("7")), c))
+  end)
+
+  it("str-to-int returns nil for invalid string", function()
+    local c = ctx({})
+    assert.is_nil(eval.eval_expr(fn_call("str-to-int", str_lit("abc")), c))
+  end)
+end)
+
+describe("stdlib: collection builtins", function()
+  local function list_lit(...)
+    local elems = {}
+    for _, v in ipairs({...}) do
+      elems[#elems+1] = { kind="symbol_lit", name=v }
+    end
+    return { kind="list_lit", elements=elems }
+  end
+
+  it("size returns count of elements", function()
+    local c = ctx({})
+    assert.equal(3, eval.eval_expr(fn_call("size", list_lit("a","b","c")), c))
+  end)
+
+  it("size returns 0 for nil/non-table", function()
+    local c = ctx({})
+    assert.equal(0, eval.eval_expr(fn_call("size", int_lit(5)), c))
+  end)
+
+  it("empty? returns true for empty list", function()
+    local c = ctx({})
+    assert.is_true(eval.eval_expr(fn_call("empty?", list_lit()), c))
+  end)
+
+  it("empty? returns false for non-empty list", function()
+    local c = ctx({})
+    assert.is_false(eval.eval_expr(fn_call("empty?", list_lit("a")), c))
+  end)
+
+  it("union merges two sets without duplicates", function()
+    local c = ctx({})
+    local result = eval.eval_expr(fn_call("union", list_lit("a","b"), list_lit("b","c")), c)
+    assert.is_true(#result == 3)
+    local s = {}; for _, v in ipairs(result) do s[v] = true end
+    assert.is_true(s["a"] and s["b"] and s["c"])
+  end)
+
+  it("intersect returns common elements", function()
+    local c = ctx({})
+    local result = eval.eval_expr(fn_call("intersect", list_lit("a","b","c"), list_lit("b","c","d")), c)
+    assert.is_true(#result == 2)
+    local s = {}; for _, v in ipairs(result) do s[v] = true end
+    assert.is_true(s["b"] and s["c"])
+  end)
+
+  it("list-get returns element at index", function()
+    local c = ctx({})
+    local node = fn_call("list-get", list_lit("x","y","z"), int_lit(2))
+    assert.equal("y", eval.eval_expr(node, c))
+  end)
+
+  it("list-get returns nil for out-of-bounds index", function()
+    local c = ctx({})
+    local node = fn_call("list-get", list_lit("x","y"), int_lit(5))
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+
+  it("list-size returns list length", function()
+    local c = ctx({})
+    local node = fn_call("list-size", list_lit("a","b","c","d"))
+    assert.equal(4, eval.eval_expr(node, c))
+  end)
+end)
+
+describe("engine pseudo-paths", function()
+  local engine_mod = require("runtime.engine")
+  local compiler   = require("compiler.compiler")
+
+  local src = [[
+engine-config:
+  entry-scene: main
+scene main:
+  Hello.
+  * Go
+    -> main
+]]
+
+  it("engine/current-scene returns current scene name", function()
+    local gt = compiler.compile(src, "test.sb")
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    local node = { kind="path_expr", segments={"engine","current-scene"} }
+    assert.equal("main", eval.eval_expr(node, c))
+  end)
+
+  it("engine/scene-stack returns the stack as a list", function()
+    local gt = compiler.compile(src, "test.sb")
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    local node = { kind="path_expr", segments={"engine","scene-stack"} }
+    local stack = eval.eval_expr(node, c)
+    assert.is_table(stack)
+    assert.equal("main", stack[1])
+  end)
+
+  it("engine/tick returns current tick (0 initially)", function()
+    local gt = compiler.compile(src, "test.sb")
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    local node = { kind="path_expr", segments={"engine","tick"} }
+    assert.equal(0, eval.eval_expr(node, c))
+  end)
+
+  it("engine/time returns time table", function()
+    local gt = compiler.compile(src, "test.sb")
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    local node = { kind="path_expr", segments={"engine","time"} }
+    local t = eval.eval_expr(node, c)
+    assert.is_table(t)
+  end)
+
+  it("engine/current-scene is nil when no engine_ref", function()
+    local c = ctx({})  -- no engine_ref
+    local node = { kind="path_expr", segments={"engine","current-scene"} }
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+end)
+
+describe("tag and hook execution", function()
+  local compiler   = require("compiler.compiler")
+  local engine_mod = require("runtime.engine")
+
+  it("pre-hook fires before fn body", function()
+    local src = [[
+state counter: Int(0, 100) = 0
+tag watched
+fn inc-counter:
+  tags: [watched]
+  set! counter 10
+hook watched:
+  pre:
+    set! counter 1
+]]
+    local gt = compiler.compile(src, "hook_test.sb")
+    assert.is_not_nil(gt)
+    local eng = engine_mod.new(gt)
+    eng:init()
+    -- counter should start at 0
+    assert.equal(0, eng._state:get("counter"))
+    -- call inc-counter; pre-hook sets it to 1 first, then body sets it to 10
+    local c = eng:make_ctx("test")
+    eval.call_fn("inc-counter", {}, c)
+    -- after: pre-hook ran (set to 1), then body ran (set to 10)
+    assert.equal(10, eng._state:get("counter"))
+  end)
+
+  it("post-hook fires after fn body", function()
+    local src = [[
+state counter: Int(0, 100) = 0
+tag watched
+fn inc-counter:
+  tags: [watched]
+  set! counter 5
+hook watched:
+  post:
+    set! counter 99
+]]
+    local gt = compiler.compile(src, "hook_test2.sb")
+    assert.is_not_nil(gt)
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    eval.call_fn("inc-counter", {}, c)
+    -- post-hook ran after body, overwriting 5 → 99
+    assert.equal(99, eng._state:get("counter"))
+  end)
+
+  it("fn_after hook fires after specific function", function()
+    local src = [[
+state flag: Int(0, 10) = 0
+fn foo:
+  set! flag 3
+hook after: foo:
+  set! flag 7
+]]
+    local gt = compiler.compile(src, "hook_test3.sb")
+    assert.is_not_nil(gt)
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    eval.call_fn("foo", {}, c)
+    assert.equal(7, eng._state:get("flag"))
+  end)
+
+  it("fn_before hook fires before specific function", function()
+    local src = [[
+state flag: Int(0, 10) = 0
+fn foo:
+  set! flag 3
+hook before: foo:
+  set! flag 9
+]]
+    local gt = compiler.compile(src, "hook_test4.sb")
+    assert.is_not_nil(gt)
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    eval.call_fn("foo", {}, c)
+    -- before-hook ran (flag=9), then body ran (flag=3)
+    assert.equal(3, eng._state:get("flag"))
+  end)
+
+  it("post-hook has access to changes variable", function()
+    local src = [[
+state hp: Int(0, 100) = 50
+state last-change-count: Int(0, 100) = 0
+tag audited
+fn damage:
+  tags: [audited]
+  set! hp 30
+hook audited:
+  post:
+    set! last-change-count (size changes)
+]]
+    local gt = compiler.compile(src, "hook_test5.sb")
+    assert.is_not_nil(gt)
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    eval.call_fn("damage", {}, c)
+    assert.equal(30, eng._state:get("hp"))
+    -- changes should have had 1 entry (the set! hp 30)
+    assert.equal(1, eng._state:get("last-change-count"))
+  end)
+
+  it("hook body can read state normally", function()
+    local src = [[
+state world/val:  Int(0, 100) = 42
+state world/copy: Int(0, 100) = 0
+tag copier
+fn set-val:
+  tags: [copier]
+  pass
+hook copier:
+  post:
+    set! world/copy world/val
+]]
+    local gt = compiler.compile(src, "hook_test6.sb")
+    assert.is_not_nil(gt)
+    local eng = engine_mod.new(gt)
+    eng:init()
+    local c = eng:make_ctx("test")
+    eval.call_fn("set-val", {}, c)
+    assert.equal(42, eng._state:get("world/copy"))
+  end)
+end)

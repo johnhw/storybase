@@ -736,6 +736,33 @@ local function emit_grids(decls)
   return grids
 end
 
+--- Emit tag declarations into game_table.tags (name-keyed set).
+local function emit_tags(decls)
+  local tags = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.TAG_DECL then
+      tags[node.name] = true
+    end
+  end
+  return tags
+end
+
+--- Emit hook declarations into game_table.hooks list.
+--- Each entry: { hook_kind, target, body }
+local function emit_hooks(decls)
+  local hooks = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.HOOK_DECL then
+      hooks[#hooks+1] = {
+        hook_kind = node.hook_kind,
+        target    = node.target,
+        body      = node.body,
+      }
+    end
+  end
+  return hooks
+end
+
 local function emit_migrations(decls)
   local migrations = {}
   for _, node in ipairs(decls) do
@@ -841,6 +868,8 @@ function M.emit(typed_ast, opts)
     migrations = emit_migrations(decls),
     bounded    = emit_bounded(decls),
     grids      = emit_grids(decls),
+    tags       = emit_tags(decls),
+    hooks      = emit_hooks(decls),
     production = opts.production or false,
   }
 

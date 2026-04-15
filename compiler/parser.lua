@@ -2708,6 +2708,146 @@ local function parse_watch_decl(p, doc)
 end
 
 
+-- ── `tag name` declaration ───────────────────────────────────────────────────
+local function parse_tag_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "tag"
+  local name = p:at("IDENT") and p:adv().value or "?"
+  p:skip_to_eol()
+  return ast.tag_decl(name, tpos)
+end
+
+-- ── `hook` declaration ───────────────────────────────────────────────────────
+-- Syntax variants:
+--   hook tag-name:                         → hooks pre:/post: body for that tag
+--     pre:  stmt...
+--     post: stmt...
+--   hook after: fn-name:                   → post-hook for a specific function
+--     stmt...
+--   hook before: fn-name:                  → pre-hook for a specific function
+--     stmt...
+local function parse_hook_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "hook"
+
+  -- Determine hook kind
+  local hook_kind, target
+
+  -- `after:` and `before:` are tokenized as NAMED_ARG by the lexer.
+  if p:at("NAMED_ARG", "after") then
+    p:adv()  -- consume NAMED_ARG("after") — colon already consumed
+    -- fn-name follows as NAMED_ARG (e.g. `foo:`) or IDENT
+    if p:at("NAMED_ARG") then
+      target = p:adv().value
+    elseif p:at("IDENT") then
+      target = p:adv().value
+      p:match("OP", ":")
+    end
+    hook_kind = "fn_after"
+  elseif p:at("NAMED_ARG", "before") then
+    p:adv()  -- consume NAMED_ARG("before")
+    if p:at("NAMED_ARG") then
+      target = p:adv().value
+    elseif p:at("IDENT") then
+      target = p:adv().value
+      p:match("OP", ":")
+    end
+    hook_kind = "fn_before"
+  elseif p:at("KEYWORD", "after") or p:at("IDENT", "after") then
+    p:adv()  -- consume "after"
+    p:match("OP", ":")
+    if p:at("NAMED_ARG") then
+      target = p:adv().value
+    elseif p:at("IDENT") then
+      target = p:adv().value
+      p:match("OP", ":")
+    end
+    hook_kind = "fn_after"
+  elseif p:at("KEYWORD", "before") or p:at("IDENT", "before") then
+    p:adv()  -- consume "before"
+    p:match("OP", ":")
+    if p:at("NAMED_ARG") then
+      target = p:adv().value
+    elseif p:at("IDENT") then
+      target = p:adv().value
+      p:match("OP", ":")
+    end
+    hook_kind = "fn_before"
+  elseif p:at("NAMED_ARG") then
+    -- "tag-name:" — NAMED_ARG already consumed the colon
+    target    = p:adv().value
+    hook_kind = nil  -- determined below from pre:/post: sub-blocks
+  elseif p:at("IDENT") then
+    target    = p:adv().value
+    p:match("OP", ":")
+    hook_kind = nil  -- determined below from pre:/post: sub-blocks
+  else
+    p:emit_err(ast.E.BAD_DECLARATION, "expected hook target after 'hook'", tpos)
+    p:skip_to_eol()
+    return nil
+  end
+
+  p:match("NEWLINE")
+
+  -- Parse body: either a raw body block (for fn_before/fn_after)
+  -- or an inner block with pre:/post: sub-blocks (for tag hooks)
+  local result = {}
+
+  if hook_kind == "fn_before" or hook_kind == "fn_after" then
+    -- Direct body
+    local body = parse_body_items(p, false)
+    result[#result+1] = ast.hook_decl(hook_kind, target, body, doc, tpos)
+  else
+    -- Tag hook: look for pre:/post: sub-blocks inside an INDENT block
+    if p:at("INDENT") then
+      p:adv()
+      while not p:at("DEDENT") and not p:at("EOF") do
+        p:skip_newlines()
+        if p:at("DEDENT") or p:at("EOF") then break end
+        local sub = p:cur()
+        -- `pre:` and `post:` are NAMED_ARG tokens inside the indented block.
+        local is_pre_post = (sub.kind == "KEYWORD" and (sub.value == "pre" or sub.value == "post"))
+                         or (sub.kind == "NAMED_ARG" and (sub.value == "pre" or sub.value == "post"))
+        if is_pre_post then
+          local timing = sub.value
+          p:adv()  -- consume KEYWORD/NAMED_ARG for "pre" or "post"
+          -- KEYWORD "pre"/"post" still has a colon to consume; NAMED_ARG already ate it
+          if sub.kind == "KEYWORD" then p:match("OP", ":") end
+          local body
+          if p:at("NEWLINE") then
+            p:adv()
+            body = parse_body_items(p, false)
+          else
+            local stmt = parse_stmt(p)
+            body = stmt and {stmt} or {}
+            p:skip_to_eol()
+          end
+          local hk = (timing == "pre") and "tag_pre" or "tag_post"
+          result[#result+1] = ast.hook_decl(hk, target, body, doc, tpos)
+        else
+          p:skip_to_eol()
+        end
+      end
+      if p:at("DEDENT") then p:adv() end
+    else
+      -- Single-line hook with no sub-block: treat as post
+      local body = {}
+      local stmt = parse_stmt(p)
+      if stmt then body[1] = stmt end
+      p:skip_to_eol()
+      result[#result+1] = ast.hook_decl("tag_post", target, body, doc, tpos)
+    end
+  end
+
+  -- Return multiple nodes if we parsed both pre and post blocks.
+  -- The caller's parse_file_decls handles single nodes, so wrap in a
+  -- sentinel that parse_file_decls will flatten.
+  if #result == 1 then return result[1] end
+  if #result == 0 then return nil end
+  -- Return as a special multi-decl wrapper (parse_file_decls will handle it)
+  return { _multi_decl = true, decls = result }
+end
+
 -- ============================================================
 -- Top-level dispatch
 -- ============================================================
@@ -2726,6 +2866,8 @@ local function parse_decl(p, doc)
     elseif t.value == "actor"      then return parse_actor_decl(p, doc)
     elseif t.value == "schedule"   then return parse_schedule_decl(p, doc)
     elseif t.value == "verify"     then return parse_verify_decl(p, doc)
+    elseif t.value == "tag"        then return parse_tag_decl(p, doc)
+    elseif t.value == "hook"       then return parse_hook_decl(p, doc)
     elseif t.value == "watch"
         or t.value == "watch-when" then return parse_watch_decl(p, doc)
     elseif t.value == "bounded"    then return parse_bounded_decl(p, doc)
@@ -2799,7 +2941,17 @@ function M.parse(tokens, filename)
 
     local prev = p.pos
     local decl = parse_decl(p, doc)
-    if decl then table.insert(decls, decl) end
+    if decl then
+      -- parse_hook_decl may return a multi-decl wrapper when it produces
+      -- both a pre: and a post: hook node from one hook block.
+      if decl._multi_decl then
+        for _, d in ipairs(decl.decls or {}) do
+          table.insert(decls, d)
+        end
+      else
+        table.insert(decls, decl)
+      end
+    end
     doc = nil
 
     p:skip_newlines()

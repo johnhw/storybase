@@ -208,6 +208,7 @@ function M.new(game_table, opts)
     ctx.scheduler   = self._scheduler
     ctx.debug       = self._debug   -- may be nil (no debug server attached)
     ctx.grids       = self._grids   -- tile grid data (may be empty table)
+    ctx.engine_ref  = self          -- for engine/ pseudo-path reads
     return ctx
   end
 

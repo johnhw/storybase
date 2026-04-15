@@ -185,6 +185,8 @@ M.K.MACRO_DECL          = "macro_decl"
 M.K.MACRO_CALL_STMT     = "macro_call_stmt"
 M.K.MIGRATION_DECL      = "migration_decl"
 M.K.DEFGRID_DECL        = "defgrid_decl"
+M.K.TAG_DECL            = "tag_decl"   -- tag name
+M.K.HOOK_DECL           = "hook_decl"  -- hook tag_name: pre:/post: body
 
 -- ── Type expressions ──────────────────────────────────────────
 M.K.TYPE_BOOL           = "type_bool"
@@ -315,6 +317,7 @@ local DECL_KINDS = {
   [M.K.WATCH_DECL]     = true, [M.K.WATCH_WHEN_DECL] = true,
   [M.K.SCENE_DECL]     = true, [M.K.MACRO_DECL]      = true,
   [M.K.MIGRATION_DECL] = true, [M.K.DEFGRID_DECL]    = true,
+  [M.K.TAG_DECL]       = true, [M.K.HOOK_DECL]       = true,
 }
 
 local MUT_KINDS = {
@@ -852,6 +855,31 @@ end
 --- type_name is string; fields is list of named_arg nodes
 function M.record_constructor(type_name, fields, pos)
   return M.node(M.K.RECORD_CONSTRUCTOR, { type_name = type_name, fields = fields or {} }, pos)
+end
+
+--- `tag name` declaration.
+---@param name string
+---@param pos  table
+function M.tag_decl(name, pos)
+  return M.node(M.K.TAG_DECL, { name = name }, pos)
+end
+
+--- `hook tag_or_fn:` declaration.
+--- timing is "pre" or "post" (from the block inside the hook).
+--- When hook_kind is "tag", tag_name is the tag being hooked.
+--- When hook_kind is "fn_before"/"fn_after", fn_name is the function being hooked.
+---@param hook_kind string  "tag_pre"|"tag_post"|"fn_before"|"fn_after"
+---@param target    string  tag name or function name
+---@param body      table   list of AST statement nodes
+---@param doc       string?
+---@param pos       table
+function M.hook_decl(hook_kind, target, body, doc, pos)
+  return M.node(M.K.HOOK_DECL, {
+    hook_kind = hook_kind,
+    target    = target,
+    body      = body or {},
+    doc       = doc,
+  }, pos)
 end
 
 -- ============================================================

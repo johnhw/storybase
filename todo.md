@@ -6,11 +6,70 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-16)
+## Current Status and Next Steps (2026-04-15)
 
 **Documentation COMPLETE** — all 20 docs written (README + 5 tutorials + 6 how-to guides + 5 reference pages + 3 explanation pages).
 
-**Test expansion pass ongoing** — 1401 tests passing (was 1385 from prior session).
+**Test expansion + spec-gap pass COMPLETE** — 1451 tests passing.
+
+**Spec review (2026-04-15) — all gaps now resolved.**
+
+---
+
+## Spec Gaps (identified 2026-04-15, COMPLETED 2026-04-15)
+
+These items were specified in `idea.md` but missing from the implementation. All are now done.
+
+### §10 Random Sources — missing builtins
+
+- [x] `random-bool p` — Bool with probability p; logs result; search engine branches on true/false
+- [x] `random-enum EnumType` — uniform draw from declared enum; logs; search engine branches over all values
+- [x] `random-choice list` — uniform draw from a List; logs; search engine branches over all values
+- [x] `random-weighted weights list` — weighted draw; logs; search engine branches weighted
+
+### §24 Standard Library — missing builtins
+
+- [x] `str ...` — concatenate any number of values into a String
+- [x] `abs val` — absolute value of an Int
+- [x] `clamp val lo hi` — clamp Int to [lo, hi]
+- [x] `int-to-str n` — Int → String
+- [x] `str-to-int s` — String → Option(Int)
+- [x] `size set` — Set(T) → Int: number of elements
+- [x] `empty? set` — Set(T) → Bool
+- [x] `union a b` — Set(T) Set(T) → Set(T)
+- [x] `intersect a b` — Set(T) Set(T) → Set(T)
+- [x] `list-get list n` — List(T) Int → Option(T)
+- [x] `list-size list` — List(T) → Int
+
+### §24 Engine Pseudo-Paths
+
+- [x] `engine/current-scene` — reads as the current SceneId
+- [x] `engine/scene-stack` — reads as the scene stack list
+- [x] `engine/tick` — reads as the current tick counter
+- [x] `engine/time` — reads as the full time tuple
+- [ ] `engine/checkpoint!` — callable form (deferred; low priority)
+- [ ] `engine/emit event args` — callable form (deferred; low priority)
+
+### §9 Hooks and Aspects
+
+- [x] `tag name` — custom tag declaration (parser + codegen)
+- [x] `hook before: fn-name:` / `hook after: fn-name:` — declaration parsing + runtime dispatch
+- [x] `hook tagname: pre: body` / `hook tagname: post: body` — tag-based hooks
+- [x] `changes` variable in `post:` hook blocks — list of `{path, old, new}` records
+
+---
+
+**Completed this session (2026-04-15, spec-gap pass):**
+- `runtime/eval.lua`: added `random-bool`, `random-enum`, `random-choice`, `random-weighted`, `str`, `abs`, `clamp`, `int-to-str`, `str-to-int`, `size`, `empty?`, `union`, `intersect`, `list-get`, `list-size` builtins
+- `runtime/eval.lua`: engine pseudo-path reads (`engine/current-scene`, `engine/scene-stack`, `engine/tick`, `engine/time`) via `ctx.engine_ref`
+- `runtime/eval.lua`: full hook dispatch in `call_fn` — pre/post hooks by tag and by fn name; `changes` variable in post-hook context
+- `runtime/engine.lua`: `ctx.engine_ref = self` in `make_ctx`
+- `compiler/ast.lua`: `tag_decl` and `hook_decl` node kinds + constructors
+- `compiler/lexer.lua`: `tag` and `hook` keywords
+- `compiler/parser.lua`: `parse_tag_decl`, `parse_hook_decl`, `_multi_decl` flattening; handles NAMED_ARG tokenization of `after:`/`pre:`/`post:`
+- `compiler/codegen.lua`: `emit_tags` and `emit_hooks` → `game_table.tags` and `.hooks`
+- `tests/runtime/eval_spec.lua`: +49 tests covering all new builtins, engine pseudo-paths, hook execution
+- `tests/compiler/codegen_spec.lua`: +6 tests covering tag/hook codegen
 
 **Completed this session (2026-04-16):**
 - `tests/compiler/codegen_spec.lua`: +16 tests covering:

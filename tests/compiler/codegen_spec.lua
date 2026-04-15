@@ -962,3 +962,97 @@ scene main:
     assert.is_not_nil(gt.schema)
   end)
 end)
+
+-- ============================================================
+-- Tag and hook declarations
+-- ============================================================
+
+describe("codegen — tag declarations", function()
+  it("emits tag names into game_table.tags", function()
+    local gt = compile([[
+tag broadcast
+tag reversible
+fn noop:
+  pass
+]])
+    assert.is_not_nil(gt)
+    assert.is_not_nil(gt.tags)
+    assert.is_true(gt.tags["broadcast"])
+    assert.is_true(gt.tags["reversible"])
+  end)
+
+  it("game_table.tags is empty when no tags are declared", function()
+    local gt = compile("fn noop:\n  pass\n")
+    assert.is_not_nil(gt)
+    local count = 0
+    for _ in pairs(gt.tags or {}) do count = count + 1 end
+    assert.equal(0, count)
+  end)
+end)
+
+describe("codegen — hook declarations", function()
+  it("emits a tag_pre hook", function()
+    local gt = compile([[
+tag broadcast
+fn foo:
+  pass
+hook broadcast:
+  pre:
+    pass
+]])
+    assert.is_not_nil(gt)
+    assert.is_not_nil(gt.hooks)
+    local found = false
+    for _, h in ipairs(gt.hooks) do
+      if h.hook_kind == "tag_pre" and h.target == "broadcast" then found = true end
+    end
+    assert.is_true(found, "expected a tag_pre hook for 'broadcast'")
+  end)
+
+  it("emits a tag_post hook", function()
+    local gt = compile([[
+tag broadcast
+fn foo:
+  pass
+hook broadcast:
+  post:
+    pass
+]])
+    assert.is_not_nil(gt)
+    local found = false
+    for _, h in ipairs(gt.hooks) do
+      if h.hook_kind == "tag_post" and h.target == "broadcast" then found = true end
+    end
+    assert.is_true(found, "expected a tag_post hook for 'broadcast'")
+  end)
+
+  it("emits a fn_after hook for a specific function", function()
+    local gt = compile([[
+fn foo:
+  pass
+hook after: foo:
+  pass
+]])
+    assert.is_not_nil(gt)
+    local found = false
+    for _, h in ipairs(gt.hooks) do
+      if h.hook_kind == "fn_after" and h.target == "foo" then found = true end
+    end
+    assert.is_true(found, "expected fn_after hook for 'foo'")
+  end)
+
+  it("emits a fn_before hook for a specific function", function()
+    local gt = compile([[
+fn foo:
+  pass
+hook before: foo:
+  pass
+]])
+    assert.is_not_nil(gt)
+    local found = false
+    for _, h in ipairs(gt.hooks) do
+      if h.hook_kind == "fn_before" and h.target == "foo" then found = true end
+    end
+    assert.is_true(found, "expected fn_before hook for 'foo'")
+  end)
+end)
