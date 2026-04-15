@@ -6,9 +6,21 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-14)
+## Current Status and Next Steps (2026-04-15)
 
 **Documentation COMPLETE** — all 20 docs written (README + 5 tutorials + 6 how-to guides + 5 reference pages + 3 explanation pages).
+
+**Test expansion pass COMPLETE** — 1370 tests passing (was 1346 at start of session).
+
+**Completed this session (2026-04-15):**
+- Fixed bug: `relate!`/`unrelate!` were silently no-ops (eval.lua had K.RELATE_MUT/K.UNRELATE_MUT defined but no handlers); implemented handlers that mutate `game_table.relations[rel].data`
+- `tests/runtime/eval_spec.lua`: +38 tests (collection mutations, spawn/despawn, path-list, any?/all?, tostring, division, let bindings, relate!/unrelate!, random-int)
+- `tests/runtime/state_spec.lua`: +17 tests (push_checkpoint/undo, _clamp_hook, _spawn_hook/_despawn_hook)
+- `tests/runtime/log_spec.lua`: +13 tests (checkpoint markers, last_checkpoint_seq, entries_after, entries_up_to)
+- `tests/runtime/engine_spec.lua`: +10 tests (=> enter/exit navigation, if/else narration, post_action, npc-speed)
+- `tests/compiler/import_spec.lua`: +4 tests (duplicate names, absolute import paths, imported relations)
+- `tests/lib/storybase_spec.lua`: +7 tests (game:set, game:reset, on() event callbacks)
+- `tests/compiler/checker_spec.lua`: +5 tests (SUPERFICIAL_IN_COND, WRITE_UNTYPED_VAR with SymbolOf inference)
 
 **CLI fixes + integration test suite COMPLETE** — 1292 tests passing.
 
