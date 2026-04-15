@@ -1370,3 +1370,81 @@ fn run:
 ]], ast.E.LAMBDA_CALLS_MUT)
   end)
 end)
+
+-- ============================================================
+-- SUPERFICIAL_IN_COND warning
+-- ============================================================
+
+describe("checker — SUPERFICIAL_IN_COND warning", function()
+  local BASE = [[
+module sc-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+scene main:
+  * Go -> main
+]]
+
+  it("String path in if condition emits SUPERFICIAL_IN_COND", function()
+    check_warn(BASE .. [[
+state world:
+  label: String = "hello"
+fn test:
+  if world/label = "hello":
+    pass
+]], ast.E.SUPERFICIAL_IN_COND)
+  end)
+
+  it("Float path in comparison emits SUPERFICIAL_IN_COND", function()
+    check_warn(BASE .. [[
+state world:
+  ratio: Float = 0.5
+fn test:
+  if world/ratio > 0.3:
+    pass
+]], ast.E.SUPERFICIAL_IN_COND)
+  end)
+
+  it("discrete Bool path in condition does NOT emit SUPERFICIAL_IN_COND", function()
+    check_ok(BASE .. [[
+state world:
+  flag: Bool = false
+fn test:
+  if world/flag:
+    pass
+]])
+  end)
+end)
+
+-- ============================================================
+-- WRITE_UNTYPED_VAR warning
+-- ============================================================
+
+describe("checker — WRITE_UNTYPED_VAR warning", function()
+  local BASE = [[
+module wuv-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+scene main:
+  * Go -> main
+]]
+
+  it("untyped interpolated variable in write path emits WRITE_UNTYPED_VAR", function()
+    check_warn(BASE .. [[
+state world:
+  x: Int(0, 99) = 0
+fn writer somevar:
+  set! world/{somevar} 5
+]], ast.E.WRITE_UNTYPED_VAR)
+  end)
+
+  it("loop var from path-list does NOT emit WRITE_UNTYPED_VAR (SymbolOf inferred)", function()
+    check_ok(BASE .. [[
+state npcs/{npc}: Bool  max: 5
+fn clear-all:
+  for npc in (path-list npcs):
+    set! npcs/{npc} false
+]])
+  end)
+end)
