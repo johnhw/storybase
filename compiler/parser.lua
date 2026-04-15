@@ -711,11 +711,16 @@ local function parse_relation_decl(p, doc)
         self:skip_to_eol(); return nil
       end
       self:expect("OP", ":", "expected ':' after relation key")
-      -- Parse optional value list: ['a, 'b, ...] or bare symbols/idents
+      -- Parse optional value list: ['a, 'b, ...] or {'a, 'b, ...} or bare symbols/idents
       local values = {}
+      local close_bracket = nil
       if self:at("OP", "[") then
-        self:adv()  -- consume "["
-        while not self:at("OP", "]") and not self:at("NEWLINE")
+        self:adv(); close_bracket = "]"
+      elseif self:at("OP", "{") then
+        self:adv(); close_bracket = "}"
+      end
+      if close_bracket then
+        while not self:at("OP", close_bracket) and not self:at("NEWLINE")
               and not self:at("EOF") do
           local vpos = self:cur().pos
           if self:at("SYMBOL") then
@@ -727,7 +732,7 @@ local function parse_relation_decl(p, doc)
           end
           self:match("OP", ",")
         end
-        self:expect("OP", "]", "expected ']' to close relation value list")
+        self:expect("OP", close_bracket, "expected '"..close_bracket.."' to close relation value list")
       end
       self:skip_to_eol()
       return { key = key, values = values }
@@ -1211,7 +1216,15 @@ local function parse_when_stmt(p, is_scene)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD "when"
   local cond = parse_expr(p)
-  p:expect("OP", ":", "expected ':' after when condition")
+  -- The ':' after the condition may already have been consumed by the lexer as
+  -- part of a NAMED_ARG token (e.g. "room-clear?:" → NAMED_ARG "room-clear?").
+  -- In that case the current token will be NEWLINE/DEDENT/EOF — just skip the
+  -- explicit ':' check.  If ':' is still present, consume it normally.
+  if p:at("OP", ":") then
+    p:adv()
+  elseif not (p:at("NEWLINE") or p:at("DEDENT") or p:at("EOF")) then
+    p:expect("OP", ":", "expected ':' after when condition")
+  end
   p:match("NEWLINE")
   local body = parse_body_items(p, is_scene or false)
   return ast.when_stmt(cond, body, tpos)
@@ -1280,8 +1293,14 @@ local function parse_for_stmt(p)
   else
     p:emit_err(ast.E.EXPECTED_TOKEN, "expected 'in' after for variable", p:cur().pos)
   end
+  -- Peek ahead: if the iterator expression is a bare NAMED_ARG (e.g. "changes:")
+  -- the lexer already consumed the ':' as part of the token.
+  local iter_tok_is_named_arg = p:at("NAMED_ARG")
   local iter = parse_expr(p)
-  p:expect("OP", ":", "expected ':' after for expression")
+  -- Only expect explicit ':' if the NAMED_ARG did NOT already consume it.
+  if not iter_tok_is_named_arg then
+    p:expect("OP", ":", "expected ':' after for expression")
+  end
   p:skip_to_eol()
   local body = parse_body_items(p, false)
   return ast.for_stmt(var_name, iter, body, tpos)
@@ -1534,6 +1553,10 @@ local function parse_cmp(p)
     local op_pos = p:cur().pos; local op = p:adv().value
     local right = parse_add(p)
     left = ast.binary_op(op, left, right, op_pos)
+  elseif p:at("KEYWORD", "in") then
+    local op_pos = p:cur().pos; p:adv()
+    local right = parse_add(p)
+    left = ast.binary_op("in", left, right, op_pos)
   end
   return left
 end
@@ -1653,12 +1676,15 @@ local MUTATION_TABLE = {
   end,
   ["relate!"]  = function(p, pos)
     local rel = p:at("IDENT") and p:adv().value or "?"
-    local a = parse_expr(p); local b = parse_expr(p)
+    -- Use parse_atom (not parse_expr) for source and target to avoid greedy
+    -- argument collection: `relate! rel ident1 ident2` must not parse ident2
+    -- as an argument to ident1.
+    local a = parse_atom(p); local b = parse_atom(p)
     p:skip_to_eol(); return ast.relate_mut(rel, a, b, pos)
   end,
   ["unrelate!"] = function(p, pos)
     local rel = p:at("IDENT") and p:adv().value or "?"
-    local a = parse_expr(p); local b = parse_expr(p)
+    local a = parse_atom(p); local b = parse_atom(p)
     p:skip_to_eol(); return ast.unrelate_mut(rel, a, b, pos)
   end,
   ["send!"]    = function(p, pos)

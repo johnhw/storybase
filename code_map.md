@@ -568,6 +568,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo03_quest.sb` | Bool flags, `fn` with `pre:`, `when`, `if/else`, Class enum, XP system |
 | `demo04_expedition.sb` | entity family (`state crew/{m}`), `spawn!`/`despawn!`, `for`/`path-list`, `path-exists?`, `count-where` |
 | `demo05_siege.sb` | time-model, actor + behavior, `send!`, schedule, `cancel-schedule!`, `verify-always` |
+| `demo06_buried_keep.sb` | schema-version + migration, record types, static/dynamic relations with `{...}` data, `relate!`/`unrelate!`, `defgrid`/`within-range?`, tag+hook, watch/watch-when, `in` operator, `contains?`, `size`/`empty?` on map-style sets, `union`/`intersect`, `any?`/`all?`, `push!`/`pop!`, actor+inbox, `match` on variant, `spawn!`/`despawn!`, `count-where`, `path-exists?`, `verify-always`, `for` over `path-list` |
 
 ---
 

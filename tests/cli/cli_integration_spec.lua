@@ -190,6 +190,7 @@ local DEMO_SB_FILES = {
   "demos/demo03_quest.sb",
   "demos/demo04_expedition.sb",
   "demos/demo05_siege.sb",
+  "demos/demo06_buried_keep.sb",
 }
 
 describe("CLI compile: demo .sb files", function()
@@ -272,6 +273,7 @@ local DEMO_STEPS = {
   ["demos/demo03_quest.sb"]     = 10,  -- has quest loop; bound early
   ["demos/demo04_expedition.sb"] = 8,  -- crew can all die by day 8
   ["demos/demo05_siege.sb"]     = 12,  -- has guarded victory condition
+  ["demos/demo06_buried_keep.sb"] = 6, -- torches run out in ~4 steps auto-play
 }
 
 describe("CLI run --auto --steps N: all demo files run without error", function()

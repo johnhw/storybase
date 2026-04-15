@@ -243,7 +243,10 @@ function M.new(game_table, opts)
       elseif sub.kind == "if_expr" then
         local body = eval.eval_expr(sub.condition, ctx) and sub.then_body or sub.else_body
         self:_render_narration_items(narration, body, ctx)
+      elseif sub.kind == "scene_goto" or sub.kind == "scene_enter" then
+        eval.eval_stmt(sub, ctx)  -- sets ctx.signal
       end
+      if ctx.signal then return end  -- stop on navigation signal
     end
   end
 
@@ -301,9 +304,8 @@ function M.new(game_table, opts)
         -- Conditional narration block: render body if condition is true
         local cond = eval.eval_expr(item.condition, ctx)
         if cond then
-          for _, sub in ipairs(item.body or {}) do
-            self:_render_narration_items(narration, {sub}, ctx)
-          end
+          self:_render_narration_items(narration, item.body, ctx)
+          if ctx.signal then nav_signal = ctx.signal; break end
         end
 
       elseif item.kind == "if_expr" then

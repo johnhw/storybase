@@ -8,11 +8,488 @@ Milestone goals are marked **M**.
 
 ## Current Status and Next Steps (2026-04-15)
 
-**Documentation COMPLETE** — all 20 docs written (README + 5 tutorials + 6 how-to guides + 5 reference pages + 3 explanation pages).
+**demo06 COMPLETE** — `demos/demo06_buried_keep.sb` ("The Buried Keep") fully implemented and tested. 1465 tests passing.
 
-**Test expansion + spec-gap pass COMPLETE** — 1451 tests passing.
+**Next task:** Further demos or remaining low-priority features (see list below).
 
-**Spec review (2026-04-15) — all gaps now resolved.**
+### Fixes made for demo06
+
+- `compiler/parser.lua`: relation static-data block now accepts both `{...}` and `[...]` syntax for value sets
+- `runtime/engine.lua`: `_render_narration_items` now handles `scene_goto`/`scene_enter` inside when-blocks; `render_scene` propagates nav signal from `when` body
+- `compiler/parser.lua`: `in` binary operator added in `parse_cmp`
+- `runtime/eval.lua`: `in` binary operator evaluation (array-style and map-style tables)
+- `runtime/eval.lua`: `contains?` builtin added
+- `runtime/eval.lua`: `size`/`empty?` fixed for map-style tables (`{key=true,...}` from `adjacent?`)
+- `runtime/eval.lua`: PATH_EXPR multi-segment access on local table vars (`c/path`)
+- `compiler/parser.lua`: `for x in expr:` handles NAMED_ARG tokenization of iterator
+- `compiler/parser.lua`: `when condition:` handles NAMED_ARG tokenization of condition
+- `compiler/parser.lua`: `relate!`/`unrelate!` use `parse_atom` to prevent greedy arg collection
+
+---
+
+## Demo 06 — "The Buried Keep" (planned, 2026-04-15)
+
+### Concept
+
+A three-person adventuring party descends into a five-room subterranean keep to
+recover the Sunstone before their torches burn out. The player chooses the
+party's roles, navigates between rooms, fights monsters, loots items, and must
+reach the entrance again carrying the Sunstone to win. The party is wiped out
+(loss) if all three members die or if the torches run out before escaping.
+
+This is a single file: `demos/demo06_buried_keep.sb`.
+
+The game is deliberately designed to exercise every significant StoryBase
+feature that the existing five demos do not already cover.
+
+---
+
+### Feature Coverage Matrix
+
+| Feature | Where it appears |
+|---------|-----------------|
+| `record` type | `PartyMember`, `Monster` struct types |
+| `relation` (static) | `room-exits` movement graph |
+| `relation` (dynamic) | `room-loot`, `room-monster` — modified at runtime |
+| `relate!` / `unrelate!` | Picking up items clears loot; defeating monsters clears them |
+| `defgrid` | `keep-layout 6x6` — walls/pits; used for `within-range?` and `path-to` |
+| `tag` + `hook` | `tag combat` on attack fns; `hook combat: post:` increments kill counter |
+| `hook after: move-to:` | Decrements torches on every movement |
+| `watch` / `watch-when` | Watch HP, turn, torches; alert on wipe / sunstone found |
+| `schema-version` + `migration` | v1→v2 adds `world/kills: Int(0,30) = 0` |
+| `random-bool` | 40% ambush chance when entering a dangerous room |
+| `random-enum` | Draw monster type for ambush encounter |
+| `random-weighted` | Loot quality roll (common 50%, rare 35%, legendary 15%) |
+| `str` | Build combat result message: `str "Dealt " dmg " damage to " kind` |
+| `abs` | Absolute damage variance in attack formula |
+| `clamp` | Clamp computed damage to legal Int range |
+| `size` | Count monsters in current room |
+| `empty?` | Guard "inventory full" choice |
+| `union` / `intersect` | Combine active status-effect sets in narration logic |
+| `list-get` / `list-size` | Access spell-list entries for the mage role |
+| `any?` / `all?` | Check if any member is wounded; if all are dead |
+| `push!` / `pop!` | Add items to / consume items from inventory |
+| `engine/tick` | Display tick number in scene narration |
+| `time-model` | Single `turn` axis; `time-inc!` on every move |
+| `schedule` | Torch burn (every 3 turns); wraith stirs (every 5 turns) |
+| `cancel-schedule!` | Cancel torch burn after escaping |
+| `actor` + `send!` + `inbox` | Scout NPC warns party about ambushes |
+| `match` on variant message | Scout's `warn-ambush` / `found-exit` messages |
+| `spawn!` / `despawn!` | Spawn 3 party members at start; despawn on death |
+| `count-where` | Count living party members |
+| `for` loop over `path-list` | Apply turn effects to each party member |
+| `path-exists?` | Guard actions that require a specific member alive |
+| `verify-always` | HP ≥ 0 for all members; torch count ≥ 0 |
+| Multi-scene machine | 8 named scenes |
+| Doc strings | On all type, state, relation, fn, actor, scene declarations |
+| `import` | *(Stretch goal: split types into `keep_types.sb`)* |
+| `bounded` | *(Stretch goal: NPC threat assessment via Lua)* |
+
+---
+
+### Schema
+
+#### Module header
+
+```
+module buried-keep
+  version: 2
+```
+
+#### schema-version and migration
+
+```
+schema-version: 2
+
+migration 1 -> 2:
+  add world/kills: Int(0, 30) = 0
+```
+
+(Version 1 was the initial design without the kill counter. This is a realistic
+incremental-development scenario, showing how migration works.)
+
+#### engine-config
+
+```
+engine-config:
+  entry-scene: intro
+```
+
+#### time-model
+
+```
+time-model:
+  axes: [turn]
+  wrap: [none]
+```
+
+#### Type declarations
+
+```
+type Room    = entrance | corridor | armory | vault | throne-room
+type Role    = warrior | mage | scout
+type Status  = active | wounded | dead
+type MonsterKind = skeleton | wraith | golem
+type ItemKind    = sunstone | iron-sword | kite-shield | torch-bundle | healing-draught
+type TileKind    = open | wall | pit
+type LootQuality = common | rare | legendary
+
+record PartyMember:
+  role:   Role
+  hp:     Int(0, 20)
+  status: Status
+
+record Monster:
+  kind:   MonsterKind
+  hp:     Int(0, 15)
+  threat: Int(0, 5)
+```
+
+#### State declarations
+
+```
+state world:
+  current-room:   Room         = 'entrance
+  turn:           Int(0, 30)   = 0
+  sunstone-found: Bool         = false
+  escaped:        Bool         = false
+  torches:        Int(0, 10)   = 5
+  kills:          Int(0, 30)   = 0   # added in migration 1->2
+
+state party/{name}: PartyMember  max: 4
+  # spawned at game start: warrior "aldric", mage "sylva", scout "pin
+
+state inventory: Set(ItemKind, 8) = {}
+```
+
+#### Relation declarations
+
+```
+"Movement graph between keep rooms."
+relation room-exits: Room -> Set(Room, 3):
+  'entrance:    {'corridor}
+  'corridor:    {'entrance, 'armory, 'vault}
+  'armory:      {'corridor, 'throne-room}
+  'vault:       {'corridor}
+  'throne-room: {'armory}
+
+"Items available for pickup in each room. Cleared at runtime when looted."
+relation room-loot: Room -> Set(ItemKind, 4):
+  'armory: {'iron-sword, 'kite-shield}
+  'vault:  {'sunstone, 'healing-draught}
+
+"Monsters present in each room. Cleared at runtime when defeated."
+relation room-monster: Room -> Set(MonsterKind, 2):
+  'corridor:    {'skeleton}
+  'armory:      {'skeleton, 'wraith}
+  'throne-room: {'golem}
+```
+
+#### Tile grid
+
+```
+"6×6 overhead layout of the keep. Used for range checks and pathfinding."
+defgrid keep-layout:
+  dimensions: Int(0,6) x Int(0,6)
+  cell-type:  TileKind
+```
+
+Cells are set during `intro` scene to encode walls/pits (hardcoded `set!` calls
+on `grid-set!`). Used by `within-range?` to check if scout NPC can warn the
+party (must be within 3 tiles), and `path-to` to calculate move cost.
+
+#### Actor declaration
+
+```
+type ScoutMsg:
+  | warn-ambush: room: Room
+  | found-exit:
+
+"Aldric's scout companion. Warns of nearby threats and exit visibility."
+actor scout-npc:
+  perceives: [world/current-room, party/*/hp, party/*/status]
+  inbox:     List(ScoutMsg, 4)
+  behavior:  scout-behavior
+  priority:  5
+```
+
+#### Tag and hook declarations
+
+```
+tag combat
+tag explore
+
+"After any combat function, increment the kill counter."
+hook combat: post:
+  for c in changes:
+    when c/path = "room-monster/*" and c/new = nil:
+      inc! world/kills 1
+
+"After every move, burn one step of torches."
+hook after: move-to:
+  when world/torches > 0:
+    dec! world/torches 1
+```
+
+#### Watch declarations
+
+```
+watch world/turn      "Turn"
+watch world/torches   "Torches"
+watch world/kills     "Kills"
+watch-when (all-party-dead?)         "All party members dead — turn {world/turn}"
+watch-when world/sunstone-found      "Sunstone recovered!"
+watch-when world/torches = 0         "Torches exhausted — darkness falls"
+```
+
+#### Schedule declarations
+
+```
+"Torches burn down over time."
+schedule torch-burn:
+  every:  [turn: +3]
+  offset: [turn: 0]
+  fn:
+    when world/torches > 0:
+      dec! world/torches 1
+
+"A wraith stirs deep in the keep every five turns."
+schedule wraith-stirs:
+  every:  [turn: +5]
+  offset: [turn: 2]
+  fn:
+    when not ('wraith in (room-monster world/current-room)):
+      relate! room-monster world/current-room 'wraith
+```
+
+#### Verify blocks
+
+```
+verify "party hp never negative":
+  verify-always all? (path-list party) fn(m): party/{m}/hp >= 0
+
+verify "torch count non-negative":
+  verify-always world/torches >= 0
+
+verify "sunstone stays in inventory once found":
+  verify-always world/sunstone-found =>
+    ('sunstone in inventory or world/escaped)
+```
+
+---
+
+### Pure Functions
+
+```
+fn living-count:
+  count-where (path-list party) fn(m): party/{m}/status != 'dead
+
+fn all-party-dead?:
+  living-count = 0
+
+fn any-wounded?:
+  any? (path-list party) fn(m): party/{m}/status = 'wounded
+
+fn all-healthy?:
+  all? (path-list party) fn(m): party/{m}/status = 'active
+
+fn has-item? kind:
+  kind in inventory
+
+fn monster-count:
+  size (room-monster world/current-room)
+
+fn room-clear?:
+  empty? (room-monster world/current-room)
+
+fn can-escape?:
+  world/sunstone-found and world/current-room = 'entrance
+
+fn party-size:
+  list-size (path-list party)
+
+fn first-member:
+  list-get (path-list party) 0
+
+fn torches-critical?:
+  world/torches <= 1
+
+fn damage-from kind:
+  # Returns expected damage from a monster kind as Int(0,10)
+  match kind:
+    'skeleton: 3
+    'wraith:   5
+    'golem:    8
+```
+
+---
+
+### Transaction Functions
+
+```
+"Move to an adjacent room. Triggers explore hook (torch consumption)."
+fn move-to room:
+  tags: [explore]
+  pre: room in (room-exits world/current-room)
+  pre: not all-party-dead?
+  pre: world/torches > 0
+  set! world/current-room room
+  time-inc! turn: 1
+  inc! world/turn 1
+  when random-bool 0.4:
+    when not room-clear?:
+      let kind = random-enum MonsterKind
+      when not (kind in (room-monster room)):
+        relate! room-monster room kind
+
+"Attack a monster in the current room."
+fn attack-monster kind:
+  tags: [combat]
+  pre: kind in (room-monster world/current-room)
+  let base-dmg = damage-from kind
+  let roll     = random-int 1 4
+  let dmg      = clamp (base-dmg + roll - 2) 1 12
+  let msg      = str "Dealt " dmg " damage to " kind
+  for m in (path-list party):
+    when party/{m}/status = 'active:
+      let taken = clamp (dmg - 2) 0 8
+      dec! party/{m}/hp taken
+      when party/{m}/hp = 0:
+        set! party/{m}/status 'dead
+        despawn! party m
+  unrelate! room-monster world/current-room kind
+
+"Pick up an item from the current room."
+fn pick-up item:
+  pre: item in (room-loot world/current-room)
+  pre: not (item in inventory)
+  push! inventory item
+  unrelate! room-loot world/current-room item
+  when item = 'sunstone:
+    set! world/sunstone-found true
+
+"Drink a healing draught to restore the most-wounded member."
+fn use-healing-draught:
+  pre: has-item? 'healing-draught
+  pre: any-wounded?
+  pop! inventory 'healing-draught
+  for m in (path-list party):
+    when party/{m}/status = 'wounded:
+      set! party/{m}/status 'active
+      set! party/{m}/hp 15
+
+"Escape the keep, carrying the Sunstone."
+fn escape:
+  pre: can-escape?
+  set! world/escaped true
+  cancel-schedule! torch-burn
+  cancel-schedule! wraith-stirs
+
+"Scout behavior: process inbox messages."
+fn scout-behavior:
+  for msg in scout-npc/inbox:
+    match msg:
+      warn-ambush {room}:
+        when world/current-room = room:
+          pass    # party already there, warning noted
+        _: pass
+      found-exit:
+        pass
+```
+
+---
+
+### Scenes (8 total)
+
+#### `scene intro`
+Narration: title card, premise. Spawn the three party members with their
+starting stats. Show role descriptions. One choice: "Begin the descent" → `keep`.
+Also initialise the tile grid with `grid-set!` calls to mark walls and pits.
+
+#### `scene keep`
+Main hub. Shows current room name, turn, torches, living count, inventory
+summary (using `str` and `size`). Conditional narration blocks:
+- torch warning when `torches-critical?`
+- monster warning when `not room-clear?`
+- wounded alert when `any-wounded?`
+- sunstone banner when `world/sunstone-found`
+- engine/tick in footer
+
+Choices (all guarded):
+- `[room in (room-exits world/current-room)]` for each adjacent room → `move-to room` → `keep`
+- `[not room-clear?]` Fight monster → `-> combat`
+- `[not empty? (room-loot world/current-room)]` Examine loot → `-> loot-room`
+- `[has-item? 'healing-draught and any-wounded?]` Use healing draught → `use-healing-draught` → `keep`
+- `[can-escape?]` Escape! → `escape` → `victory`
+- `[all-party-dead?]` (automatic redirect) → `defeat`
+- `[world/torches = 0]` (automatic redirect) → `defeat`
+
+#### `scene combat`
+Show monster kind, threat, party status. Choices:
+- Attack (calls `attack-monster`) → `keep`
+- Retreat (returns to prior room via move-to) → `keep`
+Uses `match` on monster kind for flavour text. Show `str`-built damage message.
+After killing all monsters: narration "The room falls silent."
+
+#### `scene loot-room`
+Show items in the room with descriptions. Choices per item:
+- `[item in (room-loot world/current-room)]` Pick up item → `pick-up item` → `keep`
+- Leave → `keep`
+
+#### `scene vault`
+Special scene triggered when entering 'vault room. Extra narration about the
+Sunstone's glow. If sunstone still present: choice "Take the Sunstone" with
+prominent formatting. After taking: brief cutscene narration then `-> keep`.
+
+#### `scene throne-room`
+Boss encounter. The golem guards the armory passage. Special narration using
+`within-range?` on the defgrid to describe the golem's position relative to the
+party. Extra choices for warrior-specific attack (if `party/aldric` path exists
+and role = 'warrior). After golem is dead: choice to proceed → `keep`.
+
+#### `scene victory`
+You escaped with the Sunstone. Show final stats: turns taken, kills, party
+members still alive (`living-count`), quality of survival. If all three members
+survived: "A perfect delve." Elseif one survived: "A costly victory." Uses `str`
+to build the final summary line.
+
+#### `scene defeat`
+Two causes: all dead (show who fell and when), or torches out (darkness narration).
+Use `if world/torches = 0 ... else ...` to branch. Show `world/turn` and `world/kills`.
+
+---
+
+### Implementation Notes
+
+1. **Grid initialisation**: In `intro`, make calls like `grid-set! keep-layout [0,0] 'wall` etc. to set up a 6×6 layout. Exact layout to be decided during implementation, but must include at least one `wall` and one `pit` cell so that `path-to` and `within-range?` return interesting results.
+
+2. **Scout NPC messages**: The scout doesn't actively send messages (no Lua tick AI) — instead, the `wraith-stirs` schedule and `move-to` hook send to the scout inbox using `send!` to demonstrate the mechanic. The scout's `scout-behavior` function processes them.
+
+3. **`union` / `intersect` usage**: Define a status-effect set for the party (e.g. `state world/active-effects: Set(StatusEffect, 4) = {}`) and use `union`/`intersect` when combining effects from different sources. Alternatively, use them in the `for` loop over party members when computing combined effect lists.
+
+4. **`list-get` / `list-size` for spells**: Give the `mage` role a spell list declared as `state sylva/spells: List(SpellKind, 4)`. In `scene combat`, the mage can cast `list-get sylva/spells 0` if available.
+
+5. **Migration**: The file declares `schema-version: 2` and a `migration 1 -> 2` block. The v1 game didn't track kills; v2 adds `world/kills`. This is realistic and shows the migration system working.
+
+6. **Doc strings**: Every declaration gets a one-line doc string. This ensures the live inspector has populated metadata.
+
+7. **`undo!` note**: The spec originally included `undo!` via a "retreat" action. However `undo!` reverses log entries and works at the Lua API level rather than as a user-visible scene action — leave it out of the playable game to avoid confusing UX, but note it could be tested via a `verify` block using counterfactual API.
+
+---
+
+### Implementation Checklist
+
+- [ ] Write `demos/demo06_buried_keep.sb` per the spec above
+- [ ] Verify it runs cleanly: `lua5.4 cli/main.lua run --auto demos/demo06_buried_keep.sb`
+- [ ] Add to CLI integration tests: entry in `tests/cli/cli_integration_spec.lua`
+- [ ] Smoke-test all scenes are reachable (combat, vault, throne-room, victory, defeat)
+- [ ] Confirm `migration 1->2` block is present and parses without error
+- [ ] Confirm `defgrid` + `within-range?` calls execute without runtime error
+- [ ] Confirm `hook combat: post:` increments `world/kills` after `attack-monster`
+- [ ] Confirm `hook after: move-to:` decrements torches after each `move-to`
+- [ ] Confirm `schedule torch-burn` and `wraith-stirs` fire at correct intervals
+- [ ] Update `code_map.md` to mention demo06
+- [ ] Make a commit
 
 ---
 

@@ -188,9 +188,21 @@ eval_expr = function(node, ctx)
   -- Path read
   elseif k == K.PATH_EXPR then
     local path = eval_path(node, ctx)
+    local segs = node.segments or {}
     -- Check local vars first (single-segment paths can be loop/let vars)
-    if #(node.segments or {}) == 1 and ctx.vars[node.segments[1]] ~= nil then
-      return ctx.vars[node.segments[1]]
+    if #segs == 1 and ctx.vars[segs[1]] ~= nil then
+      return ctx.vars[segs[1]]
+    end
+    -- Multi-segment path where first segment is a local table var (record field access)
+    if #segs > 1 and ctx.vars[segs[1]] ~= nil then
+      local base = ctx.vars[segs[1]]
+      if type(base) == "table" then
+        for i = 2, #segs do
+          if type(base) ~= "table" then return nil end
+          base = base[segs[i]]
+        end
+        return base
+      end
     end
     -- Engine pseudo-paths: engine/current-scene, engine/tick, etc.
     if path == "engine/current-scene" then
@@ -387,6 +399,16 @@ eval_expr = function(node, ctx)
       return l / r
     elseif op == "and" then return l and r
     elseif op == "or"  then return l or r
+    elseif op == "in"  then
+      -- Membership test: l in r (r is a list/set/adjacency table)
+      if type(r) ~= "table" then return false end
+      -- Array-style check (list/set literals)
+      for _, v in ipairs(r) do
+        if v == l then return true end
+      end
+      -- Map-style check (relation adjacency {key=true,...})
+      if r[l] then return true end
+      return false
     end
     return nil
 
@@ -785,13 +807,31 @@ local BUILTINS = {
   -- ── Collection stdlib ────────────────────────────────────────────────────────
   ["size"] = function(args, ctx)
     local v = eval_expr(args[1], ctx)
-    if type(v) == "table" then return #v end
-    return 0
+    if type(v) ~= "table" then return 0 end
+    local n = #v
+    if n > 0 then return n end
+    -- Also count map-style entries (e.g. relation adjacency {key=true,...})
+    local count = 0
+    for _ in pairs(v) do count = count + 1 end
+    return count
   end,
   ["empty?"] = function(args, ctx)
     local v = eval_expr(args[1], ctx)
     if type(v) ~= "table" then return true end
-    return #v == 0
+    if #v > 0 then return false end
+    -- Also check map-style entries
+    for _ in pairs(v) do return false end
+    return true
+  end,
+  ["contains?"] = function(args, ctx)
+    local collection = eval_expr(args[1], ctx)
+    local item       = eval_expr(args[2], ctx)
+    if type(collection) ~= "table" then return false end
+    for _, v in ipairs(collection) do
+      if v == item then return true end
+    end
+    if collection[item] then return true end
+    return false
   end,
   ["union"] = function(args, ctx)
     local a = eval_expr(args[1], ctx)

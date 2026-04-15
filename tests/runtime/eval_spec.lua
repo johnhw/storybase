@@ -196,6 +196,44 @@ describe("eval_expr: binary operators", function()
   it("or: false or true", function()
     assert.is_true(eval.eval_expr(binop("or", bool_lit(false), bool_lit(true)), ctx()))
   end)
+
+  it("in: element in array-style list returns true", function()
+    local c = ctx({})
+    local node = binop("in", {kind="string_lit", value="b"},
+      {kind="list_lit", elements={{kind="string_lit",value="a"},{kind="string_lit",value="b"}}})
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
+  it("in: element not in list returns false", function()
+    local c = ctx({})
+    local node = binop("in", {kind="string_lit", value="z"},
+      {kind="list_lit", elements={{kind="string_lit",value="a"},{kind="string_lit",value="b"}}})
+    assert.is_false(eval.eval_expr(node, c))
+  end)
+
+  it("in: element in map-style table returns true", function()
+    local c = ctx({})
+    c.vars["m"] = {corridor=true, armory=true}
+    local node = binop("in",
+      {kind="string_lit", value="corridor"},
+      {kind="fn_call", name="m", args={}})
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
+  it("in: element not in map-style table returns false", function()
+    local c = ctx({})
+    c.vars["m"] = {corridor=true}
+    local node = binop("in",
+      {kind="string_lit", value="vault"},
+      {kind="fn_call", name="m", args={}})
+    assert.is_false(eval.eval_expr(node, c))
+  end)
+
+  it("in: returns false when right side is not a table", function()
+    local c = ctx({})
+    local node = binop("in", {kind="string_lit", value="x"}, int_lit(5))
+    assert.is_false(eval.eval_expr(node, c))
+  end)
 end)
 
 describe("eval_expr: unary not", function()
@@ -1608,6 +1646,14 @@ describe("stdlib: collection builtins", function()
     assert.equal(0, eval.eval_expr(fn_call("size", int_lit(5)), c))
   end)
 
+  it("size returns correct count for map-style table (adjacent? result)", function()
+    local c = ctx({})
+    -- inject a map-style table via a let var
+    c.vars["m"] = {corridor=true, armory=true}
+    local node = fn_call("size", {kind="fn_call", name="m", args={}})
+    assert.equal(2, eval.eval_expr(node, c))
+  end)
+
   it("empty? returns true for empty list", function()
     local c = ctx({})
     assert.is_true(eval.eval_expr(fn_call("empty?", list_lit()), c))
@@ -1616,6 +1662,34 @@ describe("stdlib: collection builtins", function()
   it("empty? returns false for non-empty list", function()
     local c = ctx({})
     assert.is_false(eval.eval_expr(fn_call("empty?", list_lit("a")), c))
+  end)
+
+  it("empty? returns false for non-empty map-style table", function()
+    local c = ctx({})
+    c.vars["m"] = {corridor=true}
+    local node = fn_call("empty?", {kind="fn_call", name="m", args={}})
+    assert.is_false(eval.eval_expr(node, c))
+  end)
+
+  it("contains? finds element in array-style list", function()
+    local c = ctx({})
+    local node = fn_call("contains?", list_lit("a","b","c"), {kind="string_lit", value="b"})
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
+  it("contains? finds element in map-style table", function()
+    local c = ctx({})
+    c.vars["m"] = {corridor=true, armory=true}
+    local node = fn_call("contains?",
+      {kind="fn_call", name="m", args={}},
+      {kind="string_lit", value="corridor"})
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
+  it("contains? returns false for missing element", function()
+    local c = ctx({})
+    local node = fn_call("contains?", list_lit("a","b"), {kind="string_lit", value="c"})
+    assert.is_false(eval.eval_expr(node, c))
   end)
 
   it("union merges two sets without duplicates", function()

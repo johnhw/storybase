@@ -420,13 +420,26 @@ describe("parser — relation declarations", function()
     assert.are.equal(0, #d.initial_data)
   end)
 
-  it("parses a relation with static data block", function()
-    local src = "relation exits: Location -> Set(Location, 6):\n  'village: {'forest}\n  'forest: {'village}"
+  it("parses a relation with static data block using {...} syntax", function()
+    local src = "relation exits: Location -> Set(Location, 6):\n  'village: {'forest}\n  'forest: {'village, 'dungeon}"
     local d = decl(src)
     assert.are.equal(ast.K.RELATION_DECL, d.kind)
     assert.are.equal(2, #d.initial_data)
     assert.are.equal(ast.K.SYMBOL_LIT, d.initial_data[1].key.kind)
     assert.are.equal("village", d.initial_data[1].key.name)
+    assert.are.equal(1, #d.initial_data[1].values)
+    assert.are.equal("forest", d.initial_data[1].values[1].name)
+    assert.are.equal(2, #d.initial_data[2].values)
+  end)
+
+  it("parses a relation with static data block using [...] syntax", function()
+    local src = "relation exits: Location -> Set(Location, 6):\n  'village: ['forest]\n  'forest: ['village, 'dungeon]"
+    local d = decl(src)
+    assert.are.equal(ast.K.RELATION_DECL, d.kind)
+    assert.are.equal(2, #d.initial_data)
+    assert.are.equal(1, #d.initial_data[1].values)
+    assert.are.equal("forest", d.initial_data[1].values[1].name)
+    assert.are.equal(2, #d.initial_data[2].values)
   end)
 
   it("attaches doc string", function()
