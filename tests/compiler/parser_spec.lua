@@ -1596,3 +1596,164 @@ describe("parser — indexed list access", function()
     assert.equal(1, node.path.index.value)
   end)
 end)
+
+-- ── verify declarations ────────────────────────────────────────────────────────
+
+describe("parser — verify declaration", function()
+  local function find_clause(d, clause_kind)
+    for _, c in ipairs(d.clauses or {}) do
+      if c.clause_kind == clause_kind then return c end
+    end
+  end
+
+  it("parses verify-always clause", function()
+    local d = decl([[
+verify "invariant holds":
+  verify-always world/hp >= 0
+]])
+    assert.equal(ast.K.VERIFY_DECL, d.kind)
+    assert.equal("invariant holds", d.label)
+    assert.is_not_nil(find_clause(d, "always"), "expected always clause")
+  end)
+
+  it("parses verify after: block with path@before", function()
+    local d = decl([[
+verify "earn increases gold":
+  after (earn 10):
+    world/gold > world/gold@before
+]])
+    assert.equal(ast.K.VERIFY_DECL, d.kind)
+    assert.is_not_nil(find_clause(d, "after"), "expected after clause")
+  end)
+
+  it("parses verify with requires precondition", function()
+    local d = decl([[
+verify "requires example":
+  requires world/flag = true
+  verify-always world/hp >= 0
+]])
+    assert.equal(ast.K.VERIFY_DECL, d.kind)
+    assert.is_not_nil(find_clause(d, "requires"), "expected requires clause")
+  end)
+
+  it("parses verify from-any-state: block", function()
+    local d = decl([[
+verify "reachable":
+  from-any-state:
+    can-reach? (world/done = true)
+]])
+    assert.equal(ast.K.VERIFY_DECL, d.kind)
+    assert.is_not_nil(find_clause(d, "from_any_state"), "expected from_any_state clause")
+  end)
+end)
+
+-- ── watch declarations ─────────────────────────────────────────────────────────
+
+describe("parser — watch declaration", function()
+  it("parses watch path declaration", function()
+    local d = decl([[watch world/hp  "Player HP"]])
+    assert.equal(ast.K.WATCH_DECL, d.kind)
+    assert.equal("Player HP", d.label)
+  end)
+
+  it("parses watch-when declaration with condition", function()
+    local d = decl([[watch-when world/hp <= 0  "player died"]])
+    assert.equal("watch_when_decl", d.kind)
+  end)
+end)
+
+-- ── bounded declarations ───────────────────────────────────────────────────────
+
+describe("parser — bounded declaration", function()
+  it("parses bounded with distribution and returns type", function()
+    local d = decl([[
+bounded roll-die:
+  distribution: uniform
+  returns: Int(1, 6)
+]])
+    assert.equal(ast.K.BOUNDED_DECL, d.kind)
+    assert.equal("roll-die", d.name)
+  end)
+
+  it("parses bounded with reads list", function()
+    local d = decl([[
+bounded score:
+  reads: [world/level, world/gold]
+]])
+    assert.equal(ast.K.BOUNDED_DECL, d.kind)
+    assert.is_table(d.reads)
+    assert.equal(2, #d.reads)
+  end)
+end)
+
+-- ── migration declarations ────────────────────────────────────────────────────
+
+describe("parser — migration declaration", function()
+  it("parses migration block with rename and drop", function()
+    local d = decl([[
+migration 1 -> 2:
+  rename world/hp world/health
+  drop world/old-field
+]])
+    assert.equal(ast.K.MIGRATION_DECL or "migration_decl", d.kind)
+  end)
+end)
+
+-- ── counterfactual expression ─────────────────────────────────────────────────
+
+describe("parser — counterfactual expression", function()
+  it("parses counterfactual do: block as COUNTERFACTUAL_EXPR", function()
+    local src = [[
+module cf-test
+  version: 1.0
+state world:
+  gold: Int(0,999) = 100
+fn spend:
+  dec! world/gold 30
+fn after-spend:
+  pure
+  let branch = counterfactual do:
+    spend
+  (in-state branch) world/gold
+scene s:
+  * Go -> s
+]]
+    local tree, diags = parse(src)
+    assert.is_true(no_errors(src), "expected no parse errors")
+    -- Find the fn declaration for after-spend
+    local fn_decl = nil
+    for _, d in ipairs(tree.decls or {}) do
+      if d.kind == ast.K.FN_DECL and d.name == "after-spend" then fn_decl = d end
+    end
+    assert.is_not_nil(fn_decl, "expected after-spend fn decl")
+    -- Body should contain let_stmt with counterfactual_expr somewhere
+    -- (stmt[1] is `pure` tag, stmt[2] is `let branch = counterfactual do:...`)
+    local let_stmt = nil
+    for _, stmt in ipairs(fn_decl.body or {}) do
+      if stmt.kind == ast.K.LET_STMT then let_stmt = stmt; break end
+    end
+    assert.is_not_nil(let_stmt, "expected let_stmt in fn body")
+    local binding = let_stmt.bindings and let_stmt.bindings[1]
+    assert.is_not_nil(binding)
+    assert.equal(ast.K.COUNTERFACTUAL_EXPR, binding.expr.kind)
+  end)
+
+  it("parses counterfactual with from: and simulate: options", function()
+    local src = [[
+module cf2
+  version: 1.0
+state world:
+  x: Int(0,9) = 0
+fn noop:
+  pass
+fn cf-with-opts:
+  pure
+  let snap = counterfactual simulate: true do:
+    noop
+  (in-state snap) world/x
+scene s:
+  * Go -> s
+]]
+    assert.is_true(no_errors(src), "expected no parse errors for counterfactual with options")
+  end)
+end)
