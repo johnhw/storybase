@@ -6,11 +6,18 @@ Milestone goals are marked **M**.
 
 ---
 
-## Current Status and Next Steps (2026-04-15)
+## Current Status and Next Steps (2026-04-16)
 
 **Documentation COMPLETE** — all 20 docs written (README + 5 tutorials + 6 how-to guides + 5 reference pages + 3 explanation pages).
 
-**Test expansion pass COMPLETE** — 1370 tests passing (was 1346 at start of session).
+**Test expansion pass ongoing** — 1401 tests passing (was 1385 from prior session).
+
+**Completed this session (2026-04-16):**
+- `tests/compiler/codegen_spec.lua`: +16 tests covering:
+  - migration declarations: rename, add, drop, rename-enum, multi-migration sort, empty ops
+  - defgrid declarations: dimensions, default value, multiple grids
+  - watch emission: path watch descriptor, watch-when descriptor, multiple watches order
+  - verify emission: label+clauses, clause kind='always', multiple verify blocks
 
 **Completed this session (2026-04-15):**
 - Fixed bug: `relate!`/`unrelate!` were silently no-ops (eval.lua had K.RELATE_MUT/K.UNRELATE_MUT defined but no handlers); implemented handlers that mutate `game_table.relations[rel].data`

@@ -697,6 +697,223 @@ scene main:
   end)
 end)
 
+-- ── Migration declarations ────────────────────────────────────────────────────
+
+describe("codegen — migration declarations", function()
+  it("emits migrations table entry with from/to version", function()
+    local gt = compile([[
+migration 1 -> 2:
+  rename player/hp -> player/health
+]])
+    assert.is_table(gt.migrations)
+    assert.equal(1, #gt.migrations)
+    local m = gt.migrations[1]
+    assert.equal(1, m.from_ver)
+    assert.equal(2, m.to_ver)
+  end)
+
+  it("emits rename op in migration", function()
+    local gt = compile([[
+migration 1 -> 2:
+  rename player/hp -> player/health
+]])
+    local m = gt.migrations[1]
+    assert.equal(1, #m.ops)
+    assert.equal("rename", m.ops[1].op)
+    assert.equal("player/hp", m.ops[1].old_path)
+    assert.equal("player/health", m.ops[1].new_path)
+  end)
+
+  it("emits add op in migration", function()
+    local gt = compile([[
+migration 1 -> 2:
+  add player/mana = 50
+]])
+    local m = gt.migrations[1]
+    assert.equal(1, #m.ops)
+    assert.equal("add", m.ops[1].op)
+    assert.equal("player/mana", m.ops[1].path)
+    assert.is_not_nil(m.ops[1].value)
+  end)
+
+  it("emits drop op in migration", function()
+    local gt = compile([[
+migration 2 -> 3:
+  drop player/notes
+]])
+    local m = gt.migrations[1]
+    assert.equal(1, #m.ops)
+    assert.equal("drop", m.ops[1].op)
+    assert.equal("player/notes", m.ops[1].path)
+  end)
+
+  it("emits multiple migrations sorted by from_ver", function()
+    local gt = compile([[
+migration 2 -> 3:
+  drop player/notes
+migration 1 -> 2:
+  add player/mana = 50
+]])
+    assert.equal(2, #gt.migrations)
+    assert.equal(1, gt.migrations[1].from_ver)
+    assert.equal(2, gt.migrations[2].from_ver)
+  end)
+
+  it("emits rename-enum op in migration", function()
+    local gt = compile([[
+type Class = fighter | mage
+state player/class: Class = 'fighter
+migration 2 -> 3:
+  rename-enum player/class 'fighter -> 'warrior
+]])
+    local m = gt.migrations[1]
+    assert.equal(1, #m.ops)
+    assert.equal("rename-enum", m.ops[1].op)
+    assert.equal("player/class", m.ops[1].path)
+    assert.equal("fighter", m.ops[1].old_sym)
+    assert.equal("warrior", m.ops[1].new_sym)
+  end)
+
+  it("emits empty ops list when migration body has no ops", function()
+    local gt = compile([[
+migration 3 -> 4:
+]])
+    assert.equal(1, #gt.migrations)
+    assert.equal(3, gt.migrations[1].from_ver)
+    assert.is_table(gt.migrations[1].ops)
+  end)
+end)
+
+-- ── Defgrid declarations ──────────────────────────────────────────────────────
+
+describe("codegen — defgrid declarations", function()
+  it("emits grids table entry with name and dimensions", function()
+    local gt = compile([[
+defgrid world-map:
+  dimensions: 10 x 8
+  cell-type:  Terrain
+]])
+    assert.is_table(gt.grids)
+    assert.is_not_nil(gt.grids["world-map"])
+    local g = gt.grids["world-map"]
+    assert.equal("world-map", g.name)
+    assert.equal(10, g.width)
+    assert.equal(8,  g.height)
+    assert.equal("Terrain", g.cell_type)
+  end)
+
+  it("emits defgrid with default value", function()
+    local gt = compile([[
+defgrid dungeon:
+  dimensions: 5 x 5
+  cell-type:  Floor
+  default:    wall
+]])
+    local g = gt.grids["dungeon"]
+    assert.is_not_nil(g)
+    assert.equal("wall", g.default_val)
+  end)
+
+  it("emits multiple grids independently", function()
+    local gt = compile([[
+defgrid map-a:
+  dimensions: 4 x 4
+  cell-type:  Tile
+defgrid map-b:
+  dimensions: 8 x 8
+  cell-type:  Tile
+]])
+    assert.is_not_nil(gt.grids["map-a"])
+    assert.is_not_nil(gt.grids["map-b"])
+    assert.equal(4, gt.grids["map-a"].width)
+    assert.equal(8, gt.grids["map-b"].width)
+  end)
+end)
+
+-- ── Watch declarations ────────────────────────────────────────────────────────
+
+describe("codegen — watch emission", function()
+  it("emits watch descriptor with path and label", function()
+    local gt = compile([[
+state world/hp: Int(0,100) = 50
+watch world/hp "HP"
+]])
+    assert.is_table(gt.watches)
+    assert.equal(1, #gt.watches)
+    local w = gt.watches[1]
+    assert.equal("watch", w.kind)
+    assert.equal("HP",    w.label)
+    assert.is_not_nil(w.path)
+  end)
+
+  it("emits watch-when descriptor with condition and label", function()
+    local gt = compile([[
+state world/alarm: Bool = false
+watch-when world/alarm "Alarm triggered"
+]])
+    assert.is_table(gt.watches)
+    assert.equal(1, #gt.watches)
+    local w = gt.watches[1]
+    assert.equal("watch_when", w.kind)
+    assert.equal("Alarm triggered", w.label)
+    assert.is_not_nil(w.condition)
+  end)
+
+  it("emits multiple watches preserving order", function()
+    local gt = compile([[
+state world/hp:    Int(0,100) = 50
+state world/mana:  Int(0,100) = 30
+watch world/hp   "HP"
+watch world/mana "Mana"
+]])
+    assert.equal(2, #gt.watches)
+    assert.equal("HP",   gt.watches[1].label)
+    assert.equal("Mana", gt.watches[2].label)
+  end)
+end)
+
+-- ── Verify declarations ───────────────────────────────────────────────────────
+
+describe("codegen — verify emission", function()
+  it("emits verify descriptor with label and clauses", function()
+    local gt = compile([[
+state world/hp: Int(0,100) = 50
+verify "hp positive":
+  verify-always world/hp >= 0
+]])
+    assert.is_table(gt.verifies)
+    assert.equal(1, #gt.verifies)
+    local v = gt.verifies[1]
+    assert.equal("hp positive", v.label)
+    assert.equal(1, #v.clauses)
+  end)
+
+  it("emits verify-always clause with kind='always'", function()
+    local gt = compile([[
+state world/hp: Int(0,100) = 50
+verify "hp positive":
+  verify-always world/hp >= 0
+]])
+    local clause = gt.verifies[1].clauses[1]
+    assert.equal("always", clause.kind)
+    assert.is_not_nil(clause.body)
+  end)
+
+  it("emits multiple verify blocks", function()
+    local gt = compile([[
+state world/hp:   Int(0,100) = 50
+state world/mana: Int(0,100) = 30
+verify "hp ok":
+  verify-always world/hp >= 0
+verify "mana ok":
+  verify-always world/mana >= 0
+]])
+    assert.equal(2, #gt.verifies)
+    assert.equal("hp ok",   gt.verifies[1].label)
+    assert.equal("mana ok", gt.verifies[2].label)
+  end)
+end)
+
 -- ── Production build mode ────────────────────────────────────────────────────
 
 describe("codegen — production build mode", function()
