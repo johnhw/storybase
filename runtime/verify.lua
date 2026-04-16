@@ -19,6 +19,44 @@ local M    = {}
 local DEFAULT_BFS_DEPTH = 5
 
 -- ============================================================
+-- Path pattern matching (§4.3)
+-- ============================================================
+
+--- Return true when `path` matches `pattern`.
+---
+--- Supported wildcards:
+---   *     — any single segment (no slashes)
+---   **    — any sequence of segments (including slashes)
+---   (a|b) — alternation (recursively expanded)
+---
+---@param pattern string
+---@param path    string
+---@return boolean
+local function match_path_pattern(pattern, path)
+  if pattern == "*"  then return true end
+  if pattern == path then return true end
+  -- Expand (a|b|c) alternation groups
+  local alt_s, alt_e = pattern:find("%((.-)%)")
+  if alt_s then
+    local before    = pattern:sub(1, alt_s - 1)
+    local alt_inner = pattern:sub(alt_s + 1, alt_e - 1)
+    local after     = pattern:sub(alt_e + 1)
+    for branch in alt_inner:gmatch("[^|]+") do
+      if match_path_pattern(before .. branch .. after, path) then return true end
+    end
+    return false
+  end
+  -- Convert wildcards to Lua pattern
+  local lp = pattern:gsub("([%.%+%-%^%$%(%)%[%]%%])", "%%%1")
+  lp = lp:gsub("%*%*", "\0")
+  lp = lp:gsub("%*", "[^/]+")
+  lp = lp:gsub("\0", ".*")
+  return path:match("^" .. lp .. "$") ~= nil
+end
+
+M.match_path_pattern = match_path_pattern
+
+-- ============================================================
 -- State helpers
 -- ============================================================
 

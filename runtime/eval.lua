@@ -284,23 +284,64 @@ eval_expr = function(node, ctx)
             .. " exceeds limit of " .. max_depth)
     end
 
-    -- Create a branched GameState by deep-copying current cache and applying transitions
+    -- Create a branched GameState, starting from either the current state or
+    -- a historical snapshot built by replaying the log up to from_tick.
     local log_mod   = require("runtime.log")
     local state_mod = require("runtime.state")
     local cf_log    = log_mod.new()
     local cf_state  = state_mod.new(ctx.state and ctx.state._schema or {}, cf_log)
-    -- Deep-copy current cache
-    for path, val in pairs(ctx.state and ctx.state._cache or {}) do
-      if type(val) == "table" then
-        local c = {}; for i, x in ipairs(val) do c[i] = x end
-        cf_state._cache[path] = c
+
+    if node.from_tick then
+      -- Evaluate the from_tick expression to a tick number
+      local target_tick = eval_expr(node.from_tick, ctx)
+      if type(target_tick) == "number" and ctx.state and ctx.state._log then
+        -- Replay log mutations up to target_tick to reconstruct historical state
+        cf_state:init_defaults()
+        for _, e in ipairs(ctx.state._log._entries or {}) do
+          if e.path ~= nil then
+            local etime = type(e.time) == "table" and (e.time.tick or 0) or 0
+            if etime <= target_tick then
+              if type(e["new"]) == "table" then
+                local c = {}
+                for i, x in ipairs(e["new"]) do c[i] = x end
+                cf_state._cache[e.path] = c
+              else
+                cf_state._cache[e.path] = e["new"]
+              end
+              if type(e.time) == "table" then
+                for k, v in pairs(e.time) do cf_state._time[k] = v end
+              end
+            end
+          end
+        end
       else
-        cf_state._cache[path] = val
+        -- from_tick evaluated to non-number or no log available: copy current state
+        for path, val in pairs(ctx.state and ctx.state._cache or {}) do
+          if type(val) == "table" then
+            local c = {}; for i, x in ipairs(val) do c[i] = x end
+            cf_state._cache[path] = c
+          else
+            cf_state._cache[path] = val
+          end
+        end
+        for axis, v in pairs(ctx.state and ctx.state._time or {}) do
+          cf_state._time[axis] = v
+        end
       end
-    end
-    -- Copy time
-    for axis, v in pairs(ctx.state and ctx.state._time or {}) do
-      cf_state._time[axis] = v
+    else
+      -- No from_tick: deep-copy current cache
+      for path, val in pairs(ctx.state and ctx.state._cache or {}) do
+        if type(val) == "table" then
+          local c = {}; for i, x in ipairs(val) do c[i] = x end
+          cf_state._cache[path] = c
+        else
+          cf_state._cache[path] = val
+        end
+      end
+      -- Copy time
+      for axis, v in pairs(ctx.state and ctx.state._time or {}) do
+        cf_state._time[axis] = v
+      end
     end
     -- Apply transition function calls to the copy
     local cf_ctx = M.new_ctx(cf_state, ctx.fns, "counterfactual")

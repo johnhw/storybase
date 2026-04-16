@@ -350,3 +350,55 @@ verify "gold zero always":
       "fail_msg should include state info: " .. msg)
   end)
 end)
+
+-- ============================================================
+-- match_path_pattern (§4.3)
+-- ============================================================
+
+describe("verify: match_path_pattern", function()
+  local mpp = verify_mod.match_path_pattern
+
+  it("exact path matches itself", function()
+    assert.is_true(mpp("player/health", "player/health"))
+    assert.is_false(mpp("player/health", "player/mana"))
+  end)
+
+  it("bare * matches any path", function()
+    assert.is_true(mpp("*", "player/health"))
+    assert.is_true(mpp("*", "world/tick"))
+  end)
+
+  it("* single-segment wildcard matches one segment", function()
+    assert.is_true(mpp("player/*",  "player/health"))
+    assert.is_true(mpp("player/*",  "player/mana"))
+    assert.is_false(mpp("player/*", "player/items/0"), "* should not cross /")
+    assert.is_false(mpp("player/*", "world/tick"))
+  end)
+
+  it("** multi-segment wildcard matches any number of segments", function()
+    assert.is_true(mpp("player/**",  "player/health"))
+    assert.is_true(mpp("player/**",  "player/items/0"))
+    assert.is_true(mpp("player/**",  "player/a/b/c"))
+    assert.is_false(mpp("player/**", "world/tick"))
+  end)
+
+  it("npcs/*/location matches only location under any direct NPC", function()
+    assert.is_true(mpp("npcs/*/location",  "npcs/knight/location"))
+    assert.is_true(mpp("npcs/*/location",  "npcs/mage/location"))
+    assert.is_false(mpp("npcs/*/location", "npcs/knight/health"))
+    assert.is_false(mpp("npcs/*/location", "npcs/knight/items/0"))
+  end)
+
+  it("alternation (a|b) expands to two exact matches", function()
+    assert.is_true(mpp("player/(health|mana)",  "player/health"))
+    assert.is_true(mpp("player/(health|mana)",  "player/mana"))
+    assert.is_false(mpp("player/(health|mana)", "player/gold"))
+  end)
+
+  it("alternation with three branches", function()
+    assert.is_true(mpp("world/(a|b|c)", "world/a"))
+    assert.is_true(mpp("world/(a|b|c)", "world/b"))
+    assert.is_true(mpp("world/(a|b|c)", "world/c"))
+    assert.is_false(mpp("world/(a|b|c)", "world/d"))
+  end)
+end)

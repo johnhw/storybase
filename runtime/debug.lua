@@ -37,18 +37,48 @@ local DEFAULT_PORT = 7373
 -- Helpers
 -- ============================================================
 
---- Pattern match: does `path` match `pattern` where `*` is a wildcard segment?
----@param pattern string  e.g. "player/*" or "npcs/*/health" or exact path
----@param path    string
+--- Pattern match: does `path` match `pattern`?
+---
+--- Supported wildcards (idea.md §4.3):
+---   *      — any single path segment (no slashes)
+---   **     — any sequence of segments (including slashes)
+---   (a|b)  — alternation: matches if any branch matches (recursively expanded)
+---
+---@param pattern string  e.g. "player/*", "npcs/*/health", "player/**", "player/(health|mana)"
+---@param path    string  e.g. "player/health"
 ---@return boolean
 local function path_matches(pattern, path)
-  if pattern == "*" then return true end
+  if pattern == "*"  then return true end
   if pattern == path then return true end
-  -- Convert pattern to a Lua pattern (escape magic chars, replace * with [^/]+)
+
+  -- Expand (a|b|c) alternation groups recursively
+  local alt_s, alt_e = pattern:find("%((.-)%)")
+  if alt_s then
+    local before    = pattern:sub(1, alt_s - 1)
+    local alt_inner = pattern:sub(alt_s + 1, alt_e - 1)
+    local after     = pattern:sub(alt_e + 1)
+    for branch in alt_inner:gmatch("[^|]+") do
+      if path_matches(before .. branch .. after, path) then return true end
+    end
+    return false
+  end
+
+  -- Convert to a Lua pattern:
+  --   1. Escape Lua magic chars (not *)
+  --   2. Replace ** with a NUL placeholder so it is not touched by the * step
+  --   3. Replace remaining * with [^/]+ (single segment)
+  --   4. Replace placeholder with .* (any segments)
   local lp = pattern:gsub("([%.%+%-%^%$%(%)%[%]%%])", "%%%1")
-  lp = lp:gsub("%*", "[^/]+")
-  lp = "^" .. lp .. "$"
-  return path:match(lp) ~= nil
+  lp = lp:gsub("%*%*", "\0")       -- placeholder for **
+  lp = lp:gsub("%*", "[^/]+")      -- * = one segment (no slashes)
+  lp = lp:gsub("\0", ".*")         -- ** = any segments (including slashes)
+  return path:match("^" .. lp .. "$") ~= nil
+end
+
+--- Return true when `pattern` contains any wildcard character that requires
+--- iterating all cache keys rather than doing an exact lookup.
+local function is_pattern(s)
+  return s:find("%*") ~= nil or s:find("%(") ~= nil
 end
 
 -- ============================================================
@@ -140,11 +170,25 @@ function M.new(engine, opts)
 
     for _, w in ipairs(self._watches) do
       if w.kind == "path" then
-        local val = eng._state and eng._state:get(w.path)
-        if val ~= nil then
-          self:emit("watch-fired", {
-            label = w.label, kind = "path", path = w.path, value = val, tick = tick_val
-          })
+        if is_pattern(w.path) then
+          -- Pattern watch: iterate all cache keys and fire for each match
+          if eng._state then
+            for cache_path, val in pairs(eng._state._cache) do
+              if val ~= nil and path_matches(w.path, cache_path) then
+                self:emit("watch-fired", {
+                  label = w.label, kind = "path", path = cache_path,
+                  value = val, tick = tick_val,
+                })
+              end
+            end
+          end
+        else
+          local val = eng._state and eng._state:get(w.path)
+          if val ~= nil then
+            self:emit("watch-fired", {
+              label = w.label, kind = "path", path = w.path, value = val, tick = tick_val
+            })
+          end
         end
 
       elseif w.kind == "cond" then

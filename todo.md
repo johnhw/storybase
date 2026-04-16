@@ -8,7 +8,7 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-16)
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
-and the **Standalone Bundler** major feature below. **1514 tests passing.**
+and the **Standalone Bundler** and two Medium Features below. **1533 tests passing.**
 
 ---
 
@@ -53,10 +53,13 @@ and the **Standalone Bundler** major feature below. **1514 tests passing.**
   `compiler/checker.lua` name resolution and `compiler/compiler.lua` splice logic.
   Prerequisite: resolve the import-alias bug above.
 
-- [ ] **Path patterns in `watch` and `verify` forms.** `idea.md §4.3` specifies `player/*`,
-  `npcs/*/location`, `player/**/strength` wildcards in query contexts. The BFS and watch
-  checker currently work on flat cache keys. Add a `match_path_pattern(pattern, key)` helper
-  and apply it in `runtime/verify.lua` and `runtime/debug.lua`.
+- [x] **Path patterns in `watch` and `verify` forms.** `idea.md §4.3` specifies `player/*`,
+  `npcs/*/location`, `player/**` wildcards and `player/(health|mana)` alternations.
+  `runtime/debug.lua` `path_matches` extended with `**` multi-segment wildcards and `(a|b)`
+  alternation expansion; `check_watches` now iterates all cache keys for pattern watches;
+  `engine.lua` `set_debug_server` now registers `watch`/`watch-when` declarations from
+  `game_table.watches`; `runtime/verify.lua` exports `match_path_pattern`. Tests in
+  `tests/runtime/debug_spec.lua` (+14) and `tests/runtime/verify_spec.lua` (+9).
 
 - [ ] **Browser-based debug UI.** The debug server already streams structured NDJSON events
   over TCP. A minimal single-page HTML file (state tree, mutation log, timeline scrubber, watch
@@ -64,11 +67,12 @@ and the **Standalone Bundler** major feature below. **1514 tests passing.**
   custom tooling. Add an HTTP GET handler for `/` to `runtime/debug.lua` that serves the
   embedded HTML.
 
-- [ ] **`counterfactual` as a language expression.** `idea.md §21` specifies
+- [x] **`counterfactual` as a language expression.** `idea.md §21` specifies
   `let alt = counterfactual from: world/turn - 3 do: ...` as first-class syntax.
-  `runtime/counterfactual.lua` and `lib/storybase.lua` expose this via Lua only. The AST node
-  `COUNTERFACTUAL_EXPR` exists; wire it through `compiler/parser.lua` (parse the `from:` /
-  `do:` block) and `runtime/eval.lua` (`eval_expr` for `COUNTERFACTUAL_EXPR`).
+  Parser and eval were already wired; added `from_tick` log replay: when `from:` is set,
+  `eval.lua` builds historical state by replaying log mutations up to the target tick (falls
+  back to current state if `from_tick` evaluates to non-number or log is empty). 4 new tests in
+  `tests/runtime/counterfactual_spec.lua`.
 
 - [ ] **Demo 07.** A demo specifically exercising `import`, `bounded`, and/or `counterfactual`
   to fill remaining spec coverage gaps. Good candidate: a two-file game where the main file

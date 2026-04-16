@@ -431,6 +431,18 @@ function M.new(game_table, opts)
     end
     -- Wire schedule-fired events through the scheduler
     self._scheduler._debug_server = srv
+    -- Register watch/watch-when declarations from the compiled game table
+    for _, w in ipairs(self._game and self._game.watches or {}) do
+      if w.kind == "watch" and w.path then
+        local segs = w.path.segments or {}
+        local path_str = table.concat(segs, "/")
+        if path_str ~= "" then
+          srv:register_watch(path_str, w.label)
+        end
+      elseif w.kind == "watch_when" and w.condition then
+        srv:register_watch_when(w.condition, w.label)
+      end
+    end
   end
 
   --- Run post-action phases (steps 2–6 of the turn lifecycle).
@@ -528,6 +540,10 @@ function M.new(game_table, opts)
 
     -- Post-action phases: message delivery, actor behaviors, scheduler
     self:post_action()
+    -- Poll debug server for incoming commands (non-blocking)
+    if self._debug and self._debug.poll then
+      pcall(function() self._debug:poll() end)
+    end
 
     -- NPC speed: run N extra autonomous turns per player action
     local cfg = self._game.schema and self._game.schema.engine_config
@@ -565,6 +581,20 @@ function M.run(game_table, opts)
   if opts.seed then math.randomseed(opts.seed) end
 
   local eng = M.new(game_table, opts)
+
+  -- Start debug server when --debug flag was given (debug_port is set)
+  if opts.debug_port then
+    local ok_d, debug_mod = pcall(require, "runtime.debug")
+    if ok_d then
+      local srv = debug_mod.new(eng, { port = opts.debug_port, mode = "tcp" })
+      eng:set_debug_server(srv)
+      srv:start()
+      io.stderr:write(string.format("[debug] listening on :%d\n", opts.debug_port))
+    else
+      io.stderr:write("warning: could not load debug module: "
+                      .. tostring(debug_mod) .. "\n")
+    end
+  end
 
   if opts.load_path then
     -- Load mode: restore defaults then replay saved log
@@ -607,6 +637,11 @@ function M.run(game_table, opts)
     if write_save(opts.save_path, eng._scene_stack, eng._log, eng._state) then
       io.stdout:write("[Saved to " .. opts.save_path .. "]\n")
     end
+  end
+
+  -- Shut down debug server if one was started
+  if eng._debug and eng._debug.stop then
+    pcall(function() eng._debug:stop() end)
   end
 
   return 0

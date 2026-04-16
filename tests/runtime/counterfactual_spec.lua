@@ -558,3 +558,135 @@ scene main:
     assert.is_nil(ctx.state._cache["npcs/hero"])
   end)
 end)
+
+-- ============================================================
+-- counterfactual from: tick  (log replay to historical state)
+-- ============================================================
+
+describe("counterfactual from: tick", function()
+  local src = [[
+module cft-from
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0,9999) = 100
+
+fn earn amount:
+  inc! world/gold amount
+
+scene main:
+  * Go -> main
+]]
+
+  it("from: 0 starts from the state at tick 0 (schema defaults), ignoring later mutations", function()
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+
+    -- Apply two mutations with explicit time stamps to the live log
+    ctx.state._log:append({
+      path = "world/gold", old = 100, ["new"] = 150,
+      time = { tick = 1 }, fn = "earn",
+    })
+    ctx.state._cache["world/gold"] = 150
+    ctx.state._log:append({
+      path = "world/gold", old = 150, ["new"] = 200,
+      time = { tick = 2 }, fn = "earn",
+    })
+    ctx.state._cache["world/gold"] = 200
+
+    -- from: 0 → should replay only entries with tick <= 0 (none)
+    -- so the state starts from init_defaults (gold = 100)
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = { kind = "int_lit", value = 0 },
+      transitions = {},
+      simulate    = false,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    assert.equals(100, gs:get("world/gold"),
+      "from:0 should give default value (100), not current (200)")
+    -- Live state unchanged
+    assert.equals(200, ctx.state._cache["world/gold"])
+  end)
+
+  it("from: 1 includes mutations up to tick 1 only", function()
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+
+    ctx.state._log:append({
+      path = "world/gold", old = 100, ["new"] = 150,
+      time = { tick = 1 }, fn = "earn",
+    })
+    ctx.state._cache["world/gold"] = 150
+    ctx.state._log:append({
+      path = "world/gold", old = 150, ["new"] = 200,
+      time = { tick = 2 }, fn = "earn",
+    })
+    ctx.state._cache["world/gold"] = 200
+
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = { kind = "int_lit", value = 1 },
+      transitions = {},
+      simulate    = false,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    assert.equals(150, gs:get("world/gold"),
+      "from:1 should give state after tick-1 mutation (150)")
+    assert.equals(200, ctx.state._cache["world/gold"])
+  end)
+
+  it("from: tick + transitions: mutations apply on top of historical state", function()
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt)
+
+    ctx.state._log:append({
+      path = "world/gold", old = 100, ["new"] = 150,
+      time = { tick = 1 }, fn = "earn",
+    })
+    ctx.state._cache["world/gold"] = 150
+
+    -- from: 1, then apply earn 25 → 150 + 25 = 175
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = { kind = "int_lit", value = 1 },
+      transitions = {
+        { kind = "fn_call", name = "earn", args = {
+          { kind = "int_lit", value = 25 }
+        }},
+      },
+      simulate    = false,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    assert.equals(175, gs:get("world/gold"),
+      "from:1 + earn(25): 150 + 25 = 175")
+    -- Live state unchanged
+    assert.equals(150, ctx.state._cache["world/gold"])
+  end)
+
+  it("from: with non-number expression falls back to current state gracefully", function()
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local ctx = make_ctx(gt, { ["world/gold"] = 999 })
+
+    -- Use a nil-producing expression (path that doesn't exist) as from_tick
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = { kind = "path_expr", segments = {"world", "nonexistent"} },
+      transitions = {},
+      simulate    = false,
+    }
+    -- Should not error; falls back to copying current state
+    local ok, gs = pcall(eval_mod.eval_expr, node, ctx)
+    assert.is_true(ok, "from: with non-number should not raise an error")
+    if ok then
+      assert.equals(999, gs:get("world/gold"),
+        "fallback: counterfactual from non-number from_tick uses current state")
+    end
+  end)
+end)

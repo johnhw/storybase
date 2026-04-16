@@ -1046,3 +1046,201 @@ scene main:
     assert.equal(0, events[1].clamped)
   end)
 end)
+
+-- ============================================================
+-- Path pattern watches (§4.3)
+-- ============================================================
+
+describe("debug: path pattern watches", function()
+  local PATTERN_SRC = [[
+module pattern-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state player:
+  health: Int(0,100) = 80
+  mana:   Int(0,100) = 60
+  gold:   Int(0,999) = 10
+state world:
+  tick: Int(0,9999) = 0
+scene main:
+  * Go -> main
+]]
+
+  it("watch player/* fires for all player fields", function()
+    local gt, errs = compile(PATTERN_SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[p.path] = p.value end)
+    srv:register_watch("player/*", "All Player Fields")
+    srv:check_watches()
+
+    assert.is_not_nil(fired["player/health"], "player/health should fire")
+    assert.is_not_nil(fired["player/mana"],   "player/mana should fire")
+    assert.is_not_nil(fired["player/gold"],   "player/gold should fire")
+    assert.is_nil(fired["world/tick"],         "world/tick should not match player/*")
+  end)
+
+  it("watch player/* fires correct default values", function()
+    local gt, errs = compile(PATTERN_SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[p.path] = p.value end)
+    srv:register_watch("player/*", "Player")
+    srv:check_watches()
+
+    assert.equal(80, fired["player/health"])
+    assert.equal(60, fired["player/mana"])
+    assert.equal(10, fired["player/gold"])
+  end)
+
+  it("watch npcs/*/location matches family member location paths", function()
+    local gt, errs = compile(PATTERN_SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    -- Inject NPC family paths directly
+    eng._state._cache["npcs/knight/location"] = 5
+    eng._state._cache["npcs/mage/location"]   = 12
+    eng._state._cache["npcs/knight/health"]   = 80
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[p.path] = p.value end)
+    srv:register_watch("npcs/*/location", "NPC Locations")
+    srv:check_watches()
+
+    assert.equal(5,  fired["npcs/knight/location"])
+    assert.equal(12, fired["npcs/mage/location"])
+    assert.is_nil(fired["npcs/knight/health"], "health should NOT match npcs/*/location")
+  end)
+
+  it("watch player/** matches nested multi-level paths", function()
+    local gt, errs = compile(PATTERN_SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    eng._state._cache["player/items/0"] = "sword"
+    eng._state._cache["player/items/1"] = "shield"
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[p.path] = true end)
+    srv:register_watch("player/**", "Deep Player")
+    srv:check_watches()
+
+    assert.is_true(fired["player/health"],  "player/health should match player/**")
+    assert.is_true(fired["player/items/0"], "player/items/0 should match player/**")
+    assert.is_true(fired["player/items/1"], "player/items/1 should match player/**")
+    assert.is_nil(fired["world/tick"],      "world/tick should not match player/**")
+  end)
+
+  it("watch player/(health|mana) fires only health and mana", function()
+    local gt, errs = compile(PATTERN_SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[p.path] = true end)
+    srv:register_watch("player/(health|mana)", "Health or Mana")
+    srv:check_watches()
+
+    assert.is_true(fired["player/health"], "player/health should fire")
+    assert.is_true(fired["player/mana"],   "player/mana should fire")
+    assert.is_nil(fired["player/gold"],    "player/gold should NOT fire")
+  end)
+
+  it("exact path watch still works correctly", function()
+    local gt, errs = compile(PATTERN_SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[#fired+1] = p end)
+    srv:register_watch("player/health", "HP")
+    srv:check_watches()
+
+    assert.equal(1, #fired)
+    assert.equal("player/health", fired[1].path)
+    assert.equal(80, fired[1].value)
+  end)
+end)
+
+-- ============================================================
+-- Game-table watch declarations wired via set_debug_server
+-- ============================================================
+
+describe("debug: game-table watch declarations", function()
+  it("watch declaration fires via set_debug_server", function()
+    local SRC = [[
+module watch-decl-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  hp: Int(0,100) = 75
+watch world/hp "HP Watch"
+scene main:
+  * Go -> main
+]]
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[#fired+1] = p end)
+    srv:check_watches()
+
+    assert.equal(1, #fired, "watch declaration should fire")
+    assert.equal("HP Watch", fired[1].label)
+    assert.equal(75, fired[1].value)
+  end)
+
+  it("watch-when declaration fires via set_debug_server", function()
+    local SRC = [[
+module watch-when-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  hp: Int(0,100) = 10
+watch-when world/hp < 50 "Low HP"
+scene main:
+  * Go -> main
+]]
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[#fired+1] = p end)
+    srv:check_watches()  -- hp=10 < 50: fires on first check
+
+    assert.equal(1, #fired, "watch-when should fire when condition is initially true")
+    assert.equal("Low HP", fired[1].label)
+  end)
+end)
