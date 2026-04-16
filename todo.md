@@ -8,11 +8,14 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-16)
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
-and the **Standalone Bundler**, **Language Server (LSP)**, and two Medium Features below.
-**1589 tests passing.**
+the **Standalone Bundler**, **Language Server (LSP)**, and three Medium Features below.
+**1596 tests passing.**
 
 Three low-priority deferred items completed: `engine/checkpoint!` callable, `engine/emit`
 callable, and `game:docs()` public API for doc string surfacing.
+
+Demo 07 (The Wanderer's Oracle) is complete: demonstrates `import`, `bounded`, and
+`counterfactual` in a two-file game (`demos/oracle_lib.sb` + `demos/demo07_oracle.sb`).
 
 ---
 
@@ -78,10 +81,11 @@ callable, and `game:docs()` public API for doc string surfacing.
   back to current state if `from_tick` evaluates to non-number or log is empty). 4 new tests in
   `tests/runtime/counterfactual_spec.lua`.
 
-- [ ] **Demo 07.** A demo specifically exercising `import`, `bounded`, and/or `counterfactual`
-  to fill remaining spec coverage gaps. Good candidate: a two-file game where the main file
-  imports a shared types/utility file, uses a `bounded` computation for NPC decision-making,
-  and demonstrates `counterfactual` for player "what if" narration.
+- [x] **Demo 07.** `demos/demo07_oracle.sb` + `demos/oracle_lib.sb` — The Wanderer's Oracle.
+  Two-file game: main file imports oracle_lib.sb (flat import), uses `bounded oracle-weather`
+  (with `?? 'clear` fallback when no handler), and `counterfactual` in pure preview fns
+  (`preview-meditate`, `preview-trade`, `preview-gather-trade`) called from scene narration.
+  7 CLI integration tests added; verify blocks pass (155 BFS states). 1596 tests passing.
 
 ### Major Features
 

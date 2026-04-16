@@ -616,6 +616,8 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo04_expedition.sb` | entity family (`state crew/{m}`), `spawn!`/`despawn!`, `for`/`path-list`, `path-exists?`, `count-where` |
 | `demo05_siege.sb` | time-model, actor + behavior, `send!`, schedule, `cancel-schedule!`, `verify-always` |
 | `demo06_buried_keep.sb` | schema-version + migration, record types, static/dynamic relations with `{...}` data, `relate!`/`unrelate!`, `defgrid`/`within-range?`, tag+hook, watch/watch-when, `in` operator, `contains?`, `size`/`empty?` on map-style sets, `union`/`intersect`, `any?`/`all?`, `push!`/`pop!`, actor+inbox, `match` on variant, `spawn!`/`despawn!`, `count-where`, `path-exists?`, `verify-always`, `for` over `path-list` |
+| `demo07_oracle.sb` | two-file split via `import` (oracle_lib.sb), `bounded` computation (oracle-weather with `?? 'clear` fallback), `counterfactual` for pure preview functions called from scene narration |
+| `oracle_lib.sb` | shared types (`Shrine`, `WeatherKind`), state, relation (`paths`), pure helpers — imported by demo07_oracle.sb |
 
 ---
 

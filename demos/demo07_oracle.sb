@@ -1,0 +1,199 @@
+# demo07_oracle.sb — The Wanderer's Oracle
+#
+# Features demonstrated:
+#   import        — flat import of oracle_lib.sb (shared types + state + relations)
+#   bounded       — oracle-weather divines shrine weather; falls back to 'clear via ??
+#   counterfactual — crystal orb shows glimpses of alternate futures before you act
+#
+# Run:  storybase run demos/demo07_oracle.sb
+# Auto: storybase run --auto --steps 10 demos/demo07_oracle.sb
+
+module oracle-main
+  version: 1.0
+
+import "oracle_lib.sb"
+
+schema-version: 1
+
+engine-config:
+  entry-scene:              intro
+  max-counterfactual-depth: 3
+
+# ─────────────────────────────────────────────────────────
+# Bounded: oracle-weather
+# ─────────────────────────────────────────────────────────
+
+"Divine the weather at the next shrine. Falls back to 'clear when no handler is registered."
+bounded oracle-weather:
+  returns:      WeatherKind
+  distribution: uniform
+  reads:        [world/day, world/shrine]
+  lua:          "oracle.weather"
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+"Travel to an adjacent shrine: advance the day and divine the new weather."
+fn travel shrine:
+  pre:  shrine in (adjacent? paths world/shrine)
+  pre:  world/day < 20
+  set!  world/shrine shrine
+  inc!  world/day 1
+  set!  world/weather (oracle-weather ?? 'clear)
+
+"Meditate at the current shrine to deepen your renown."
+fn meditate:
+  inc!  world/renown 12
+  inc!  world/day 1
+
+"Trade offerings for local renown."
+fn trade:
+  pre:  world/offerings >= 10
+  dec!  world/offerings 10
+  inc!  world/renown 8
+
+"Gather offerings from the surrounding land."
+fn gather:
+  inc!  world/offerings 15
+  inc!  world/day 1
+
+# ─────────────────────────────────────────────────────────
+# Pure preview functions using counterfactual (orb visions)
+# ─────────────────────────────────────────────────────────
+
+"Crystal orb: what renown would be if you meditate now."
+fn preview-meditate:
+  let alt = counterfactual do:
+    meditate
+  (in-state alt) world/renown
+
+"Crystal orb: what offerings would remain if you trade now."
+fn preview-trade:
+  let alt = counterfactual do:
+    trade
+  (in-state alt) world/offerings
+
+"Crystal orb: what renown would be if you gather then trade."
+fn preview-gather-trade:
+  let alt = counterfactual do:
+    gather
+    trade
+  (in-state alt) world/renown
+
+# ─────────────────────────────────────────────────────────
+# Watches (dev mode only — stripped from production builds)
+# ─────────────────────────────────────────────────────────
+
+watch world/day         "Day"
+watch world/renown      "Renown"
+watch world/offerings   "Offerings"
+watch world/weather     "Weather"
+watch-when renowned?    "The wanderer's name spreads across the shrines!"
+watch-when journey-end? "The wandering days are spent."
+
+# ─────────────────────────────────────────────────────────
+# Verify blocks
+# ─────────────────────────────────────────────────────────
+
+verify "offerings never go negative":
+  verify-always world/offerings >= 0
+
+verify "renown never goes negative":
+  verify-always world/renown >= 0
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene intro:
+  THE WANDERER'S ORACLE
+  A crystal orb hangs at your belt, heavy with possibility.
+  Four ancient shrines await: hearth, stone, lake, and tower.
+  Offer what you carry. Build your renown. Let the orb guide you.
+
+  Day {world/day}. Renown: {world/renown}. Offerings: {world/offerings}.
+
+  * Begin the wandering
+    -> wanderer
+
+scene wanderer:
+  Shrine of {world/shrine}. Day {world/day}/8.
+  Weather: {world/weather}.
+  Renown: {world/renown}. Offerings: {world/offerings}.
+
+  [renowned?] Shrine keepers bow as you approach. Your name precedes you.
+  [world/weather = 'stormy] Dark clouds swirl overhead — travel is dangerous today.
+  [world/weather = 'misty] Strange mist clings to the roads ahead.
+  [not safe-travel?] The roads are treacherous. Consider waiting.
+
+  when journey-end?:
+    -> finale
+
+  * [not journey-end? and 'stone in (adjacent? paths world/shrine)] Travel to the Stone Shrine
+    travel 'stone
+    -> wanderer
+
+  * [not journey-end? and 'lake in (adjacent? paths world/shrine)] Travel to the Lake Shrine
+    travel 'lake
+    -> wanderer
+
+  * [not journey-end? and 'tower in (adjacent? paths world/shrine)] Travel to the Tower Shrine
+    travel 'tower
+    -> wanderer
+
+  * [not journey-end? and 'hearth in (adjacent? paths world/shrine)] Travel to the Hearth Shrine
+    travel 'hearth
+    -> wanderer
+
+  * Meditate at this shrine (+12 renown, +1 day)
+    meditate
+    -> wanderer
+
+  * [world/offerings >= 10] Trade offerings for renown (-10 offerings, +8 renown)
+    trade
+    -> wanderer
+
+  * Gather offerings from the land (+15 offerings, +1 day)
+    gather
+    -> wanderer
+
+  * Consult the crystal orb (glimpse possible futures)
+    => orb-vision
+
+scene orb-vision:
+  THE CRYSTAL ORB GLOWS...
+  Swirling light reveals what might be.
+
+  Now: renown {world/renown}, offerings {world/offerings}.
+
+  If you meditate: renown would reach {preview-meditate}.
+  If you trade: offerings would drop to {preview-trade}.
+  If you gather then trade: renown would reach {preview-gather-trade}.
+
+  The visions fade. The choice is yours.
+
+  * Return to the shrine
+    <-
+
+scene finale:
+  YOUR WANDERING DAYS ARE DONE.
+
+  You spent {world/day} days among the ancient shrines.
+  Final renown: {world/renown}. Final offerings: {world/offerings}.
+
+  if world/renown >= 70:
+    Your name echoes in every shrine-hall. You have become legend.
+  else:
+    if world/renown >= 50:
+      A modest legacy. The shrine keepers remember you fondly.
+    else:
+      Few recall your passing. The shrines stand unchanged.
+
+  if world/offerings >= 60:
+    Your satchel is heavy with offerings — a prosperous journey.
+  else:
+    The road has spent what you carried.
+
+  * Reflect further
+    -> finale

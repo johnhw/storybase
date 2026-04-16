@@ -1,0 +1,59 @@
+# oracle_lib.sb
+# Shared types, state, and relations for demo07_oracle.sb.
+# Imported by demo07_oracle.sb via flat import — all names available unqualified.
+
+module oracle-lib
+  version: 1.0
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+"Ancient shrine locations the wanderer can visit."
+type Shrine = hearth | stone | lake | tower
+
+"Weather conditions at each shrine, divined by the oracle."
+type WeatherKind = clear | stormy | misty
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+"The wanderer's world state."
+state world:
+  shrine:    Shrine      = 'hearth
+  day:       Int(0, 20)  = 1
+  offerings: Int(0, 100) = 30
+  renown:    Int(0, 100) = 50
+  weather:   WeatherKind = 'clear
+
+# ─────────────────────────────────────────────────────────
+# Relations
+# ─────────────────────────────────────────────────────────
+
+"Roads between shrines."
+relation paths: Shrine -> Set(Shrine, 3):
+  'hearth: {'stone, 'lake}
+  'stone:  {'hearth, 'tower}
+  'lake:   {'hearth, 'tower}
+  'tower:  {'stone, 'lake}
+
+# ─────────────────────────────────────────────────────────
+# Pure helpers
+# ─────────────────────────────────────────────────────────
+
+"True when the wanderer is well-known across the shrines."
+fn renowned?:
+  world/renown >= 70
+
+"True when the wanderer carries many offerings."
+fn wealthy?:
+  world/offerings >= 60
+
+"True when the wandering days are spent (day >= 8)."
+fn journey-end?:
+  world/day >= 8
+
+"True when weather allows safe travel."
+fn safe-travel?:
+  world/weather != 'stormy
