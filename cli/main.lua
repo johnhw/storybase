@@ -38,12 +38,16 @@ local function print_usage()
 Usage: storybase <command> [options] <file>
 
 Commands:
+  check   <file>              Check a .sb file (lexer+parser+checker; no codegen)
   compile <file>              Compile a .sb file; report errors and warnings
   run     <file>              Compile and run a game interactively
+  format  <file>              Pretty-print a .sb file in canonical style
+  repl    <file>              Load and explore a .sb file interactively
   verify  <file>              Run all verify blocks in a .sb file
   migrate <save.log>          Apply outstanding schema migrations to a save log
   extract-symbols <file>      Scan symbol literals; suggest type declarations
   compact <game.sb> <save.log> Emit snapshot + delta log for faster replay
+  bundle  <file>              Bundle a game into a single self-contained .lua file
   help                        Show this help text
 
 Options (compile / run):
@@ -53,16 +57,57 @@ Options (compile / run):
 Options (run):
   --save <path>               Save game log to <path> on exit
   --load <path>               Load game log from <path> before starting
+  --debug                     Start debug server (default port 7777)
 
 ]])
 end
 
+--- Split source text into a 1-based array of line strings.
+---@param source string
+---@return string[]
+local function split_lines(source)
+  local lines = {}
+  for line in (source .. "\n"):gmatch("([^\n]*)\n") do
+    lines[#lines + 1] = line
+  end
+  return lines
+end
+
 --- Format and print all diagnostics in a list to stderr.
-local function print_diags(diags)
+--- Optional source_map: {[filepath] = source_string} — used to print the
+--- offending source line with a caret (^) pointer beneath it.
+---@param diags      table   diagnostic accumulator
+---@param source_map table?  {[file] = source_string}
+local function print_diags(diags, source_map)
+  -- Pre-split source lines on demand (lazy cache)
+  local line_cache = {}  -- {[file] = string[]}
+  local function get_lines(file)
+    if not source_map or not file then return nil end
+    if not line_cache[file] then
+      local src = source_map[file]
+      if src then line_cache[file] = split_lines(src) end
+    end
+    return line_cache[file]
+  end
+
   for _, d in ipairs(diags.all or {}) do
-    local loc = string.format("%s:%d:%d", d.file or "?", d.line or 0, d.col or 0)
+    local loc   = string.format("%s:%d:%d", d.file or "?", d.line or 0, d.col or 0)
     local label = (d.level == "error") and "error" or "warning"
     io.stderr:write(string.format("%s: %s [%s]: %s\n", loc, label, d.code, d.message))
+
+    -- Print source context if we have the source and a valid line number
+    if d.line and d.line > 0 then
+      local lines = get_lines(d.file)
+      if lines then
+        local srcline = lines[d.line]
+        if srcline then
+          io.stderr:write(string.format("  %s\n", srcline))
+          local col = math.max(1, d.col or 1)
+          io.stderr:write(string.format("  %s^\n", string.rep(" ", col - 1)))
+        end
+      end
+    end
+
     if d.note and d.note ~= "" then
       io.stderr:write(string.format("  note: %s\n", d.note))
     end
@@ -80,7 +125,7 @@ local function diag_summary(diags)
 end
 
 -- Flags that are boolean (do not consume the next token as a value).
-local BOOL_FLAGS = { production = true, auto = true }
+local BOOL_FLAGS = { production = true, auto = true, debug = true }
 
 --- Parse a flat argument list into {flags, positional}.
 --- Flags are --name or --name value pairs; positional are the rest.
@@ -129,9 +174,14 @@ local function cmd_compile(args)
     return 1
   end
 
+  -- Read source for context lines in error messages
+  local source_map = {}
+  local sf = io.open(filepath, "r")
+  if sf then source_map[filepath] = sf:read("*a"); sf:close() end
+
   local compile_opts = { production = (flags["production"] == true) }
   local game_table, diags = compiler.compile_file(filepath, compile_opts)
-  print_diags(diags)
+  print_diags(diags, source_map)
 
   if diags:has_errors() then
     local s = diag_summary(diags)
@@ -175,9 +225,14 @@ local function cmd_run(args)
     return 1
   end
 
+  -- Read source for context lines in error messages
+  local run_source_map = {}
+  local rsf = io.open(filepath, "r")
+  if rsf then run_source_map[filepath] = rsf:read("*a"); rsf:close() end
+
   local compile_opts = { production = (flags["production"] == true) }
   local game_table, diags = compiler.compile_file(filepath, compile_opts)
-  print_diags(diags)
+  print_diags(diags, run_source_map)
   if diags:has_errors() then
     io.stderr:write("Compilation failed; cannot run.\n")
     return 1
@@ -208,12 +263,21 @@ local function cmd_run(args)
     }
   end
 
+  -- --debug: start debug server before the game loop
+  local debug_port = nil
+  if flags["debug"] then
+    -- Prefer port from engine-config, fall back to default 7777
+    local ec = game_table and game_table.schema and game_table.schema.engine_config
+    debug_port = (ec and tonumber(ec["debug-port"])) or 7777
+  end
+
   local opts = {
-    seed       = flags["seed"] and tonumber(flags["seed"]),
-    production = flags["production"] == true,
-    save_path  = flags["save"],
-    load_path  = flags["load"],
-    io_in      = io_in,
+    seed        = flags["seed"] and tonumber(flags["seed"]),
+    production  = flags["production"] == true,
+    save_path   = flags["save"],
+    load_path   = flags["load"],
+    io_in       = io_in,
+    debug_port  = debug_port,
   }
 
   return engine.run(game_table, opts) or 0
@@ -241,6 +305,39 @@ local function cmd_migrate(args)
   return migrate_cmd.run(args) or 0
 end
 
+-- ── Command: check ───────────────────────────────────────────
+
+local function cmd_check(args)
+  local ok, check_cmd = pcall(require, "cli.check_cmd")
+  if not ok then
+    io.stderr:write("error: could not load check command: " .. tostring(check_cmd) .. "\n")
+    return 1
+  end
+  return check_cmd.run(args) or 0
+end
+
+-- ── Command: format ───────────────────────────────────────────
+
+local function cmd_format(args)
+  local ok, format_cmd = pcall(require, "cli.format_cmd")
+  if not ok then
+    io.stderr:write("error: could not load format command: " .. tostring(format_cmd) .. "\n")
+    return 1
+  end
+  return format_cmd.run(args) or 0
+end
+
+-- ── Command: repl ─────────────────────────────────────────────
+
+local function cmd_repl(args)
+  local ok, repl_cmd = pcall(require, "cli.repl_cmd")
+  if not ok then
+    io.stderr:write("error: could not load repl command: " .. tostring(repl_cmd) .. "\n")
+    return 1
+  end
+  return repl_cmd.run(args) or 0
+end
+
 -- ── Command: extract-symbols ──────────────────────────────────
 
 local function cmd_extract_symbols(args)
@@ -251,6 +348,17 @@ local function cmd_extract_symbols(args)
     return 1
   end
   return extract_cmd.run(args) or 0
+end
+
+-- ── Command: bundle ──────────────────────────────────────────
+
+local function cmd_bundle(args)
+  local ok, bundle_cmd = pcall(require, "cli.bundle_cmd")
+  if not ok then
+    io.stderr:write("error: could not load bundle command: " .. tostring(bundle_cmd) .. "\n")
+    return 1
+  end
+  return bundle_cmd.run(args) or 0
 end
 
 -- ── Command: compact ──────────────────────────────────────────
@@ -311,6 +419,42 @@ storybase extract-symbols <file>
   paths they are written to.  Suggests `type` enum declarations for
   paths that have consistent sets of symbol values.
 ]],
+  ["check"] = [[
+storybase check <file>
+
+  Run lexer → parser → checker on a .sb file and report errors/warnings.
+  Stops before code generation; faster feedback than `compile`.
+  Exits 0 if no errors (warnings are allowed), 1 if any error is found.
+]],
+  ["format"] = [[
+storybase format [--check] <file>
+
+  Pretty-print a .sb file in canonical style (2-space indentation).
+  Without --check, writes the formatted source to stdout.
+  With --check, exits 0 if the file is already canonical, 1 if not.
+
+  Options:
+    --check    Verify the file matches canonical format without printing
+    --write    Rewrite the file in-place (creates a .sb.bak backup)
+]],
+  ["repl"] = [[
+storybase repl <file>
+
+  Load a .sb file and start an interactive expression REPL.
+
+  At the prompt, you can:
+    <expression>       Evaluate a pure expression and print the result
+    <fn-name> [args]   Call a transaction function
+    :state <path>      Inspect a state path value
+    :scene             Show current scene name
+    :choices           List available choices
+    :choose <N>        Execute choice N
+    :tick              Run one autonomous turn
+    :load <path>       Load a save file
+    :save <path>       Save the current state
+    :help              Show this command list
+    :quit / :q         Exit the REPL
+]],
   ["compact"] = [[
 storybase compact <game.sb> <save.log> [--out <output.log>]
 
@@ -321,6 +465,22 @@ storybase compact <game.sb> <save.log> [--out <output.log>]
   Options:
     --out <path>   Write compacted log to <path>
                    (default: <save.log base>.compact.log)
+]],
+  ["bundle"] = [[
+storybase bundle [--production] [--output <path>] <file>
+
+  Bundle a .sb game into a single self-contained Lua file.  The output file
+  embeds all runtime modules and the compiled game table; it runs with a
+  stock lua5.4 binary and requires no StoryBase installation.
+
+  Options:
+    --production     Strip verify/watch blocks from the compiled game
+    --output <path>  Write the bundle to <path>  (default: <file>.lua)
+
+  The bundled game accepts the following flags at runtime:
+    --seed N         Set random seed for reproducible runs
+    --save <path>    Save game log to <path> on exit
+    --load <path>    Load game log from <path> before starting
 ]],
   ["help"] = [[
 storybase help [<command>]
@@ -346,12 +506,16 @@ local function cmd_help(args)
 end
 
 local COMMANDS = {
+  ["check"]           = cmd_check,
   ["compile"]         = cmd_compile,
   ["run"]             = cmd_run,
+  ["format"]          = cmd_format,
+  ["repl"]            = cmd_repl,
   ["verify"]          = cmd_verify,
   ["migrate"]         = cmd_migrate,
   ["extract-symbols"] = cmd_extract_symbols,
   ["compact"]         = cmd_compact,
+  ["bundle"]          = cmd_bundle,
   ["help"]            = cmd_help,
 }
 

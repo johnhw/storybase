@@ -474,13 +474,29 @@ rng:weighted(weights, list) → value
 
 ## cli/
 
-### `cli/main.lua` (~400 lines)
+### `cli/main.lua` (~550 lines)
 - `M.main(argv)` — top-level dispatcher
-- Subcommands: `compile`, `run`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
-- Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` for `run`; `--production` for `compile`/`run`
+- Subcommands: `check`, `compile`, `run`, `format`, `repl`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
+- Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` for `run`; `--production` for `compile`/`run`
 - `BOOL_FLAGS` set prevents boolean flags from eating the following positional arg
 - `--auto` / `--steps N`: non-interactive run mode; fake `io_in` always returns "1"; `--steps N` limits turns
+- `--debug`: starts debug TCP server before the game loop, prints `[debug] listening on :PORT`
+- `print_diags(diags, source_map?)` prints errors with source-context lines + caret indicator
 - Per-subcommand help: `storybase help <subcommand>` shows detailed usage
+
+### `cli/check_cmd.lua` (~115 lines)
+- `M.run(args)` — run lexer → parser → checker (no codegen); print errors/warnings with source context
+- Faster feedback than `compile`; exits 0 on success (warnings allowed), 1 on errors
+
+### `cli/format_cmd.lua` (~850 lines)
+- `M.run(args)` — parse AST and emit canonical indented output
+- Flags: `--check` (compare only, exit 1 if differs), `--write` (rewrite in-place with .bak backup)
+- Default: write formatted source to stdout
+
+### `cli/repl_cmd.lua` (~175 lines)
+- `M.run(args)` — load a .sb file and start an interactive expression REPL
+- Meta-commands: `:state <path>`, `:scene`, `:choices`, `:choose N`, `:tick`, `:save`, `:load`, `:help`, `:quit`
+- Evaluates pure expressions and calls transaction functions interactively
 
 ### `cli/verify_cmd.lua` (79 lines)
 - `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
@@ -490,6 +506,15 @@ rng:weighted(weights, list) → value
 
 ### `cli/extract_cmd.lua` (~220 lines)
 - `M.run(args)` — walk typed AST (via `parse_and_check_file`), collect SYMBOL_LIT nodes grouped by SET_MUT target path, output candidate `type Name = val | val` declarations
+
+### `cli/bundle_cmd.lua` (~290 lines)
+- `M.run(args)` — compile a .sb file and emit a single self-contained Lua file
+- Embeds 14 runtime modules as `package.preload` entries (compiler excluded)
+- `serialize(val)` — recursive Lua-value-to-source-literal serialiser (handles NaN/±Inf, cycles detection, sequence vs map tables)
+- `BUNDLE_MODULES` list controls which modules are embedded (in dependency order)
+- Bundle includes a `BUNDLED_ASSETS` table + `asset_load()` helper as extension point for future asset embedding
+- Bundled game accepts: `--seed N`, `--save <path>`, `--load <path>` at runtime
+- Flags: `--output <path>` (default: same dir as .sb with .lua extension), `--production`
 
 ### `cli/compact_cmd.lua` (~115 lines)
 - `M.run(args)` — replay save log into fresh state, write compact save with one entry per path
@@ -547,7 +572,9 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |
 | `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |
 | `tests/cli/compact_spec.lua` | compact CLI command |
-| `tests/cli/cli_integration_spec.lua` | Full CLI integration tests: all subcommands against all test*.sb + demo*.sb files (77 tests; run before CLI/demo commits) |
+| `tests/cli/bundle_spec.lua` | bundle CLI command: output validity, execution, --production, save/load, error cases (20 tests) |
+| `tests/cli/cli_integration_spec.lua` | Full CLI integration tests: all subcommands (check/compile/run/format/repl/verify/migrate) against all test*.sb + demo*.sb files; also import alias, exports:, source-context error output tests |
+| `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, end-to-end pipeline |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
 | `tests/fuzz/log_fuzz_spec.lua` | Property test: log serialise/deserialise round-trip; replay determinism |
