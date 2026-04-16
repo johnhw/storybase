@@ -48,6 +48,7 @@ Commands:
   extract-symbols <file>      Scan symbol literals; suggest type declarations
   compact <game.sb> <save.log> Emit snapshot + delta log for faster replay
   bundle  <file>              Bundle a game into a single self-contained .lua file
+  lsp                         Start the LSP server (stdio JSON-RPC)
   help                        Show this help text
 
 Options (compile / run):
@@ -372,6 +373,18 @@ local function cmd_compact(args)
   return compact_cmd.run(args) or 0
 end
 
+-- ── Command: lsp ─────────────────────────────────────────────
+
+local function cmd_lsp(_args)
+  local ok, lsp = pcall(require, "cli.lsp")
+  if not ok then
+    io.stderr:write("error: could not load lsp: " .. tostring(lsp) .. "\n")
+    return 1
+  end
+  lsp.run()
+  return 0
+end
+
 -- ── Dispatch table ────────────────────────────────────────────
 
 local COMMAND_HELP = {
@@ -482,6 +495,19 @@ storybase bundle [--production] [--output <path>] <file>
     --save <path>    Save game log to <path> on exit
     --load <path>    Load game log from <path> before starting
 ]],
+  ["lsp"] = [[
+storybase lsp
+
+  Start the StoryBase Language Server Protocol (LSP) server.
+  Communicates over stdin/stdout using the JSON-RPC 2.0 protocol.
+
+  Configure your editor to launch this command as an LSP server for
+  files with the .sb extension.  The server provides:
+    - Diagnostics (errors and warnings) on open/change
+    - Hover documentation (doc strings, kind, parameters)
+    - Go-to-definition (jump to declaration)
+    - Completion (names, state paths, types, scenes, functions)
+]],
   ["help"] = [[
 storybase help [<command>]
 
@@ -516,6 +542,7 @@ local COMMANDS = {
   ["extract-symbols"] = cmd_extract_symbols,
   ["compact"]         = cmd_compact,
   ["bundle"]          = cmd_bundle,
+  ["lsp"]             = cmd_lsp,
   ["help"]            = cmd_help,
 }
 

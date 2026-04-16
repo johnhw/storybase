@@ -8,7 +8,8 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-16)
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
-and the **Standalone Bundler** and two Medium Features below. **1546 tests passing.**
+and the **Standalone Bundler**, **Language Server (LSP)**, and two Medium Features below.
+**1589 tests passing.**
 
 Three low-priority deferred items completed: `engine/checkpoint!` callable, `engine/emit`
 callable, and `game:docs()` public API for doc string surfacing.
@@ -84,12 +85,12 @@ callable, and `game:docs()` public API for doc string surfacing.
 
 ### Major Features
 
-- [ ] **Language Server (LSP).** The compiler already produces a symbol table with position
-  info, doc strings, and type information. An LSP server wrapping `M.parse_and_check` would
-  give go-to-definition, hover (doc strings), path completion, and diagnostics in any
-  LSP-capable editor. Implement as `cli/lsp.lua` using the `stdio` JSON-RPC transport (no
-  extra dependencies). This is the highest-leverage investment for making StoryBase usable by
-  game authors who are not Lua programmers.
+- [x] **Language Server (LSP).** `cli/lsp.lua` — stdio JSON-RPC 2.0 server. Wraps
+  `M.parse_and_check`; on every `textDocument/didOpen` or `textDocument/didChange` it
+  re-parses and pushes diagnostics. Supports `textDocument/hover` (doc strings + kind +
+  params), `textDocument/definition` (jump to declaration), and `textDocument/completion`
+  (names, state paths, types, scenes filtered by prefix; trigger chars `/` and `-`).
+  Wired as `storybase lsp` in `cli/main.lua`. 43 unit tests in `tests/cli/lsp_spec.lua`.
 
 - [x] **Standalone bundler (`storybase bundle`).** `storybase bundle game.sb --output game.lua`
   produces a single self-contained Lua file: compiler stripped, 14 runtime modules embedded

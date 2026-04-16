@@ -518,6 +518,22 @@ rng:weighted(weights, list) → value
 - Bundled game accepts: `--seed N`, `--save <path>`, `--load <path>` at runtime
 - Flags: `--output <path>` (default: same dir as .sb with .lua extension), `--production`
 
+### `cli/lsp.lua` (~340 lines)
+Language Server Protocol server. Communicates over stdio using JSON-RPC 2.0.
+- `M.run()` — main loop; reads messages from stdin, dispatches handlers, writes responses to stdout
+- `M.build_syms(typed_ast)` → `{[name]=sym}` — extract flat symbol map from typed AST + symtab; each entry has `{kind, pos, doc, detail}`
+- `M.word_at(lines, line0, char0)` → `string|nil` — extract identifier/path under 0-based cursor
+- `M.make_lsp_diags(diags)` → `table[]` — convert StoryBase diagnostics to LSP format
+
+**Supported LSP methods:**
+- `initialize` — returns server capabilities (hover, definition, completion, diagnostics)
+- `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose` — document lifecycle; publishes diagnostics on open/change
+- `textDocument/hover` — doc string + kind + param list for symbol under cursor
+- `textDocument/definition` — jump to declaration position
+- `textDocument/completion` — names, state paths, types, scenes filtered by prefix; trigger characters `/` and `-`
+
+**Symbol kinds collected:** `type`, `state`, `relation`, `scene`, `grid`, `fn`, `actor`, `schedule`, `bounded`, `macro`
+
 ### `cli/compact_cmd.lua` (~115 lines)
 - `M.run(args)` — replay save log into fresh state, write compact save with one entry per path
 - Usage: `storybase compact <game.sb> <save.log> [--out <out.log>]`
@@ -577,6 +593,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/compact_spec.lua` | compact CLI command |
 | `tests/cli/bundle_spec.lua` | bundle CLI command: output validity, execution, --production, save/load, error cases (20 tests) |
 | `tests/cli/cli_integration_spec.lua` | Full CLI integration tests: all subcommands (check/compile/run/format/repl/verify/migrate) against all test*.sb + demo*.sb files; also import alias, exports:, source-context error output tests |
+| `tests/cli/lsp_spec.lua` | LSP server unit tests: build_syms (types/states/fns/actors/docs), word_at (word extraction, paths, hyphens), make_lsp_diags (severity, positions), integration with real parse+check (43 tests) |
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, end-to-end pipeline |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
