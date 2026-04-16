@@ -8,7 +8,10 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-16)
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
-and the **Standalone Bundler** and two Medium Features below. **1533 tests passing.**
+and the **Standalone Bundler** and two Medium Features below. **1546 tests passing.**
+
+Three low-priority deferred items completed: `engine/checkpoint!` callable, `engine/emit`
+callable, and `game:docs()` public API for doc string surfacing.
 
 ---
 
@@ -102,13 +105,20 @@ and the **Standalone Bundler** and two Medium Features below. **1533 tests passi
 
 Items noted as low-priority during earlier phases; not yet implemented.
 
-- [ ] `engine/checkpoint!` callable form — currently the `checkpoint` tag handles checkpointing;
-  the callable form would allow manual checkpoints inside non-tagged functions.
+- [x] `engine/checkpoint!` callable form — parser handles PATH token `engine/checkpoint!` as
+  `CHECKPOINT_MUT` node (ast.lua); eval pushes a log checkpoint. Optional `fn-name` arg
+  overrides the checkpoint label. Tests in `tests/lib/storybase_spec.lua`.
 
-- [ ] `engine/emit event args` callable form — for emitting debug/presentation events directly
-  from transaction functions without going through a hook.
+- [x] `engine/emit event args` callable form — parser handles PATH token `engine/emit` as
+  `EMIT_MUT` node; eval fires `ctx.debug:emit(...)` (debug server) AND `ctx.game._emit_hook`
+  (wired by `lib/storybase.lua` to deliver events to `game:on()` listeners). Tests in
+  `tests/lib/storybase_spec.lua`.
 
-- [ ] Doc string surfacing via public API — doc fields are present in `game_table` but not
-  exposed through `lib/storybase.lua` or the debug server schema browser.
+- [x] Doc string surfacing via public API — `game:docs(name?)` added to `lib/storybase.lua`:
+  collects `doc` fields from fns, scenes, actors, schedules, bounded, schema.states/types;
+  returns full map or single-name lookup. Tests in `tests/lib/storybase_spec.lua`.
+
+- [ ] Doc string surfacing via debug server schema browser — `get-schema` command could
+  include doc fields alongside type information. Not yet implemented.
 
 - [ ] Every public function in every module has at least one passing and one failing test.

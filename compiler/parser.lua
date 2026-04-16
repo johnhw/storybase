@@ -336,12 +336,14 @@ end
 
 --- module name
 ---   version: N
+---   exports: [Name, ...]
 local function parse_module_decl(p, doc)
   local tpos = p:cur().pos
   p:adv()  -- consume "module"
   local name_t = p:expect("IDENT", nil, "expected module name")
   local name = name_t and name_t.value or "?"
   local version = nil
+  local exports = nil  -- list of exported names, or nil if not specified
 
   p:skip_newlines()
   if p:at("INDENT") then
@@ -354,6 +356,23 @@ local function parse_module_decl(p, doc)
         local v = p:match("INTEGER") or p:match("FLOAT")
         if v then version = v.value end
         p:skip_to_eol()
+      elseif p:at("NAMED_ARG", "exports") then
+        -- exports: [Name, Name, ...]
+        p:adv()
+        exports = {}
+        if p:at("OP", "[") then
+          p:adv()
+          while not p:at("OP", "]") and not p:at("EOF") and not p:at("NEWLINE") do
+            if p:at("IDENT") then
+              exports[#exports+1] = p:adv().value
+            else
+              p:adv()
+            end
+            p:match("OP", ",")
+          end
+          p:match("OP", "]")
+        end
+        p:skip_to_eol()
       else
         p:skip_to_eol()
       end
@@ -361,7 +380,7 @@ local function parse_module_decl(p, doc)
     if p:at("DEDENT") then p:adv() end
   end
 
-  return ast.module_decl(name, version, tpos)
+  return ast.module_decl(name, version, exports, tpos)
 end
 
 --- import "path"  /  import "path" as Alias
@@ -1815,6 +1834,27 @@ parse_stmt = function(p)
   if t.kind == "IDENT" and MUTATION_TABLE[t.value] then
     p:adv()
     return MUTATION_TABLE[t.value](p, tpos)
+  end
+
+  -- Engine pseudo-mutation paths (PATH tokens)
+  if t.kind == "PATH" and t.value == "engine/checkpoint!" then
+    p:adv()
+    local fn_name_expr = nil
+    if not p:at("NEWLINE") and not p:at("EOF") and not p:at("DEDENT") then
+      fn_name_expr = parse_atom(p)
+    end
+    p:skip_to_eol()
+    return ast.checkpoint_mut(fn_name_expr, tpos)
+  end
+  if t.kind == "PATH" and t.value == "engine/emit" then
+    p:adv()
+    local event_expr = parse_atom(p)
+    local args_expr = nil
+    if not p:at("NEWLINE") and not p:at("EOF") and not p:at("DEDENT") then
+      args_expr = parse_expr(p)
+    end
+    p:skip_to_eol()
+    return ast.emit_mut(event_expr, args_expr, tpos)
   end
 
   -- Control flow

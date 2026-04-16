@@ -70,6 +70,8 @@ SET_MUT, INC_MUT, DEC_MUT, ADD_MUT, REMOVE_MUT, CLEAR_MUT
 PUSH_MUT, POP_MUT, SPAWN_MUT, DESPAWN_MUT
 GOTO_STMT, ENTER_STMT, EXIT_STMT, SEND_MUT
 MATCH_ARM, COND_ARM
+CHECKPOINT_MUT   -- engine/checkpoint! [fn-name]
+EMIT_MUT         -- engine/emit event [args]
 ```
 
 ---
@@ -540,8 +542,9 @@ Public Lua API for embedding StoryBase in another Lua program.
   - `game:tick()` — one autonomous turn (post_action only)
   - `game:save(filepath)` → ok, err; write save file
   - `game:load(filepath)` → ok, err; restore from save file
-  - `game:on(event, handler)` — subscribe to "choice", "mutation", "scene-change"
+  - `game:on(event, handler)` — subscribe to "choice", "mutation", "scene-change", or any custom `engine/emit` event name
   - `game:register_bounded(name, fn)` — register bounded computation handler
+  - `game:docs(name?)` — return doc string(s) from compiled game table; no arg returns all docs as a table, name arg returns the doc for that entity
 
 ---
 

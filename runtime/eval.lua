@@ -71,6 +71,8 @@ local K = {
   TIME_SET_MUT       = "time_set_mut",
   CANCEL_SCHEDULE_MUT = "cancel_schedule_mut",
   SCHEDULE_MUT        = "schedule_mut",
+  CHECKPOINT_MUT      = "checkpoint_mut",
+  EMIT_MUT            = "emit_mut",
   PATH_AT_BEFORE        = "path_at_before",
   COUNTERFACTUAL_EXPR   = "counterfactual_expr",
   IN_STATE_EXPR         = "in_state_expr",
@@ -1859,6 +1861,34 @@ eval_stmt = function(node, ctx)
           fire_at       = fa,
           fired         = fi,
         })
+      end
+    end
+
+  elseif k == K.CHECKPOINT_MUT then
+    -- engine/checkpoint! [fn-name] — push a checkpoint into the log
+    if ctx.state and ctx.state.push_checkpoint then
+      local label
+      if node.fn_name then
+        local v = eval_expr(node.fn_name, ctx)
+        label = tostring(v or "manual")
+      else
+        label = ctx.fn_name or "manual"
+      end
+      ctx.state:push_checkpoint(label)
+    end
+
+  elseif k == K.EMIT_MUT then
+    -- engine/emit event [args] — emit a named event to debug/presentation layer
+    local event_name = eval_expr(node.event, ctx)
+    local payload    = node.args and eval_expr(node.args, ctx) or {}
+    if type(event_name) == "string" then
+      local tick = ctx.state and ctx.state._time and ctx.state._time.tick or 0
+      if ctx.debug then
+        pcall(function() ctx.debug:emit(event_name, payload) end)
+      end
+      -- Also fire game-level listeners (ctx.game._emit_hook if set by lib/storybase)
+      if ctx.game and type(ctx.game._emit_hook) == "function" then
+        pcall(ctx.game._emit_hook, event_name, payload, tick)
       end
     end
 

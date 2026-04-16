@@ -596,3 +596,193 @@ scene end-scene:
     assert.has_no_error(function() g:choose(1) end)
   end)
 end)
+
+-- ── engine/checkpoint! callable form ─────────────────────────────────────────
+
+describe("engine/checkpoint! callable", function()
+  local SRC = [[
+module checkpoint-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  hp: Int(0, 100) = 50
+fn damage:
+  dec! world/hp 10
+fn checkpoint-and-damage:
+  engine/checkpoint!
+  dec! world/hp 10
+scene main:
+  * Hit -> main
+]]
+
+  it("engine/checkpoint! pushes a checkpoint into the log", function()
+    local g = sb.from_source(SRC, "checkpoint-test")
+    assert.is_not_nil(g)
+    g:init()
+    g:call("checkpoint-and-damage")
+    -- undo should roll back the damage
+    local eng = g._eng
+    local ok = eng._state:undo(1)
+    assert.is_true(ok)
+    assert.equal(50, g:get("world/hp"))
+  end)
+
+  it("engine/checkpoint! without the tag still creates an undo point", function()
+    local g = sb.from_source(SRC, "checkpoint-test")
+    assert.is_not_nil(g)
+    g:init()
+    -- call damage (no checkpoint) then checkpoint-and-damage
+    g:call("damage")                  -- hp = 40, no checkpoint
+    g:call("checkpoint-and-damage")   -- pushes checkpoint, then hp = 30
+    local eng = g._eng
+    local ok = eng._state:undo(1)
+    assert.is_true(ok)
+    assert.equal(40, g:get("world/hp"))  -- rolled back to pre-checkpoint-and-damage hp
+  end)
+
+  it("undo fails when no checkpoint exists", function()
+    local g = sb.from_source(SRC, "checkpoint-test")
+    assert.is_not_nil(g)
+    g:init()
+    g:call("damage")  -- no checkpoint
+    local ok = g._eng._state:undo(1)
+    assert.is_false(ok)
+  end)
+end)
+
+-- ── engine/emit callable form ─────────────────────────────────────────────────
+
+describe("engine/emit callable", function()
+  local SRC = [[
+module emit-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  x: Int(0, 99) = 0
+fn do-thing:
+  inc! world/x 1
+  engine/emit 'thing-happened {x: world/x}
+fn emit-no-args:
+  engine/emit 'simple-event
+scene main:
+  * Go -> main
+]]
+
+  it("engine/emit fires the game-level on() listener", function()
+    local g = sb.from_source(SRC, "emit-test")
+    assert.is_not_nil(g)
+    g:init()
+    local fired = {}
+    g:on("thing-happened", function(p) fired[#fired+1] = p end)
+    g:call("do-thing")
+    assert.equal(1, #fired)
+    assert.equal("thing-happened", fired[1].event)
+  end)
+
+  it("engine/emit with no args payload fires listener without error", function()
+    local g = sb.from_source(SRC, "emit-test")
+    assert.is_not_nil(g)
+    g:init()
+    local fired = false
+    g:on("simple-event", function() fired = true end)
+    assert.has_no_error(function() g:call("emit-no-args") end)
+    assert.is_true(fired)
+  end)
+
+  it("engine/emit fires multiple times across calls", function()
+    local g = sb.from_source(SRC, "emit-test")
+    assert.is_not_nil(g)
+    g:init()
+    local count = 0
+    g:on("thing-happened", function() count = count + 1 end)
+    g:call("do-thing")
+    g:call("do-thing")
+    assert.equal(2, count)
+  end)
+
+  it("engine/emit is silent when no listeners registered", function()
+    local g = sb.from_source(SRC, "emit-test")
+    assert.is_not_nil(g)
+    g:init()
+    assert.has_no_error(function() g:call("do-thing") end)
+  end)
+end)
+
+-- ── game:docs ─────────────────────────────────────────────────────────────────
+
+describe("game:docs", function()
+  local SRC = [[
+module docs-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  gold: Int(0, 9999) = 0
+
+"Increases gold by the given amount."
+fn earn amount:
+  inc! world/gold amount
+
+"The starting scene."
+scene main:
+  * Earn -> main
+]]
+
+  local function make()
+    local g = sb.from_source(SRC, "docs-test"); g:init(); return g
+  end
+
+  it("docs() returns a table for a compiled game", function()
+    local g = make()
+    local d = g:docs()
+    assert.is_table(d)
+  end)
+
+  it("docs() includes doc strings for annotated fns", function()
+    local g = make()
+    local d = g:docs()
+    assert.is_not_nil(d["earn"])
+    assert.is_string(d["earn"])
+  end)
+
+  it("docs() includes doc strings for annotated scenes", function()
+    local g = make()
+    local d = g:docs()
+    assert.is_not_nil(d["main"])
+    assert.is_string(d["main"])
+  end)
+
+  it("docs(name) returns the doc for a specific entity", function()
+    local g = make()
+    local doc = g:docs("earn")
+    assert.is_string(doc)
+  end)
+
+  it("docs(name) returns nil for unknown names", function()
+    local g = make()
+    assert.is_nil(g:docs("nonexistent"))
+  end)
+
+  it("docs() returns empty table when nothing is annotated", function()
+    local src2 = [[
+module no-docs
+  version: 1.0
+engine-config:
+  entry-scene: s
+schema-version: 1
+fn foo:
+  pass
+scene s:
+  * Go -> s
+]]
+    local g = sb.from_source(src2, "no-docs"); g:init()
+    local d = g:docs()
+    assert.is_table(d)
+    assert.is_nil(d["foo"])  -- no doc string
+  end)
+end)

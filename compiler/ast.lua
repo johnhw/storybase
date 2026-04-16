@@ -130,6 +130,8 @@ M.E = {
   -- File I/O
   FILE_NOT_FOUND           = "FILE_NOT_FOUND",
   FILE_READ_ERROR          = "FILE_READ_ERROR",
+  -- Feature availability
+  UNSUPPORTED_FEATURE      = "UNSUPPORTED_FEATURE",
 }
 
 -- ============================================================
@@ -142,6 +144,7 @@ M.W = {
   UNUSED_IMPORT            = "WARN_UNUSED_IMPORT",
   IMPRECISE_SEARCH         = "WARN_IMPRECISE_SEARCH",
   APPROXIMATE_RESULT       = "WARN_APPROXIMATE_RESULT",
+  EXPORTS_NOT_ENFORCED     = "WARN_EXPORTS_NOT_ENFORCED",
 }
 
 -- ============================================================
@@ -268,6 +271,8 @@ M.K.ENTER_SCENE_MUT     = "enter_scene_mut"  -- enter-scene! name
 M.K.EXIT_SCENE_MUT      = "exit_scene_mut"   -- exit-scene!
 M.K.SCHEDULE_MUT        = "schedule_mut"     -- schedule! name opts fn
 M.K.CANCEL_SCHEDULE_MUT = "cancel_schedule_mut" -- cancel-schedule! name
+M.K.CHECKPOINT_MUT      = "checkpoint_mut"      -- engine/checkpoint! [fn-name]
+M.K.EMIT_MUT            = "emit_mut"            -- engine/emit event [args]
 
 -- ── Scene-specific nodes ──────────────────────────────────────
 M.K.NARRATION_LINE      = "narration_line"   -- plain text
@@ -333,6 +338,7 @@ local MUT_KINDS = {
   [M.K.GOTO_SCENE_MUT]      = true, [M.K.ENTER_SCENE_MUT] = true,
   [M.K.EXIT_SCENE_MUT]      = true,
   [M.K.SCHEDULE_MUT]        = true, [M.K.CANCEL_SCHEDULE_MUT] = true,
+  [M.K.CHECKPOINT_MUT]      = true, [M.K.EMIT_MUT]            = true,
 }
 
 local TYPE_EXPR_KINDS = {
@@ -392,8 +398,8 @@ end
 
 -- ── Declarations ─────────────────────────────────────────────
 
-function M.module_decl(name, version, pos)
-  return M.node(M.K.MODULE_DECL, { name = name, version = version }, pos)
+function M.module_decl(name, version, exports, pos)
+  return M.node(M.K.MODULE_DECL, { name = name, version = version, exports = exports }, pos)
 end
 
 --- flat import (alias=nil) or namespaced import (alias=string)
@@ -785,6 +791,15 @@ function M.schedule_mut(name, opts, fn, pos)
 end
 function M.cancel_schedule_mut(name, pos)
   return M.node(M.K.CANCEL_SCHEDULE_MUT, { name = name }, pos)
+end
+--- fn_name_expr is an optional expression whose value becomes the checkpoint label
+function M.checkpoint_mut(fn_name_expr, pos)
+  return M.node(M.K.CHECKPOINT_MUT, { fn_name = fn_name_expr }, pos)
+end
+--- event is an expression evaluating to the event name (string or symbol);
+--- args is an optional expression for the event payload
+function M.emit_mut(event, args, pos)
+  return M.node(M.K.EMIT_MUT, { event = event, args = args }, pos)
 end
 
 -- ── Scene elements ────────────────────────────────────────────

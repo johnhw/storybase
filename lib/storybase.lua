@@ -95,6 +95,10 @@ function M._make_game(game_table)
     if next(self._handlers) then
       self._eng._game._bounded_handlers = self._handlers
     end
+    -- Wire engine/emit events to game listeners
+    self._eng._game._emit_hook = function(event_name, payload, tick)
+      self:_emit(event_name, { event = event_name, payload = payload, tick = tick })
+    end
     self._eng:init()
     return self
   end
@@ -407,6 +411,39 @@ function M._make_game(game_table)
     for _, h in ipairs(self._listeners[event_name] or {}) do
       pcall(h, payload)
     end
+  end
+
+  -- ── Doc string access ─────────────────────────────────────
+
+  --- Return doc strings from the compiled game table.
+  --- With no argument: returns a table mapping names to their doc strings.
+  --- With a name argument: returns the doc string for that name, or nil.
+  ---
+  --- Searches fns, scenes, actors, schedules, bounded, and schema.states.
+  ---@param name string?  Named entity to look up (optional)
+  ---@return table|string|nil
+  function self:docs(name)
+    local gt = self._gt
+    local all = {}
+    local function collect(tbl)
+      if type(tbl) ~= "table" then return end
+      for k, v in pairs(tbl) do
+        if type(v) == "table" and v.doc then
+          all[k] = v.doc
+        end
+      end
+    end
+    collect(gt.fns)
+    collect(gt.scenes)
+    collect(gt.actors)
+    collect(gt.schedules)
+    collect(gt.bounded)
+    if gt.schema then
+      collect(gt.schema.states)
+      collect(gt.schema.types)
+    end
+    if name ~= nil then return all[name] end
+    return all
   end
 
   -- ── Autonomous turns ──────────────────────────────────────
