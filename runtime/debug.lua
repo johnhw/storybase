@@ -32,6 +32,227 @@
 local M = {}
 
 local DEFAULT_PORT = 7373
+local DEFAULT_HTTP_PORT = 7374
+
+-- ============================================================
+-- Embedded browser debug UI (served at GET /)
+-- ============================================================
+
+M.HTML_UI = [==========[
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StoryBase Debug</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Courier New',monospace;background:#0d1117;color:#c9d1d9;height:100vh;display:flex;flex-direction:column;font-size:13px}
+header{padding:8px 16px;background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:16px;flex-shrink:0}
+header h1{font-size:13px;color:#ff7b72;letter-spacing:2px;text-transform:uppercase;font-weight:bold}
+.badge{font-size:11px;padding:2px 8px;border-radius:3px;background:#21262d;color:#8b949e}
+.badge.ok{background:#1a3a1a;color:#56d364}
+.badge.err{background:#3a1a1a;color:#f85149}
+.main{flex:1;display:flex;overflow:hidden;min-height:0}
+#game-panel{width:42%;min-width:260px;display:flex;flex-direction:column;border-right:1px solid #30363d}
+.ptitle{padding:4px 12px;background:#161b22;font-size:10px;color:#8b949e;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #30363d;flex-shrink:0}
+#transcript{flex:1;overflow-y:auto;padding:12px 14px;line-height:1.7;white-space:pre-wrap}
+.sb{margin-bottom:8px}
+.sl{color:#8b949e;font-size:10px;margin-bottom:4px}
+.sn{color:#c9d1d9}
+#choices-bar{padding:8px 10px;border-top:1px solid #30363d;display:flex;flex-wrap:wrap;gap:5px}
+.cb{padding:5px 10px;background:#21262d;border:1px solid #30363d;color:#c9d1d9;cursor:pointer;font-family:inherit;font-size:12px;border-radius:3px;text-align:left}
+.cb:hover:not(:disabled){background:#388bfd22;border-color:#388bfd;color:#79c0ff}
+.cb:disabled{opacity:0.35;cursor:not-allowed}
+#debug-panels{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.dp{flex:1;display:flex;flex-direction:column;min-height:70px;border-bottom:1px solid #30363d;overflow:hidden}
+.dp:last-child{border-bottom:none}
+.dpb{flex:1;overflow-y:auto;padding:3px 0}
+.sp{padding:1px 10px;display:flex;gap:6px;font-size:12px}
+.sp:hover{background:#161b22}
+.spk{color:#8b949e;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}
+.spv{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spv.n{color:#79c0ff}.spv.b{color:#ff7b72}.spv.s{color:#a5d6ff}.spv.o{color:#56d364}
+.me{padding:2px 10px;border-bottom:1px solid #21262d;font-size:11px;line-height:1.5}
+.mep{color:#ff7b72}.mea{color:#8b949e}.mem{color:#8b949e;font-size:10px;margin-left:4px}
+.tl{padding:8px 12px}
+#tslider{width:100%;accent-color:#388bfd;cursor:pointer}
+.tlb{display:flex;justify-content:space-between;font-size:10px;color:#8b949e;margin-top:2px}
+.we{padding:2px 10px;border-bottom:1px solid #21262d;font-size:11px;line-height:1.5}
+.wel{color:#d2a8ff}.wep{color:#ffa657}.wem{color:#8b949e;font-size:10px;margin-left:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>StoryBase</h1>
+  <span id="cbadge" class="badge err">disconnected</span>
+  <span id="mbadge" class="badge">mode: ?</span>
+  <span id="tbadge" class="badge">tick: 0</span>
+</header>
+<div class="main">
+  <div id="game-panel">
+    <div class="ptitle">Game</div>
+    <div id="transcript"></div>
+    <div id="choices-bar"></div>
+  </div>
+  <div id="debug-panels">
+    <div class="dp" style="flex:1.5">
+      <div class="ptitle">State</div>
+      <div class="dpb" id="state-panel"></div>
+    </div>
+    <div class="dp" style="flex:1.2">
+      <div class="ptitle">Mutations</div>
+      <div class="dpb" id="mut-panel"></div>
+    </div>
+    <div class="dp" style="flex:0 0 auto">
+      <div class="ptitle">Timeline</div>
+      <div class="tl">
+        <input type="range" id="tslider" min="0" max="0" value="0">
+        <div class="tlb"><span>0</span><span id="tmaxlbl">0</span></div>
+      </div>
+    </div>
+    <div class="dp" style="flex:0.8">
+      <div class="ptitle">Watches</div>
+      <div class="dpb" id="watch-panel"></div>
+    </div>
+  </div>
+</div>
+<script>
+var mode='debug',maxTick=0,live=true;
+function fv(v){if(v===null||v===undefined)return'null';return JSON.stringify(v);}
+function vc(v){var t=typeof v;if(t==='number')return'n';if(t==='boolean')return'b';if(t==='string')return's';return'o';}
+async function api(p){
+  try{
+    var r=await fetch('/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+    return await r.json();
+  }catch(e){return{error:String(e)};}
+}
+function renderScene(d){
+  if(!d||d.error)return;
+  var tr=document.getElementById('transcript');
+  var blk=document.createElement('div');blk.className='sb';
+  var lbl=document.createElement('div');lbl.className='sl';
+  lbl.textContent='['+( d.scene||'?')+']';
+  var nar=document.createElement('div');nar.className='sn';
+  nar.textContent=(Array.isArray(d.narration)?d.narration.join('\n'):(d.narration||''));
+  blk.appendChild(lbl);blk.appendChild(nar);tr.appendChild(blk);
+  tr.scrollTop=tr.scrollHeight;
+  var bar=document.getElementById('choices-bar');bar.innerHTML='';
+  (d.choices||[]).forEach(function(c){
+    var btn=document.createElement('button');btn.className='cb';
+    btn.textContent=c.idx+'. '+c.label;
+    btn.disabled=(mode!=='serve');
+    if(mode!=='serve')btn.title='Start with --serve to enable browser play';
+    btn.onclick=function(){doChoice(c.idx);};
+    bar.appendChild(btn);
+  });
+}
+async function loadScene(){renderScene(await api({cmd:'get-scene'}));}
+async function doChoice(n){
+  document.querySelectorAll('.cb').forEach(function(b){b.disabled=true;});
+  renderScene(await api({cmd:'do-choice',n:n}));
+}
+function renderState(m){
+  var p=document.getElementById('state-panel');p.innerHTML='';
+  Object.keys(m).sort().forEach(function(k){
+    var row=document.createElement('div');row.className='sp';
+    var ek=document.createElement('span');ek.className='spk';ek.textContent=k;ek.title=k;
+    var ev=document.createElement('span');ev.className='spv '+vc(m[k]);ev.textContent=fv(m[k]);ev.title=fv(m[k]);
+    row.appendChild(ek);row.appendChild(ev);p.appendChild(row);
+  });
+}
+function patchState(path,val){
+  var rows=document.getElementById('state-panel').querySelectorAll('.sp');
+  for(var i=0;i<rows.length;i++){
+    if(rows[i].querySelector('.spk').textContent===path){
+      var ev=rows[i].querySelector('.spv');
+      ev.className='spv '+vc(val);ev.textContent=fv(val);ev.title=fv(val);return;
+    }
+  }
+  var row=document.createElement('div');row.className='sp';
+  var ek=document.createElement('span');ek.className='spk';ek.textContent=path;ek.title=path;
+  var ev=document.createElement('span');ev.className='spv '+vc(val);ev.textContent=fv(val);ev.title=fv(val);
+  row.appendChild(ek);row.appendChild(ev);
+  document.getElementById('state-panel').appendChild(row);
+}
+async function loadState(){
+  var r=await api({cmd:'get-state',pattern:'*'});
+  if(r.state)renderState(r.state);
+}
+function addMut(m){
+  var p=document.getElementById('mut-panel');
+  var row=document.createElement('div');row.className='me';
+  row.innerHTML='<span class="mep">'+(m.path||'')+'</span>'
+    +'<span class="mea"> '+fv(m.old)+' \u2192 '+fv(m['new'])+'</span>'
+    +'<span class="mem"> '+(m.fn||'')+' @'+(m.tick||0)+'</span>';
+  p.insertBefore(row,p.firstChild);
+  if(p.children.length>200)p.removeChild(p.lastChild);
+}
+var slider=document.getElementById('tslider');
+var tmaxlbl=document.getElementById('tmaxlbl');
+slider.oninput=async function(){
+  var t=parseInt(this.value);live=(t===maxTick);
+  document.getElementById('tbadge').textContent='tick: '+t;
+  if(!live){var r=await api({cmd:'time-travel',tick:t});if(r.snapshot)renderState(r.snapshot);}
+};
+function setTick(t){
+  if(t>maxTick){
+    maxTick=t;slider.max=maxTick;tmaxlbl.textContent=String(maxTick);
+    if(live)slider.value=maxTick;
+  }
+  document.getElementById('tbadge').textContent='tick: '+(live?maxTick:parseInt(slider.value));
+}
+function addWatch(w){
+  var p=document.getElementById('watch-panel');
+  var row=document.createElement('div');row.className='we';
+  row.innerHTML='<span class="wel">['+(w.label||'')+']</span> '
+    +'<span class="wep">'+(w.path||'')+'</span>'
+    +' = '+fv(w.value)
+    +'<span class="wem"> @'+(w.tick||0)+'</span>';
+  p.insertBefore(row,p.firstChild);
+  if(p.children.length>100)p.removeChild(p.lastChild);
+}
+function connectSSE(){
+  var es=new EventSource('/events');
+  es.onopen=function(){
+    document.getElementById('cbadge').textContent='connected';
+    document.getElementById('cbadge').className='badge ok';
+  };
+  es.onmessage=function(e){
+    try{
+      var ev=JSON.parse(e.data),d=ev.data||{};
+      if(ev.event==='mutation'){
+        addMut(d);
+        if(live&&d.path!=null)patchState(d.path,d['new']);
+        if(d.tick!=null)setTick(d.tick);
+      }else if(ev.event==='scene-change'){
+        loadScene();
+      }else if(ev.event==='watch-fired'){
+        addWatch(d);
+      }
+    }catch(_){}
+  };
+  es.onerror=function(){
+    document.getElementById('cbadge').textContent='disconnected';
+    document.getElementById('cbadge').className='badge err';
+    es.close();setTimeout(connectSSE,2000);
+  };
+}
+async function init(){
+  connectSSE();
+  var mr=await api({cmd:'get-mode'});
+  mode=(mr&&mr.mode)||'debug';
+  document.getElementById('mbadge').textContent='mode: '+mode;
+  var tr=await api({cmd:'get-tick'});
+  if(tr&&tr.tick!=null)setTick(tr.tick);
+  await loadState();
+  await loadScene();
+}
+init();
+</script>
+</body>
+</html>
+]==========]
 
 -- ============================================================
 -- Helpers
@@ -93,16 +314,21 @@ function M.new(engine, opts)
   opts = opts or {}
 
   local srv = {
-    _engine      = engine,
-    _port        = opts.port or DEFAULT_PORT,
-    _mode        = opts.mode or "hook",
-    _running     = false,
-    _clients     = {},          -- TCP clients (when in tcp mode)
-    _breakpoints = {},          -- {id → condition_fn}
-    _bp_counter  = 0,
-    _watches     = {},          -- {kind, path?, condition?, label}
-    _handlers    = {},          -- {event_name → [fn, ...]}
-    _tcp_socket  = nil,
+    _engine       = engine,
+    _port         = opts.port or DEFAULT_PORT,
+    _mode         = opts.mode or "hook",
+    _running      = false,
+    _clients      = {},          -- TCP clients (when in tcp mode)
+    _breakpoints  = {},          -- {id → condition_fn}
+    _bp_counter   = 0,
+    _watches      = {},          -- {kind, path?, condition?, label}
+    _handlers     = {},          -- {event_name → [fn, ...]}
+    _tcp_socket   = nil,
+    -- HTTP server fields (populated by start_http)
+    _http_socket  = nil,
+    _http_clients = {},          -- active HTTP connections being parsed
+    _sse_clients  = {},          -- open SSE connections (sockets)
+    _serve_mode   = false,       -- true when started with --serve
   }
 
   -- ── Event delivery ────────────────────────────────────────
@@ -130,6 +356,10 @@ function M.new(engine, opts)
     if self._mode == "tcp" and #self._clients > 0 then
       local json = M.encode_json({ event = event_name, data = payload })
       self:_broadcast(json .. "\n")
+    end
+    -- SSE broadcast to browser clients
+    if self._sse_clients and #self._sse_clients > 0 then
+      self:_sse_push(event_name, payload)
     end
   end
 
@@ -473,6 +703,174 @@ function M.new(engine, opts)
                             changes = #changes, tick = tick })
       return { ok = true, outcome = outcome, changes = #changes }
 
+    elseif cmd == "get-schema" then
+      if not eng or not eng._game then
+        return { error = "no engine or game not loaded" }
+      end
+      local g = eng._game
+
+      -- Types
+      local types = {}
+      for _, t in ipairs(g.schema and g.schema.types or {}) do
+        local entry = { kind = t.kind, name = t.name, doc = t.doc }
+        if t.values   then entry.values   = t.values   end
+        if t.fields   then entry.fields   = t.fields   end
+        if t.branches then entry.branches = t.branches end
+        types[#types+1] = entry
+      end
+
+      -- States
+      local states = {}
+      for _, s in ipairs(g.schema and g.schema.states or {}) do
+        local entry = {
+          path      = s.path,
+          kind      = s.kind,
+          type_desc = s.type_desc,
+          default   = s.default,
+          doc       = s.doc,
+        }
+        if s.fields then entry.fields = s.fields end
+        states[#states+1] = entry
+      end
+
+      -- Relations
+      local relations = {}
+      for _, r in ipairs(g.schema and g.schema.relations or {}) do
+        relations[#relations+1] = {
+          name         = r.name,
+          from_type    = r.from_type,
+          to_type_desc = r.to_type_desc,
+          doc          = r.doc,
+        }
+      end
+
+      -- Fns
+      local fns = {}
+      for name, f in pairs(g.fns or {}) do
+        fns[#fns+1] = {
+          name           = name,
+          params         = f.params,
+          is_transaction = f.is_transaction,
+          uses_bounded   = f.uses_bounded,
+          doc            = f.doc,
+        }
+      end
+
+      -- Scenes
+      local scenes = {}
+      for name, sc in pairs(g.scenes or {}) do
+        scenes[#scenes+1] = { name = name, doc = sc.doc }
+      end
+
+      -- Actors
+      local actors = {}
+      for name, a in pairs(g.actors or {}) do
+        actors[#actors+1] = {
+          name       = name,
+          state_path = a.state_path,
+          doc        = a.doc,
+        }
+      end
+
+      -- Schedules
+      local schedules = {}
+      for name, sc in pairs(g.schedules or {}) do
+        schedules[#schedules+1] = { name = name, doc = sc.doc }
+      end
+
+      -- Bounded
+      local bounded = {}
+      for name, b in pairs(g.bounded or {}) do
+        bounded[#bounded+1] = {
+          name     = name,
+          returns  = b.returns,
+          reads    = b.reads,
+          lua_name = b.lua,
+          doc      = b.doc,
+        }
+      end
+
+      return {
+        schema_version = g.schema and g.schema.version,
+        engine_config  = g.schema and g.schema.engine_config,
+        types          = types,
+        states        = states,
+        relations     = relations,
+        fns           = fns,
+        scenes        = scenes,
+        actors        = actors,
+        schedules     = schedules,
+        bounded       = bounded,
+      }
+
+    elseif cmd == "get-scene" then
+      if not eng then return { error = "no engine" } end
+      local scene_name = eng:current_scene()
+      if not scene_name then return { error = "no current scene" } end
+      local narration, choices, nav_signal = eng:render_scene(scene_name)
+      -- Follow unconditional nav signal (same as eng:step())
+      if nav_signal then
+        if nav_signal.type == "goto" then
+          eng:goto_scene(nav_signal.target)
+        elseif nav_signal.type == "enter" then
+          eng:enter_scene(nav_signal.target)
+        elseif nav_signal.type == "exit" then
+          eng:exit_scene()
+        end
+        scene_name = eng:current_scene()
+        if scene_name then
+          narration, choices = eng:render_scene(scene_name)
+        end
+      end
+      local choice_list = {}
+      for i, c in ipairs(choices or {}) do
+        choice_list[i] = { idx = i, label = c.label or "" }
+      end
+      return { scene = scene_name, narration = narration or {}, choices = choice_list }
+
+    elseif cmd == "do-choice" then
+      local n = tonumber(payload.n)
+      if not n then return { error = "missing 'n'" } end
+      if not srv._serve_mode then
+        return { error = "not in serve mode; start with --serve to enable browser play" }
+      end
+      if not eng then return { error = "no engine" } end
+      local scene_name = eng:current_scene()
+      if not scene_name then return { error = "no current scene" } end
+      local ok, signal = pcall(eng.do_choice, eng, scene_name, n)
+      if not ok then return { error = tostring(signal) } end
+      pcall(eng.post_action, eng)
+      if signal then
+        if signal.type == "goto" then
+          pcall(eng.goto_scene, eng, signal.target)
+        elseif signal.type == "enter" then
+          pcall(eng.enter_scene, eng, signal.target)
+        elseif signal.type == "exit" then
+          pcall(eng.exit_scene, eng)
+        end
+      end
+      -- Return updated scene (same as get-scene)
+      scene_name = eng:current_scene()
+      if not scene_name then
+        return { ok = true, scene = nil, narration = {}, choices = {} }
+      end
+      local narration, choices = eng:render_scene(scene_name)
+      local choice_list = {}
+      for i, c in ipairs(choices or {}) do
+        choice_list[i] = { idx = i, label = c.label or "" }
+      end
+      return { ok = true, scene = scene_name, narration = narration or {}, choices = choice_list }
+
+    elseif cmd == "get-tick" then
+      local tick = 0
+      if eng and eng._state then
+        tick = eng._state:get("world/tick") or 0
+      end
+      return { tick = tick }
+
+    elseif cmd == "get-mode" then
+      return { mode = srv._serve_mode and "serve" or "debug" }
+
     else
       return { error = "unknown command: " .. tostring(cmd) }
     end
@@ -511,7 +909,7 @@ function M.new(engine, opts)
     end
   end
 
-  --- Stop the debug server.
+  --- Stop the debug server (TCP + HTTP).
   function srv:stop()
     self._running = false
     for _, c in ipairs(self._clients) do
@@ -522,6 +920,255 @@ function M.new(engine, opts)
       pcall(function() self._tcp_socket:close() end)
       self._tcp_socket = nil
     end
+    -- Also stop HTTP server if running
+    self:stop_http()
+  end
+
+  -- ── HTTP server (browser debug UI) ──────────────────────────
+
+  --- Start the HTTP server for the browser debug UI.
+  ---@param port integer  HTTP port (default: DEFAULT_HTTP_PORT)
+  function srv:start_http(port)
+    port = port or DEFAULT_HTTP_PORT
+    self._http_port = port
+    local ok_s, socket = pcall(require, "socket")
+    if not ok_s or not socket then
+      io.stderr:write("storybase debug-ui: LuaSocket not available\n")
+      return
+    end
+    local s, err = socket.tcp()
+    if not s then
+      io.stderr:write("storybase debug-ui: cannot create socket: " .. tostring(err) .. "\n")
+      return
+    end
+    s:setoption("reuseaddr", true)
+    pcall(function() s:setoption("reuseport", true) end)  -- best-effort; not all platforms
+    local bound, berr = s:bind("*", port)
+    if not bound then
+      io.stderr:write("storybase debug-ui: cannot bind port " .. port
+                      .. ": " .. tostring(berr) .. "\n")
+      s:close()
+      return
+    end
+    local listened, lerr = s:listen(32)
+    if not listened then
+      io.stderr:write("storybase debug-ui: cannot listen port " .. port
+                      .. ": " .. tostring(lerr) .. "\n")
+      s:close()
+      return
+    end
+    s:settimeout(0)
+    self._http_socket  = s
+    self._http_clients = {}
+    self._sse_clients  = {}
+  end
+
+  --- Stop the HTTP server and close all HTTP/SSE clients.
+  function srv:stop_http()
+    for _, c in ipairs(self._http_clients or {}) do
+      pcall(function() c.sock:close() end)
+    end
+    for _, sock in ipairs(self._sse_clients or {}) do
+      pcall(function() sock:close() end)
+    end
+    self._http_clients = {}
+    self._sse_clients  = {}
+    if self._http_socket then
+      pcall(function() self._http_socket:close() end)
+      self._http_socket = nil
+    end
+  end
+
+  --- Push a Server-Sent Event to all connected browser SSE clients.
+  ---@param event_name string
+  ---@param payload    table
+  function srv:_sse_push(event_name, payload)
+    if not self._sse_clients or #self._sse_clients == 0 then return end
+    local msg = "data: " .. M.encode_json({ event = event_name, data = payload }) .. "\n\n"
+    local live = {}
+    for _, sock in ipairs(self._sse_clients) do
+      local ok = pcall(function() sock:send(msg) end)
+      if ok then live[#live + 1] = sock end
+    end
+    self._sse_clients = live
+  end
+
+  --- Write a minimal HTTP/1.1 response and close the socket.
+  --- Uses a blocking timeout for the send so large bodies (e.g. HTML UI) are
+  --- delivered in full even when the socket was opened non-blocking.
+  ---@param sock       userdata
+  ---@param status     string    e.g. "200 OK"
+  ---@param ctype      string    Content-Type value
+  ---@param body       string
+  ---@param extra_hdrs table?    list of extra "Header: Value" strings
+  function srv:_http_response(sock, status, ctype, body, extra_hdrs)
+    local parts = {
+      "HTTP/1.1 " .. status,
+      "Content-Type: "   .. ctype,
+      "Content-Length: " .. #body,
+      "Access-Control-Allow-Origin: *",
+      "Cache-Control: no-cache",
+      "Connection: close",
+    }
+    if extra_hdrs then
+      for _, h in ipairs(extra_hdrs) do parts[#parts + 1] = h end
+    end
+    local response = table.concat(parts, "\r\n") .. "\r\n\r\n" .. body
+    -- Switch to blocking send so the full response is delivered before close.
+    pcall(function() sock:settimeout(5) end)
+    pcall(function() sock:send(response) end)
+    pcall(function() sock:close() end)
+  end
+
+  --- Parse the HTTP request line and header fields from a client's accumulated lines.
+  local function parse_http_client(c)
+    local first = c.lines[1] or ""
+    c.method, c.path = first:match("^(%u+)%s+([^%s]+)%s+HTTP")
+    if not c.method then
+      -- HTTP/1.0 or malformed: try without version
+      c.method, c.path = first:match("^(%u+)%s+([^%s]+)")
+    end
+    c.method = c.method or "GET"
+    c.path   = (c.path or "/"):match("^([^?#]+)") or "/"  -- strip query/fragment
+    c.req_headers = {}
+    for i = 2, #c.lines do
+      local k, v = c.lines[i]:match("^([^:]+):%s*(.+)$")
+      if k then
+        c.req_headers[k:lower():gsub("%s", "")] = v
+      end
+    end
+  end
+
+  --- Dispatch an HTTP request.  Returns true to keep client in _http_clients (body pending).
+  function srv:_dispatch_http(c)
+    parse_http_client(c)
+    local method = c.method
+    local path   = c.path
+
+    if method == "OPTIONS" then
+      self:_http_response(c.sock, "200 OK", "text/plain", "", {
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers: Content-Type",
+      })
+      return false
+
+    elseif method == "GET" and path == "/" then
+      self:_http_response(c.sock, "200 OK", "text/html; charset=utf-8", M.HTML_UI)
+      return false
+
+    elseif method == "GET" and path == "/events" then
+      -- Server-Sent Events: send headers (blocking), keep socket open in _sse_clients
+      local hdr = "HTTP/1.1 200 OK\r\n"
+        .. "Content-Type: text/event-stream\r\n"
+        .. "Cache-Control: no-cache\r\n"
+        .. "Access-Control-Allow-Origin: *\r\n"
+        .. "Connection: keep-alive\r\n"
+        .. "\r\n"
+      pcall(function() c.sock:settimeout(5) end)
+      local ok = pcall(function() c.sock:send(hdr) end)
+      -- Restore non-blocking for subsequent event pushes
+      pcall(function() c.sock:settimeout(0) end)
+      if ok then
+        self._sse_clients[#self._sse_clients + 1] = c.sock
+      else
+        pcall(function() c.sock:close() end)
+      end
+      return false  -- socket moved to _sse_clients; drop from _http_clients
+
+    elseif method == "POST" and (path == "/command" or path == "/cmd") then
+      local cl = tonumber(c.req_headers["content-length"]) or 0
+      if cl > 0 then
+        c.state    = "body"
+        c.body     = ""
+        c.body_rem = cl
+        return true  -- keep in _http_clients to accumulate body
+      else
+        return self:_handle_post(c)
+      end
+
+    else
+      self:_http_response(c.sock, "404 Not Found", "text/plain", "Not Found")
+      return false
+    end
+  end
+
+  --- Handle a completed HTTP POST /command request.  Returns false (always done).
+  function srv:_handle_post(c)
+    local ok, payload = pcall(M.decode_json, c.body or "{}")
+    local resp
+    if ok and type(payload) == "table" then
+      local cmd_name = payload.cmd
+      payload.cmd = nil
+      resp = self:handle_command(tostring(cmd_name or ""), payload)
+    else
+      resp = { error = "invalid JSON body" }
+    end
+    self:_http_response(c.sock, "200 OK", "application/json", M.encode_json(resp))
+    return false
+  end
+
+  --- Non-blocking poll of the HTTP server: accept new connections and advance
+  --- the per-client state machine (headers → body → dispatch → done).
+  function srv:poll_http()
+    if not self._http_socket then return end
+
+    -- Accept new TCP connections from the HTTP listener
+    local client = self._http_socket:accept()
+    while client do
+      client:settimeout(0)
+      self._http_clients[#self._http_clients + 1] = {
+        sock      = client,
+        state     = "headers",
+        lines     = {},
+        method    = nil,
+        path      = nil,
+        req_headers = {},
+        body      = "",
+        body_rem  = 0,
+      }
+      client = self._http_socket:accept()
+    end
+
+    -- Advance each client's state machine
+    local live = {}
+    for _, c in ipairs(self._http_clients) do
+      local keep = false
+
+      if c.state == "headers" then
+        local line, err = c.sock:receive("*l")
+        if line then
+          line = line:gsub("\r$", "")  -- strip trailing CR
+          if line == "" then
+            -- Blank line signals end of HTTP headers
+            keep = self:_dispatch_http(c)
+          else
+            c.lines[#c.lines + 1] = line
+            keep = true
+          end
+        elseif err == "timeout" then
+          keep = true  -- no data yet; wait for next poll
+        end
+        -- err == "closed" or other → drop client (keep = false)
+
+      elseif c.state == "body" then
+        -- Accumulate body bytes (handles partial reads from non-blocking socket)
+        local data, err, partial = c.sock:receive(c.body_rem)
+        local chunk = data or partial or ""
+        if #chunk > 0 then
+          c.body     = c.body .. chunk
+          c.body_rem = c.body_rem - #chunk
+        end
+        if data or c.body_rem <= 0 then
+          keep = self:_handle_post(c)
+        elseif err == "timeout" then
+          keep = true  -- still waiting for rest of body
+        end
+        -- else: closed → drop
+      end
+
+      if keep then live[#live + 1] = c end
+    end
+    self._http_clients = live
   end
 
   --- Broadcast a message to all connected TCP clients.

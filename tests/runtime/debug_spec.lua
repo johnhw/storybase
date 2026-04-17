@@ -1244,3 +1244,170 @@ scene main:
     assert.equal("Low HP", fired[1].label)
   end)
 end)
+
+-- ============================================================
+-- get-schema command
+-- ============================================================
+
+local SCHEMA_SRC = [[
+module schema-test
+  version: 1.2
+engine-config:
+  entry-scene: start
+schema-version: 2
+
+"A shrine type."
+type ShrineKind = hearth | stone | lake
+
+"World state."
+state world:
+  score: Int(0, 999) = 0
+  shrine: ShrineKind = 'hearth
+
+"Shrine paths."
+relation paths: ShrineKind -> Set(ShrineKind, 2):
+  'hearth: {'stone}
+  'stone:  {'lake}
+  'lake:   {'hearth}
+
+"Advance score."
+fn advance:
+  inc! world/score 10
+
+"Add points."
+fn score-points amount:
+  inc! world/score amount
+
+"Is winning?"
+fn winning?:
+  world/score >= 500
+
+"External oracle."
+bounded oracle-score:
+  returns:      Int(0, 999)
+  lua:          "oracle.score"
+
+scene start:
+  * Go
+    -> start
+]]
+
+local function make_schema_srv()
+  local gt, errs = compile(SCHEMA_SRC)
+  assert.equal(0, #errs, errs[1] and errs[1].message)
+  local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+  eng:init()
+  local srv = debug_mod.new(eng)
+  srv:start()
+  return srv
+end
+
+describe("debug: get-schema command", function()
+  it("returns error without engine", function()
+    local srv = debug_mod.new(nil)
+    local r = srv:handle_command("get-schema")
+    assert.not_nil(r.error)
+  end)
+
+  it("returns schema_version and engine_config", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.equal(2, r.schema_version)
+    assert.not_nil(r.engine_config)
+    assert.equal("start", r.engine_config["entry-scene"])
+  end)
+
+  it("returns types with doc strings", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.not_nil(r.types)
+    local shrine_type
+    for _, t in ipairs(r.types) do
+      if t.name == "ShrineKind" then shrine_type = t end
+    end
+    assert.not_nil(shrine_type, "ShrineKind type should be present")
+    assert.equal("A shrine type.", shrine_type.doc)
+  end)
+
+  it("returns states with doc strings", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.not_nil(r.states)
+    local world_state
+    for _, s in ipairs(r.states) do
+      if s.path == "world" or (s.path and s.path:find("^world")) then
+        world_state = s; break
+      end
+    end
+    assert.not_nil(world_state, "world state entry should be present")
+  end)
+
+  it("returns relations", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.not_nil(r.relations)
+    local paths_rel
+    for _, rel in ipairs(r.relations) do
+      if rel.name == "paths" then paths_rel = rel end
+    end
+    assert.not_nil(paths_rel, "paths relation should be present")
+    assert.equal("ShrineKind", paths_rel.from_type)
+  end)
+
+  it("returns fns with doc strings and transaction flag", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.not_nil(r.fns)
+    local advance_fn, winning_fn
+    for _, f in ipairs(r.fns) do
+      if f.name == "advance"  then advance_fn  = f end
+      if f.name == "winning?" then winning_fn  = f end
+    end
+    assert.not_nil(advance_fn, "advance fn should be present")
+    assert.equal("Advance score.", advance_fn.doc)
+    assert.equal(true, advance_fn.is_transaction)
+    assert.not_nil(winning_fn, "winning? fn should be present")
+    assert.equal(false, winning_fn.is_transaction)
+  end)
+
+  it("returns scenes with doc strings", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.not_nil(r.scenes)
+    local start_scene
+    for _, sc in ipairs(r.scenes) do
+      if sc.name == "start" then start_scene = sc end
+    end
+    assert.not_nil(start_scene, "start scene should be present")
+  end)
+
+  it("returns bounded declarations with doc strings", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.not_nil(r.bounded)
+    local oracle
+    for _, b in ipairs(r.bounded) do
+      if b.name == "oracle-score" then oracle = b end
+    end
+    assert.not_nil(oracle, "oracle-score bounded should be present")
+    assert.equal("External oracle.", oracle.doc)
+    assert.equal("oracle.score", oracle.lua_name)
+  end)
+
+  it("returns empty lists for game with no actors or schedules", function()
+    local srv = make_schema_srv()
+    local r = srv:handle_command("get-schema")
+    assert.is_nil(r.error)
+    assert.not_nil(r.actors)
+    assert.not_nil(r.schedules)
+    assert.equal(0, #r.actors)
+    assert.equal(0, #r.schedules)
+  end)
+end)

@@ -73,7 +73,17 @@ function M.new(state, log)
     local eval    = require("runtime.eval")
     local current = self._state:get_time()
 
-    for name, ss in pairs(self._static) do
+    -- Collect names to avoid mutating _static during iteration
+    local names = {}
+    for name in pairs(self._static) do names[#names + 1] = name end
+
+    -- Collect names of at:-only schedules that are fully fired (to deregister)
+    local to_deregister = {}
+
+    for _, name in ipairs(names) do
+      local ss = self._static[name]
+      if not ss then goto next_sched end
+
       local should_fire = false
 
       -- ── every: trigger ──────────────────────────────────────
@@ -150,7 +160,27 @@ function M.new(state, log)
         local ctx    = eval.new_ctx(self._state, fns, "schedule:" .. name)
         local ok, _err = pcall(eval.eval_stmts, ss.body, ctx)
         local _ = ok  -- result unused; errors are silent
+
+        -- After firing an at:-only schedule (no every:), schedule for deregister.
+        -- (Check after firing so the body still runs once.)
+        if ss.trigger.at and #ss.trigger.at > 0
+           and (not ss.trigger.every or #ss.trigger.every == 0) then
+          local all_at_fired = true
+          for _, entry in ipairs(ss.trigger.at) do
+            if not ss.fired[entry.axis] then all_at_fired = false; break end
+          end
+          if all_at_fired then
+            to_deregister[#to_deregister + 1] = name
+          end
+        end
       end
+
+      ::next_sched::
+    end
+
+    -- Deregister fully-fired at:-only schedules outside the loop
+    for _, name in ipairs(to_deregister) do
+      self._static[name] = nil
     end
   end
 

@@ -374,29 +374,37 @@ log:serialise()                      → string
 
 ---
 
-### `runtime/debug.lua` (550 lines)
-Debug server: watches, NDJSON TCP transport, event emission.
+### `runtime/debug.lua` (~1390 lines)
+Debug server: watches, NDJSON TCP transport, HTTP/SSE browser UI, event emission.
 
 - `M.new(engine, opts)` → srv  (opts: `port` default 7777)
 - `M.encode_json(v)` → string
 - `M.decode_json(s)` → value
+- `M.HTML_UI` — embedded single-file HTML/JS/CSS debug UI (~10 KB)
 
 **srv methods:**
 ```
 srv:start()                          -- bind TCP socket, listen
 srv:stop()
 srv:poll()                           -- non-blocking: accept clients, read commands
+srv:start_http(port)                 -- bind HTTP listener (browser UI); default port 7374
+srv:stop_http()                      -- close HTTP listener and all client/SSE sockets
+srv:poll_http()                      -- non-blocking: accept HTTP connections, advance state machine
+srv:_http_response(sock, status, ctype, body, extra_hdrs?)  -- write HTTP/1.1 response + CORS
+srv:_sse_push(event_name, payload)   -- send data:<json>\n\n to all SSE clients; prunes dead sockets
 srv:on(event_name, fn)               -- register event handler
-srv:emit(event_name, payload)        -- fire event → broadcast to all clients
-srv:_broadcast(msg)                  -- send NDJSON line to all clients
+srv:emit(event_name, payload)        -- fire event → TCP broadcast + SSE push
+srv:_broadcast(msg)                  -- send NDJSON line to all TCP clients
 srv:register_watch(path, label)
 srv:register_watch_when(cond_expr, label)
 srv:check_watches()                  -- evaluate watch conditions, emit "watch-triggered"
-srv:handle_command(cmd, payload)     -- dispatch incoming command (e.g. "get-state", "undo")
+srv:handle_command(cmd, payload)     -- dispatch incoming command
 ```
 
+**HTTP routes:** `GET /` → HTML UI, `GET /events` → SSE stream, `POST /command` → JSON API, `OPTIONS *` → CORS preflight
 **Built-in events:** `mutation`, `scene-change`, `clamp-event`, `spawn-event`, `despawn-event`, `message-sent`, `schedule-fired`, `fn-call`, `reload`, `watch-fired`
-**Commands (from client):** `get-state`, `eval`, `get-log`, `time-travel`, `set-breakpoint`, `clear-breakpoint`, `reload`
+**Commands (TCP + HTTP):** `get-state`, `get-scene`, `do-choice`, `get-tick`, `get-mode`, `get-schema`, `eval`, `get-log`, `time-travel`, `set-breakpoint`, `clear-breakpoint`, `reload`
+**HTTP server state:** `_http_socket`, `_http_clients`, `_sse_clients`, `_serve_mode`
 **Hot reload schema migration:** `reload` command validates Int range, enum values, adds new fields, drops removed fields atomically
 
 ---
@@ -479,10 +487,11 @@ rng:weighted(weights, list) → value
 ### `cli/main.lua` (~550 lines)
 - `M.main(argv)` — top-level dispatcher
 - Subcommands: `check`, `compile`, `run`, `format`, `repl`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
-- Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` for `run`; `--production` for `compile`/`run`
+- Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` / `--serve` for `run`; `--production` for `compile`/`run`
 - `BOOL_FLAGS` set prevents boolean flags from eating the following positional arg
 - `--auto` / `--steps N`: non-interactive run mode; fake `io_in` always returns "1"; `--steps N` limits turns
-- `--debug`: starts debug TCP server before the game loop, prints `[debug] listening on :PORT`
+- `--debug`: starts debug TCP server (port 7373) + HTTP UI server (port 7374); game runs via stdin; browser panels read-only
+- `--serve`: starts HTTP UI server only (port 7374); no stdin loop; browser drives game via `do-choice`; `_serve_mode=true`
 - `print_diags(diags, source_map?)` prints errors with source-context lines + caret indicator
 - Per-subcommand help: `storybase help <subcommand>` shows detailed usage
 
@@ -587,6 +596,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/query_spec.lua` | Relation queries |
 | `tests/runtime/counterfactual_spec.lua` | Counterfactual branching |
 | `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec; hot reload schema migration; spawn/despawn events |
+| `tests/runtime/debug_http_spec.lua` | HTTP/SSE transport: lifecycle, GET /, POST /command, get-scene/do-choice, SSE events (23 tests) |
 | `tests/runtime/migrate_spec.lua` | Migration runner |
 | `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |
 | `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |

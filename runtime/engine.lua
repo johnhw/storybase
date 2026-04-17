@@ -582,7 +582,7 @@ function M.run(game_table, opts)
 
   local eng = M.new(game_table, opts)
 
-  -- Start debug server when --debug flag was given (debug_port is set)
+  -- Start debug server when --debug or --serve flag was given (debug_port is set)
   if opts.debug_port then
     local ok_d, debug_mod = pcall(require, "runtime.debug")
     if ok_d then
@@ -590,6 +590,15 @@ function M.run(game_table, opts)
       eng:set_debug_server(srv)
       srv:start()
       io.stderr:write(string.format("[debug] listening on :%d\n", opts.debug_port))
+      -- Start HTTP UI server when requested
+      if opts.http_port then
+        srv:start_http(opts.http_port)
+        io.stderr:write(string.format("[debug ui] http://localhost:%d\n", opts.http_port))
+      end
+      -- Mark serve mode so do-choice commands are accepted
+      if opts.serve then
+        srv._serve_mode = true
+      end
     else
       io.stderr:write("warning: could not load debug module: "
                       .. tostring(debug_mod) .. "\n")
@@ -629,8 +638,19 @@ function M.run(game_table, opts)
     eng:init()
   end
 
-  while eng:step() do
-    -- loop
+  if opts.serve and eng._debug then
+    -- Serve mode: game loop driven by HTTP do-choice commands (no stdin).
+    -- poll_http() + poll() are called each iteration; socket.sleep avoids busy-wait.
+    local ok_s, socket_mod = pcall(require, "socket")
+    while true do
+      pcall(function() eng._debug:poll_http() end)
+      pcall(function() eng._debug:poll() end)
+      if ok_s and socket_mod.sleep then socket_mod.sleep(0.01) end
+    end
+  else
+    while eng:step() do
+      -- standard stdin-driven game loop
+    end
   end
 
   if opts.save_path then

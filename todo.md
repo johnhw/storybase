@@ -71,11 +71,24 @@ Demo 07 (The Wanderer's Oracle) is complete: demonstrates `import`, `bounded`, a
   `game_table.watches`; `runtime/verify.lua` exports `match_path_pattern`. Tests in
   `tests/runtime/debug_spec.lua` (+14) and `tests/runtime/verify_spec.lua` (+9).
 
-- [ ] **Browser-based debug UI.** The debug server already streams structured NDJSON events
-  over TCP. A minimal single-page HTML file (state tree, mutation log, timeline scrubber, watch
-  panel) served by the debug server itself would make the debug infrastructure usable without
-  custom tooling. Add an HTTP GET handler for `/` to `runtime/debug.lua` that serves the
-  embedded HTML.
+- [x] **Browser-based debug UI + interactive play.**  All subtasks complete. 23 tests in
+  `tests/runtime/debug_http_spec.lua`. **1634 tests passing.**
+
+#### Browser UI Subtasks (all complete)
+
+- [x] **Subtask 1** — HTTP + SSE transport in `runtime/debug.lua`: `srv:start_http(port)`,
+  `srv:poll_http()`, `srv:_http_response()`, `srv:_sse_push()`, routes for GET /, GET /events,
+  POST /command, OPTIONS; `srv:emit()` broadcasts to SSE clients.
+- [x] **Subtask 2** — New game-play commands: `get-scene`, `do-choice`, `get-tick`, `get-mode`
+  in `handle_command`. `do-choice` gated by `_serve_mode`.
+- [x] **Subtask 3** — Embedded HTML/JS/CSS (`M.HTML_UI`) in `runtime/debug.lua`: two-column
+  layout (GAME left, STATE/MUTATIONS/TIMELINE/WATCHES right), SSE auto-reconnect, choice
+  buttons disabled in debug mode.
+- [x] **Subtask 4** — `--serve` flag in `cli/main.lua`: `serve` added to `BOOL_FLAGS`; HTTP
+  server started on `debug_port + 1`; polling loop replaces stdin loop in serve mode.
+- [x] **Subtask 5** — `tests/runtime/debug_http_spec.lua`: 23 tests covering lifecycle, GET /,
+  POST /command, get-scene/do-choice, SSE events.
+- [x] **Subtask 6** — `code_map.md` updated; task marked complete.
 
 - [x] **`counterfactual` as a language expression.** `idea.md §21` specifies
   `let alt = counterfactual from: world/turn - 3 do: ...` as first-class syntax.

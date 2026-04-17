@@ -714,6 +714,7 @@ local function emit_bounded(decls)
         distribution = node.distribution,
         reads        = node.reads or {},
         lua          = node.lua_name,
+        doc          = node.doc,
       }
     end
   end

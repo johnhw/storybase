@@ -58,7 +58,9 @@ Options (compile / run):
 Options (run):
   --save <path>               Save game log to <path> on exit
   --load <path>               Load game log from <path> before starting
-  --debug                     Start debug server (default port 7777)
+  --debug                     Start TCP debug server + browser UI (ports 7373/7374)
+  --serve                     Like --debug, but browser drives the game (no stdin)
+  --http-port N               Override the HTTP UI port (default: debug-port + 1)
 
 ]])
 end
@@ -126,7 +128,7 @@ local function diag_summary(diags)
 end
 
 -- Flags that are boolean (do not consume the next token as a value).
-local BOOL_FLAGS = { production = true, auto = true, debug = true }
+local BOOL_FLAGS = { production = true, auto = true, debug = true, serve = true }
 
 --- Parse a flat argument list into {flags, positional}.
 --- Flags are --name or --name value pairs; positional are the rest.
@@ -264,12 +266,20 @@ local function cmd_run(args)
     }
   end
 
-  -- --debug: start debug server before the game loop
+  -- --debug / --serve: start debug TCP server
+  -- --serve also starts HTTP UI and switches to browser-driven game loop
+  local is_serve = flags["serve"] == true
   local debug_port = nil
-  if flags["debug"] then
-    -- Prefer port from engine-config, fall back to default 7777
+  if flags["debug"] or is_serve then
+    -- Prefer port from engine-config, fall back to default 7373
     local ec = game_table and game_table.schema and game_table.schema.engine_config
-    debug_port = (ec and tonumber(ec["debug-port"])) or 7777
+    debug_port = (ec and tonumber(ec["debug-port"])) or 7373
+  end
+
+  -- HTTP UI port (debug_port + 1 by default, or explicit --http-port N)
+  local http_port = nil
+  if flags["debug"] or is_serve then
+    http_port = tonumber(flags["http-port"]) or (debug_port + 1)
   end
 
   local opts = {
@@ -279,6 +289,8 @@ local function cmd_run(args)
     load_path   = flags["load"],
     io_in       = io_in,
     debug_port  = debug_port,
+    http_port   = http_port,
+    serve       = is_serve,
   }
 
   return engine.run(game_table, opts) or 0
