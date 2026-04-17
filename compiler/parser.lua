@@ -150,6 +150,16 @@ local function parse_type_expr(p)
     local name = t.value
     p:adv()
 
+    -- Namespace-qualified type: Alias.TypeName  (e.g. E.Npc)
+    if p:at("OP", ".") then
+      local nx = p:peek()
+      if nx and nx.kind == "IDENT" then
+        p:adv()  -- consume "."
+        local member = p:adv().value  -- consume member name
+        return ast.type_named(name .. "." .. member, tpos)
+      end
+    end
+
     if name == "Bool" then
       return ast.type_bool(tpos)
 
@@ -1017,7 +1027,18 @@ local function parse_atom(p)
 
   elseif t.kind == "IDENT" then
     -- 0-arg function call (no further argument collection in atom context)
-    p:adv(); return ast.fn_call(t.value, {}, tpos)
+    local name = t.value
+    p:adv()
+    -- Namespace-qualified call: Alias.fn-name
+    if p:at("OP", ".") then
+      local nx = p:peek()
+      if nx and nx.kind == "IDENT" then
+        p:adv()  -- consume "."
+        local member = p:adv().value  -- consume member name
+        name = name .. "." .. member
+      end
+    end
+    return ast.fn_call(name, {}, tpos)
   elseif t.kind == "OP" and t.value == "(" then
     -- Check for (in-state gs) prefix before regular expr
     local nx = p:peek()
@@ -1462,6 +1483,15 @@ local function parse_primary(p)
   if t.kind == "IDENT" then
     local name = t.value
     p:adv()
+    -- Namespace-qualified call: Alias.fn-name (consume before variant/record checks)
+    if p:at("OP", ".") then
+      local nx = p:peek()
+      if nx and nx.kind == "IDENT" then
+        p:adv()  -- consume "."
+        local member = p:adv().value  -- consume member name
+        name = name .. "." .. member
+      end
+    end
     -- Check for variant constructor: TypeName/variant-name field: val, ...
     -- e.g. ActorMsg/trade-offer item: item, price: price
     if p:at("OP", "/") and p:peek() and p:peek().kind == "IDENT" then
@@ -1805,6 +1835,15 @@ local function parse_scene_goto(p)
     p:adv(); target = parse_expr(p); p:expect("OP", ")")
   elseif p:at("IDENT") or p:at("PATH") then
     target = p:adv().value
+    -- Support namespace-qualified scene: -> E.scene-name
+    if p:at("OP", ".") then
+      local nx = p:peek()
+      if nx and nx.kind == "IDENT" then
+        p:adv()  -- consume "."
+        local member = p:adv().value
+        target = target .. "." .. member
+      end
+    end
   else
     p:emit_err(ast.E.BAD_EXPRESSION, "expected scene name after '->'", p:cur().pos)
     target = "?"
@@ -1817,8 +1856,20 @@ local function parse_scene_enter(p)
   local tpos = p:cur().pos
   p:adv()  -- consume "=>"
   local target
-  if p:at("IDENT") or p:at("PATH") then target = p:adv().value
-  else p:emit_err(ast.E.BAD_EXPRESSION, "expected scene name after '=>'", p:cur().pos); target = "?"
+  if p:at("IDENT") or p:at("PATH") then
+    target = p:adv().value
+    -- Support namespace-qualified scene: => E.scene-name
+    if p:at("OP", ".") then
+      local nx = p:peek()
+      if nx and nx.kind == "IDENT" then
+        p:adv()  -- consume "."
+        local member = p:adv().value
+        target = target .. "." .. member
+      end
+    end
+  else
+    p:emit_err(ast.E.BAD_EXPRESSION, "expected scene name after '=>'", p:cur().pos)
+    target = "?"
   end
   p:skip_to_eol()
   return ast.scene_enter(target, tpos)

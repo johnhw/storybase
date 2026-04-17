@@ -46,6 +46,116 @@ local SKIP_ON_IMPORT = {
   [ast.K.ENGINE_CONFIG]  = true,
 }
 
+--- Apply namespace prefix to all non-state declarations from a namespaced import.
+--- Renames type/fn/scene/actor/schedule/bounded/macro declarations to "Alias.Name",
+--- and rewrites all internal cross-references accordingly.
+--- State and relation declarations remain global (unchanged paths).
+---@param imp_ast table  Parsed+resolved AST of the imported module (modified in-place)
+---@param alias   string  The namespace alias (e.g. "E" for `import "x" as E`)
+local function apply_import_namespace(imp_ast, alias)
+  local k = ast.K
+
+  -- Collect names to prefix (type/fn/scene/actor/schedule/bounded/macro)
+  local rename = {}
+  for _, decl in ipairs(imp_ast.decls or {}) do
+    local dk = decl.kind
+    if (dk == k.TYPE_ENUM or dk == k.TYPE_ALIAS or
+        dk == k.TYPE_RECORD or dk == k.TYPE_VARIANT or
+        dk == k.FN_DECL or dk == k.SCENE_DECL or
+        dk == k.ACTOR_DECL or dk == k.SCHEDULE_DECL or
+        dk == k.BOUNDED_DECL or dk == k.MACRO_DECL)
+       and decl.name then
+      rename[decl.name] = alias .. "." .. decl.name
+    end
+  end
+  if not next(rename) then return end
+
+  -- Recursive rename walker.
+  -- Handles AST nodes (kind present) and plain tables (pos, trigger, lists, etc.)
+  local function rn(node)
+    if type(node) ~= "table" then return node end
+
+    -- Plain table (no kind): walk all key-value pairs
+    if not node.kind then
+      local copy = {}
+      local changed = false
+      for f, v in pairs(node) do
+        local nv = rn(v)
+        copy[f] = nv
+        if nv ~= v then changed = true end
+      end
+      return changed and copy or node
+    end
+
+    -- AST node: shallow-copy, apply targeted renames, then walk all child tables
+    local copy = {}
+    for f, v in pairs(node) do copy[f] = v end
+    local nk = node.kind
+
+    -- Rename declaration names
+    if copy.name and rename[copy.name] and
+       (nk == k.TYPE_ENUM or nk == k.TYPE_ALIAS or
+        nk == k.TYPE_RECORD or nk == k.TYPE_VARIANT or
+        nk == k.FN_DECL or nk == k.SCENE_DECL or
+        nk == k.ACTOR_DECL or nk == k.SCHEDULE_DECL or
+        nk == k.BOUNDED_DECL or nk == k.MACRO_DECL) then
+      copy.name = rename[copy.name]
+    end
+
+    -- Rename TYPE_NAMED references
+    if nk == k.TYPE_NAMED and copy.name and rename[copy.name] then
+      copy.name = rename[copy.name]
+    end
+
+    -- Rename FN_CALL and MACRO_CALL_STMT names
+    if (nk == k.FN_CALL or nk == k.MACRO_CALL_STMT)
+       and copy.name and rename[copy.name] then
+      copy.name = rename[copy.name]
+    end
+
+    -- Rename scene navigation targets (string targets only; expr targets are walked below)
+    if (nk == k.GOTO_SCENE_MUT or nk == k.ENTER_SCENE_MUT or
+        nk == k.SCENE_GOTO or nk == k.SCENE_ENTER)
+       and type(copy.target) == "string" and rename[copy.target] then
+      copy.target = rename[copy.target]
+    end
+
+    -- Rename schedule mutation names
+    if (nk == k.SCHEDULE_MUT or nk == k.CANCEL_SCHEDULE_MUT)
+       and copy.name and rename[copy.name] then
+      copy.name = rename[copy.name]
+    end
+
+    -- Rename record constructor type names ("TypeName" or "TypeName/variant")
+    if nk == k.RECORD_CONSTRUCTOR and copy.type_name then
+      local slash = (copy.type_name):find("/")
+      if slash then
+        local tname = (copy.type_name):sub(1, slash - 1)
+        local rest  = (copy.type_name):sub(slash)
+        if rename[tname] then copy.type_name = rename[tname] .. rest end
+      elseif rename[copy.type_name] then
+        copy.type_name = rename[copy.type_name]
+      end
+    end
+
+    -- Recursively walk all table-valued child fields
+    for f, v in pairs(copy) do
+      if f ~= "pos" and type(v) == "table" then
+        copy[f] = rn(v)
+      end
+    end
+
+    return copy
+  end
+
+  -- Apply rename walk to all declarations
+  local new_decls = {}
+  for _, decl in ipairs(imp_ast.decls or {}) do
+    new_decls[#new_decls + 1] = rn(decl)
+  end
+  imp_ast.decls = new_decls
+end
+
 --- Recursively resolve all import declarations in an AST node, splicing
 --- imported declarations in-place before the first non-import declaration.
 ---
@@ -90,10 +200,23 @@ local function resolve_imports(ast_root, source_file, diags, in_progress)
               in_progress[imp_path] = true
               resolve_imports(imp_ast, imp_path, diags, in_progress)
               in_progress[imp_path] = nil
+              -- Apply namespace prefix if this is an aliased import
+              if decl.alias then
+                apply_import_namespace(imp_ast, decl.alias)
+              end
               -- Splice non-metadata declarations before current position
               for _, d in ipairs(imp_ast.decls or {}) do
                 if not SKIP_ON_IMPORT[d.kind] then
                   new_decls[#new_decls+1] = d
+                end
+                -- Warn if the imported module declares exports: (not yet enforced)
+                if d.kind == ast.K.MODULE_DECL and d.exports and #d.exports > 0 then
+                  diags:push_warning(ast.W.EXPORTS_NOT_ENFORCED,
+                    string.format(
+                      "module '%s' declares exports: but export enforcement is not yet "
+                      .. "implemented; all names are exported unconditionally",
+                      d.name or "?"),
+                    d.pos or ast.pos(imp_path, 0, 0))
                 end
               end
             end

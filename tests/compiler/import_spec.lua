@@ -307,6 +307,340 @@ scene s:
   end)
 end)
 
+-- ── Namespaced imports (`import "path" as Alias`) ────────────────────────────
+
+describe("import resolver: namespaced import as Alias", function()
+  it("plain import (no alias) still works", function()
+    local lib = tmpfile([[
+module plain-lib
+  version: 1.0
+state plain:
+  x: Int(0, 9) = 0
+]])
+    local main = tmpfile(string.format([[
+module plain-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt, "plain import should compile")
+    assert.is_false(diags:has_errors())
+  end)
+
+  it("type from aliased import accessible as Alias.TypeName", function()
+    local lib = tmpfile([[
+module ns-type-lib
+  version: 1.0
+type Color = red | green | blue
+]])
+    local main = tmpfile(string.format([[
+module ns-type-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as C
+
+state world:
+  color: C.Color = 'red
+
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt, "namespaced type import should compile: " ..
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- The type should be registered under C.Color
+    local found_type = false
+    for _, t in ipairs(gt.schema and gt.schema.types or {}) do
+      if t.name == "C.Color" then found_type = true end
+    end
+    assert.is_true(found_type, "expected type C.Color in schema")
+  end)
+
+  it("function from aliased import callable as Alias.fn-name", function()
+    local lib = tmpfile([[
+module ns-fn-lib
+  version: 1.0
+state counter: Int(0, 999) = 0
+fn add-ten:
+  inc! counter 10
+]])
+    local main = tmpfile(string.format([[
+module ns-fn-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as L
+
+scene s:
+  * Go
+    L.add-ten
+    -> s
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt, "namespaced fn import should compile: " ..
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- Function should be stored under qualified name
+    assert.is_not_nil(gt.fns and gt.fns["L.add-ten"],
+      "expected fn L.add-ten in game table")
+  end)
+
+  it("state paths from aliased import remain global (no prefix)", function()
+    local lib = tmpfile([[
+module ns-state-lib
+  version: 1.0
+state world:
+  hp: Int(0, 100) = 100
+]])
+    local main = tmpfile(string.format([[
+module ns-state-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as W
+
+scene s:
+  HP: {world/hp}
+  * End
+    -> s
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt, "state from aliased import should be global: " ..
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- State path must be global (no prefix)
+    local paths = {}
+    for _, s in ipairs(gt.schema and gt.schema.states or {}) do
+      paths[s.path] = true
+    end
+    assert.is_true(paths["world"], "world state should be globally accessible")
+  end)
+
+  it("internal cross-references within aliased module are rewritten", function()
+    -- helper-fn calls base-fn internally; both get prefixed when imported as N
+    local lib = tmpfile([[
+module ns-cross-lib
+  version: 1.0
+state x: Int(0, 999) = 0
+fn base-fn:
+  inc! x 5
+fn helper-fn:
+  base-fn
+  base-fn
+]])
+    local main = tmpfile(string.format([[
+module ns-cross-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as N
+
+scene s:
+  * Run
+    N.helper-fn
+    -> s
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt, "cross-reference rewrite should succeed: " ..
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    assert.is_not_nil(gt.fns and gt.fns["N.base-fn"], "expected N.base-fn")
+    assert.is_not_nil(gt.fns and gt.fns["N.helper-fn"], "expected N.helper-fn")
+  end)
+
+  it("scene from aliased import accessible as Alias.scene-name via ->", function()
+    local lib = tmpfile([[
+module ns-scene-lib
+  version: 1.0
+scene intro:
+  The beginning.
+  * Continue
+    -> intro
+]])
+    local main = tmpfile(string.format([[
+module ns-scene-main
+  version: 1.0
+engine-config:
+  entry-scene: start
+
+import %q as S
+
+scene start:
+  Go!
+  * Enter
+    -> S.intro
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt, "namespaced scene import should compile: " ..
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    assert.is_not_nil(gt.scenes and gt.scenes["S.intro"],
+      "expected S.intro in game table")
+  end)
+
+  it("two different aliased imports do not conflict", function()
+    local libA = tmpfile([[
+module a-lib
+  version: 1.0
+type Color = red | blue
+fn paint:
+  pass
+]])
+    local libB = tmpfile([[
+module b-lib
+  version: 1.0
+type Color = green | yellow
+fn paint:
+  pass
+]])
+    local main = tmpfile(string.format([[
+module dual-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as A
+import %q as B
+
+state world:
+  ca: A.Color = 'red
+  cb: B.Color = 'green
+
+scene s:
+  Done.
+]], libA, libB))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(libA); os.remove(libB); os.remove(main)
+    assert.is_not_nil(gt, "two aliased imports should not conflict: " ..
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- Both A.Color and B.Color should exist
+    local types = {}
+    for _, t in ipairs(gt.schema and gt.schema.types or {}) do
+      types[t.name] = true
+    end
+    assert.is_true(types["A.Color"], "expected A.Color")
+    assert.is_true(types["B.Color"], "expected B.Color")
+  end)
+
+  it("unqualified name from aliased import not accessible (UNDEFINED_TYPE)", function()
+    local lib = tmpfile([[
+module ns-unq-lib
+  version: 1.0
+type Widget = big | small
+]])
+    local main = tmpfile(string.format([[
+module ns-unq-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as W
+
+state world:
+  w: Widget = 'big
+
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    -- Widget is not accessible unqualified; W.Widget would work
+    assert.is_nil(gt, "unqualified name from aliased import should fail")
+    local found = false
+    for _, e in ipairs(diags.errors or {}) do
+      if e.code == "UNDEFINED_TYPE" then found = true end
+    end
+    assert.is_true(found, "expected UNDEFINED_TYPE for unqualified Widget")
+  end)
+end)
+
+-- ── module exports: (WARN_EXPORTS_NOT_ENFORCED) ───────────────────────────────
+
+describe("import resolver: module exports warning", function()
+  it("emits WARN_EXPORTS_NOT_ENFORCED when imported module has exports:", function()
+    local lib = tmpfile([[
+module exports-lib
+  version: 1.0
+  exports: [Color]
+
+type Color = red | green
+state world:
+  color: Color = 'red
+]])
+    local main = tmpfile(string.format([[
+module exports-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+state player:
+  color: Color = 'green
+
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    -- Should compile (exports: is a warning, not a hard error)
+    assert.is_not_nil(gt)
+    assert.is_false(diags:has_errors())
+    local found = false
+    for _, w in ipairs(diags.warnings or {}) do
+      if w.code == "WARN_EXPORTS_NOT_ENFORCED" then found = true end
+    end
+    assert.is_true(found, "expected WARN_EXPORTS_NOT_ENFORCED warning")
+  end)
+
+  it("module exports: is parsed and stored in AST", function()
+    local src = [[
+module parsed-exports
+  version: 1.0
+  exports: [Foo, Bar]
+engine-config:
+  entry-scene: s
+scene s:
+  Done.
+]]
+    local typed_ast, diags = compiler.parse_and_check(src, "parsed-exports.sb")
+    -- exports are not enforced so no error on the main file itself
+    -- (warning only applies when the module is imported by another file)
+    assert.is_not_nil(typed_ast or diags)
+    -- Find the module decl and verify exports were parsed
+    local typed, _ = compiler.parse_and_check(src, "x.sb")
+    if typed then
+      for _, decl in ipairs(typed.decls or {}) do
+        if decl.kind == "module_decl" then
+          assert.is_not_nil(decl.exports, "exports field should be present")
+          assert.equal(2, #decl.exports)
+          assert.equal("Foo", decl.exports[1])
+          assert.equal("Bar", decl.exports[2])
+        end
+      end
+    end
+  end)
+end)
+
 -- ── compile() with absolute import path ──────────────────────────────────────
 
 describe("import resolver: compile() with absolute import path", function()

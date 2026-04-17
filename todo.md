@@ -5,11 +5,11 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-04-16)
+## Current Status (2026-04-17)
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
-the **Standalone Bundler**, **Language Server (LSP)**, and three Medium Features below.
-**1596 tests passing.**
+the **Standalone Bundler**, **Language Server (LSP)**, and all four Medium Features below.
+**1611 tests passing.**
 
 Three low-priority deferred items completed: `engine/checkpoint!` callable, `engine/emit`
 callable, and `game:docs()` public API for doc string surfacing.
@@ -55,10 +55,13 @@ Demo 07 (The Wanderer's Oracle) is complete: demonstrates `import`, `bounded`, a
 
 ### Medium Features
 
-- [ ] **Namespaced imports (`import "path" as E`).** Once the alias is respected, names from
-  the imported file are accessible as `E.TypeName`, `E.fn-name`, etc. The main work is in
-  `compiler/checker.lua` name resolution and `compiler/compiler.lua` splice logic.
-  Prerequisite: resolve the import-alias bug above.
+- [x] **Namespaced imports (`import "path" as E`).** Names from the imported file are
+  accessible as `E.TypeName`, `E.fn-name`, `E.scene-name`, etc. State and relation
+  declarations remain global. Implementation: `apply_import_namespace` in
+  `compiler/compiler.lua` renames all non-state declarations and rewrites internal
+  cross-references; `compiler/parser.lua` extended to parse `Alias.Name` in type
+  expressions, function calls, and scene transitions. 7 new tests in
+  `tests/compiler/import_spec.lua`; CLI integration test updated. **1611 tests passing.**
 
 - [x] **Path patterns in `watch` and `verify` forms.** `idea.md §4.3` specifies `player/*`,
   `npcs/*/location`, `player/**` wildcards and `player/(health|mana)` alternations.
@@ -123,7 +126,10 @@ Items noted as low-priority during earlier phases; not yet implemented.
   collects `doc` fields from fns, scenes, actors, schedules, bounded, schema.states/types;
   returns full map or single-name lookup. Tests in `tests/lib/storybase_spec.lua`.
 
-- [ ] Doc string surfacing via debug server schema browser — `get-schema` command could
-  include doc fields alongside type information. Not yet implemented.
+- [x] Doc string surfacing via debug server schema browser — `get-schema` command added
+  to `runtime/debug.lua` `handle_command`. Returns types (with doc), states, relations,
+  fns (with is_transaction flag + doc), scenes, actors, schedules, bounded (with lua_name
+  + doc), schema_version, and engine_config. `codegen.lua` `emit_bounded` now emits `doc`.
+  9 new tests in `tests/runtime/debug_spec.lua`.
 
 - [ ] Every public function in every module has at least one passing and one failing test.

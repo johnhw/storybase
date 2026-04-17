@@ -821,13 +821,14 @@ scene main:
   end)
 end)
 
--- ── Import alias error ────────────────────────────────────────────────────────
+-- ── Namespaced import alias ───────────────────────────────────────────────────
 
-describe("CLI: import alias gives error", function()
-  it("emits UNSUPPORTED_FEATURE error for import as Alias", function()
+describe("CLI: namespaced import as Alias", function()
+  it("compiles successfully with import as Alias", function()
     local imported = tmpfile(".sb", [[
 module lib
   version: 1
+type Size = small | big
 state lib:
   val: Int(0, 100) = 0
 ]])
@@ -837,16 +838,16 @@ module main
 import "%s" as Lib
 engine-config:
   entry-scene: start
+state world:
+  sz: Lib.Size = 'small
 scene start:
   Done.
 ]], imported)
     local p = tmpfile(".sb", main_src)
-    local rc, _, err = run_cli({"compile", p})
+    local rc, out, err = run_cli({"compile", p})
     os.remove(p)
     os.remove(imported)
-    assert.equal(1, rc, "expected compile to fail for import alias")
-    assert.is_truthy(err:find("UNSUPPORTED_FEATURE") or err:find("alias"),
-      "expected alias error: " .. err)
+    assert.equal(0, rc, "expected compile to succeed for namespaced import: " .. err)
   end)
 end)
 
