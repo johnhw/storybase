@@ -58,6 +58,8 @@ header h1{font-size:13px;color:#ff7b72;letter-spacing:2px;text-transform:upperca
 .ptitle{padding:4px 12px;background:#161b22;font-size:10px;color:#8b949e;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #30363d;flex-shrink:0}
 #transcript{flex:0.6;overflow-y:auto;padding:12px 14px;line-height:1.7;white-space:pre-wrap}
 .sb{margin-bottom:8px}
+.sb.tt-here{border-left:3px solid #388bfd;padding-left:8px;background:#161b22}
+.sb.tt-past{opacity:0.4}
 .sl{color:#8b949e;font-size:10px;margin-bottom:4px}
 .sn{color:#c9d1d9}
 #choices-bar{padding:8px 10px;border-top:1px solid #30363d;display:flex;flex-direction:column;flex-wrap:wrap;align-content:stretch;max-height:280px;gap:5px}
@@ -127,10 +129,28 @@ async function api(p){
     return await r.json();
   }catch(e){return{error:String(e)};}
 }
+function markTranscript(t){
+  var blocks=document.getElementById('transcript').querySelectorAll('.sb');
+  if(live){
+    blocks.forEach(function(b){b.classList.remove('tt-here','tt-past');});
+    return;
+  }
+  var last=-1;
+  for(var i=0;i<blocks.length;i++){
+    if(parseInt(blocks[i].getAttribute('data-seq')||'0')<=t)last=i;
+  }
+  blocks.forEach(function(b,i){
+    b.classList.remove('tt-here','tt-past');
+    if(i===last)b.classList.add('tt-here');
+    else if(i>last)b.classList.add('tt-past');
+  });
+  if(last>=0)blocks[last].scrollIntoView({block:'nearest'});
+}
 function renderScene(d){
   if(!d||d.error)return;
   var tr=document.getElementById('transcript');
   var blk=document.createElement('div');blk.className='sb';
+  blk.setAttribute('data-seq',maxTick);
   var lbl=document.createElement('div');lbl.className='sl';
   lbl.textContent='['+( d.scene||'?')+']';
   var nar=document.createElement('div');nar.className='sn';
@@ -212,10 +232,12 @@ slider.oninput=async function(){
     if(r.snapshot)renderState(r.snapshot);
     if(r.entries)renderMuts(r.entries);
     if(r.watches)renderWatches(r.watches);
+    markTranscript(t);
   }else{
     await loadState();
     await loadMuts();
     await loadWatches();
+    markTranscript(t);
     document.querySelectorAll('.cb').forEach(function(b){b.disabled=(mode!=='serve');});
   }
 };
