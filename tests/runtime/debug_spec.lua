@@ -221,29 +221,48 @@ end)
 describe("debug: time-travel command", function()
   local gt, errs = compile(MINIMAL_SRC)
 
-  it("time-travel at tick 0 returns initial state", function()
+  it("time-travel at seq 0 returns initial defaults", function()
     if not gt then pending("compile failed"); return end
     local eng = engine_mod.new(gt, { io_out = { write = function() end } })
     eng:init()
 
     local eval_mod = require("runtime.eval")
     local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
-    -- Earn some gold (at tick 0)
+    -- Earn some gold (seq 1)
     eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)
-    -- Advance tick
-    eng._state:set("world/tick", 1, "test")
-    -- Earn more gold (at tick 1)
+    -- Earn more gold (seq 2)
     eval_mod.call_fn("earn", {{ kind = "int_lit", value = 20 }}, ctx)
 
     local srv = debug_mod.new(eng)
     srv:start()
 
-    -- time-travel to tick 0 → should see gold = 60 (50 + 10 earned)
-    local resp = srv:handle_command("time-travel", { tick = 0 })
+    -- time-travel to seq=0 → should see initial defaults only (gold=50)
+    local resp = srv:handle_command("time-travel", { seq = 0 })
     assert.is_nil(resp.error, resp.error)
     assert.is_table(resp.snapshot)
-    -- Snapshot at tick ≤ 0 contains initial defaults and any mutations at tick 0
-    assert.is_not_nil(resp.snapshot["player/gold"])
+    assert.equal(50, resp.snapshot["player/gold"])
+  end)
+
+  it("time-travel to seq 1 shows state after first mutation", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
+    -- Earn 10 gold (seq 1 → gold=60)
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)
+    -- Earn 20 gold (seq 2 → gold=80)
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 20 }}, ctx)
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+
+    -- time-travel to seq=1 → should see gold=60
+    local resp = srv:handle_command("time-travel", { seq = 1 })
+    assert.is_nil(resp.error, resp.error)
+    assert.is_table(resp.snapshot)
+    assert.equal(60, resp.snapshot["player/gold"])
   end)
 
   it("time-travel returns frozen snapshot (live state unchanged)", function()
@@ -255,7 +274,7 @@ describe("debug: time-travel command", function()
     srv:start()
 
     local before_gold = eng._state:get("player/gold")
-    local resp = srv:handle_command("time-travel", { tick = 0 })
+    local resp = srv:handle_command("time-travel", { seq = 0 })
 
     -- Live state must be unchanged
     assert.equal(before_gold, eng._state:get("player/gold"))

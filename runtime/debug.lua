@@ -87,7 +87,7 @@ header h1{font-size:13px;color:#ff7b72;letter-spacing:2px;text-transform:upperca
   <h1>StoryBase</h1>
   <span id="cbadge" class="badge err">disconnected</span>
   <span id="mbadge" class="badge">mode: ?</span>
-  <span id="tbadge" class="badge">tick: 0</span>
+  <span id="tbadge" class="badge">seq: 0</span>
 </header>
 <div class="main">
   <div id="game-panel">
@@ -194,15 +194,15 @@ var slider=document.getElementById('tslider');
 var tmaxlbl=document.getElementById('tmaxlbl');
 slider.oninput=async function(){
   var t=parseInt(this.value);live=(t===maxTick);
-  document.getElementById('tbadge').textContent='tick: '+t;
-  if(!live){var r=await api({cmd:'time-travel',tick:t});if(r.snapshot)renderState(r.snapshot);}
+  document.getElementById('tbadge').textContent='seq: '+t;
+  if(!live){var r=await api({cmd:'time-travel',seq:t});if(r.snapshot)renderState(r.snapshot);}
 };
 function setTick(t){
   if(t>maxTick){
     maxTick=t;slider.max=maxTick;tmaxlbl.textContent=String(maxTick);
     if(live)slider.value=maxTick;
   }
-  document.getElementById('tbadge').textContent='tick: '+(live?maxTick:parseInt(slider.value));
+  document.getElementById('tbadge').textContent='seq: '+(live?maxTick:parseInt(slider.value));
 }
 function setWatch(w){
   var p=document.getElementById('watch-panel');
@@ -235,7 +235,7 @@ function connectSSE(){
       if(ev.event==='mutation'){
         addMut(d);
         if(live&&d.path!=null)patchState(d.path,d['new']);
-        if(d.tick!=null)setTick(d.tick);
+        if(d.seq!=null)setTick(d.seq);
       }else if(ev.event==='scene-change'){
         if(_pc>0){_pc--;if(_pt){clearTimeout(_pt);_pt=null;}}else{loadScene();}
       }else if(ev.event==='watch-fired'){
@@ -255,7 +255,7 @@ async function init(){
   mode=(mr&&mr.mode)||'debug';
   document.getElementById('mbadge').textContent='mode: '+mode;
   var tr=await api({cmd:'get-tick'});
-  if(tr&&tr.tick!=null)setTick(tr.tick);
+  if(tr&&tr.seq!=null)setTick(tr.seq);
   await loadState();
   await loadWatches();
   await loadScene();
@@ -505,10 +505,10 @@ function M.new(engine, opts)
       return { entries = slice }
 
     elseif cmd == "time-travel" then
-      local tick = payload.tick
-      if not eng or not tick then return { error = "missing 'tick'" } end
+      local seq = payload.seq
+      if not eng or not seq then return { error = "missing 'seq'" } end
 
-      -- Build a replay of the log up to the requested tick
+      -- Build a replay of the log up to the requested seq number
       local state_mod = require("runtime.state")
       local log_mod   = require("runtime.log")
       local snap_log  = log_mod.new()
@@ -516,10 +516,9 @@ function M.new(engine, opts)
         eng._game and eng._game.schema or {}, snap_log)
       snap_state:init_defaults()
 
-      -- Replay all entries with time ≤ tick
+      -- Replay all entries with seq ≤ requested seq
       for _, e in ipairs(eng._log:entries()) do
-        local etime = type(e.time) == "table" and e.time.tick or 0
-        if etime <= tick then
+        if e.seq <= seq then
           snap_state._cache[e.path] = e["new"]
         else
           break
@@ -529,7 +528,7 @@ function M.new(engine, opts)
       -- Return a frozen snapshot (table of path→value)
       local frozen = {}
       for k, v in pairs(snap_state._cache) do frozen[k] = v end
-      return { snapshot = frozen, tick = tick }
+      return { snapshot = frozen, seq = seq }
 
     elseif cmd == "set-breakpoint" then
       local cond = payload.condition
@@ -874,11 +873,11 @@ function M.new(engine, opts)
       return { ok = true, scene = scene_name, narration = narration or {}, choices = choice_list }
 
     elseif cmd == "get-tick" then
-      local tick = 0
-      if eng and eng._state then
-        tick = eng._state:get("world/tick") or 0
+      local seq = 0
+      if eng and eng._log then
+        seq = eng._log:seq()
       end
-      return { tick = tick }
+      return { seq = seq }
 
     elseif cmd == "get-mode" then
       return { mode = srv._serve_mode and "serve" or "debug" }

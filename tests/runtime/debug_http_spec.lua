@@ -225,10 +225,10 @@ describe("debug HTTP server: POST /command", function()
     assert.is_table(r.state)
   end)
 
-  it("get-tick returns tick number", function()
+  it("get-tick returns seq number", function()
     local r = http_post(srv, PORT, "/command", { cmd = "get-tick" })
     assert.is_not_nil(r)
-    assert.is_number(r.tick)
+    assert.is_number(r.seq)
   end)
 
   it("get-mode returns 'debug' when not in serve mode", function()
