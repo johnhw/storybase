@@ -141,4 +141,11 @@ end)
 - Keep `reads:` accurate — only list paths the handler actually reads. Overly broad `reads:` degrades perception-snapshot filtering for actors.
 - Bounded computations that always return the same value are fine but unnecessary — just use a pure function instead.
 - The `lua:` name is matched against the name passed to `game:register_bounded`. It is not a Lua module path; it is just a string key.
-- If no handler is registered for a bounded computation at runtime, the engine raises an error.
+- If no handler is registered at runtime, the bounded call returns `nil`. Use `??` to provide a default:
+
+  ```
+  let weather = (oracle-weather ?? 'clear):
+    ...
+  ```
+
+  This makes bounded computations safe to use even when no Lua handler is wired up (e.g. in CLI / non-embedded runs).

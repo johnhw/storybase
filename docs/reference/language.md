@@ -559,13 +559,31 @@ Returns a `List(SymbolOf(npcs), 3)` of matching keys.
 ### `counterfactual` expression
 
 ```
-counterfactual:
-  from: 3 ticks ago
-  do:   heal 50
-  check player/health > 80
+let alt = counterfactual do:
+  heal 50
+  move-to 'castle
+(in-state alt) player/health
 ```
 
-Evaluates `check` in a forked copy of state after applying `do:` to a snapshot at `from:`. The live state is unchanged.
+Forks a copy of the current state, applies the `do:` block (a list of function calls), and returns a frozen snapshot. Read values from the snapshot with `(in-state <var>) <path>`. The live state is unchanged.
+
+Optional `from:` clause replays the transaction log to a past tick before applying mutations:
+
+```
+let alt = counterfactual from: (world/turn - 3) do:
+  heal 50
+(in-state alt) player/health
+```
+
+Optional `simulate: true` runs one round of actor and scheduler activity after the mutations:
+
+```
+let alt = counterfactual simulate: true do:
+  spawn-enemy
+(in-state alt) combat/active
+```
+
+`counterfactual` is pure — it may only be used in pure functions (no mutations in the outer scope).
 
 ### Lambda expressions
 
@@ -711,6 +729,24 @@ undo! steps: 3
 ```
 
 Revert state to the most recent checkpoint (or `steps:` checkpoints ago). Does not erase log entries; appends an `undo` event.
+
+### `engine/checkpoint!`
+
+```
+engine/checkpoint!
+engine/checkpoint! my-fn-name
+```
+
+Push an explicit checkpoint into the transaction log. The optional argument overrides the checkpoint label (defaults to the enclosing function name). Used together with `undo!`.
+
+### `engine/emit`
+
+```
+engine/emit event-name
+engine/emit event-name arg1 arg2
+```
+
+Fire a named event. In debug mode the event is broadcast to connected debug clients (TCP and SSE). When using the Lua embedding API, the event is delivered to any `game:on("event-name", handler)` listeners registered with `game:on()`.
 
 ### `let`
 
@@ -967,3 +1003,5 @@ Import cycles are a compile error.
 | `SUPERFICIAL_IN_COND` | error | Superficial type in a conditional expression |
 | `PERCEIVES_VIOLATION` | warning | Actor reads a path outside its `perceives:` list |
 | `UNTYPED_SYMBOL` | warning | `Symbol` used where `SymbolOf(F)` would give better bounds |
+| `UNSUPPORTED_FEATURE` | error | Feature not yet implemented (e.g., `import "f" as Alias` — use flat import) |
+| `WARN_EXPORTS_NOT_ENFORCED` | warning | Module declares `exports:` but import filtering is not yet enforced |

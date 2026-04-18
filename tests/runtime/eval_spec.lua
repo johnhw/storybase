@@ -671,15 +671,16 @@ end)
 -- ============================================================
 
 describe("eval: render_text", function()
-  it("renders plain string segments", function()
+  it("renders a single string segment", function()
     local c = ctx({})
-    local text = { "Hello", "world" }
+    local text = { "Hello world" }
     assert.equal("Hello world", eval.render_text(text, c))
   end)
 
-  it("renders inline_expr", function()
+  it("renders inline_expr with surrounding spacing from the string part", function()
     local c = ctx({ ["player/hp"] = 42 })
-    local text = { "HP:", { kind="inline_expr", expr=path("player", "hp") } }
+    -- The parser always bakes spacing into string segments; render_text joins with "".
+    local text = { "HP: ", { kind="inline_expr", expr=path("player", "hp") } }
     assert.equal("HP: 42", eval.render_text(text, c))
   end)
 end)

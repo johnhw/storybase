@@ -270,6 +270,33 @@ The handler receives the argument(s) passed to the bounded call plus a read-only
 
 ---
 
+### Documentation
+
+#### `game:docs(name?)`
+
+Return doc strings from the compiled game table.
+
+```lua
+-- All entities with doc strings
+local all_docs = game:docs()
+-- { ["heal"] = "Restore player health.", ["player"] = "Player state.", ... }
+
+-- Single entity lookup
+local doc = game:docs("heal")   -- → "Restore player health." or nil
+```
+
+Doc strings are string literals placed immediately before a declaration in the `.sb` source:
+
+```
+"Restore player health."
+fn heal amount:
+  inc! player/health amount
+```
+
+`game:docs()` collects doc strings from: `fn`, `scene`, `actor`, `schedule`, `bounded`, and `state`/`type` declarations.
+
+---
+
 ### Event Subscriptions
 
 #### `game:on(event_name, handler)`
@@ -297,6 +324,16 @@ end)
 | `"choice"` | `index`, `scene` | After each `game:choose()` call |
 | `"mutation"` | `path`, `old`, `new`, `fn` | After each state mutation |
 | `"scene-change"` | `scene`, `from` | After each scene transition |
+
+**Custom events** fired by `engine/emit` in the StoryBase source are also delivered here:
+
+```lua
+-- In mygame.sb:
+--   engine/emit "level-up" player/level
+game:on("level-up", function(payload)
+  print("Level up! Now level " .. tostring(payload))
+end)
+```
 
 ---
 

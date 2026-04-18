@@ -1976,28 +1976,70 @@ end
 
 -- ── Body items (INDENT block, scene or code mode) ────────────────────────────
 
+-- Return the display string and raw source byte-length for a token.
+-- Used by parse_narration_text to reconstruct original spacing.
+local function tok_display_and_len(tok)
+  local k, v = tok.kind, tok.value
+  if k == "SYMBOL" then
+    local s = tostring(v)
+    return "'" .. s, 1 + #s          -- ' prefix not in value
+  elseif k == "NAMED_ARG" then
+    local s = tostring(v)
+    return s .. ":", #s + 1          -- : suffix not in value
+  elseif k == "BOOL" then
+    local s = v and "true" or "false"
+    return s, #s
+  elseif k == "INT" or k == "FLOAT" then
+    local s = tostring(v)
+    return s, #s
+  else
+    local s = tostring(v)
+    return s, #s
+  end
+end
+
 -- Collect tokens as a narration text list (strings + inline_expr nodes).
+-- Spacing is reconstructed from token column positions so that punctuation
+-- adjacent to words (commas, periods, apostrophes) is not padded with spaces.
 -- Consumes up to and including the NEWLINE.
 local function parse_narration_text(p)
   local text = {}
-  local text_parts = {}
+  local buf = {}
+  local prev_end = nil  -- column just past the last character of the previous token
+
+  local function flush()
+    if #buf > 0 then
+      table.insert(text, table.concat(buf))
+      buf = {}
+    end
+  end
+
   while not p:at("NEWLINE") and not p:at("DEDENT") and not p:at("EOF") do
     if p:at("OP", "{") then
-      if #text_parts > 0 then
-        table.insert(text, table.concat(text_parts, " "))
-        text_parts = {}
+      -- Add trailing space to buf if there's a gap before {
+      local brace_col = p:cur().pos.col
+      if prev_end ~= nil and brace_col > prev_end then
+        table.insert(buf, " ")
       end
+      flush()
       local epos = p:cur().pos
       p:adv()  -- consume "{"
       local e = parse_expr(p)
-      p:expect("OP", "}", "expected '}' to close inline expression")
+      local rbrace = p:expect("OP", "}", "expected '}' to close inline expression")
+      prev_end = rbrace and (rbrace.pos.col + 1) or nil
       table.insert(text, ast.inline_expr(e, epos))
     else
       local tok = p:adv()
-      table.insert(text_parts, tostring(tok.value))
+      local display, raw_len = tok_display_and_len(tok)
+      local col = tok.pos.col
+      if prev_end ~= nil and col > prev_end then
+        table.insert(buf, " ")
+      end
+      table.insert(buf, display)
+      prev_end = col + raw_len
     end
   end
-  if #text_parts > 0 then table.insert(text, table.concat(text_parts, " ")) end
+  flush()
   p:match("NEWLINE")
   return text
 end

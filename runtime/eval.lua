@@ -1982,7 +1982,7 @@ function M.render_text(text, ctx)
       parts[#parts + 1] = tostring(val ~= nil and val or "")
     end
   end
-  return table.concat(parts, " ")
+  return table.concat(parts, "")
 end
 
 -- ============================================================

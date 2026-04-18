@@ -12,6 +12,26 @@ If StoryBase is installed on your `PATH` as `storybase`, you may use `storybase`
 
 ## Commands
 
+### `check`
+
+Run the lexer, parser, and type checker only (no code generation). Faster than `compile`; use for quick error feedback during development.
+
+```
+storybase check <file.sb>
+```
+
+Diagnostics include source-context lines with a caret pointing to the offending column:
+
+```
+path/to/file.sb:12:5: error [UNDEFINED_TYPE]: unknown type 'Weapn'
+  state player/weapon: Weapn = 'sword
+      ^
+```
+
+**Exit codes:** `0` = no errors (warnings allowed), `1` = one or more errors.
+
+---
+
 ### `compile`
 
 Compile a `.sb` file and report all errors and warnings. Does not run the game.
@@ -62,6 +82,8 @@ storybase run [options] <file.sb>
 | `--load <path>` | Load a transaction log from `<path>` before starting. Applies any outstanding schema migrations. |
 | `--auto` | Non-interactive mode: always pick choice 1. Useful for automated testing. |
 | `--steps N` | Limit to `N` turns then exit. Requires `--auto`. |
+| `--debug` | Start the TCP debug server (port 7373) and browser UI server (port 7374). Browser panels are read-only; game is driven from stdin. |
+| `--serve` | Start the browser UI server (port 7374) only. No stdin loop; the browser drives the game via `do-choice`. Implies `--debug` behaviour except no stdin interaction. |
 
 **Interaction:**
 
@@ -163,6 +185,81 @@ The original log is never modified.
 
 ---
 
+### `format`
+
+Parse a `.sb` file and write canonical formatted output.
+
+```
+storybase format [--check] [--write] <file.sb>
+```
+
+| Flag | Description |
+|------|-------------|
+| (none) | Write formatted source to stdout. |
+| `--check` | Exit 1 if the file is not already formatted; do not modify it. |
+| `--write` | Rewrite the file in-place (creates a `.bak` backup). |
+
+Canonical formatting uses 2-space indentation and consistent spacing around operators.
+
+---
+
+### `repl`
+
+Load a `.sb` file and start an interactive expression REPL for live state inspection and debugging.
+
+```
+storybase repl <file.sb>
+```
+
+Type any pure StoryBase expression to evaluate it. Meta-commands:
+
+| Command | Description |
+|---------|-------------|
+| `:state <path>` | Print the value at a state path |
+| `:scene` | Print the current scene name |
+| `:choices` | List available choices |
+| `:choose N` | Dispatch choice N |
+| `:tick` | Run one autonomous turn |
+| `:save` / `:load` | Save or load state |
+| `:help` | Show help |
+| `:quit` | Exit |
+
+---
+
+### `bundle`
+
+Compile a `.sb` file and emit a self-contained Lua file that runs with a stock `lua5.4` binary (no StoryBase installation needed).
+
+```
+storybase bundle [--output <path>] [--production] <file.sb>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--output <path>` | Output path (default: same directory as `.sb` file, with `.lua` extension). |
+| `--production` | Compile in production mode before bundling (strips verify/watch blocks). |
+
+The bundled file embeds the full runtime and the compiled game table. At runtime it accepts `--seed N`, `--save <path>`, and `--load <path>`.
+
+---
+
+### `lsp`
+
+Start the StoryBase Language Server Protocol (LSP) server. Communicates over stdio using JSON-RPC 2.0. Intended to be launched by editor integrations.
+
+```
+storybase lsp
+```
+
+Supported LSP capabilities:
+
+- **Diagnostics** — published on every `textDocument/didOpen` and `textDocument/didChange`.
+- **Hover** — doc string, kind, and parameter list for the symbol under the cursor.
+- **Go to definition** — jump to the declaration of a type, function, scene, actor, etc.
+- **Completion** — names, state paths, types, and scenes filtered by prefix; trigger characters `/` and `-`.
+
+---
+
 ### `help`
 
 Show usage information.
@@ -192,12 +289,15 @@ All diagnostics use the format:
 | Code | Meaning |
 |------|---------|
 | `UNDEFINED_TYPE` | Reference to a type name that was not declared |
+| `UNDEFINED_NAME` | Reference to an undeclared function, scene, or variable |
 | `DUPLICATE_DECL` | Two declarations with the same name |
 | `IMPORT_CYCLE` | Circular import between modules |
 | `FILE_NOT_FOUND` | `import` target file does not exist |
 | `TYPE_MISMATCH` | Value used where a different type is expected |
 | `IMPURE_IN_PURE` | Mutation primitive called from a pure context |
 | `WRITE_PATH_DYNAMIC` | Dynamic path construction in a write position |
+| `SUPERFICIAL_IN_COND` | Superficial type used in a conditional expression |
+| `UNSUPPORTED_FEATURE` | Feature not yet implemented (e.g., `import "f" as Alias` — use flat import instead) |
 
 **Common warning codes:**
 
@@ -206,3 +306,4 @@ All diagnostics use the format:
 | `PERCEIVES_VIOLATION` | Actor reads a path not listed in its `perceives:` block |
 | `IMPURE_IN_PURE` | (warning variant) Function inferred as impure but used in pure context |
 | `UNTYPED_SYMBOL` | `Symbol` used where a typed `SymbolOf(Family)` would give better bounds |
+| `WARN_EXPORTS_NOT_ENFORCED` | A module declares `exports:` but import filtering is not enforced at runtime |

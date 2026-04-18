@@ -266,7 +266,8 @@ run_game("demos/demo02_merchant.sb")
 | `game:eval(expr)` | Evaluate expression string |
 | `game:counterfactual(fn)` | Forked state branch |
 | `game:register_bounded(name, fn)` | Register bounded handler |
-| `game:on(event, handler)` | Subscribe to event |
+| `game:on(event, handler)` | Subscribe to event (built-in + custom `engine/emit` events) |
+| `game:docs(name?)` | Doc strings for all entities (or one by name) |
 | `game:tick()` | Autonomous turn |
 | `game:save(path)` | Save to file |
 | `game:load(path)` | Load from file |

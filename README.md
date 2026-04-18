@@ -6,7 +6,8 @@
 - A **transaction log** as the single source of truth — automatic save/load, full replay, time-travel debugging.
 - **Bounded future-state search** — ask "can the player die in the next ten turns?" and get an exact answer.
 - **Structured actors and messaging** — NPC behavior functions with perception filtering, typed inbox messages, and deferred-write conflict resolution.
-- **First-class debugging** — TCP JSON debug server, watch expressions, hot reload, and counterfactual traces.
+- **First-class debugging** — TCP JSON debug server, embedded browser UI, watch expressions, hot reload, and counterfactual traces.
+- **Language tooling** — LSP server (hover, go-to-definition, completion, diagnostics), formatter, REPL, and standalone bundler.
 
 ---
 
@@ -99,6 +100,8 @@ lua5.4 cli/main.lua run demos/demo02_merchant.sb   # types, guards, match
 lua5.4 cli/main.lua run demos/demo03_quest.sb      # Bool flags, fn, pre:
 lua5.4 cli/main.lua run demos/demo04_expedition.sb # entity families
 lua5.4 cli/main.lua run demos/demo05_siege.sb      # actors, schedules, verify
+lua5.4 cli/main.lua run demos/demo06_buried_keep.sb  # records, grids, migrations
+lua5.4 cli/main.lua run demos/demo07_oracle.sb     # import, bounded, counterfactual
 ```
 
 ---
@@ -123,21 +126,28 @@ lua5.4 cli/main.lua run demos/demo05_siege.sb      # actors, schedules, verify
 lua5.4 cli/main.lua <command> [options] <file>
 
 Commands:
+  check   <file>               Fast syntax + type check (no codegen)
   compile <file>               Compile; report errors and warnings
   run     <file>               Compile and run interactively
+  format  <file>               Format source (--check / --write flags)
+  repl    <file>               Interactive expression REPL
   verify  <file>               Run all verify blocks
+  bundle  <file>               Bundle into a self-contained Lua file
+  lsp                          Start LSP server (for editor integration)
   migrate <save.log>           Apply schema migrations to a save file
   extract-symbols <file>       Suggest type declarations from symbol usage
   compact <game.sb> <save.log> Compact a save log into a snapshot
   help [<command>]             Show help
 
-Options:
+Options (run):
   --production                 Strip debug-only content (verify, watch, pre:/post:)
   --seed N                     Fix random seed
-  --save <path>                Save game log on exit  (run only)
-  --load <path>                Load game log before start  (run only)
-  --auto                       Non-interactive: always pick choice 1  (run only)
-  --steps N                    Limit to N turns  (run, --auto mode)
+  --save <path>                Save game log on exit
+  --load <path>                Load game log before start
+  --auto                       Non-interactive: always pick choice 1
+  --steps N                    Limit to N turns  (requires --auto)
+  --debug                      TCP debug server (port 7373) + browser UI (port 7374)
+  --serve                      Browser-driven mode: open http://localhost:7374
 ```
 
 ---
@@ -174,7 +184,7 @@ Full documentation lives in `docs/`:
 ## Running Tests
 
 ```bash
-busted tests/                          # all unit/integration tests (~1292)
+busted tests/                          # all unit/integration tests (~1634)
 busted tests/cli/cli_integration_spec.lua   # CLI integration tests (~77)
 ```
 

@@ -1,12 +1,37 @@
 # How to Connect the Debug Server
 
-The StoryBase debug server exposes a TCP JSON (NDJSON) interface for live state inspection, time-travel, watch events, and hot reload. It is designed for tooling — editor plugins, GUI debuggers, or custom scripts.
+The StoryBase debug server provides two interfaces:
+
+- **TCP / NDJSON** — for editor plugins, custom scripts, and programmatic tooling.
+- **Browser UI** — an embedded single-page app served over HTTP/SSE at `localhost:7374`.
 
 ---
 
 ## Starting the Server
 
-The debug server starts when the engine is run in development mode (not `--production`). The default port is **7777**. Override in `engine-config`:
+### `--debug` mode (game runs in terminal; browser is read-only)
+
+```bash
+lua5.4 cli/main.lua run --debug mygame.sb
+```
+
+- TCP debug server starts on port **7373** (or `debug-port` from `engine-config`).
+- Browser UI server starts on port **7374** (`debug-port + 1`).
+- The game is driven from stdin as normal; the browser panels display state, mutations, log, and watches in real time but cannot send choices.
+
+### `--serve` mode (game driven entirely from browser)
+
+```bash
+lua5.4 cli/main.lua run --serve mygame.sb
+```
+
+- Browser UI server starts on port **7374** only (no TCP server, no stdin loop).
+- Open `http://localhost:7374` in a browser; click choice buttons to drive the game.
+- Use `--seed N` / `--save` / `--load` flags as normal.
+
+### Programmatic / custom port
+
+Override in `engine-config`:
 
 ```
 engine-config:
@@ -14,13 +39,7 @@ engine-config:
   debug-port:  7373
 ```
 
-Run the game normally:
-
-```bash
-lua5.4 cli/main.lua run mygame.sb
-```
-
-The server listens on `localhost:<port>`. Connect any TCP client to interact.
+The debug server listens on `localhost:<debug-port>`. Connect any TCP client to interact.
 
 ---
 
@@ -72,6 +91,82 @@ Response:
 ```json
 {"event": "state", "state": {"player/health": 85, "player/gold": 30, ...}}
 ```
+
+---
+
+### `get-scene`
+
+Returns the rendered current scene: narration lines and available choices.
+
+```json
+{"cmd": "get-scene"}
+```
+
+Response:
+
+```json
+{"event": "scene", "name": "village", "text": "...", "choices": [{"index": 1, "label": "Enter forest"}]}
+```
+
+---
+
+### `do-choice`
+
+Dispatch a player choice by index. Only available in `--serve` mode (returns an error otherwise).
+
+```json
+{"cmd": "do-choice", "index": 1}
+```
+
+Response:
+
+```json
+{"event": "choice-ok", "index": 1}
+```
+
+---
+
+### `get-tick`
+
+Returns the current game tick.
+
+```json
+{"cmd": "get-tick"}
+```
+
+Response:
+
+```json
+{"event": "tick", "tick": 7}
+```
+
+---
+
+### `get-mode`
+
+Returns whether the server is in interactive (`"debug"`) or browser-driven (`"serve"`) mode.
+
+```json
+{"cmd": "get-mode"}
+```
+
+Response:
+
+```json
+{"event": "mode", "mode": "serve"}
+```
+
+---
+
+### `get-schema`
+
+Returns the full compiled game schema: types, states, relations, functions, scenes, actors, schedules, bounded computations, engine config, and schema version.
+
+```json
+{"cmd": "get-schema"}
+```
+
+Response includes doc strings for all named entities.
 
 ---
 
