@@ -56,11 +56,11 @@ header h1{font-size:13px;color:#ff7b72;letter-spacing:2px;text-transform:upperca
 .main{flex:1;display:flex;overflow:hidden;min-height:0}
 #game-panel{width:42%;min-width:260px;display:flex;flex-direction:column;border-right:1px solid #30363d}
 .ptitle{padding:4px 12px;background:#161b22;font-size:10px;color:#8b949e;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #30363d;flex-shrink:0}
-#transcript{flex:1;overflow-y:auto;padding:12px 14px;line-height:1.7;white-space:pre-wrap}
+#transcript{flex:0.6;overflow-y:auto;padding:12px 14px;line-height:1.7;white-space:pre-wrap}
 .sb{margin-bottom:8px}
 .sl{color:#8b949e;font-size:10px;margin-bottom:4px}
 .sn{color:#c9d1d9}
-#choices-bar{padding:8px 10px;border-top:1px solid #30363d;display:flex;flex-wrap:wrap;gap:5px}
+#choices-bar{padding:8px 10px;border-top:1px solid #30363d;display:flex;flex-direction:column;flex-wrap:wrap;align-content:stretch;max-height:280px;gap:5px}
 .cb{padding:5px 10px;background:#21262d;border:1px solid #30363d;color:#c9d1d9;cursor:pointer;font-family:inherit;font-size:12px;border-radius:3px;text-align:left}
 .cb:hover:not(:disabled){background:#388bfd22;border-color:#388bfd;color:#79c0ff}
 .cb:disabled{opacity:0.35;cursor:not-allowed}
