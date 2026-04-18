@@ -265,6 +265,34 @@ describe("debug: time-travel command", function()
     assert.equal(60, resp.snapshot["player/gold"])
   end)
 
+  it("time-travel returns filtered entries and watches", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local eval_mod = require("runtime.eval")
+    local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)  -- seq 1
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 20 }}, ctx)  -- seq 2
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    srv:register_watch("player/gold", "Gold")
+
+    -- At seq=1 there is 1 log entry; watches reflect that snapshot
+    local resp = srv:handle_command("time-travel", { seq = 1 })
+    assert.is_table(resp.entries)
+    assert.equal(1, #resp.entries)
+    assert.equal(1, resp.entries[1].seq)
+    assert.is_table(resp.watches)
+    local gold_w
+    for _, w in ipairs(resp.watches) do
+      if w.label == "Gold" then gold_w = w end
+    end
+    assert.not_nil(gold_w, "Gold watch should be present")
+    assert.equal(60, gold_w.value)  -- snapshot at seq=1: gold=60
+  end)
+
   it("time-travel returns frozen snapshot (live state unchanged)", function()
     if not gt then pending("compile failed"); return end
     local eng = engine_mod.new(gt, { io_out = { write = function() end } })

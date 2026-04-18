@@ -181,21 +181,43 @@ async function loadState(){
   var r=await api({cmd:'get-state',pattern:'*'});
   if(r.state)renderState(r.state);
 }
-function addMut(m){
-  var p=document.getElementById('mut-panel');
+function mutRow(m){
   var row=document.createElement('div');row.className='me';
   row.innerHTML='<span class="mep">'+(m.path||'')+'</span>'
     +'<span class="mea"> '+fv(m.old)+' \u2192 '+fv(m['new'])+'</span>'
-    +'<span class="mem"> '+(m.fn||'')+' @'+(m.tick||0)+'</span>';
-  p.insertBefore(row,p.firstChild);
+    +'<span class="mem"> '+(m.fn||'')+' #'+(m.seq!=null?m.seq:(m.tick||0))+'</span>';
+  return row;
+}
+function addMut(m){
+  var p=document.getElementById('mut-panel');
+  p.insertBefore(mutRow(m),p.firstChild);
   if(p.children.length>200)p.removeChild(p.lastChild);
+}
+function renderMuts(entries){
+  var p=document.getElementById('mut-panel');p.innerHTML='';
+  for(var i=(entries.length-1);i>=0;i--)p.appendChild(mutRow(entries[i]));
+}
+async function loadMuts(){
+  var r=await api({cmd:'get-log'});
+  if(r.entries)renderMuts(r.entries);
 }
 var slider=document.getElementById('tslider');
 var tmaxlbl=document.getElementById('tmaxlbl');
 slider.oninput=async function(){
   var t=parseInt(this.value);live=(t===maxTick);
   document.getElementById('tbadge').textContent='seq: '+t;
-  if(!live){var r=await api({cmd:'time-travel',seq:t});if(r.snapshot)renderState(r.snapshot);}
+  if(!live){
+    document.querySelectorAll('.cb').forEach(function(b){b.disabled=true;});
+    var r=await api({cmd:'time-travel',seq:t});
+    if(r.snapshot)renderState(r.snapshot);
+    if(r.entries)renderMuts(r.entries);
+    if(r.watches)renderWatches(r.watches);
+  }else{
+    await loadState();
+    await loadMuts();
+    await loadWatches();
+    document.querySelectorAll('.cb').forEach(function(b){b.disabled=(mode!=='serve');});
+  }
 };
 function setTick(t){
   if(t>maxTick){
@@ -204,13 +226,17 @@ function setTick(t){
   }
   document.getElementById('tbadge').textContent='seq: '+(live?maxTick:parseInt(slider.value));
 }
+function watchHtml(w){
+  var lbl=String(w.label||'');
+  return '<span class="wel">['+lbl+']</span> '
+    +'<span class="wep">'+(w.path||'')+'</span>'
+    +' = '+fv(w.value)
+    +'<span class="wem"> #'+(w.seq!=null?w.seq:(w.tick||0))+'</span>';
+}
 function setWatch(w){
   var p=document.getElementById('watch-panel');
   var lbl=String(w.label||'');
-  var html='<span class="wel">['+lbl+']</span> '
-    +'<span class="wep">'+(w.path||'')+'</span>'
-    +' = '+fv(w.value)
-    +'<span class="wem"> @'+(w.tick||0)+'</span>';
+  var html=watchHtml(w);
   var rows=p.querySelectorAll('.we');
   for(var i=0;i<rows.length;i++){
     if(rows[i].getAttribute('data-wl')===lbl){rows[i].innerHTML=html;return;}
@@ -219,9 +245,18 @@ function setWatch(w){
   row.setAttribute('data-wl',lbl);row.innerHTML=html;
   p.appendChild(row);
 }
+function renderWatches(watches){
+  var p=document.getElementById('watch-panel');p.innerHTML='';
+  (watches||[]).forEach(function(w){
+    var row=document.createElement('div');row.className='we';
+    row.setAttribute('data-wl',String(w.label||''));
+    row.innerHTML=watchHtml(w);
+    p.appendChild(row);
+  });
+}
 async function loadWatches(){
   var r=await api({cmd:'get-watches'});
-  if(r.watches)r.watches.forEach(setWatch);
+  if(r.watches)renderWatches(r.watches);
 }
 function connectSSE(){
   var es=new EventSource('/events');
@@ -233,13 +268,13 @@ function connectSSE(){
     try{
       var ev=JSON.parse(e.data),d=ev.data||{};
       if(ev.event==='mutation'){
-        addMut(d);
+        if(live)addMut(d);
         if(live&&d.path!=null)patchState(d.path,d['new']);
         if(d.seq!=null)setTick(d.seq);
       }else if(ev.event==='scene-change'){
-        if(_pc>0){_pc--;if(_pt){clearTimeout(_pt);_pt=null;}}else{loadScene();}
+        if(_pc>0){_pc--;if(_pt){clearTimeout(_pt);_pt=null;}}else if(live){loadScene();}
       }else if(ev.event==='watch-fired'){
-        setWatch(d);
+        if(live)setWatch(d);
       }
     }catch(_){}
   };
@@ -528,7 +563,39 @@ function M.new(engine, opts)
       -- Return a frozen snapshot (table of path→value)
       local frozen = {}
       for k, v in pairs(snap_state._cache) do frozen[k] = v end
-      return { snapshot = frozen, seq = seq }
+
+      -- Log entries up to this seq (for the mutations panel)
+      local entries_snap = {}
+      for _, e in ipairs(eng._log:entries()) do
+        if e.seq <= seq then entries_snap[#entries_snap+1] = e else break end
+      end
+
+      -- Evaluate watches against the snapshot state
+      local eval_mod = require("runtime.eval")
+      local watches_snap = {}
+      for _, w in ipairs(self._watches) do
+        if w.kind == "path" then
+          if is_pattern(w.path) then
+            for cache_path, val in pairs(snap_state._cache) do
+              if val ~= nil and path_matches(w.path, cache_path) then
+                watches_snap[#watches_snap+1] = { label = w.label, kind = "path",
+                  path = cache_path, value = val }
+              end
+            end
+          else
+            watches_snap[#watches_snap+1] = { label = w.label, kind = "path",
+              path = w.path, value = snap_state._cache[w.path] }
+          end
+        elseif w.kind == "cond" then
+          local wctx = eval_mod.new_ctx(snap_state, eng._fns, "watch-when")
+          local ok, cur = pcall(eval_mod.eval_expr, w.cond_expr, wctx)
+          watches_snap[#watches_snap+1] = { label = w.label, kind = "cond",
+            value = (ok and cur or false) }
+        end
+      end
+
+      return { snapshot = frozen, seq = seq,
+               entries = entries_snap, watches = watches_snap }
 
     elseif cmd == "set-breakpoint" then
       local cond = payload.condition
