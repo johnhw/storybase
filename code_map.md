@@ -547,6 +547,13 @@ Language Server Protocol server. Communicates over stdio using JSON-RPC 2.0.
 - `M.run(args)` — replay save log into fresh state, write compact save with one entry per path
 - Usage: `storybase compact <game.sb> <save.log> [--out <out.log>]`
 
+### `cli/cli_cmd.lua` (~340 lines)
+Single-step scripting mode for `storybase run --cli save.sbd`.
+- `M.run(game_table, save_path, opts)` — main entry point; reads `opts.input` as a choice index (or `q`/`quit`/`exit`), executes one step, writes save, emits JSON to `opts.output`
+- Save format: `save.sbd` Lua chunk (scene stack, log, state snapshot, checkpoint stack) + `save.sbd.snap` for fast replay
+- JSON output: `{type, scene, narration, choices, state, done, saved}` for state; `{type="quit"}`, `{type="done"}`, `{type="error", message}`
+- `opts.reset = true` — restart from initial state; `opts.seed` — RNG seed
+
 ---
 
 ## lib/
@@ -604,6 +611,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/bundle_spec.lua` | bundle CLI command: output validity, execution, --production, save/load, error cases (20 tests) |
 | `tests/cli/cli_integration_spec.lua` | Full CLI integration tests: all subcommands (check/compile/run/format/repl/verify/migrate) against all test*.sb + demo*.sb files; also import alias, exports:, source-context error output tests |
 | `tests/cli/lsp_spec.lua` | LSP server unit tests: build_syms (types/states/fns/actors/docs), word_at (word extraction, paths, hyphens), make_lsp_diags (severity, positions), integration with real parse+check (43 tests) |
+| `tests/cli/cli_cmd_spec.lua` | `--cli` single-step mode: fresh start, state persistence, reset, quit, error handling, game completion, checkpoint+undo (demo08), state fields, subprocess integration (35 tests) |
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, end-to-end pipeline |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |

@@ -9,7 +9,7 @@ Completed work has been moved to [completed.md](completed.md).
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
 the **Standalone Bundler**, **Language Server (LSP)**, and all four Medium Features below.
-**1641 tests passing** (excluding flaky http tests; 1624 in isolation).
+**1659 tests passing** (excluding flaky http tests; 1642 in isolation).
 
 Demo 08 (The Probability Engine) is complete: demonstrates `probability`, `can-reach?`,
 `find-path`, `optimal-path`, `find-counterexample`, `engine/emit`, `engine/checkpoint!`,
@@ -29,6 +29,13 @@ Bug fixes in this session:
   `if/else` works as a value-returning construct in function bodies.
 - `parse_if_expr`: parser now handles the case where `:` after the condition was consumed
   as part of a NAMED_ARG token (same fix already present in `parse_when_stmt`).
+
+---
+
+**`--cli` single-step scripting mode** is complete: `storybase run game.sb --cli save.sbd` reads
+stdin for a choice index, advances the game by exactly one step, writes full state (including
+checkpoint stack) to the save file, and emits a single JSON object to stdout. 35 tests in
+`tests/cli/cli_cmd_spec.lua`. Supports `--reset` flag and `q`/`quit`/`exit` to quit.
 
 ---
 

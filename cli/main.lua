@@ -61,6 +61,9 @@ Options (run):
   --debug                     Start TCP debug server + browser UI (ports 7373/7374)
   --serve                     Like --debug, but browser drives the game (no stdin)
   --http-port N               Override the HTTP UI port (default: debug-port + 1)
+  --cli <save.sbd>            Single-step scripting mode: read one choice from stdin,
+                              output JSON to stdout, save full state, then exit
+  --reset                     (--cli only) Wipe save file and start fresh
 
 ]])
 end
@@ -128,7 +131,7 @@ local function diag_summary(diags)
 end
 
 -- Flags that are boolean (do not consume the next token as a value).
-local BOOL_FLAGS = { production = true, auto = true, debug = true, serve = true }
+local BOOL_FLAGS = { production = true, auto = true, debug = true, serve = true, reset = true }
 
 --- Parse a flat argument list into {flags, positional}.
 --- Flags are --name or --name value pairs; positional are the rest.
@@ -280,6 +283,21 @@ local function cmd_run(args)
   local http_port = nil
   if flags["debug"] or is_serve then
     http_port = tonumber(flags["http-port"]) or (debug_port + 1)
+  end
+
+  -- --cli <path>: single-step scripting mode (read one choice, write JSON, exit)
+  local cli_path = flags["cli"]
+  if cli_path then
+    local ok_cli, cli_cmd = pcall(require, "cli.cli_cmd")
+    if not ok_cli then
+      io.stderr:write("error: could not load cli command: " .. tostring(cli_cmd) .. "\n")
+      return 1
+    end
+    local cli_opts = {
+      seed  = flags["seed"] and tonumber(flags["seed"]),
+      reset = flags["reset"] == true,
+    }
+    return cli_cmd.run(game_table, cli_path, cli_opts) or 0
   end
 
   local opts = {
