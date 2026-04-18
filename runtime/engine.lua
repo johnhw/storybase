@@ -209,6 +209,7 @@ function M.new(game_table, opts)
     ctx.debug       = self._debug   -- may be nil (no debug server attached)
     ctx.grids       = self._grids   -- tile grid data (may be empty table)
     ctx.engine_ref  = self          -- for engine/ pseudo-path reads
+    ctx._in_bfs     = self._in_bfs  -- propagate BFS-mode guard (prevents recursive BFS)
     return ctx
   end
 
@@ -408,26 +409,30 @@ function M.new(game_table, opts)
     self._debug = srv
     -- Wire mutation events through state store
     self._state._mutation_hook = function(path, old, new_val, fn_name)
-      local tick = self._state and self._state._time and self._state._time.tick or 0
+      local seq  = self._log:seq()
+      local tick = self._state._time and self._state._time.tick or 0
       srv:emit("mutation", { path = path, old = old, new = new_val,
-                              fn = fn_name, tick = tick })
+                              fn = fn_name, tick = tick, seq = seq })
     end
     -- Wire clamp events through state store
     self._state._clamp_hook = function(path, attempted, clamped, fn_name)
-      local tick = self._state and self._state._time and self._state._time.tick or 0
+      local seq  = self._log:seq()
+      local tick = self._state._time and self._state._time.tick or 0
       srv:emit("clamp-event", { path = path, attempted = attempted,
-                                 clamped = clamped, fn = fn_name, tick = tick })
+                                 clamped = clamped, fn = fn_name, tick = tick, seq = seq })
     end
     -- Wire spawn/despawn events through state store
     self._state._spawn_hook = function(family, key, init, fn_name)
-      local tick = self._state and self._state._time and self._state._time.tick or 0
+      local seq  = self._log:seq()
+      local tick = self._state._time and self._state._time.tick or 0
       srv:emit("spawn-event", { family = family, key = key, init = init,
-                                 fn = fn_name, tick = tick })
+                                 fn = fn_name, tick = tick, seq = seq })
     end
     self._state._despawn_hook = function(family, key, fn_name)
-      local tick = self._state and self._state._time and self._state._time.tick or 0
+      local seq  = self._log:seq()
+      local tick = self._state._time and self._state._time.tick or 0
       srv:emit("despawn-event", { family = family, key = key,
-                                   fn = fn_name, tick = tick })
+                                   fn = fn_name, tick = tick, seq = seq })
     end
     -- Wire schedule-fired events through the scheduler
     self._scheduler._debug_server = srv

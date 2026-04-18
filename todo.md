@@ -5,17 +5,30 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-04-17)
+## Current Status (2026-04-18)
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
 the **Standalone Bundler**, **Language Server (LSP)**, and all four Medium Features below.
-**1611 tests passing.**
+**1641 tests passing** (excluding flaky http tests; 1624 in isolation).
 
-Three low-priority deferred items completed: `engine/checkpoint!` callable, `engine/emit`
-callable, and `game:docs()` public API for doc string surfacing.
+Demo 08 (The Probability Engine) is complete: demonstrates `probability`, `can-reach?`,
+`find-path`, `optimal-path`, `find-counterexample`, `engine/emit`, `engine/checkpoint!`,
+`undo!`, explicit lambda `fn(x): ...`, and `verify after requires`. Run:
+  `lua5.4 cli/main.lua run --auto --steps 15 demos/demo08_probability_engine.sb`
 
-Demo 07 (The Wanderer's Oracle) is complete: demonstrates `import`, `bounded`, and
-`counterfactual` in a two-file game (`demos/oracle_lib.sb` + `demos/demo07_oracle.sb`).
+Bug fixes in this session:
+- `_in_bfs` guard: BFS engines in `search.lua` and `verify.lua` now set `eng._in_bfs = true`.
+  `make_ctx` in `engine.lua` propagates it; `child_ctx` in `eval.lua` propagates it. All five
+  BFS builtins (`can-reach?`, `find-path`, `probability`, `optimal-path`, `find-counterexample`)
+  have guards returning safe defaults when called from narration during outer BFS.
+- `nil` as language literal: `call_fn` now treats the name "nil" as the nil literal,
+  allowing `if doom = nil:` comparisons.
+- Nil variable tracking: `nil_vars` set added to contexts; LET_STMT and param binding
+  track nil-valued variables so they can be distinguished from undefined names.
+- `if/else` retval propagation: `IF_EXPR` as a statement now propagates `sub.retval` so
+  `if/else` works as a value-returning construct in function bodies.
+- `parse_if_expr`: parser now handles the case where `:` after the condition was consumed
+  as part of a NAMED_ARG token (same fix already present in `parse_when_stmt`).
 
 ---
 
@@ -146,3 +159,487 @@ Items noted as low-priority during earlier phases; not yet implemented.
   9 new tests in `tests/runtime/debug_spec.lua`.
 
 - [ ] Every public function in every module has at least one passing and one failing test.
+
+---
+
+## New Demos
+
+### Feature gap analysis
+
+The existing seven demos leave several implemented features undemonstrated:
+
+| Feature | Status |
+|---------|--------|
+| Search builtins in gameplay (`can-reach?`, `find-path`, `probability`, `optimal-path`, `find-counterexample`) | **Not demoed** — only used in offline `verify` blocks |
+| Advanced tile grid (`visible-from?`, `path-to`, `grid-get/set!`, `occupied-by`) | **Not demoed** — demo06 only shows `within-range?` |
+| `engine/checkpoint!` + undo | **Not demoed** |
+| `engine/emit` custom events | **Not demoed** |
+| `while` loop | **Not demoed** |
+| `cond` expression | **Not demoed** |
+| Lambda expressions explicitly | Implicit in `count-where` but never written as `fn(x): ...` |
+| `verify` clauses beyond `verify-always` (`after`, `requires`, `from_any_state`) | **Not demoed** |
+| `Option(T)` type | **Not demoed** |
+| Inline `Enum(a, b)` type | **Not demoed** |
+| Type aliases (`type Alias = OtherType`) | **Not demoed** |
+| Multi-axis time model (more than one axis) | Demo05 uses time-model but single axis |
+
+The two biggest gaps are (1) search builtins as interactive gameplay mechanics—StoryBase's flagship feature—and (2) the advanced tile grid algorithms.
+
+---
+
+### Demo 08 — "The Probability Engine" (search builtins as gameplay) ✓ COMPLETE
+
+**Concept.** A gambling den / strategic betting game in which the player is an odds-maker
+advising desperate clients. The engine's BFS search builtins become the in-game "calculation
+machine" that lets the player quote probabilities, find winning paths, and expose impossible
+dreams before taking someone's last coin.
+
+**Narrative premise.** You run a back-alley probability shop in a city under siege. Clients
+arrive with schemes and wagers; you use your mechanical oracle to assess their odds. A city
+governor wants to know if relief supplies *can* reach the city before the walls fall; a
+gambler wants the *optimal* sequence of bets to clear his debt; a spy wants to know if she
+*can possibly* escape without being caught.
+
+**Features to demonstrate:**
+
+- `probability` — quoted as an in-game percentage ("Your plan succeeds 34% of the time")
+- `can-reach?` — gating a "take the contract" choice ("The task is impossible — I cannot in
+  good conscience take your coin")
+- `find-path` / `optimal-path` — displayed as a printed route or bet sequence to the client
+- `find-counterexample` — "I have found the one sequence of events that destroys your plan"
+- `engine/emit 'contract-accepted {...}` — emit a custom event each time a contract is signed
+- `engine/checkpoint!` — mark the state before each consultation so the player can undo a
+  bad contract with a `<- undo` choice
+- `undo` mechanic via scene that calls `engine/checkpoint!` before each session and lets the
+  player back out
+- `verify after requires` — post-game invariant: "after any contract is accepted, the client's
+  gold is reduced"; `requires` used as a precondition guard
+- Lambda expressions explicitly: `fn(path): probability ... > 0.5`
+
+**Sketch of state:**
+
+```
+type ContractKind = 'supply-run | 'escape | 'bet-sequence | 'assassination
+state world/day          : Int(1, 30)
+state world/reputation   : Int(0, 100)
+state world/gold         : Int(0, 500)
+state world/contract     : Option(ContractKind)
+state clients/supply/gold : Int(0, 200)
+state clients/gambler/gold: Int(0, 200)
+state clients/spy/gold    : Int(0, 200)
+```
+
+**Scene structure:**
+- `intro` → `shop` (main hub)
+- `shop`: list active clients + current reputation; `engine/checkpoint!` here each turn
+- `=> consult-supply`, `=> consult-gambler`, `=> consult-spy` (enter/exit sub-scenes)
+- Each consult scene uses a search builtin to compute the answer, shows the result in
+  narration (`{probability ...}`, `{can-reach? ...}`), then offers "Accept / Decline"
+- `=> undo-last` scene that calls a pure fn to describe what will be rolled back, then
+  player confirms — demonstrates checkpoint + undo
+- `finale` when `world/day >= 20` or `world/reputation` reaches ceiling/floor
+
+**Implementation notes:**
+- The BFS search targets will be small sub-games embedded in the `.sb` file (separate
+  scenes that model each client's situation); `can-reach?` / `probability` evaluate
+  reachability over those scenes
+- This keeps the state space small enough for fast BFS (< 1 second)
+- `find-counterexample` returns a snapshot; narrate it as "The oracle has found your doom:
+  {counterexample/...}"
+
+---
+
+### Demo 09 — "The Warden's Map" (advanced tile grid)
+
+**Concept.** A dungeon-warden puzzle game. The player manages a small dungeon grid: placing
+guards, toggling torches (opaque cells), and watching intruders try to reach the vault.
+The game uses every advanced tile grid builtin not shown in demo06.
+
+**Features to demonstrate:**
+
+- `grid-get` / `grid-set!` — toggling torch cells (lit/dark) and trap cells
+- `visible-from?` — guard sight-lines: a guard can only act on an intruder they can see
+- `path-to` — display the shortest intruder route to the vault each turn
+- `occupied-by` — check which guard (if any) occupies a cell before placing
+- `while` loop — simulation of intruder advance each round until stopped or vault reached
+- `cond` expression — multi-branch status message based on vault danger level
+- Inline `Enum(lit, dark, trapped)` type for cell state
+- Lambda in `count-where`: count visible intruders with explicit `fn(k): visible-from? ...`
+- `engine/emit 'intruder-spotted {...}` on each sight-line trigger
+- `verify from_any_state when ... : assert ...` — model-check that the vault is never
+  reachable when all entry corridors are guarded
+
+**Sketch of grid:**
+
+```
+defgrid dungeon 10 8:
+  ##########
+  #...V....#    V = vault, . = floor, # = wall
+  #.######.#
+  #......>.#    > = east entry, v = south entry
+  #.######.#
+  #........#
+  #v.......#
+  ##########
+```
+
+**State:**
+```
+type CellKind = Enum(floor, wall, torch, trap)
+state guards/{g}/x    : Int(0, 9)
+state guards/{g}/y    : Int(0, 7)
+state world/round     : Int(1, 20)
+state world/alert     : Int(0, 5)
+state vault/breached  : Bool
+```
+
+**Scene structure:**
+- `intro` → `warden-view` (main hub each round)
+- `warden-view`: narrate current grid state, intruder path (`{path-to dungeon ...}`),
+  visible intruder count, alert level
+- Choices: place/move a guard, toggle a torch, set a trap, advance the round
+- Advancing the round runs the `while` simulation (intruder movement loop)
+- `engine/emit 'round-complete {round: world/round}` each round
+- `=> place-guard`, `=> toggle-torch`, `=> set-trap` sub-scenes
+- `finale` when vault is breached or all intruders are caught
+
+---
+
+---
+
+### Demo 10 — "The Market Bell" (multi-axis time model)
+
+**Concept.** A small trading-post game set over five days. The player buys and sells goods
+at a village market that opens and closes on a real hour/day cycle. Schedules fire at
+meaningful times of day, hours wrap cyclically, and a one-shot festival closes the market
+permanently on day 5. This is the only demo to use more than one time axis.
+
+**Time-model features to demonstrate:**
+
+- **Multi-axis model** — `axes: [day, hour]` (two axes)
+- **Cyclic wrap** — `wrap: [none, 24]` (hours wrap at 24; days do not)
+- **Multi-axis `time-inc!`** — advancing both axes in one call: `time-inc! hour: 4`; a
+  rest action advances `hour: 8`; waking at midnight wraps cleanly into the next day
+- **`every:` with non-trivial `offset:`** — morning bell fires `every: [day: +1]` with
+  `offset: [hour: 6]` (6am each day); evening close fires at `offset: [hour: 18]`
+- **`at:` one-shot schedule** — `at: [day: +5]` triggers the grand festival, cancels the
+  market permanently, fires `engine/emit 'festival-begins`
+- **`time-inc!` producing a wrap event** — when hour exceeds 24 and wraps, a schedule
+  fires `every: [day: +1]` automatically; narrate this as "A new day dawns."
+
+**State:**
+
+```
+time-model:
+  axes: [day, hour]
+  wrap: [none, 24]
+
+engine-config:
+  entry-scene: market-town
+
+state world/day         : Int(1, 6)    = 1
+state world/hour        : Int(0, 23)   = 8
+state market/open       : Bool         = true
+state market/festival   : Bool         = false
+state player/gold       : Int(0, 500)  = 100
+state player/goods      : Int(0, 20)   = 5
+state prices/grain      : Int(1, 20)   = 8
+state prices/cloth      : Int(1, 30)   = 15
+```
+
+**Schedules:**
+
+```
+schedule morning-bell:
+  every:  [day: +1]
+  offset: [hour: 6]
+  fn:
+    set!  market/open true
+    set!  prices/grain  (random-int 5 12)
+    set!  prices/cloth  (random-int 10 25)
+    engine/emit 'market-opened {day: world/day, hour: world/hour}
+
+schedule evening-close:
+  every:  [day: +1]
+  offset: [hour: 18]
+  fn:
+    set!  market/open false
+    engine/emit 'market-closed {day: world/day}
+
+schedule grand-festival:
+  at: [day: +5]
+  fn:
+    set!  market/festival true
+    set!  market/open     false
+    cancel-schedule! morning-bell
+    cancel-schedule! evening-close
+    engine/emit 'festival-begins {day: world/day}
+```
+
+**Transaction functions:**
+
+```
+fn buy-grain:
+  pre:  market/open
+  pre:  player/gold >= prices/grain
+  dec!  player/gold  prices/grain
+  inc!  player/goods 1
+
+fn sell-grain:
+  pre:  market/open
+  pre:  player/goods > 0
+  inc!  player/gold  prices/grain
+  dec!  player/goods 1
+
+fn rest:               # sleep until morning; advances 8 hours (may wrap day)
+  pre:  not market/open
+  time-inc! hour: 8
+
+fn browse-stalls:      # pass 2 hours at the market
+  pre:  market/open
+  time-inc! hour: 2
+```
+
+**Scene structure:**
+
+- `market-town` (main hub): narrate day, hour, market status, prices, gold, goods;
+  conditional lines for "Market is open / closed", "Festival has begun"; choices gate on
+  `market/open`
+- Choices: buy grain, sell grain, browse stalls (+2 hr), rest until morning (+8 hr)
+- `when market/festival`: `-> festival-end`
+- `festival-end`: finale scene summarising gold earned over the five days
+
+**Verify blocks (demonstrating `after` and `requires`):**
+
+```
+verify "gold never goes negative":
+  verify-always player/gold >= 0
+
+verify "selling requires goods":
+  after (sell-grain):
+    player/goods >= 0
+
+verify "market closed at night":
+  from_any_state
+  when world/hour >= 18 or world/hour < 6:
+    assert not market/open or market/festival
+```
+
+**Watch declarations:**
+
+```
+watch world/day          "Day"
+watch world/hour         "Hour"
+watch market/open        "Market open"
+watch player/gold        "Gold"
+watch prices/grain       "Grain price"
+watch-when market/festival  "The Grand Festival has begun!"
+```
+
+---
+
+---
+
+### Demo 11 — "The Expedition Guild" (`find`, `Option(T)`, type aliases, computed goto, multiline strings, `@before`)
+
+**Concept.** A guild management game. The player hires adventurers from a roster, assigns a
+companion, equips a weapon, and dispatches expeditions over thirty days. The `find`
+expression drives every roster query; `Option(T)` models nullable companion and weapon
+slots; type aliases keep state declarations readable; a computed goto routes to each
+companion's unique scene.
+
+**Features to demonstrate:**
+
+- **Type aliases** — `type Gold = Int(0, 500)` / `type Prestige = Int(0, 100)` — named
+  abbreviations for bounded types; used throughout state declarations
+- **`Option(T)`** — `state player/companion : Option(SymbolOf(members))` (nil = solo) and
+  `state player/weapon : Option(WeaponKind)` (nil = unarmed); nil-coalescing `??` used in
+  narration: `player/weapon ?? 'none`
+- **`find` expression** — full `where`/`order-by`/`limit` form:
+  - `find member where members/{member}/status = 'available order-by members/{member}/skill desc limit 4` — show best recruits
+  - `find member where members/{member}/location = guild/location` — who is present today
+  - `count-where` with explicit `fn(m): members/{m}/status = 'injured` lambda alongside `find` to contrast the two forms
+- **Computed goto** — `-> (companion-scene player/companion)` routes to the scene named
+  after the active companion; a pure fn `companion-scene key` returns the scene id as a
+  symbol; also `-> (next-chapter world/chapter)` for chapter progression
+- **Multiline strings** — quest briefings and expedition reports rendered as `"""..."""`
+  blocks in narration and choice text
+- **`@before` in verify** — `verify "hiring spends gold": after (hire-member m): player/gold < @before player/gold`; `requires guild/gold > 0`
+
+**State:**
+
+```
+type Gold     = Int(0, 500)
+type Prestige = Int(0, 100)
+type MemberStatus = available | on-mission | injured | retired
+type WeaponKind   = sword | bow | staff
+type Chapter      = Enum(prologue, rising, climax, epilogue)
+
+state guild/gold     : Gold      = 200
+state guild/prestige : Prestige  = 10
+state guild/day      : Int(1,30) = 1
+state guild/chapter  : Chapter   = 'prologue
+
+state members/{m}:
+  status   : MemberStatus = 'available
+  skill    : Int(1, 10)
+  hire-cost: Int(5, 50)
+
+state player/companion : Option(SymbolOf(members))
+state player/weapon    : Option(WeaponKind)
+```
+
+**Key functions:**
+
+```
+fn companion-scene key:          # returns scene name for computed goto
+  match key:
+    'aldric: 'talk-aldric
+    'mira:   'talk-mira
+    'zhen:   'talk-zhen
+    _:       'no-companion
+
+fn hire-member m:
+  pre:  members/{m}/status = 'available
+  pre:  guild/gold >= members/{m}/hire-cost
+  dec!  guild/gold members/{m}/hire-cost
+  set!  members/{m}/status 'on-mission
+
+fn equip-weapon w:
+  set! player/weapon w
+
+fn unequip:
+  set! player/weapon nil
+
+fn dismiss-companion:
+  set! player/companion nil
+```
+
+**Scene structure:**
+
+- `guild-hall` (hub): shows roster summary (`find` for available members), day, gold,
+  prestige; `-> (companion-scene player/companion)` as a choice when companion is set
+- `=> hire-roster`: full `find` query drives the list; hire action sets companion
+- `=> armory`: `Option(WeaponKind)` equip/unequip; shows `player/weapon ?? 'unarmed`
+- `talk-aldric`, `talk-mira`, `talk-zhen` (computed-goto targets): companion-specific scenes
+- `no-companion`: reached when companion is nil
+- `=> mission-briefing`: multiline string quest text, dispatches expedition
+- `-> (next-chapter guild/chapter)` advances chapter on milestone
+- `guild-epilogue`: finale when `guild/day >= 30`
+
+---
+
+### Demo 12 — "The Herbalist's Codex" (namespaced import + lib file)
+
+**Concept.** A two-file herbalism game. A library file defines all shared types, state, and
+pure helpers; the main file imports it with an alias and uses every name through the
+namespace prefix. This mirrors real multi-module game authoring and demonstrates that
+scene navigation, type references, and function calls all work across a namespaced import.
+
+**Features to demonstrate:**
+
+- **`import "codex_lib.sb" as Herb`** — namespaced import; all non-state names from the
+  lib become `Herb.TypeName`, `Herb.fn-name`, `Herb.scene-name`
+- Show that **state and relation declarations remain global** (no prefix needed to read
+  `garden/moisture` even though it is declared in the lib)
+- Cross-file **scene navigation**: `=> Herb.scene-harvest` enters a scene defined in the lib
+- Cross-file **type references**: `type Remedy = Herb.PlantKind | 'none` in the main file
+- Cross-file **function calls**: `Herb.assess-stock`, `Herb.brew-remedy remedy-kind`
+- Reinforce **multiline strings** for lore entries in the lib file
+- Reinforce **`Option(T)`**: `state workbench/remedy : Option(Herb.RemedyKind)` — what is
+  currently being brewed (nil = empty bench)
+- **`verify after`** across files: `after (Herb.brew-remedy r): workbench/remedy != nil`
+
+**File layout:**
+
+`demos/codex_lib.sb`:
+```
+module codex-lib
+  version: 1.0
+
+type PlantKind  = feverwort | silkmoss | ironroot | moonpetal
+type RemedyKind = tonic | salve | elixir | poultice
+
+state garden/{p}:
+  quantity : Int(0, 20) = 0
+  moisture : Int(0, 5)  = 3
+
+"Assess whether the garden has enough of a plant to brew."
+fn assess-stock plant min-qty:
+  garden/{plant}/quantity >= min-qty
+
+"Reduce moisture on all garden beds (called each day)."
+fn dry-garden:
+  for p in (path-list garden):
+    when garden/{p}/moisture > 0:
+      dec! garden/{p}/moisture 1
+
+scene harvest:
+  The garden beds stretch before you.
+  ...
+```
+
+`demos/demo12_codex.sb`:
+```
+module codex-main
+  version: 1.0
+
+import "codex_lib.sb" as Herb
+
+schema-version: 1
+
+engine-config:
+  entry-scene: workshop
+
+type RemedyKind = Herb.RemedyKind      # re-export alias
+
+state workbench/remedy  : Option(Herb.RemedyKind)
+state workbench/day     : Int(1, 20)   = 1
+state player/gold       : Int(0, 200)  = 50
+
+fn brew-remedy r:
+  pre:  Herb.assess-stock 'feverwort 3
+  dec!  garden/feverwort/quantity 3
+  set!  workbench/remedy r
+
+fn sell-remedy:
+  pre:  workbench/remedy != nil
+  inc!  player/gold 15
+  set!  workbench/remedy nil
+
+scene workshop:
+  The workshop. Day {workbench/day}. Gold: {player/gold}.
+  Bench: {workbench/remedy ?? 'empty}.
+
+  * Tend the garden
+    => Herb.harvest
+  * [Herb.assess-stock 'feverwort 3] Brew a tonic
+    brew-remedy 'tonic
+    -> workshop
+  * [workbench/remedy != nil] Sell the remedy (+15 gold)
+    sell-remedy
+    -> workshop
+  * Rest (advance day)
+    Herb.dry-garden
+    inc! workbench/day 1
+    -> workshop
+```
+
+**Verify:**
+```
+verify "remedy requires ingredients":
+  after (brew-remedy r):
+    workbench/remedy != nil
+
+verify "gold never negative":
+  verify-always player/gold >= 0
+```
+
+---
+
+### Prioritisation
+
+Implement Demo 08 first — it demonstrates the most distinctive StoryBase capability (BFS
+search as gameplay) and requires no new language features. Demo 09 (advanced tile grid),
+Demo 10 (multi-axis time), Demo 11 (find/Option/computed goto), and Demo 12 (namespaced
+import) can follow in any order; each is self-contained.

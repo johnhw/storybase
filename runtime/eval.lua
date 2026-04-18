@@ -99,6 +99,7 @@ function M.new_ctx(state, fns, fn_name, game)
     state      = state,
     fns        = fns or {},
     vars       = {},
+    nil_vars   = {},   -- tracks variable names explicitly bound to nil
     fn_name    = fn_name or "?",
     signal     = nil,
     retval     = nil,
@@ -126,10 +127,15 @@ local function child_ctx(parent, fn_name)
     engine_ref = parent.engine_ref, -- propagate engine reference for engine/ paths
     scene_stack = parent.scene_stack,
     counterfactual_depth = parent.counterfactual_depth,  -- propagate nesting depth
+    _in_bfs  = parent._in_bfs,   -- propagate BFS-mode guard (prevents recursive BFS)
+    nil_vars = {},   -- tracks variable names explicitly bound to nil
   }
-  -- Copy parent vars into child (shadowing allowed)
+  -- Copy parent vars and nil_vars into child (shadowing allowed)
   for k, v in pairs(parent.vars) do
     child.vars[k] = v
+  end
+  for k in pairs(parent.nil_vars or {}) do
+    child.nil_vars[k] = true
   end
   return child
 end
@@ -995,6 +1001,7 @@ local BUILTINS = {
   end,
   ["can-reach?"] = function(args, ctx)
     if not ctx.game then return false end
+    if ctx._in_bfs then return true end   -- optimistic during outer BFS: allow exploration
 
     local search_mod = require("runtime.search")
     local log_mod    = require("runtime.log")
@@ -1071,6 +1078,7 @@ local BUILTINS = {
 
   ["find-path"] = function(args, ctx)
     if not ctx.game then return nil end
+    if ctx._in_bfs then return nil end    -- guard: no nested BFS during outer BFS
 
     local search_mod = require("runtime.search")
     local log_mod    = require("runtime.log")
@@ -1150,6 +1158,7 @@ local BUILTINS = {
   -- verify-always expr [depth: N] → Bool (true if expr holds in ALL reachable states)
   ["verify-always"] = function(args, ctx)
     if not ctx.game then return true end
+    if ctx._in_bfs then return true end   -- guard: skip nested BFS during outer BFS
     local search_mod = require("runtime.search")
     local log_mod    = require("runtime.log")
     local state_mod  = require("runtime.state")
@@ -1186,6 +1195,7 @@ local BUILTINS = {
   -- probability expr [depth: N] → Float (probability that expr holds at depth N)
   ["probability"] = function(args, ctx)
     if not ctx.game then return 0.0 end
+    if ctx._in_bfs then return 0.0 end    -- guard: no nested BFS during outer BFS
     local search_mod = require("runtime.search")
     local log_mod    = require("runtime.log")
     local state_mod  = require("runtime.state")
@@ -1223,6 +1233,7 @@ local BUILTINS = {
   -- optimal-path expr [by: cost-expr] [depth: N] → list of choice labels or nil
   ["optimal-path"] = function(args, ctx)
     if not ctx.game then return nil end
+    if ctx._in_bfs then return nil end    -- guard: no nested BFS during outer BFS
     local search_mod = require("runtime.search")
     local log_mod    = require("runtime.log")
     local state_mod  = require("runtime.state")
@@ -1278,6 +1289,7 @@ local BUILTINS = {
   -- find-counterexample expr [depth: N] → frozen GameState or nil
   ["find-counterexample"] = function(args, ctx)
     if not ctx.game then return nil end
+    if ctx._in_bfs then return nil end    -- guard: no nested BFS during outer BFS
     local search_mod = require("runtime.search")
     local log_mod    = require("runtime.log")
     local state_mod  = require("runtime.state")
@@ -1461,8 +1473,14 @@ local BUILTINS = {
 ---@return any
 call_fn = function(name, args, ctx)
   -- 0-arg fn_call nodes may actually be variable references (params, let bindings, for vars)
-  if #(args or {}) == 0 and ctx.vars[name] ~= nil then
-    return ctx.vars[name]
+  if #(args or {}) == 0 then
+    if name == "nil" then return nil end  -- nil is a language literal
+    if ctx.vars[name] ~= nil then
+      return ctx.vars[name]
+    end
+    if ctx.nil_vars and ctx.nil_vars[name] then
+      return nil  -- variable explicitly bound to nil
+    end
   end
 
   -- Built-ins
@@ -1521,7 +1539,12 @@ call_fn = function(name, args, ctx)
   for i, param in ipairs(fn.params or {}) do
     -- params may be plain strings (from parser) or {name=...} tables
     local pname = type(param) == "table" and param.name or tostring(param)
-    sub.vars[pname] = arg_vals[i]
+    if arg_vals[i] == nil then
+      sub.nil_vars = sub.nil_vars or {}
+      sub.nil_vars[pname] = true
+    else
+      sub.vars[pname] = arg_vals[i]
+    end
   end
   -- Propagate before_snapshot for path@before in post: conditions
   if ctx.before_snapshot then
@@ -1737,16 +1760,18 @@ eval_stmt = function(node, ctx)
     end
 
   elseif k == K.IF_EXPR then
-    -- if_expr used as a statement
+    -- if_expr used as a statement; propagate retval so if/else works in fn bodies
     local cond = eval_expr(node.condition, ctx)
     if cond then
       local sub = child_ctx(ctx)
       eval_stmts(node.then_body, sub)
       if sub.signal then ctx.signal = sub.signal end
+      if sub.retval ~= nil then ctx.retval = sub.retval end
     elseif node.else_body then
       local sub = child_ctx(ctx)
       eval_stmts(node.else_body, sub)
       if sub.signal then ctx.signal = sub.signal end
+      if sub.retval ~= nil then ctx.retval = sub.retval end
     end
 
   elseif k == K.MATCH_EXPR then
@@ -1792,7 +1817,13 @@ eval_stmt = function(node, ctx)
       -- Plain form: `let x = expr` — bind into current context for rest of fn
       for _, binding in ipairs(node.bindings or {}) do
         if binding.kind == K.LET_BINDING then
-          ctx.vars[binding.name] = eval_expr(binding.expr, ctx)
+          local val = eval_expr(binding.expr, ctx)
+          if val == nil then
+            ctx.nil_vars = ctx.nil_vars or {}
+            ctx.nil_vars[binding.name] = true
+          else
+            ctx.vars[binding.name] = val
+          end
         end
       end
     end

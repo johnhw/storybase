@@ -527,6 +527,66 @@ describe("CLI demo07_oracle: import / bounded / counterfactual", function()
   end)
 end)
 
+-- ── demo08: probability engine ───────────────────────────────────────────────
+
+describe("CLI demo08_probability_engine: BFS builtins + oracle + verify", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo08_probability_engine.sb"})
+    assert.equal(0, rc, "demo08 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded") or out:find("check passed"), out)
+  end)
+
+  it("verify blocks all pass (gold >= 0, supply/spy preconditions)", function()
+    local rc, out, err = run_cli({"verify", "demos/demo08_probability_engine.sb"})
+    assert.equal(0, rc, "demo08 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto run 15 steps completes without timeout", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "15",
+                                   "demos/demo08_probability_engine.sb"})
+    assert.equal(0, rc, "demo08 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PROBABILITY"), out)
+  end)
+
+  it("consult-supply shows oracle analysis with probability and path steps", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo08_probability_engine.sb")
+    game:init()
+    game:choose(1)  -- Open the shop
+    game:choose(1)  -- Consult the supply captain (engine/checkpoint! then => consult-supply)
+    local narr = game:render()
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("Delivery possible"), text)
+    assert.is_truthy(text:find("Odds"), text)
+    assert.is_truthy(text:find("Shortest route"), text)
+  end)
+
+  it("premium-contract-count returns 2 (fees 25 and 35 qualify, 10 does not)", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo08_probability_engine.sb")
+    game:init()
+    game:choose(1)  -- Open the shop (shop narration shows premium count)
+    local narr = game:render()
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("2"), text)
+  end)
+
+  it("accept-supply increments gold by 25 and reputation by 10", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo08_probability_engine.sb")
+    game:init()
+    local gold_before = game:get("world/gold")
+    local rep_before  = game:get("world/reputation")
+    game:choose(1)  -- Open shop
+    game:choose(1)  -- Consult supply captain
+    game:choose(1)  -- Accept contract
+    assert.equal(gold_before + 25, game:get("world/gold"))
+    assert.equal(rep_before + 10,  game:get("world/reputation"))
+  end)
+end)
+
 -- ── extract-symbols ───────────────────────────────────────────────────────────
 
 describe("CLI extract-symbols", function()

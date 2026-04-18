@@ -1,0 +1,423 @@
+# demo08_probability_engine.sb — The Probability Engine
+#
+# Features demonstrated:
+#   probability         — oracle quotes exact odds for each client's scheme
+#   can-reach?          — gates the "Accept contract" choice (impossible = unethical)
+#   find-path           — step count for shortest delivery route
+#   optimal-path        — step count for cheapest-cost route
+#   find-counterexample — reveals the specific doom scenario where things go wrong
+#   engine/emit         — fires 'contract-accepted event when a deal is signed
+#   engine/checkpoint!  — saves state before each consultation for undo
+#   undo!               — rolls back to the pre-consultation checkpoint
+#   lambda fn(x):       — used in count-where to tally favorable-odds clients
+#   verify after requires — post-call invariant with precondition guard
+#
+# Note on BFS depths: each oracle fn is called from its consultation scene
+# (scene stack depth ~2), giving a low branching factor (~3 choices/step).
+# Depths of 4–6 keep path counts at 3^6 = 729 — fast enough for interactive play.
+#
+# Run:  storybase run demos/demo08_probability_engine.sb
+# Auto: storybase run --auto --steps 15 demos/demo08_probability_engine.sb
+
+module probability-engine
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: intro
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+type ContractKind = supply | gamble | escape
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state world/day        : Int(1, 10)  = 1
+state world/gold       : Int(0, 500) = 80
+state world/reputation : Int(0, 100) = 25
+state world/contracts  : Int(0, 10)  = 0
+
+# Supply-run simulation (two routes, success flag)
+state supply/route   : Int(0, 2) = 0    # 0=undecided, 1=north, 2=east
+state supply/arrived : Bool      = false
+
+# Gambler simulation (3 tokens, target purse >= 60, starting at 20)
+state gambler/tokens : Int(0, 3)   = 3
+state gambler/purse  : Int(0, 100) = 20
+
+# Spy escape simulation (4 positions: 0=inside compound, 3=outside walls)
+state spy/position : Int(0, 3) = 0
+state spy/caught   : Bool      = false
+
+# ─────────────────────────────────────────────────────────
+# Pure oracle functions
+#
+# All BFS calls use depth ≤ 6. These functions are designed to be called
+# from their corresponding consultation scenes (stack depth ~2), where the
+# branching factor is ~3. 3^6 = 729 paths — well within interactive budget.
+# ─────────────────────────────────────────────────────────
+
+"Can the supply run succeed at all from the current state?"
+fn supply-can-deliver?:
+  can-reach? (supply/arrived = true) depth: 5
+
+"Probability the supply run succeeds (0.0–1.0)."
+fn supply-probability:
+  probability (supply/arrived = true) depth: 5
+
+"Number of steps in the shortest path to supply delivery."
+fn supply-path-steps:
+  let path = find-path (supply/arrived = true) depth: 5
+  when path = nil:
+    0
+  count-where path fn(step): true
+
+"Number of steps in the optimal supply route."
+fn supply-optimal-steps:
+  let path = optimal-path (supply/arrived = true) depth: 5
+  when path = nil:
+    0
+  count-where path fn(step): true
+
+"Probability the gambler clears his debt (0.0–1.0)."
+fn gambler-odds:
+  probability (gambler/purse >= 60) depth: 6
+
+"Can the gambler clear the debt at all?"
+fn gambler-can-win?:
+  can-reach? (gambler/purse >= 60) depth: 6
+
+"Can the spy escape without being caught?"
+fn spy-can-escape?:
+  can-reach? (spy/position = 3) depth: 5
+
+"Spy's position in the doom scenario (the state where she gets caught)."
+fn spy-doom-position:
+  let doom = find-counterexample (spy/caught = false) depth: 5
+  if doom = nil:
+    3
+  else:
+    (in-state doom) spy/position
+
+"Count of premium contracts available today (uses explicit lambda to filter fees)."
+fn premium-contract-count:
+  let fees = [25, 10, 35]
+  count-where fees fn(fee): fee >= 20
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+"Accept the supply contract."
+fn accept-supply:
+  pre: supply-can-deliver?
+  inc! world/gold 25
+  inc! world/reputation 10
+  inc! world/contracts 1
+  set! supply/route 0
+  set! supply/arrived false
+  engine/emit 'contract-accepted {kind: 'supply, gold: world/gold}
+
+"Accept the gambler's consultation fee."
+fn accept-gambler:
+  inc! world/gold 10
+  inc! world/reputation 5
+  inc! world/contracts 1
+  engine/emit 'contract-accepted {kind: 'gamble, gold: world/gold}
+
+"Accept the spy's escape-route contract."
+fn accept-spy:
+  pre: spy-can-escape?
+  inc! world/gold 35
+  inc! world/reputation 15
+  inc! world/contracts 1
+  set! spy/position 0
+  set! spy/caught false
+  engine/emit 'contract-accepted {kind: 'escape, gold: world/gold}
+
+"Advance to the next day."
+fn next-day:
+  pre: world/day < 10
+  inc! world/day 1
+
+# ─────────────────────────────────────────────────────────
+# Watches
+# ─────────────────────────────────────────────────────────
+
+watch world/day           "Day"
+watch world/gold          "Gold"
+watch world/reputation    "Reputation"
+watch world/contracts     "Contracts"
+watch-when world/reputation >= 70  "Your oracle's name spreads across the city!"
+watch-when world/contracts >= 5    "Five contracts — a busy oracle!"
+
+# ─────────────────────────────────────────────────────────
+# Verify blocks
+# ─────────────────────────────────────────────────────────
+
+verify "gold never goes negative":
+  verify-always world/gold >= 0
+
+verify "accepting supply contract requires a deliverable route":
+  requires supply-can-deliver?
+  after (accept-supply):
+    world/contracts > 0
+
+verify "accepting spy contract requires an escape route":
+  requires spy-can-escape?
+  after (accept-spy):
+    world/contracts > 0
+
+# ─────────────────────────────────────────────────────────
+# Simulation scenes (sub-graphs the BFS explores)
+# ─────────────────────────────────────────────────────────
+
+scene sim-supply:
+  SUPPLY ROUTE SIMULATION
+
+  * [supply/route = 0] Northern road (safer, slower)
+    set! supply/route 1
+    => sim-supply-north
+
+  * [supply/route = 0] Eastern passage (riskier, faster)
+    set! supply/route 2
+    => sim-supply-east
+
+  * Exit simulation
+    set! supply/route 0
+    set! supply/arrived false
+    <-
+
+scene sim-supply-north:
+  Northern road — two outcomes:
+
+  * Good weather — supplies arrive safely
+    set! supply/arrived true
+    <-
+
+  * Ambush at the ridge — cargo lost
+    set! supply/arrived false
+    <-
+
+scene sim-supply-east:
+  Eastern passage — two outcomes:
+
+  * Clear roads — supplies arrive before dawn
+    set! supply/arrived true
+    <-
+
+  * Bandits control the pass — cargo seized
+    set! supply/arrived false
+    <-
+
+scene sim-gambler:
+  GAMBLER SIMULATION — Tokens: {gambler/tokens}. Purse: {gambler/purse}. Target: 60.
+
+  * [gambler/tokens > 0] High-stakes wager (+30 win / -20 lose)
+    => sim-bet-high
+
+  * [gambler/tokens > 0] Safe wager (+10 win / -5 lose)
+    => sim-bet-low
+
+  * [gambler/tokens = 0] No tokens remain
+    <-
+
+scene sim-bet-high:
+  * Win! +30 coins.
+    inc! gambler/purse 30
+    dec! gambler/tokens 1
+    <-
+
+  * Lose. -20 coins.
+    dec! gambler/purse 20
+    dec! gambler/tokens 1
+    <-
+
+scene sim-bet-low:
+  * Win! +10 coins.
+    inc! gambler/purse 10
+    dec! gambler/tokens 1
+    <-
+
+  * Lose. -5 coins.
+    dec! gambler/purse 5
+    dec! gambler/tokens 1
+    <-
+
+scene sim-spy:
+  SPY ESCAPE SIMULATION — Position {spy/position} (0=inside, 3=outside).
+  [spy/caught] Caught!
+
+  * [spy/position = 0 and not spy/caught] Sneak to the courtyard
+    set! spy/position 1
+    => sim-spy-check
+
+  * [spy/position = 1 and not spy/caught] Rush to the gate
+    set! spy/position 2
+    => sim-spy-check
+
+  * [spy/position = 2 and not spy/caught] Slip through the gate
+    set! spy/position 3
+    <-
+
+  * Reset and exit
+    set! spy/position 0
+    set! spy/caught false
+    <-
+
+scene sim-spy-check:
+  Guard checkpoint:
+
+  * Pass unseen
+    <-
+
+  * Guard spots the spy!
+    set! spy/caught true
+    <-
+
+# ─────────────────────────────────────────────────────────
+# Consultation scenes
+#
+# BFS functions are called here, not from shop, to keep the
+# branching factor small (~3 choices/step from consult scenes).
+# ─────────────────────────────────────────────────────────
+
+scene consult-supply:
+  CAPTAIN ALDARA'S SUPPLY CONTRACT
+  The northern garrison needs relief supplies.
+  Two routes: northern road (safer) or eastern passage (faster).
+
+  Oracle analysis:
+  Delivery possible?  {supply-can-deliver?}
+  Odds of success:    {supply-probability}
+  Shortest route:     {supply-path-steps} steps
+  Optimal route:      {supply-optimal-steps} steps
+
+  when not supply-can-deliver?:
+    The oracle finds no path to delivery. Taking this coin would be theft.
+
+  * [supply-can-deliver?] Accept contract (+25 gold, +10 reputation)
+    accept-supply
+    -> shop
+
+  * Decline the contract
+    <-
+
+  * Study the routes in detail
+    => sim-supply
+
+scene consult-gambler:
+  CORVUS THE GAMBLER'S DEBT SCHEME
+  Corvus needs 60 coins to clear his debt.
+  He has {gambler/tokens} tokens and {gambler/purse} coins now.
+
+  Oracle analysis:
+  Can he clear the debt?  {gambler-can-win?}
+  Odds of success:        {gambler-odds}
+
+  when not gambler-can-win?:
+    Impossible. No sequence of wagers can clear this debt.
+
+  * Accept consultation fee (+10 gold, +5 reputation)
+    accept-gambler
+    -> shop
+
+  * Decline
+    <-
+
+  * Run the wager simulation
+    => sim-gambler
+
+scene consult-spy:
+  VELENA THE SPY'S ESCAPE PLAN
+  Position {spy/position} (0=inside compound, 3=outside walls).
+
+  Oracle analysis:
+  Escape possible?           {spy-can-escape?}
+  Doom scenario — caught at: {spy-doom-position}
+
+  Premium contracts available today (fees ≥ 20): {premium-contract-count}
+
+  when not spy-can-escape?:
+    The oracle finds no escape path. Taking this coin would condemn her.
+
+  * [spy-can-escape?] Accept contract (+35 gold, +15 reputation)
+    accept-spy
+    -> shop
+
+  * Decline
+    <-
+
+  * Walk through the escape simulation
+    => sim-spy
+
+# ─────────────────────────────────────────────────────────
+# Main scenes
+# ─────────────────────────────────────────────────────────
+
+scene intro:
+  THE PROBABILITY ENGINE
+  A mechanical oracle sits on your workbench, gears clicking softly.
+  Three desperate clients wait outside: a supply captain, a gambler, and a spy.
+  You take no coin for impossible schemes.
+
+  Day {world/day}. Gold: {world/gold}. Reputation: {world/reputation}.
+
+  * Open the shop for business
+    -> shop
+
+scene shop:
+  THE PROBABILITY SHOP — Day {world/day}
+  Gold: {world/gold}. Reputation: {world/reputation}. Contracts: {world/contracts}.
+  Premium contracts today: {premium-contract-count}.
+
+  * Consult the supply captain
+    engine/checkpoint!
+    => consult-supply
+
+  * Consult the gambler
+    engine/checkpoint!
+    => consult-gambler
+
+  * Consult the spy
+    engine/checkpoint!
+    => consult-spy
+
+  * Undo last consultation
+    undo! 1
+    -> shop
+
+  * [world/day < 10] End the day
+    next-day
+    -> shop
+
+  * [world/day >= 10] Close the shop for good
+    -> finale
+
+scene finale:
+  TEN DAYS IN THE ORACLE TRADE.
+
+  Day {world/day}. Gold: {world/gold}. Reputation: {world/reputation}.
+  Contracts completed: {world/contracts}.
+
+  if world/reputation >= 70:
+    Your name is legend in the besieged city.
+    The mechanical oracle proved its worth beyond all doubt.
+  else:
+    if world/reputation >= 40:
+      A respectable trade. The city's desperate paid well for certainty.
+    else:
+      Few trusted the machine. The gears spin on, unappreciated.
+
+  if world/gold >= 200:
+    You leave with a heavy purse.
+  else:
+    The consultation fees barely covered oil and ink.
+
+  * Reflect further
+    -> finale

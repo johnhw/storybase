@@ -1239,7 +1239,13 @@ local function parse_if_expr(p, is_scene)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD "if"
   local cond = parse_expr(p)
-  p:expect("OP", ":", "expected ':' after if condition")
+  -- ':' may have been consumed by the lexer as part of a NAMED_ARG token
+  -- (e.g. 'nil:' → NAMED_ARG "nil"). If so, the current token is NEWLINE/DEDENT.
+  if p:at("OP", ":") then
+    p:adv()
+  elseif not (p:at("NEWLINE") or p:at("DEDENT") or p:at("EOF")) then
+    p:expect("OP", ":", "expected ':' after if condition")
+  end
   p:match("NEWLINE")
   local then_body = parse_body_items(p, is_scene or false)
   local else_body = nil

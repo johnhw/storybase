@@ -199,6 +199,7 @@ local function trace_random_calls(game_table, engine_mod, io_sink, cache, stack,
   end
   local eng = engine_mod.new(game_table, { io_out = io_sink })
   eng:register_actors_schedules()
+  eng._in_bfs = true
   restore_engine(eng, cache, stack)
   pcall(function() eng:do_choice(scene_name, choice_index) end)
   game_table._random_inject = saved
@@ -296,6 +297,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
+  eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices_or_err = pcall(function()
@@ -342,6 +344,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
 
           local eng2 = engine_mod.new(game_table, { io_out = io_sink })
           eng2:register_actors_schedules()
+  eng2._in_bfs = true
           restore_engine(eng2, item.cache, item.stack)
 
           local ok2, sig = pcall(function()
@@ -394,6 +397,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
     do
       local eng_t = engine_mod.new(game_table, { io_out = io_sink })
       eng_t:register_actors_schedules()
+  eng_t._in_bfs = true
       restore_engine(eng_t, item.cache, item.stack)
       local ok_t = pcall(function() eng_t:autonomous_turn() end)
       if ok_t then
@@ -479,6 +483,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
+  eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices_or_err = pcall(function()
@@ -521,6 +526,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
 
           local eng2 = engine_mod.new(game_table, { io_out = io_sink })
           eng2:register_actors_schedules()
+  eng2._in_bfs = true
           restore_engine(eng2, item.cache, item.stack)
 
           local ok2, sig = pcall(function()
@@ -578,6 +584,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
     do
       local eng_t = engine_mod.new(game_table, { io_out = io_sink })
       eng_t:register_actors_schedules()
+  eng_t._in_bfs = true
       restore_engine(eng_t, item.cache, item.stack)
       local ok_t = pcall(function() eng_t:autonomous_turn() end)
       if ok_t then
@@ -663,6 +670,7 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
+  eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices = pcall(function()
@@ -679,6 +687,7 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn,
       if branch_prob >= threshold then
         local eng2 = engine_mod.new(game_table, { io_out = io_sink })
         eng2:register_actors_schedules()
+  eng2._in_bfs = true
         restore_engine(eng2, item.cache, item.stack)
 
         local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
@@ -765,6 +774,7 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
+  eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices = pcall(function()
@@ -776,6 +786,7 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
     for _, ch in ipairs(choices) do
       local eng2 = engine_mod.new(game_table, { io_out = io_sink })
       eng2:register_actors_schedules()
+  eng2._in_bfs = true
       restore_engine(eng2, item.cache, item.stack)
 
       local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
@@ -879,6 +890,7 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
 
       local eng = engine_mod.new(game_table, { io_out = io_sink })
       eng:register_actors_schedules()
+  eng._in_bfs = true
       restore_engine(eng, item.cache, item.stack)
 
       local ok, choices_or_err = pcall(function()
@@ -891,6 +903,7 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
       for _, ch in ipairs(choices) do
         local eng2 = engine_mod.new(game_table, { io_out = io_sink })
         eng2:register_actors_schedules()
+  eng2._in_bfs = true
         restore_engine(eng2, item.cache, item.stack)
 
         local ok2, sig = pcall(function()
