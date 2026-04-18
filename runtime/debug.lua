@@ -118,7 +118,7 @@ header h1{font-size:13px;color:#ff7b72;letter-spacing:2px;text-transform:upperca
   </div>
 </div>
 <script>
-var mode='debug',maxTick=0,live=true;
+var mode='debug',maxTick=0,live=true,_pc=0,_pt=null;
 function fv(v){if(v===null||v===undefined)return'null';return JSON.stringify(v);}
 function vc(v){var t=typeof v;if(t==='number')return'n';if(t==='boolean')return'b';if(t==='string')return's';return'o';}
 async function api(p){
@@ -150,6 +150,8 @@ function renderScene(d){
 async function loadScene(){renderScene(await api({cmd:'get-scene'}));}
 async function doChoice(n){
   document.querySelectorAll('.cb').forEach(function(b){b.disabled=true;});
+  _pc++;if(_pt)clearTimeout(_pt);
+  _pt=setTimeout(function(){_pc=0;_pt=null;},2000);
   renderScene(await api({cmd:'do-choice',n:n}));
 }
 function renderState(m){
@@ -226,7 +228,7 @@ function connectSSE(){
         if(live&&d.path!=null)patchState(d.path,d['new']);
         if(d.tick!=null)setTick(d.tick);
       }else if(ev.event==='scene-change'){
-        loadScene();
+        if(_pc>0){_pc--;if(_pt){clearTimeout(_pt);_pt=null;}}else{loadScene();}
       }else if(ev.event==='watch-fired'){
         addWatch(d);
       }
