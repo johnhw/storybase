@@ -1411,3 +1411,97 @@ describe("debug: get-schema command", function()
     assert.equal(0, #r.schedules)
   end)
 end)
+
+-- ============================================================
+-- get-watches command
+-- ============================================================
+
+local WATCH_SRC = [[
+module watch-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state player:
+  gold:   Int(0, 999) = 50
+  health: Int(0, 100) = 100
+
+state world:
+  tick: Int(0, 9999) = 0
+
+watch player/gold "Gold"
+watch player/health "HP"
+watch-when player/health <= 0 "Player dead"
+
+scene main:
+  * Go -> main
+]]
+
+describe("debug: get-watches command", function()
+  local gt = compiler_mod.compile(WATCH_SRC, "test.sb")
+
+  local function make_srv()
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+    return srv, eng
+  end
+
+  it("returns current values of all path watches", function()
+    if not gt then pending("compile failed"); return end
+    local srv = make_srv()
+    local r = srv:handle_command("get-watches")
+    assert.is_nil(r.error)
+    assert.not_nil(r.watches)
+    local by_label = {}
+    for _, w in ipairs(r.watches) do by_label[w.label] = w end
+    assert.not_nil(by_label["Gold"])
+    assert.equal(50, by_label["Gold"].value)
+    assert.equal("player/gold", by_label["Gold"].path)
+    assert.not_nil(by_label["HP"])
+    assert.equal(100, by_label["HP"].value)
+  end)
+
+  it("returns false for watch-when condition that is not met", function()
+    if not gt then pending("compile failed"); return end
+    local srv = make_srv()
+    local r = srv:handle_command("get-watches")
+    local by_label = {}
+    for _, w in ipairs(r.watches) do by_label[w.label] = w end
+    assert.not_nil(by_label["Player dead"])
+    assert.equal(false, by_label["Player dead"].value)
+  end)
+
+  it("reflects updated state after mutation", function()
+    if not gt then pending("compile failed"); return end
+    local srv, eng = make_srv()
+    eng._state:set("player/gold", 123, "test")
+    local r = srv:handle_command("get-watches")
+    local by_label = {}
+    for _, w in ipairs(r.watches) do by_label[w.label] = w end
+    assert.equal(123, by_label["Gold"].value)
+  end)
+
+  it("returns watch-when as true when condition is met", function()
+    if not gt then pending("compile failed"); return end
+    local srv, eng = make_srv()
+    eng._state:set("player/health", 0, "test")
+    local r = srv:handle_command("get-watches")
+    local by_label = {}
+    for _, w in ipairs(r.watches) do by_label[w.label] = w end
+    assert.equal(true, by_label["Player dead"].value)
+  end)
+
+  it("returns empty watches list when no watches registered", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    local r = srv:handle_command("get-watches")
+    assert.not_nil(r.watches)
+    assert.equal(0, #r.watches)
+  end)
+end)

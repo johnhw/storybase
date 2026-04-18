@@ -204,15 +204,24 @@ function setTick(t){
   }
   document.getElementById('tbadge').textContent='tick: '+(live?maxTick:parseInt(slider.value));
 }
-function addWatch(w){
+function setWatch(w){
   var p=document.getElementById('watch-panel');
-  var row=document.createElement('div');row.className='we';
-  row.innerHTML='<span class="wel">['+(w.label||'')+']</span> '
+  var lbl=String(w.label||'');
+  var html='<span class="wel">['+lbl+']</span> '
     +'<span class="wep">'+(w.path||'')+'</span>'
     +' = '+fv(w.value)
     +'<span class="wem"> @'+(w.tick||0)+'</span>';
-  p.insertBefore(row,p.firstChild);
-  if(p.children.length>100)p.removeChild(p.lastChild);
+  var rows=p.querySelectorAll('.we');
+  for(var i=0;i<rows.length;i++){
+    if(rows[i].getAttribute('data-wl')===lbl){rows[i].innerHTML=html;return;}
+  }
+  var row=document.createElement('div');row.className='we';
+  row.setAttribute('data-wl',lbl);row.innerHTML=html;
+  p.appendChild(row);
+}
+async function loadWatches(){
+  var r=await api({cmd:'get-watches'});
+  if(r.watches)r.watches.forEach(setWatch);
 }
 function connectSSE(){
   var es=new EventSource('/events');
@@ -230,7 +239,7 @@ function connectSSE(){
       }else if(ev.event==='scene-change'){
         if(_pc>0){_pc--;if(_pt){clearTimeout(_pt);_pt=null;}}else{loadScene();}
       }else if(ev.event==='watch-fired'){
-        addWatch(d);
+        setWatch(d);
       }
     }catch(_){}
   };
@@ -248,6 +257,7 @@ async function init(){
   var tr=await api({cmd:'get-tick'});
   if(tr&&tr.tick!=null)setTick(tr.tick);
   await loadState();
+  await loadWatches();
   await loadScene();
 }
 init();
@@ -872,6 +882,37 @@ function M.new(engine, opts)
 
     elseif cmd == "get-mode" then
       return { mode = srv._serve_mode and "serve" or "debug" }
+
+    elseif cmd == "get-watches" then
+      local eval_mod = require("runtime.eval")
+      local tick_val = eng and eng._state and eng._state:get("world/tick") or 0
+      local result = {}
+      for _, w in ipairs(self._watches) do
+        if w.kind == "path" then
+          if is_pattern(w.path) then
+            if eng and eng._state then
+              for cache_path, val in pairs(eng._state._cache) do
+                if val ~= nil and path_matches(w.path, cache_path) then
+                  result[#result+1] = { label = w.label, kind = "path",
+                    path = cache_path, value = val, tick = tick_val }
+                end
+              end
+            end
+          else
+            local val = eng and eng._state and eng._state:get(w.path)
+            result[#result+1] = { label = w.label, kind = "path",
+              path = w.path, value = val, tick = tick_val }
+          end
+        elseif w.kind == "cond" then
+          if eng and eng._state then
+            local ctx = eval_mod.new_ctx(eng._state, eng._fns, "watch-when")
+            local ok, cur = pcall(eval_mod.eval_expr, w.cond_expr, ctx)
+            result[#result+1] = { label = w.label, kind = "cond",
+              value = (ok and cur or false), tick = tick_val }
+          end
+        end
+      end
+      return { watches = result }
 
     else
       return { error = "unknown command: " .. tostring(cmd) }
