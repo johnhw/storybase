@@ -637,6 +637,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo07_oracle.sb` | two-file split via `import` (oracle_lib.sb), `bounded` computation (oracle-weather with `?? 'clear` fallback), `counterfactual` for pure preview functions called from scene narration |
 | `oracle_lib.sb` | shared types (`Shrine`, `WeatherKind`), state, relation (`paths`), pure helpers — imported by demo07_oracle.sb |
 | `demo08_probability_engine.sb` | `probability`, `can-reach?`, `find-path`, `optimal-path`, `find-counterexample` as in-game mechanics; `engine/emit`, `engine/checkpoint!`, `undo!`; explicit lambda `fn(x): ...`; `verify after requires`; `if/else` in fn bodies; `nil` literal |
+| `demo09_wardens_map.sb` | `grid-get`/`grid-set!` (tile cell read/write), `visible-from?` (guard LOS), `path-to` (shortest route with blocked-set), `occupied-by` (cell collision check); `while` loop, `cond` expression, inline `Enum(a,b,c)` type, lambda in `count-where`, `engine/emit`, `verify from-any-state:` |
 
 ---
 

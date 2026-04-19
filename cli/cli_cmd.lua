@@ -105,6 +105,28 @@ local function ser_schedule_state(scheduler)
   return table.concat(lines, "\n")
 end
 
+-- Serialise grid cells to Lua source.
+local function ser_grids(grids)
+  local lines = { "{" }
+  local names = {}
+  for name in pairs(grids or {}) do names[#names+1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local g = grids[name]
+    local cell_parts = {}
+    for i, v in ipairs(g.cells or {}) do
+      local t = type(v)
+      if t == "string" then cell_parts[i] = string.format("%q", v)
+      elseif t == "number" then cell_parts[i] = string.format("%.14g", v)
+      elseif t == "boolean" then cell_parts[i] = tostring(v)
+      else cell_parts[i] = "nil" end
+    end
+    lines[#lines+1] = "  [" .. string.format("%q", name) .. "]={" .. table.concat(cell_parts, ",") .. "},"
+  end
+  lines[#lines+1] = "}"
+  return table.concat(lines, "\n")
+end
+
 -- Serialise the checkpoint stack to Lua source.
 local function ser_checkpoints(checkpoints)
   local lines = { "{" }
@@ -154,6 +176,11 @@ local function write_cli_save(path, eng)
   f:write(ser_checkpoints(eng._state._checkpoints))
   f:write("\n")
 
+  -- Grid cell state (tile grids mutated by grid-set!)
+  f:write("save.grids =\n")
+  f:write(ser_grids(eng._grids))
+  f:write("\n")
+
   -- Scheduler state (next_fire per schedule, so thresholds survive across steps)
   f:write("save.schedule_state =\n")
   f:write(ser_schedule_state(eng._scheduler))
@@ -197,6 +224,7 @@ local function restore_engine(eng, save_data)
   local state_mod = require("runtime.state")
 
   eng._state:init_defaults()
+  eng:init_grids()  -- initialise grids to defaults before replaying mutations
 
   -- Try snapshot-accelerated restore
   local snap_path = (save_data._path or "") .. ".snap"
@@ -232,6 +260,16 @@ local function restore_engine(eng, save_data)
           ss.fired = {}
           for axis, v in pairs(ss_data.fired) do ss.fired[axis] = v end
         end
+      end
+    end
+  end
+
+  -- Restore grid cell state (overrides defaults set by init_grids above)
+  if save_data.grids then
+    for name, cells in pairs(save_data.grids) do
+      local g = eng._grids[name]
+      if g then
+        for i, v in ipairs(cells) do g.cells[i] = v end
       end
     end
   end

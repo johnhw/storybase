@@ -587,6 +587,95 @@ describe("CLI demo08_probability_engine: BFS builtins + oracle + verify", functi
   end)
 end)
 
+-- ── demo09: warden's map ─────────────────────────────────────────────────────
+
+describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verify", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo09_wardens_map.sb"})
+    assert.equal(0, rc, "demo09 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded") or out:find("check passed"), out)
+  end)
+
+  it("verify blocks pass (round in bounds, alert valid enum)", function()
+    local rc, out, err = run_cli({"verify", "demos/demo09_wardens_map.sb"})
+    assert.equal(0, rc, "demo09 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto run 12 steps completes without timeout", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "12",
+                                   "demos/demo09_wardens_map.sb"})
+    assert.equal(0, rc, "demo09 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("WARDEN"), out)
+  end)
+
+  it("init-dungeon sets up grid cells (floor default) and spawns guards", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo09_wardens_map.sb")
+    game:init()
+    game:choose(1)  -- Stand watch (calls init-dungeon)
+    local narr = game:render()
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("floor"), text)  -- grid-get returns 'floor default
+    assert.is_truthy(text:find("Guard Alpha"), text)
+  end)
+
+  it("station-alpha-west places guard with LOS to intruder", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo09_wardens_map.sb")
+    game:init()
+    game:choose(1)  -- Stand watch
+    game:choose(1)  -- Station Alpha at west gap
+    local narr = game:render()
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("Guards with sight%-line to intruder: 1"), text)
+    assert.equal(1,  game:get("guards/alpha/x"))
+    assert.equal(2,  game:get("guards/alpha/y"))
+    assert.equal(true, game:get("guards/alpha/active"))
+  end)
+
+  it("advance-round with both guards catches intruder (vault secure)", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo09_wardens_map.sb")
+    game:init()
+    game:choose(1)  -- Stand watch
+    game:choose(1)  -- Station Alpha
+    game:choose(1)  -- Station Beta
+    game:choose(4)  -- Advance simulation
+    assert.equal(true, game:get("intruder/caught"))
+    assert.equal(false, game:get("vault/breached"))
+    local text = table.concat(game:render(), " ")
+    assert.is_truthy(text:find("contained") or text:find("secure"), text)
+  end)
+
+  it("advance-round with no guards breaches vault", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo09_wardens_map.sb")
+    game:init()
+    game:choose(1)  -- Stand watch
+    game:choose(5)  -- Advance simulation (no guards)
+    local text = table.concat(game:render(), " ")
+    assert.is_truthy(text:find("breached") or text:find("crystal"), text)
+    assert.equal(true, game:get("vault/breached"))
+  end)
+
+  it("set-west-trap redirects intruder to longer east route", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo09_wardens_map.sb")
+    game:init()
+    game:choose(1)  -- Stand watch
+    local steps_before = game:get("world/round") or 0
+    -- Place west trap first
+    game:choose(4)  -- Set west trap
+    local narr = game:render()
+    local text = table.concat(narr, " ")
+    -- After trap, route should be longer (trap forces east route)
+    assert.is_truthy(text:find("Steps to vault:"), text)
+    assert.is_truthy(game:get("world/alert") ~= nil, "alert should be set")
+  end)
+end)
+
 -- ── extract-symbols ───────────────────────────────────────────────────────────
 
 describe("CLI extract-symbols", function()

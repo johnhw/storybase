@@ -1,0 +1,332 @@
+# demo09_wardens_map.sb — The Warden's Map
+#
+# Features demonstrated:
+#   grid-get / grid-set!         — toggle torch cells (floor↔torch) and set traps
+#   visible-from?                — guard sight-line check (solid: {'wall})
+#   path-to                      — shortest intruder route to vault, respects traps
+#   occupied-by                  — prevent placing two guards on the same cell
+#   while loop                   — simulate intruder advancing step by step
+#   cond expression              — multi-branch danger level based on route length
+#   Enum(quiet, tense, critical) — inline enum type for alert state
+#   lambda in count-where        — fn(g): visible-from? ... counts guards with LOS
+#   engine/emit                  — fire 'intruder-spotted event on capture
+#   verify from-any-state:       — model-check a state invariant across all BFS states
+#
+# Dungeon layout (8x5, 0-based):
+#   y=0: ########  border walls
+#   y=1: #.V....#  vault at (2,1)
+#   y=2: #.####.#  interior wall at x=2-5; west gap (1,2), east gap (6,2)
+#   y=3: #......#  open corridor; intruder starts at (3,3)
+#   y=4: ########  border walls
+#
+# Run:  storybase run demos/demo09_wardens_map.sb
+# Auto: storybase run --auto --steps 12 demos/demo09_wardens_map.sb
+
+module wardens-map
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: intro
+
+# ─── Types ───────────────────────────────────────────────────────────────────
+
+"Dungeon cell kinds."
+type CellKind = floor | wall | torch | trap
+
+"Coordinate range aliases for the 8x5 grid."
+type GridX = Int(0, 7)
+type GridY = Int(0, 4)
+
+"Guard slot: position and active flag."
+type Guard:
+  x:      GridX = 0
+  y:      GridY = 0
+  active: Bool  = false
+
+# ─── Grid ────────────────────────────────────────────────────────────────────
+
+"8x5 dungeon floor plan. Walls and barrier set by init-dungeon."
+defgrid dungeon:
+  dimensions: 8 x 5
+  cell-type:  CellKind
+  default:    'floor
+
+# ─── State ───────────────────────────────────────────────────────────────────
+
+"Guard slots — Alpha and Beta are spawned during init-dungeon."
+state guards/{g}: Guard
+
+"Intruder position and status."
+state intruder/x:      GridX = 3
+state intruder/y:      GridY = 3
+state intruder/caught: Bool  = false
+
+"The Crystal Vault — intruder target at (2,1)."
+state vault/breached: Bool = false
+
+"Round counter and alert level (inline Enum demonstrates the Enum(a,b,c) type)."
+state world/round: Int(0, 10)                    = 0
+state world/alert: Enum(quiet, tense, critical)  = 'quiet
+state world/ready: Bool                          = false
+
+# ─── Watches ─────────────────────────────────────────────────────────────────
+
+watch world/round     "Round"
+watch world/alert     "Alert"
+watch intruder/x      "Intruder X"
+watch intruder/y      "Intruder Y"
+watch intruder/caught "Caught"
+watch vault/breached  "Vault breached"
+watch-when vault/breached "The vault has been breached!"
+
+# ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+"Steps on shortest intruder path to vault (traps and walls blocked). 99 = blocked."
+fn route-length:
+  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {'wall, 'trap}
+  if path = nil:
+    99
+  else:
+    count-where path fn(step): true
+
+"Multi-branch danger label from cond expression."
+fn danger-level:
+  cond:
+    vault/breached:      'breached
+    intruder/caught:     'contained
+    route-length = 0:    'at-vault
+    route-length <= 2:   'critical
+    route-length <= 4:   'high
+    _:                   'moderate
+
+"True if the given guard is active and has line of sight to the intruder."
+fn guard-sees-intruder g:
+  guards/{g}/active and (visible-from? dungeon guards/{g}/x guards/{g}/y intruder/x intruder/y solid: {'wall})
+
+"Count of active guards with unobstructed sight-line to the intruder."
+fn visible-guard-count:
+  count-where (path-list guards) fn(g): guard-sees-intruder g
+
+"X coordinate of the intruder's next step (stays put if blocked or already at vault)."
+fn next-ix:
+  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {'wall, 'trap}
+  if path = nil:
+    intruder/x
+  else:
+    let step = list-get path 1
+    if step = nil:
+      intruder/x
+    else:
+      step['x]
+
+"Y coordinate of the intruder's next step."
+fn next-iy:
+  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {'wall, 'trap}
+  if path = nil:
+    intruder/y
+  else:
+    let step = list-get path 1
+    if step = nil:
+      intruder/y
+    else:
+      step['y]
+
+# ─── Setup ────────────────────────────────────────────────────────────────────
+
+"Build the dungeon: border walls, interior barrier, spawn guard slots."
+fn init-dungeon:
+  for x in [0, 1, 2, 3, 4, 5, 6, 7]:
+    grid-set! dungeon x 0 'wall
+    grid-set! dungeon x 4 'wall
+  for y in [1, 2, 3]:
+    grid-set! dungeon 0 y 'wall
+    grid-set! dungeon 7 y 'wall
+  grid-set! dungeon 2 2 'wall
+  grid-set! dungeon 3 2 'wall
+  grid-set! dungeon 4 2 'wall
+  grid-set! dungeon 5 2 'wall
+  spawn! guards 'alpha Guard(x: 1, y: 3, active: false)
+  spawn! guards 'beta  Guard(x: 6, y: 3, active: false)
+  set! world/ready true
+
+# ─── Guard placement ───────────────────────────────────────────────────────────
+
+"Station Guard Alpha at the west gap (1,2). occupied-by prevents cell collision."
+fn station-alpha-west:
+  pre: not guards/alpha/active
+  pre: (occupied-by dungeon guards 1 2) = nil
+  set! guards/alpha/x 1
+  set! guards/alpha/y 2
+  set! guards/alpha/active true
+
+"Station Guard Beta at the east gap (6,2). occupied-by prevents cell collision."
+fn station-beta-east:
+  pre: not guards/beta/active
+  pre: (occupied-by dungeon guards 6 2) = nil
+  set! guards/beta/x 6
+  set! guards/beta/y 2
+  set! guards/beta/active true
+
+"Recall Guard Alpha to the barracks."
+fn recall-alpha:
+  pre: guards/alpha/active
+  set! guards/alpha/active false
+  set! guards/alpha/x 1
+  set! guards/alpha/y 3
+
+# ─── Terrain ──────────────────────────────────────────────────────────────────
+
+"Toggle the corridor torch at (3,3) between floor and torch."
+fn toggle-torch:
+  let current = (grid-get dungeon 3 3)
+  if current = 'torch:
+    grid-set! dungeon 3 3 'floor
+  else:
+    grid-set! dungeon 3 3 'torch
+
+"Set a trap at the west approach (1,3) — forces intruder onto the longer east route."
+fn set-west-trap:
+  pre: (grid-get dungeon 1 3) = 'floor
+  grid-set! dungeon 1 3 'trap
+
+"Clear the trap at (1,3)."
+fn clear-west-trap:
+  pre: (grid-get dungeon 1 3) = 'trap
+  grid-set! dungeon 1 3 'floor
+
+# ─── Simulation ─────────────────────────────────────────────────────────────────
+
+"Simulate intruder advance: moves step by step while loop until caught or vault reached."
+fn advance-round:
+  pre: not vault/breached
+  pre: not intruder/caught
+  pre: world/round < 10
+  while not vault/breached and not intruder/caught and world/round < 10:
+    let visible = visible-guard-count
+    when visible > 0:
+      set! intruder/caught true
+      engine/emit 'intruder-spotted {x: intruder/x, y: intruder/y, round: world/round}
+    when not intruder/caught:
+      let nx = next-ix
+      let ny = next-iy
+      set! intruder/x nx
+      set! intruder/y ny
+      when intruder/x = 2 and intruder/y = 1:
+        set! vault/breached true
+    inc! world/round 1
+  let dist = route-length
+  if dist <= 2:
+    set! world/alert 'critical
+  else:
+    if dist <= 5:
+      set! world/alert 'tense
+    else:
+      set! world/alert 'quiet
+
+"Reset — a new intruder approaches from (3,3)."
+fn reset-intruder:
+  pre: intruder/caught or vault/breached
+  set! intruder/x 3
+  set! intruder/y 3
+  set! intruder/caught false
+  set! vault/breached false
+  set! world/round 0
+  set! world/alert 'quiet
+
+# ─── Verify ─────────────────────────────────────────────────────────────────────
+
+verify "round counter stays in bounds":
+  verify-always world/round >= 0 and world/round <= 10
+
+verify "alert level is always one of three valid symbols":
+  from-any-state:
+    world/alert = 'quiet or world/alert = 'tense or world/alert = 'critical
+
+# ─── Scenes ─────────────────────────────────────────────────────────────────────
+
+scene intro:
+  THE WARDEN'S MAP
+
+  An intruder approaches the Crystal Vault at (2,1).
+  They enter from the south corridor at (3,3) and must pass through
+  the west gap (1,2) or the east gap (6,2) to reach the vault.
+
+  Station guards to intercept. Set traps to redirect their route.
+  Advance the simulation — the intruder moves until caught or the vault falls.
+
+  * Stand watch
+    init-dungeon
+    -> warden-view
+
+scene warden-view:
+  WARDEN'S VIEW — Round {world/round}
+  Alert: {world/alert}   Danger: {danger-level}
+
+  Intruder: ({intruder/x},{intruder/y})   Steps to vault: {route-length}
+  [intruder/caught]  Intruder contained — vault secure.
+  [vault/breached]   Vault breached — crystal stolen.
+
+  Guard Alpha [{guards/alpha/active}] at ({guards/alpha/x},{guards/alpha/y})
+  Guard Beta  [{guards/beta/active}] at ({guards/beta/x},{guards/beta/y})
+  Guards with sight-line to intruder: {visible-guard-count}
+
+  Corridor torch at (3,3): {grid-get dungeon 3 3}
+  West approach at  (1,3): {grid-get dungeon 1 3}
+
+  when vault/breached or intruder/caught or world/round >= 10:
+    -> finale
+
+  * [not guards/alpha/active] Station Alpha at west gap (1,2)
+    station-alpha-west
+    -> warden-view
+
+  * [not guards/beta/active] Station Beta at east gap (6,2)
+    station-beta-east
+    -> warden-view
+
+  * [guards/alpha/active] Recall Guard Alpha
+    recall-alpha
+    -> warden-view
+
+  * Toggle corridor torch at (3,3)
+    toggle-torch
+    -> warden-view
+
+  * [(grid-get dungeon 1 3) = 'floor] Set west trap — diverts intruder east
+    set-west-trap
+    -> warden-view
+
+  * [(grid-get dungeon 1 3) = 'trap] Clear west trap
+    clear-west-trap
+    -> warden-view
+
+  * [not vault/breached and not intruder/caught and world/round < 10] Advance simulation
+    advance-round
+    -> warden-view
+
+  * [intruder/caught or vault/breached] Reset — new intruder approaches
+    reset-intruder
+    -> warden-view
+
+scene finale:
+  END OF WATCH — Round {world/round}
+  Alert level: {world/alert}.
+
+  if intruder/caught:
+    The intruder was caught at ({intruder/x},{intruder/y}).
+    The Crystal Vault stands secure.
+  else:
+    if vault/breached:
+      The intruder breached the Crystal Vault. The crystal is gone.
+    else:
+      The watch ended without resolution.
+
+  Guards on post: {count-where (path-list guards) fn(g): guards/{g}/active}
+
+  * [not vault/breached] Return to post
+    -> warden-view
+
+  * Accept the outcome
+    -> finale

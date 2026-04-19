@@ -5,30 +5,27 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-04-18)
+## Current Status (2026-04-19)
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
 the **Standalone Bundler**, **Language Server (LSP)**, and all four Medium Features below.
-**1659 tests passing** (excluding flaky http tests; 1642 in isolation).
+**1686 tests passing** (excluding flaky http tests).
 
-Demo 08 (The Probability Engine) is complete: demonstrates `probability`, `can-reach?`,
-`find-path`, `optimal-path`, `find-counterexample`, `engine/emit`, `engine/checkpoint!`,
-`undo!`, explicit lambda `fn(x): ...`, and `verify after requires`. Run:
-  `lua5.4 cli/main.lua run --auto --steps 15 demos/demo08_probability_engine.sb`
+Demo 09 (The Warden's Map) is complete: demonstrates `grid-get`/`grid-set!`, `visible-from?`,
+`path-to`, `occupied-by`, `while` loop, `cond` expression, inline `Enum(a,b,c)` type,
+lambda in `count-where`, `engine/emit`, and `verify from-any-state:`. Run:
+  `lua5.4 cli/main.lua run --auto --steps 12 demos/demo09_wardens_map.sb`
 
-Bug fixes in this session:
-- `_in_bfs` guard: BFS engines in `search.lua` and `verify.lua` now set `eng._in_bfs = true`.
-  `make_ctx` in `engine.lua` propagates it; `child_ctx` in `eval.lua` propagates it. All five
-  BFS builtins (`can-reach?`, `find-path`, `probability`, `optimal-path`, `find-counterexample`)
-  have guards returning safe defaults when called from narration during outer BFS.
-- `nil` as language literal: `call_fn` now treats the name "nil" as the nil literal,
-  allowing `if doom = nil:` comparisons.
-- Nil variable tracking: `nil_vars` set added to contexts; LET_STMT and param binding
-  track nil-valued variables so they can be distinguished from undefined names.
-- `if/else` retval propagation: `IF_EXPR` as a statement now propagates `sub.retval` so
-  `if/else` works as a value-returning construct in function bodies.
-- `parse_if_expr`: parser now handles the case where `:` after the condition was consumed
-  as part of a NAMED_ARG token (same fix already present in `parse_when_stmt`).
+Bug fixes in this session (Demo 09):
+- `child_ctx` in `eval.lua` now propagates `grids` from parent context, so grid builtins
+  (`grid-get`, `grid-set!`, `path-to`, `visible-from?`, `occupied-by`) work inside
+  user-defined functions (previously returned nil because ctx.grids was missing in child).
+- `INDEX_EXPR` eval now supports string keys (from SYMBOL_LIT) for map/table field access,
+  so `step['x]` correctly reads the `x` field from `{x=..., y=...}` path steps.
+- CLI `--cli` mode: `restore_engine` now calls `eng:init_grids()` so grids are initialized
+  to defaults on every step (previously empty `{}` after first step).
+- CLI `--cli` mode: `write_cli_save` / `restore_engine` now serialize and restore grid cell
+  state so `grid-set!` mutations survive save/restore cycles across CLI steps.
 
 ---
 
@@ -256,7 +253,7 @@ state clients/spy/gold    : Int(0, 200)
 
 ---
 
-### Demo 09 — "The Warden's Map" (advanced tile grid)
+### Demo 09 — "The Warden's Map" (advanced tile grid) ✓ COMPLETE
 
 **Concept.** A dungeon-warden puzzle game. The player manages a small dungeon grid: placing
 guards, toggling torches (opaque cells), and watching intruders try to reach the vault.

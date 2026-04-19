@@ -125,6 +125,7 @@ local function child_ctx(parent, fn_name)
     game       = parent.game,       -- propagate compiled game table
     debug      = parent.debug,      -- propagate debug server for event emission
     engine_ref = parent.engine_ref, -- propagate engine reference for engine/ paths
+    grids      = parent.grids,      -- propagate tile grid data
     scene_stack = parent.scene_stack,
     counterfactual_depth = parent.counterfactual_depth,  -- propagate nesting depth
     _in_bfs  = parent._in_bfs,   -- propagate BFS-mode guard (prevents recursive BFS)
@@ -248,6 +249,7 @@ eval_expr = function(node, ctx)
     end
     local idx  = eval_expr(node.index, ctx)
     if type(list) ~= "table" then return nil end
+    if type(idx) == "string" then return list[idx] end  -- symbol/string key: map field access
     if type(idx) ~= "number" then return nil end
     -- Support negative indices: -1 = last, -2 = second-to-last, etc.
     if idx < 0 then idx = #list + idx + 1 end
