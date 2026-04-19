@@ -514,23 +514,51 @@ end)
 -- ============================================================
 
 describe("search — time budget", function()
-  it("can_reach returns false and timed_out=true when budget is 0", function()
-    -- budget=0 means any check should time out immediately
-    local search_mod = require("runtime.search")
+  it("can_reach returns false/nil without error when budget set (no BFS expansion)", function()
+    -- With a non-existent scene the BFS loop has nothing to expand (<50 iterations),
+    -- so the clock check never fires; returns false, false normally.
     local result, timed_out = search_mod.can_reach(
       { schema = {}, fns = {}, scenes = {}, actors = {}, schedules = {} },
-      {},  -- initial cache
+      {},
       { "nonexistent-scene" },
       function() return false end,
-      5,   -- depth
-      0    -- budget: 0 seconds → immediate timeout after BUDGET_CHECK_N iters
+      5,
+      0
     )
-    -- With budget=0 and a non-existent scene (no BFS expansion), the initial
-    -- state check fails and the BFS loop has nothing to expand, so it just
-    -- returns false without timing out (0 iterations).
-    -- We just verify it returns booleans without error.
-    assert.is_boolean(result)
-    assert.is_boolean(timed_out)
+    assert.is_false(timed_out)
+    assert.is_false(result)
+  end)
+
+  it("can_reach returns nil (not false) on budget timeout", function()
+    -- Use a game with a looping scene to generate enough BFS nodes to trip
+    -- the BUDGET_CHECK_N=50 iteration threshold, then time out.
+    local src = [[
+module budget-test
+  version: 1.0
+engine-config:
+  entry-scene: loop
+state world/n : Int(0, 9999) = 0
+scene loop:
+  * Step
+    inc! world/n 1
+    -> loop
+]]
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    -- budget=-1 guarantees timeout once the first clock check fires (iter 50)
+    local result, timed_out = search_mod.can_reach(
+      gt, cache, { "loop" },
+      function(c) return (c["world/n"] or 0) >= 9999 end,
+      200,   -- deep enough that BFS won't exhaust the space first
+      -1     -- negative budget: os.clock() >= -1 is always true
+    )
+    assert.is_true(timed_out)
+    assert.is_nil(result)   -- unknown, not false
   end)
 
   it("can_reach returns reached=true, timed_out=false when condition met immediately", function()

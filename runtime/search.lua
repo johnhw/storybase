@@ -280,7 +280,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
     -- Time-budget check (every BUDGET_CHECK_N iterations)
     if budget and iter_count % BUDGET_CHECK_N == 0 then
       if (os.clock() - start_time) >= budget then
-        return false, true  -- timed out
+        return nil, true  -- timed out: result unknown
       end
     end
 

@@ -298,7 +298,7 @@ eng:inp()                     → string  -- read from io_in
 ### `runtime/search.lua` (~540 lines)
 BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 
-- `M.can_reach(game_table, cache, stack, condition_fn, depth, budget?)` → `(bool, timed_out_bool)`
+- `M.can_reach(game_table, cache, stack, condition_fn, depth, budget?)` → `(bool|nil, timed_out_bool)` — returns `nil` (not `false`) on budget timeout so callers can distinguish "not reachable" from "unknown"
 - `M.find_path(game_table, cache, stack, condition_fn, depth, budget?)` → `[{scene, label, index}, ...]` | nil
 - `M.probability(game_table, cache, stack, condition_fn, depth, threshold)` → float 0..1
 - `M.optimal_path(game_table, cache, stack, condition_fn, depth, cost_fn)` → path | nil  (Dijkstra)
