@@ -136,7 +136,7 @@ scene canyon:
   The canyon walls rise on both sides. Day {expedition/day}.
   Food remaining {expedition/food}. Living crew {living-count}.
 
-  * Push deeper (costs food, crew take damage)
+  * [crew-ready?  and  expedition/food > 0] Push deeper (costs food, crew take damage)
     explore
     -> canyon
 

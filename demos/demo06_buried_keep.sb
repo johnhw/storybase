@@ -120,7 +120,7 @@ relation room-exits: Room -> Set(Room, 3):
 "Items available in each room. Cleared when looted."
 relation room-loot: Room -> Set(ItemKind, 4):
   'armory: {'iron-sword, 'kite-shield}
-  'vault:  {'sunstone, 'healing-draught}
+  'vault:  {'sunstone, 'healing-draught, 'torch-bundle}
 
 "Monsters present in each room. Cleared when defeated."
 relation room-monster: Room -> Set(MonsterKind, 2):

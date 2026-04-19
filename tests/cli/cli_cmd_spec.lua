@@ -581,3 +581,39 @@ describe("CLI cmd: subprocess integration", function()
     cleanup(save)
   end)
 end)
+
+-- ── Precondition failure robustness ──────────────────────────────
+-- A choice whose fn has a pre: that always fails should return
+-- {type="error"} rather than crashing the CLI process.
+
+local precond_src = "module precond_test\n  version: 1.0\nengine-config:\n  entry-scene: room\nstate flag: Bool = false\nfn guarded:\n  pre: flag = true\n  set! flag true\nscene room:\n  A room.\n  * Try guarded\n    guarded\n    -> room\n"
+
+local precond_game
+do
+  local gt, diags = compiler.compile(precond_src, "precond_test.sb")
+  if not diags:has_errors() then precond_game = gt end
+end
+
+describe("CLI cmd: precondition failure returns error JSON", function()
+  local path
+
+  before_each(function()
+    path = tmp_save()
+  end)
+
+  after_each(function()
+    cleanup(path)
+  end)
+
+  it("returns type=error when a choice triggers a failing precondition", function()
+    if not precond_game then pending("could not compile precond_test game") end
+    -- fresh start
+    local r0 = step(precond_game, path, "", {reset = true})
+    assert.equal("state", r0.type)
+    assert.equal("room", r0.scene)
+    -- pick choice 1 (guarded fn: pre: flag = true, but flag is false)
+    local r1 = step(precond_game, path, "1")
+    assert.equal("error", r1.type)
+    assert.is_not_nil(r1.message)
+  end)
+end)

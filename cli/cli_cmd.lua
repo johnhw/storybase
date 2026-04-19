@@ -443,7 +443,12 @@ function M.run(game_table, save_path, opts)
     end
 
     -- Execute the chosen action
-    local signal = eng:do_choice(scene_name, idx)
+    local ok_dc, signal_or_err = pcall(eng.do_choice, eng, scene_name, idx)
+    if not ok_dc then
+      json_out({ type = "error", message = tostring(signal_or_err) })
+      return 1
+    end
+    local signal = signal_or_err
     eng:post_action()
 
     -- NPC speed
@@ -496,7 +501,12 @@ function M.run(game_table, save_path, opts)
                    message = string.format("choice %d out of range (1-%d)", idx, #choices) })
         return 1
       end
-      local signal = eng:do_choice(scene_name, idx)
+      local ok_dc2, signal_or_err2 = pcall(eng.do_choice, eng, scene_name, idx)
+      if not ok_dc2 then
+        json_out({ type = "error", message = tostring(signal_or_err2) })
+        return 1
+      end
+      local signal = signal_or_err2
       eng:post_action()
       if signal then
         if signal.type == "goto" then eng:goto_scene(signal.target)

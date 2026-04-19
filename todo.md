@@ -38,6 +38,21 @@ checkpoint stack) to the save file, and emits a single JSON object to stdout. 35
 
 ## Active Tasks
 
+### TOP PRIORITY: Interactive Demo Testing
+
+Test each demo in order (demo01–demo09) using the `--cli` single-step scripting protocol.
+Fix bugs as found, add regression tests. Stop after each demo works and wait for instructions.
+
+- [x] **demo01** — The Wanderer: basic scene flow, choices, state ✓
+- [x] **demo02** — The Merchant: inventory/trade mechanics ✓
+- [x] **demo03** — The Quest: quest state, multi-scene flow ✓
+- [x] **demo04** — The Expedition: expedition/resource mechanics ✓ (fixed: added guard on "Push deeper"; fixed: pcall on do_choice in cli_cmd.lua)
+- [x] **demo05** — The Siege: siege mechanics, finite state ✓
+- [x] **demo06** — The Buried Keep: exploration, relation state ✓ (fixed: added torch-bundle to vault loot — game was unwinnable)
+- [ ] **demo07** — The Wanderer's Oracle: imports, counterfactual, bounded
+- [ ] **demo08** — The Probability Engine: BFS builtins
+- [ ] **demo09** — The Warden's Map: grid builtins
+
 ### Bugs / Spec Gaps (fix first)
 
 - [x] **`import "path" as Alias` is silently ignored.** Fixed: `resolve_imports` now emits
