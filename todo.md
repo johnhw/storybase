@@ -9,23 +9,26 @@ Completed work has been moved to [completed.md](completed.md).
 
 All eight implementation phases are complete, plus all "Bugs/Spec Gaps", "Small Wins",
 the **Standalone Bundler**, **Language Server (LSP)**, and all four Medium Features below.
-**1686 tests passing** (excluding flaky http tests).
+**All demos 01–09 tested end-to-end via `--cli` mode.** 1696 tests passing.
 
-Demo 09 (The Warden's Map) is complete: demonstrates `grid-get`/`grid-set!`, `visible-from?`,
-`path-to`, `occupied-by`, `while` loop, `cond` expression, inline `Enum(a,b,c)` type,
-lambda in `count-where`, `engine/emit`, and `verify from-any-state:`. Run:
-  `lua5.4 cli/main.lua run --auto --steps 12 demos/demo09_wardens_map.sb`
+### Bug fixes from interactive demo testing (demos 07–09):
 
-Bug fixes in this session (Demo 09):
-- `child_ctx` in `eval.lua` now propagates `grids` from parent context, so grid builtins
-  (`grid-get`, `grid-set!`, `path-to`, `visible-from?`, `occupied-by`) work inside
-  user-defined functions (previously returned nil because ctx.grids was missing in child).
-- `INDEX_EXPR` eval now supports string keys (from SYMBOL_LIT) for map/table field access,
-  so `step['x]` correctly reads the `x` field from `{x=..., y=...}` path steps.
-- CLI `--cli` mode: `restore_engine` now calls `eng:init_grids()` so grids are initialized
-  to defaults on every step (previously empty `{}` after first step).
-- CLI `--cli` mode: `write_cli_save` / `restore_engine` now serialize and restore grid cell
-  state so `grid-set!` mutations survive save/restore cycles across CLI steps.
+**Demo 07** — no bugs found; imports, counterfactual, and bounded oracle all work correctly.
+
+**Demo 08** — two bugs fixed:
+- `engine.lua:make_ctx` was not propagating `_scene_stack` to `ctx.scene_stack`, causing
+  BFS builtins (`can-reach?`, `probability`, `find-path`, etc.) to always start from the
+  entry scene instead of the current scene. Fixed: `ctx.scene_stack = self._scene_stack`.
+  Regression test added to `tests/cli/cli_cmd_spec.lua`.
+- `spy-can-escape?` and `spy-doom-position` used `depth: 5` but the spy simulation requires
+  6 steps to reach `spy/position = 3` from `consult-spy`. Fixed depths to 6 in demo08.
+
+**Demo 09** — one bug fixed:
+- `tilegrid.lua:find_path` did not prevent corner-cutting: a diagonal move from (2,3)→(1,2)
+  was allowed even though both cardinal neighbours (1,3)[trap] and (2,2)[wall] were blocked.
+  Fixed: diagonal moves are now rejected when both (x+dx, y) and (x, y+dy) are non-walkable.
+  This makes the west-trap mechanic work as designed — the intruder is forced onto the east
+  route rather than sneaking diagonally past the trap/wall corner.
 
 ---
 
@@ -49,9 +52,9 @@ Fix bugs as found, add regression tests. Stop after each demo works and wait for
 - [x] **demo04** — The Expedition: expedition/resource mechanics ✓ (fixed: added guard on "Push deeper"; fixed: pcall on do_choice in cli_cmd.lua)
 - [x] **demo05** — The Siege: siege mechanics, finite state ✓
 - [x] **demo06** — The Buried Keep: exploration, relation state ✓ (fixed: added torch-bundle to vault loot — game was unwinnable)
-- [ ] **demo07** — The Wanderer's Oracle: imports, counterfactual, bounded
-- [ ] **demo08** — The Probability Engine: BFS builtins
-- [ ] **demo09** — The Warden's Map: grid builtins
+- [x] **demo07** — The Wanderer's Oracle: imports, counterfactual, bounded ✓ (no bugs found)
+- [x] **demo08** — The Probability Engine: BFS builtins ✓ (fixed: make_ctx now propagates scene_stack so BFS builtins start from current scene; fixed spy depth 5→6)
+- [x] **demo09** — The Warden's Map: grid builtins ✓ (fixed: tilegrid corner-cutting prevention — diagonal moves now blocked when both cardinal neighbours are walls/traps)
 
 ### Bugs / Spec Gaps (fix first)
 

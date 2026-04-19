@@ -582,6 +582,47 @@ describe("CLI cmd: subprocess integration", function()
   end)
 end)
 
+-- ── BFS scene_stack regression ────────────────────────────────────
+-- can-reach? must start from the current scene stack, not from the entry scene.
+-- Before the fix, make_ctx did not propagate _scene_stack, causing BFS builtins
+-- called from sub-scenes (entered via =>) to always search from the entry scene.
+
+local bfs_src = table.concat({
+  "module bfs_stack_test\n  version: 1.0",
+  "engine-config:\n  entry-scene: main",
+  "state world/reached: Bool = false",
+  "fn set-reached:\n  set! world/reached true",
+  "fn can-reach-it?:\n  can-reach? (world/reached = true) depth: 3",
+  "scene main:\n  Main.\n  * Dive in\n    => sub",
+  "scene sub:\n  Sub. Reachable: {can-reach-it?}.\n  * Do it\n    set-reached\n    -> main\n  * Back\n    <-",
+}, "\n")
+
+local bfs_stack_game
+do
+  local gt, diags = compiler.compile(bfs_src, "bfs_stack_test.sb")
+  if not diags:has_errors() then bfs_stack_game = gt end
+end
+
+describe("CLI cmd: BFS can-reach? uses live scene_stack", function()
+  local path
+
+  before_each(function() path = tmp_save() end)
+  after_each(function() cleanup(path) end)
+
+  it("can-reach? from a sub-scene finds goals reachable from that scene", function()
+    if not bfs_stack_game then pending("could not compile bfs_stack_test game") end
+    local r0 = step(bfs_stack_game, path, "", { reset = true })
+    assert.equal("main", r0.scene)
+    -- Enter sub-scene via =>
+    local r1 = step(bfs_stack_game, path, "1")
+    assert.equal("sub", r1.scene)
+    -- Narration should contain "Reachable: true" because can-reach? from sub
+    -- sees choice "Do it" which calls set-reached
+    local narr = table.concat(r1.narration or {}, " ")
+    assert.truthy(narr:find("true"), "expected 'true' in narration, got: " .. narr)
+  end)
+end)
+
 -- ── Precondition failure robustness ──────────────────────────────
 -- A choice whose fn has a pre: that always fails should return
 -- {type="error"} rather than crashing the CLI process.

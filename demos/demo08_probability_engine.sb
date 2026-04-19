@@ -94,11 +94,11 @@ fn gambler-can-win?:
 
 "Can the spy escape without being caught?"
 fn spy-can-escape?:
-  can-reach? (spy/position = 3) depth: 5
+  can-reach? (spy/position = 3) depth: 6
 
 "Spy's position in the doom scenario (the state where she gets caught)."
 fn spy-doom-position:
-  let doom = find-counterexample (spy/caught = false) depth: 5
+  let doom = find-counterexample (spy/caught = false) depth: 6
   if doom = nil:
     3
   else:

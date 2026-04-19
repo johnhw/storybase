@@ -295,6 +295,14 @@ function M.find_path(cells, width, height, x1, y1, x2, y2, blocked_set, allow_di
       for _, d in ipairs(dirs) do
         local nx, ny = cur.x + d[1], cur.y + d[2]
         if walkable(nx, ny) then
+          -- Prevent corner-cutting: a diagonal move is blocked when both cardinal
+          -- neighbours that form the corner are blocked (e.g. moving NW through
+          -- the gap between a wall to the north and a wall to the west).
+          if d[1] ~= 0 and d[2] ~= 0 then
+            if not walkable(cur.x + d[1], cur.y) and not walkable(cur.x, cur.y + d[2]) then
+              goto continue_dirs
+            end
+          end
           local nk = pos_key(nx, ny)
           if not closed[nk] then
             -- Diagonal cost ≈ √2; cardinal cost = 1
@@ -308,6 +316,7 @@ function M.find_path(cells, width, height, x1, y1, x2, y2, blocked_set, allow_di
             end
           end
         end
+        ::continue_dirs::
       end
     end
   end

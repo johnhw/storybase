@@ -210,6 +210,7 @@ function M.new(game_table, opts)
     ctx.grids       = self._grids   -- tile grid data (may be empty table)
     ctx.engine_ref  = self          -- for engine/ pseudo-path reads
     ctx._in_bfs     = self._in_bfs  -- propagate BFS-mode guard (prevents recursive BFS)
+    ctx.scene_stack = self._scene_stack  -- BFS builtins need the live scene stack
     return ctx
   end
 
