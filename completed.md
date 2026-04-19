@@ -5,6 +5,82 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## Demo 10 — "The Market Bell" ✅ COMPLETE (2026-04-19)
+
+1706 tests passing. Multi-axis time model demonstrated end-to-end.
+
+- `demos/demo10_market_bell.sb` — two-axis time model (`day` + `hour`, hour wraps at 24)
+- `time-inc! hour: 2` in `browse-stalls` advances hour; market auto-closes at hour 18
+- `time-inc! day: 1` + `time-set! hour: 8` in `rest` advances to next morning
+- `every: [day: +1]` schedule (`morning-bell`) fires each rest: reopens market, randomises prices
+- `at: [day: +4]` one-shot schedule (`grand-festival`) fires after 4 rests (player sees Day 5): closes market permanently, cancels morning-bell
+- `engine/emit` events: `market-opened`, `market-closed`, `festival-begins`
+- `watch` / `watch-when` declarations; 4 `verify` blocks (all pass, 36 BFS states)
+- 6 dedicated integration tests in `tests/cli/cli_integration_spec.lua`
+
+**Design note:** engine day clock starts at 0; `at: [day: +4]` fires at engine day=4 (after 4 rests). `world/day` state variable starts at 1 and increments alongside, so the player sees "Day 1 of 5" through "Day 5 of 5". The `offset: [day: 0]` syntax is present to demonstrate offset notation; cross-axis offsets (e.g. `offset: [hour: 6]` on an `every: [day: +1]` schedule) are parsed but not enforced by the scheduler.
+
+---
+
+## Interactive Demo Testing — Demos 01–09 ✅ COMPLETE (2026-04-19)
+
+All nine demos tested end-to-end via `--cli` single-step scripting mode. 1696 tests passing.
+
+- **demo01** — The Wanderer: basic scene flow, choices, state ✓
+- **demo02** — The Merchant: inventory/trade mechanics ✓
+- **demo03** — The Quest: quest state, multi-scene flow ✓
+- **demo04** — The Expedition: entity families, spawn/despawn ✓ (fixed: guard on "Push deeper"; pcall on do_choice)
+- **demo05** — The Siege: time-model, actors, schedules ✓
+- **demo06** — The Buried Keep: exploration, relations ✓ (fixed: torch-bundle added to vault loot)
+- **demo07** — The Wanderer's Oracle: imports, counterfactual, bounded ✓ (no bugs found)
+- **demo08** — The Probability Engine: BFS search builtins as gameplay ✓
+  - Fixed: `engine.lua:make_ctx` was not propagating `_scene_stack` → `ctx.scene_stack`; BFS builtins always started from entry scene. Fixed + regression test.
+  - Fixed: `spy-can-escape?` / `spy-doom-position` used `depth: 5`; simulation requires 6 steps. Fixed depths to 6.
+- **demo09** — The Warden's Map: advanced tile grid ✓
+  - Fixed: `tilegrid.lua:find_path` allowed corner-cutting diagonals past wall/trap pairs. Diagonal moves now rejected when both cardinal neighbours are non-walkable.
+
+---
+
+## All Completed Tasks from Active Backlog ✅ (2026-04-19)
+
+### Bugs / Spec Gaps
+
+- `import "path" as Alias` silently ignored → `resolve_imports` now emits `UNSUPPORTED_FEATURE`. Tests in `tests/compiler/import_spec.lua`.
+- `module ... exports:` not enforced → parser stores `exports:` list; importing emits `WARN_EXPORTS_NOT_ENFORCED`. Tests in `tests/compiler/import_spec.lua`.
+
+### Small Wins
+
+- **Source-context lines in error messages.** `print_diags` in `cli/main.lua` and `cli/check_cmd.lua` accept `source_map` and print offending line + caret.
+- **`storybase check` subcommand.** `cli/check_cmd.lua` — lexer+parser+checker only with source-context output.
+- **`storybase format` pretty-printer.** `cli/format_cmd.lua` — canonical 2-space-indented output; `--check` and `--write` modes.
+- **`--debug` flag on `run`.** `engine.run` accepts `opts.debug_port`; creates TCP debug server.
+- **`storybase repl` subcommand.** `cli/repl_cmd.lua` — interactive REPL with `:state`, `:scene`, `:choices`, `:choose N`, `:tick`, `:save/:load`.
+- **`at:` one-shot schedule trigger.** Deregister-after-fire for pure `at:`-only schedules. 12 tests in `tests/runtime/scheduler_spec.lua`.
+
+### Medium Features
+
+- **Namespaced imports (`import "path" as E`).** `apply_import_namespace` in `compiler/compiler.lua`; `compiler/parser.lua` extended for `Alias.Name`. 7 tests in `tests/compiler/import_spec.lua`. 1611 tests.
+- **Path patterns in `watch` and `verify` forms.** `**` multi-segment wildcards and `(a|b)` alternation in `runtime/debug.lua`; `runtime/verify.lua` exports `match_path_pattern`. Tests in `tests/runtime/debug_spec.lua` (+14) and `tests/runtime/verify_spec.lua` (+9).
+- **Browser-based debug UI + interactive play.** HTTP+SSE transport, game-play commands, embedded HTML/JS/CSS, `--serve` flag. 23 tests in `tests/runtime/debug_http_spec.lua`. 1634 tests.
+- **`counterfactual` as a language expression.** `from_tick` log replay in `eval.lua`. 4 tests in `tests/runtime/counterfactual_spec.lua`.
+- **Demo 07 — The Wanderer's Oracle.** `demos/demo07_oracle.sb` + `demos/oracle_lib.sb`. 1596 tests.
+- **Demo 08 — The Probability Engine.** BFS search builtins as gameplay. See demo testing section above.
+- **Demo 09 — The Warden's Map.** Advanced tile grid builtins. See demo testing section above.
+
+### Major Features
+
+- **Language Server (LSP).** `cli/lsp.lua` — stdio JSON-RPC 2.0; diagnostics on open/change; hover, definition, completion. 43 tests in `tests/cli/lsp_spec.lua`.
+- **Standalone bundler (`storybase bundle`).** `cli/bundle_cmd.lua` — single self-contained Lua file; 14 runtime modules embedded; `--production` strips verify/watch. 20 tests in `tests/cli/bundle_spec.lua`.
+
+### Deferred Items (now complete)
+
+- `engine/checkpoint!` callable form — parser handles as `CHECKPOINT_MUT` node; eval pushes log checkpoint. Tests in `tests/lib/storybase_spec.lua`.
+- `engine/emit event args` callable form — parser handles as `EMIT_MUT` node; fires debug server AND `_emit_hook`. Tests in `tests/lib/storybase_spec.lua`.
+- Doc string surfacing via public API — `game:docs(name?)` added to `lib/storybase.lua`. Tests in `tests/lib/storybase_spec.lua`.
+- Doc string surfacing via debug server schema browser — `get-schema` command in `runtime/debug.lua`. 9 tests in `tests/runtime/debug_spec.lua`.
+
+---
+
 ## Demo 06 — "The Buried Keep" ✅ COMPLETE (2026-04-15)
 
 1465 tests passing. All checklist items verified.

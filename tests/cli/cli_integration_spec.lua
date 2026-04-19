@@ -192,6 +192,7 @@ local DEMO_SB_FILES = {
   "demos/demo05_siege.sb",
   "demos/demo06_buried_keep.sb",
   "demos/demo07_oracle.sb",
+  "demos/demo10_market_bell.sb",
 }
 
 describe("CLI compile: demo .sb files", function()
@@ -276,6 +277,7 @@ local DEMO_STEPS = {
   ["demos/demo05_siege.sb"]     = 12,  -- has guarded victory condition
   ["demos/demo06_buried_keep.sb"] = 6, -- torches run out in ~4 steps auto-play
   ["demos/demo07_oracle.sb"]    = 10,  -- journey ends at day 8; reaches finale in ~9 steps
+  ["demos/demo10_market_bell.sb"] = 20, -- buy/sell loop; auto stays in day-1 trading
 }
 
 describe("CLI run --auto --steps N: all demo files run without error", function()
@@ -673,6 +675,95 @@ describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verif
     -- After trap, route should be longer (trap forces east route)
     assert.is_truthy(text:find("Steps to vault:"), text)
     assert.is_truthy(game:get("world/alert") ~= nil, "alert should be set")
+  end)
+end)
+
+-- ── demo10: market bell (multi-axis time model) ───────────────────────────────
+
+describe("CLI demo10_market_bell: multi-axis time model + schedules + verify", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo10_market_bell.sb"})
+    assert.equal(0, rc, "demo10 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo10_market_bell.sb"})
+    assert.equal(0, rc, "demo10 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto run 20 steps completes without error", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "20",
+                                   "demos/demo10_market_bell.sb"})
+    assert.equal(0, rc, "demo10 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Day"), out)
+  end)
+
+  it("browsing advances hour and closes market at 18", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo10_market_bell.sb")
+    game:init()
+    -- Browse 5 times: hour goes 8→10→12→14→16→18 (market closes on 5th)
+    for _ = 1, 4 do game:choose(3) end  -- browse ×4, still open
+    assert.equal(true,  game:get("market/open"))
+    assert.equal(16,    game:get("world/hour"))
+    game:choose(3)  -- 5th browse: hour=18, market closes
+    assert.equal(false, game:get("market/open"))
+    assert.equal(18,    game:get("world/hour"))
+  end)
+
+  it("rest triggers morning-bell: market reopens with new prices", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo10_market_bell.sb")
+    game:init()
+    -- Close market by browsing 5 times
+    for _ = 1, 5 do game:choose(3) end
+    assert.equal(false, game:get("market/open"))
+    assert.equal(1,     game:get("world/day"))
+    -- Rest: advances day, triggers morning-bell
+    local old_grain = game:get("prices/grain")
+    game:choose(1)  -- rest (only choice when market closed)
+    assert.equal(true,  game:get("market/open"))
+    assert.equal(2,     game:get("world/day"))
+    assert.equal(8,     game:get("world/hour"))
+    -- morning-bell fires random-int prices (may differ from initial)
+    local new_grain = game:get("prices/grain")
+    assert.is_truthy(new_grain >= 5 and new_grain <= 12,
+      "grain price after morning-bell should be in [5,12], got " .. tostring(new_grain))
+    _ = old_grain  -- silence unused warning
+  end)
+
+  it("grand festival fires after 4 rests (day 5)", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo10_market_bell.sb")
+    game:init()
+    for _ = 1, 4 do
+      -- browse to close market
+      for _ = 1, 5 do game:choose(3) end
+      -- rest
+      game:choose(1)
+    end
+    assert.equal(true,  game:get("market/festival"))
+    assert.equal(false, game:get("market/open"))
+    assert.equal(5,     game:get("world/day"))
+  end)
+
+  it("festival-end scene reached after grand festival", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo10_market_bell.sb")
+    game:init()
+    for _ = 1, 4 do
+      for _ = 1, 5 do game:choose(3) end
+      game:choose(1)
+    end
+    -- Only choice is the festival choice
+    local _, choices = game:render()
+    assert.equal(1, #choices)
+    assert.is_truthy(choices[1].label:find("festival"), choices[1].label)
+    game:choose(1)
+    assert.equal("festival-end", game:current_scene())
   end)
 end)
 

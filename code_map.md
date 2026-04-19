@@ -638,6 +638,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `oracle_lib.sb` | shared types (`Shrine`, `WeatherKind`), state, relation (`paths`), pure helpers — imported by demo07_oracle.sb |
 | `demo08_probability_engine.sb` | `probability`, `can-reach?`, `find-path`, `optimal-path`, `find-counterexample` as in-game mechanics; `engine/emit`, `engine/checkpoint!`, `undo!`; explicit lambda `fn(x): ...`; `verify after requires`; `if/else` in fn bodies; `nil` literal |
 | `demo09_wardens_map.sb` | `grid-get`/`grid-set!` (tile cell read/write), `visible-from?` (guard LOS), `path-to` (shortest route with blocked-set), `occupied-by` (cell collision check); `while` loop, `cond` expression, inline `Enum(a,b,c)` type, lambda in `count-where`, `engine/emit`, `verify from-any-state:` |
+| `demo10_market_bell.sb` | multi-axis `time-model` (`axes: [day, hour]`, `wrap: [none, 24]`), `time-inc!` on hour axis (browsing) and day axis (rest), `time-set!` (reset hour to morning), `every: [day: +1]` schedule (morning-bell), `at: [day: +4]` one-shot schedule (grand-festival), `cancel-schedule!`, `engine/emit`, `watch`/`watch-when`, `verify-always`, `verify after` |
 
 ---
 

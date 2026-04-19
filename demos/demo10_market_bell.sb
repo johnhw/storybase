@@ -1,0 +1,202 @@
+# demo10_market_bell.sb
+# The Market Bell -- a village trading game with a multi-axis time model.
+#
+# Features demonstrated:
+#   time-model  -- two axes: day (no wrap) and hour (wrap at 24)
+#   time-inc!   -- advances hour within a day (browse-stalls)
+#   time-inc!   -- advances day axis (rest), which triggers the morning-bell schedule
+#   time-set!   -- resets the hour clock to morning (8:00) after rest
+#   every: [day: +1]  -- morning-bell fires once per new day
+#   at: [day: +4]     -- grand-festival fires as a one-shot on what the player sees as day 5
+#   offset: [day: 0]  -- zero-phase offset (syntax demonstration)
+#   cancel-schedule!  -- morning-bell cancelled permanently when the festival begins
+#   engine/emit       -- market-opened, market-closed, festival-begins events
+#   watch / watch-when  -- live watches on prices and festival state
+#   verify-always + verify after  -- gold/goods invariants and post-conditions
+#
+# The engine day clock starts at 0 and the grand-festival fires at +4 (i.e. engine
+# day = 4, after the player rests four times).  world/day starts at 1 and increments
+# alongside the engine clock, so the player sees "Day 1 of 5" through "Day 5 of 5".
+#
+# Run with: storybase run demos/demo10_market_bell.sb
+
+module market-bell
+  version: 1.0
+
+time-model:
+  axes: [day, hour]
+  wrap: [none, 24]
+
+engine-config:
+  entry-scene: market-town
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state world/day       : Int(1, 5)   = 1
+state world/hour      : Int(0, 23)  = 8
+state market/open     : Bool        = true
+state market/festival : Bool        = false
+state player/gold     : Int(0, 500) = 100
+state player/goods    : Int(0, 20)  = 5
+state prices/grain    : Int(1, 20)  = 8
+state prices/cloth    : Int(1, 30)  = 15
+
+# ─────────────────────────────────────────────────────────
+# Schedules
+# ─────────────────────────────────────────────────────────
+
+"The morning bell rings at dawn each new day, opening the market and resetting prices."
+schedule morning-bell:
+  every:  [day: +1]
+  offset: [day: 0]
+  fn:
+    set!  market/open  true
+    set!  prices/grain (random-int 5 12)
+    set!  prices/cloth (random-int 10 25)
+    engine/emit 'market-opened {day: world/day, hour: world/hour}
+
+"The grand festival arrives on day five, closing the market for good."
+schedule grand-festival:
+  at: [day: +4]
+  fn:
+    set!  market/festival true
+    set!  market/open     false
+    cancel-schedule! morning-bell
+    engine/emit 'festival-begins {day: world/day}
+
+# ─────────────────────────────────────────────────────────
+# Watches
+# ─────────────────────────────────────────────────────────
+
+watch world/day             "Day"
+watch world/hour            "Hour"
+watch market/open           "Market open"
+watch player/gold           "Gold"
+watch prices/grain          "Grain price"
+watch prices/cloth          "Cloth price"
+watch-when market/festival  "The Grand Festival has begun!"
+
+# ─────────────────────────────────────────────────────────
+# Verify
+# ─────────────────────────────────────────────────────────
+
+verify "gold never goes negative":
+  verify-always player/gold >= 0
+
+verify "goods never go negative":
+  verify-always player/goods >= 0
+
+verify "buying spends gold":
+  after (buy-grain):
+    player/gold >= 0
+
+verify "selling reduces goods":
+  after (sell-grain):
+    player/goods >= 0
+
+# ─────────────────────────────────────────────────────────
+# Pure functions
+# ─────────────────────────────────────────────────────────
+
+fn can-buy?:
+  market/open  and  player/gold >= prices/grain
+
+fn can-sell?:
+  market/open  and  player/goods > 0
+
+fn can-browse?:
+  market/open  and  world/hour < 18
+
+fn can-rest?:
+  not market/open  and  not market/festival
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+"Buy one bundle of grain at the current market price."
+fn buy-grain:
+  pre:  market/open
+  pre:  player/gold >= prices/grain
+  dec!  player/gold  prices/grain
+  inc!  player/goods 1
+
+"Sell one bundle of grain at the current market price."
+fn sell-grain:
+  pre:  market/open
+  pre:  player/goods > 0
+  inc!  player/gold  prices/grain
+  dec!  player/goods 1
+
+"Browse the stalls for two hours.  The market closes automatically at hour 18."
+fn browse-stalls:
+  pre:  market/open
+  pre:  world/hour < 18
+  time-inc! hour: 2
+  inc!  world/hour 2
+  when  world/hour >= 18:
+    set!  market/open false
+    engine/emit 'market-closed {day: world/day, hour: world/hour}
+
+"Sleep until morning.  Advances the day clock and resets the hour to 8:00."
+fn rest:
+  pre:  not market/open
+  pre:  not market/festival
+  time-inc! day:  1
+  time-set! hour: 8
+  inc!  world/day  1
+  set!  world/hour 8
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene market-town:
+  Day {world/day} of 5.  Hour {world/hour}:00.
+  if market/festival:
+    The Grand Festival fills the square. The market has closed for good.
+    Merchants and travellers from across the kingdom pack the cobblestones.
+    The smell of roasting chestnuts drifts from every corner.
+  else:
+    if market/open:
+      The market is open and busy.
+      Grain: {prices/grain} gold per bundle.  Cloth: {prices/cloth} gold per bolt.
+      You carry {player/gold} gold and {player/goods} bundles of grain.
+    else:
+      The market has closed for the evening. The stalls are shuttered.
+      A cold breeze sweeps through the empty square.
+      You carry {player/gold} gold and {player/goods} bundles of grain.
+
+  * [can-buy?] Buy grain  (-{prices/grain} gold, +1 bundle)
+    buy-grain
+    -> market-town
+
+  * [can-sell?] Sell grain  (+{prices/grain} gold, -1 bundle)
+    sell-grain
+    -> market-town
+
+  * [can-browse?] Browse the stalls  (advances 2 hours)
+    browse-stalls
+    -> market-town
+
+  * [can-rest?] Rest until morning  (advance to next day)
+    rest
+    -> market-town
+
+  * [market/festival] The festival is here -- your journey ends.
+    -> festival-end
+
+scene festival-end:
+  Day {world/day} of 5.  The Grand Festival is in full swing.
+  After five days at the village market your journey draws to a close.
+  You finish with {player/gold} gold and {player/goods} bundles of grain.
+
+  if player/gold >= 150:
+    A profitable venture. The market has been kind.
+  else:
+    if player/gold >= 100:
+      You broke even. Not bad for a few days of work.
+    else:
+      A lean stretch. Perhaps next season will bring better prices.
