@@ -1168,8 +1168,9 @@ local function parse_match_expr(p)
     if p:at("NAMED_ARG", "_") then
       p:adv(); pattern = "_"; colon_consumed = true
     elseif p:at("NAMED_ARG") then
+      -- bare "variant-name:" (no fields) — zero-field variant pattern
       local nt = p:adv()
-      pattern = ast.fn_call(nt.value, {}, nt.pos); colon_consumed = true
+      pattern = ast.record_constructor(nt.value, {}, nt.pos); colon_consumed = true
     elseif p:at("SYMBOL") then
       local s = p:adv(); pattern = ast.symbol_lit(s.value, s.pos)
     elseif p:at("IDENT", "_") then

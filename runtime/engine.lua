@@ -630,6 +630,8 @@ function M.run(game_table, opts)
     else
       state_mod.replay(eng._state, save_data.entries or {})
     end
+    -- Register static schedules/actors before replaying log so thresholds can be updated
+    eng:register_actors_schedules()
     -- Replay schedule events so dynamic schedules and threshold advances are restored
     eng._scheduler:replay_log(save_data.entries or {}, eng._game.fns)
     -- Restore scene stack

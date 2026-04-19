@@ -56,6 +56,7 @@ end
 -- ── load test games ──────────────────────────────────────────────
 
 local game01 = load_game("demos/demo01_wanderer.sb")
+local game05 = load_game("demos/demo05_siege.sb")
 local game08 = load_game("demos/demo08_probability_engine.sb")
 
 -- ── Basic: fresh start ──────────────────────────────────────────
@@ -412,6 +413,95 @@ describe("CLI cmd: state fields", function()
     assert.equal(0,     resp.state["world/contracts"])
     assert.equal(false, resp.state["spy/caught"])
     assert.equal(false, resp.state["supply/arrived"])
+  end)
+end)
+
+-- ── Schedule persistence (demo05) ────────────────────────────────
+-- Regression tests for three bugs found during manual play-through of demo05:
+--   1. log.serialise_entries dropped schedule_name/next_fire fields → replay_log
+--      couldn't restore thresholds; schedules fired every step after first fire.
+--   2. engine.run() load path never called register_actors_schedules() → static
+--      schedules vanished after a standard save/load.
+--   3. parser: zero-field variant pattern (e.g. stand-down:) compiled as fn_call
+--      instead of record_constructor → match arm never fired.
+
+describe("CLI cmd: schedule persistence across steps (demo05 siege)", function()
+  local path
+
+  before_each(function()
+    path = tmp_save()
+    -- Fresh start + order battle stations (so we know the alert level)
+    step(game05, path, "", { reset = true })
+    step(game05, path, "3")  -- order battle stations
+  end)
+
+  after_each(function()
+    cleanup(path)
+  end)
+
+  it("attacker-wave fires every 2 turns, not every turn (regression: schedule threshold lost across steps)", function()
+    -- T1: no attack
+    local r1 = step(game05, path, "1")
+    local hp1 = r1.state["castle/hp"]
+    assert.equal(500, hp1)  -- no attack at odd turn
+
+    -- T2: attack fires (-15 at battle stations)
+    local r2 = step(game05, path, "1")
+    assert.equal(485, r2.state["castle/hp"])
+
+    -- T3: no attack (threshold advanced to T4 after T2 fire)
+    local r3 = step(game05, path, "1")
+    assert.equal(485, r3.state["castle/hp"])  -- unchanged
+
+    -- T4: attack fires again
+    local r4 = step(game05, path, "1")
+    assert.equal(470, r4.state["castle/hp"])
+  end)
+
+  it("resupply-caravan fires every 4 turns, not every turn after first fire", function()
+    -- Advance to T3 (before first resupply)
+    step(game05, path, "1"); step(game05, path, "1"); step(game05, path, "1")
+    local r3 = step(game05, path, "")  -- probe state at T3
+    local sup3 = r3.state["castle/supplies"]  -- 150-10-10-10 = 120
+
+    -- T4: resupply fires (+40) and turn costs (-10) → net +30
+    local r4 = step(game05, path, "1")
+    assert.equal(sup3 - 10 + 40, r4.state["castle/supplies"])
+
+    -- T5: no resupply, just turn cost (-10)
+    local r5 = step(game05, path, "1")
+    assert.equal(r4.state["castle/supplies"] - 10, r5.state["castle/supplies"])
+
+    -- T8: resupply fires again (next fire is at T8, 3 advances from T5)
+    step(game05, path, "1"); step(game05, path, "1")  -- T6, T7
+    local r8 = step(game05, path, "1")  -- T8: attack + resupply
+    assert.equal(r5.state["castle/supplies"] - 10*3 + 40, r8.state["castle/supplies"])
+  end)
+
+  it("actor behavior: zero-field variant (stand-down) matches correctly (regression: fn_call vs record_constructor)", function()
+    -- After battle stations: alert=battle, morale=85
+    local r_bs = step(game05, path, "")
+    assert.equal("battle", r_bs.state["garrison/alert"])
+    assert.equal(85, r_bs.state["garrison/morale"])
+
+    -- Stand down (choice 4 when alert=battle): send stand-down message to captain
+    -- Captain behavior: set alert='calm, morale+10
+    local r_sd = step(game05, path, "4")
+    assert.equal("calm", r_sd.state["garrison/alert"])
+    assert.equal(95, r_sd.state["garrison/morale"])
+  end)
+
+  it("full 10-turn siege survives with correct final HP at battle stations", function()
+    -- 5 attacks at -15 each = -75 total
+    for _ = 1, 10 do step(game05, path, "1") end
+    local r10 = step(game05, path, "")  -- probe at T10
+    assert.equal(425, r10.state["castle/hp"])
+    assert.equal(10,  r10.state["castle/turn"])
+    -- Declare victory
+    local rdone = step(game05, path, "4")
+    assert.equal("done", rdone.type)
+    assert.is_true(rdone.done)
+    assert.is_true(rdone.state["castle/siege-ended"])
   end)
 end)
 

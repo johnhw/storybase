@@ -79,6 +79,32 @@ local function ser_cache(cache)
   return table.concat(parts, "\n")
 end
 
+-- Serialise scheduler next_fire state so CLI steps can restore it without
+-- needing a cumulative log (each step only saves its own log entries).
+local function ser_schedule_state(scheduler)
+  local lines = { "{" }
+  local names = {}
+  for name in pairs(scheduler._static or {}) do names[#names+1] = name end
+  table.sort(names)
+  for _, name in ipairs(names) do
+    local ss = scheduler._static[name]
+    lines[#lines+1] = "  [" .. string.format("%q", name) .. "] = {"
+    local nf_parts = {}
+    for axis, val in pairs(ss.next_fire or {}) do
+      nf_parts[#nf_parts+1] = axis .. "=" .. tostring(val)
+    end
+    lines[#lines+1] = "    next_fire={" .. table.concat(nf_parts, ",") .. "},"
+    local fired_parts = {}
+    for axis, v in pairs(ss.fired or {}) do
+      if v then fired_parts[#fired_parts+1] = axis .. "=true" end
+    end
+    lines[#lines+1] = "    fired={" .. table.concat(fired_parts, ",") .. "},"
+    lines[#lines+1] = "  },"
+  end
+  lines[#lines+1] = "}"
+  return table.concat(lines, "\n")
+end
+
 -- Serialise the checkpoint stack to Lua source.
 local function ser_checkpoints(checkpoints)
   local lines = { "{" }
@@ -126,6 +152,11 @@ local function write_cli_save(path, eng)
   -- Checkpoint stack
   f:write("save.checkpoints =\n")
   f:write(ser_checkpoints(eng._state._checkpoints))
+  f:write("\n")
+
+  -- Scheduler state (next_fire per schedule, so thresholds survive across steps)
+  f:write("save.schedule_state =\n")
+  f:write(ser_schedule_state(eng._scheduler))
   f:write("\n")
 
   f:write("return save\n")
@@ -185,6 +216,25 @@ local function restore_engine(eng, save_data)
 
   -- Replay schedule state
   eng._scheduler:replay_log(save_data.entries or {}, eng._game.fns)
+
+  -- Restore explicit scheduler next_fire state (overrides replay_log; handles the case
+  -- where the schedule fired in a previous CLI step and the current step has no
+  -- schedule_fired entry to replay from)
+  if save_data.schedule_state then
+    for name, ss_data in pairs(save_data.schedule_state) do
+      local ss = eng._scheduler._static[name]
+      if ss then
+        if ss_data.next_fire then
+          ss.next_fire = {}
+          for axis, val in pairs(ss_data.next_fire) do ss.next_fire[axis] = val end
+        end
+        if ss_data.fired then
+          ss.fired = {}
+          for axis, v in pairs(ss_data.fired) do ss.fired[axis] = v end
+        end
+      end
+    end
+  end
 
   -- Restore scene stack
   if type(save_data.scene_stack) == "table" and #save_data.scene_stack > 0 then

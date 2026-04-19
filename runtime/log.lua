@@ -247,6 +247,21 @@ function M.serialise_entries(entries)
     if e.time ~= nil then
       parts[#parts + 1] = "time=" .. ser_val(e.time)
     end
+    if e.schedule_name ~= nil then
+      parts[#parts + 1] = "schedule_name=" .. ser_val(e.schedule_name)
+    end
+    if e.next_fire ~= nil then
+      local nf_parts = {}
+      for axis, val in pairs(e.next_fire) do
+        nf_parts[#nf_parts + 1] = axis .. "=" .. tostring(val)
+      end
+      parts[#parts + 1] = "next_fire={" .. table.concat(nf_parts, ",") .. "}"
+    end
+    if e.fired_axes and #e.fired_axes > 0 then
+      local fa_parts = {}
+      for i, axis in ipairs(e.fired_axes) do fa_parts[i] = string.format("%q", axis) end
+      parts[#parts + 1] = "fired_axes={" .. table.concat(fa_parts, ",") .. "}"
+    end
     lines[#lines + 1] = "  {" .. table.concat(parts, ", ") .. "},"
   end
   lines[#lines + 1] = "}"
