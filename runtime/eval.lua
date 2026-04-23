@@ -159,7 +159,13 @@ local function eval_path(node, ctx)
     local parts = {}
     for _, seg in ipairs(node.segments or {}) do
       if type(seg) == "table" and seg.interp then
-        local val = ctx.vars[seg.interp]
+        local val
+        if seg.interp:find("/", 1, true) then
+          -- path expression: look up value from state (e.g. {player/companion})
+          val = ctx.state and ctx.state:get(seg.interp)
+        else
+          val = ctx.vars[seg.interp]
+        end
         parts[#parts + 1] = tostring(val ~= nil and val or seg.interp)
       else
         parts[#parts + 1] = tostring(seg)
@@ -2001,6 +2007,22 @@ end
 -- Narration rendering
 -- ============================================================
 
+--- Convert any value to a display string for narration/template interpolation.
+--- Lists (sequential tables) are joined with ", ".
+local function val_to_display(val)
+  if val == nil then return "" end
+  if type(val) == "table" then
+    -- Sequential list: join with ", "
+    if #val > 0 or next(val) == nil then
+      local parts = {}
+      for _, v in ipairs(val) do parts[#parts+1] = tostring(v) end
+      return table.concat(parts, ", ")
+    end
+    return tostring(val)
+  end
+  return tostring(val)
+end
+
 --- Render a narration text list (mixed strings and inline_expr nodes) to a string.
 ---@param text table  list of strings and inline_expr nodes
 ---@param ctx  table  evaluation context
@@ -2012,7 +2034,7 @@ function M.render_text(text, ctx)
       parts[#parts + 1] = item
     elseif type(item) == "table" and item.kind == K.INLINE_EXPR then
       local val = eval_expr(item.expr, ctx)
-      parts[#parts + 1] = tostring(val ~= nil and val or "")
+      parts[#parts + 1] = val_to_display(val)
     end
   end
   return table.concat(parts, "")

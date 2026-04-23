@@ -384,8 +384,10 @@ function M.tokenize(source, filename)
           adv()  -- consume '{'
           if is_alpha(peek()) then
             local istart = pos
-            while is_alnum(peek()) or (peek() == '-' and is_alnum(peek(1))) do
-              if peek() == '-' then adv() end
+            -- Allow path expressions like player/companion inside {}
+            while is_alnum(peek()) or (peek() == '-' and is_alnum(peek(1)))
+               or (peek() == '/' and is_alpha(peek(1))) do
+              if peek() == '-' or peek() == '/' then adv() end
               adv()
             end
             local iname = s:sub(istart, pos - 1)

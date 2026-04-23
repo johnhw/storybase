@@ -785,13 +785,28 @@ local function make_path_expr(path_str, pos)
 end
 
 -- Convert "npcs/{npc}/hp" INTERP_PATH token string → interp_path node
+-- Handles path-expression interpolations like {player/companion} correctly.
 local function make_interp_path(path_str, pos)
   local segs = {}
-  for seg in path_str:gmatch("[^/]+") do
-    if seg:sub(1,1) == '{' then
-      table.insert(segs, { interp = seg:sub(2, -2) })
+  local i = 1
+  local n = #path_str
+  while i <= n do
+    local c = path_str:sub(i, i)
+    if c == '/' then
+      i = i + 1  -- skip path separator
+    elseif c == '{' then
+      local close = path_str:find("}", i + 1, true)
+      if close then
+        table.insert(segs, { interp = path_str:sub(i + 1, close - 1) })
+        i = close + 1
+      else
+        table.insert(segs, path_str:sub(i))
+        break
+      end
     else
-      table.insert(segs, seg)
+      local j = path_str:find("[/{]", i) or (n + 1)
+      table.insert(segs, path_str:sub(i, j - 1))
+      i = j
     end
   end
   return ast.interp_path(segs, pos)

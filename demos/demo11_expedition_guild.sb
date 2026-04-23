@@ -1,0 +1,324 @@
+# demo11_expedition_guild.sb
+# The Expedition Guild -- a guild management game.
+#
+# Features demonstrated:
+#   type aliases          -- type Gold = Int(0,500) / type Prestige = Int(0,100)
+#   Option(T) + ??        -- player/companion and player/weapon are nullable
+#   find expression       -- where:/order-by:/limit: roster queries
+#   find ... count        -- count injured members
+#   computed goto         -- -> (companion-scene player/companion)
+#   multiline strings     -- """...""" in mission briefing
+#   @before in verify     -- gold/prestige change after mutating functions
+#
+# Run: storybase run demos/demo11_expedition_guild.sb
+
+module expedition-guild
+  version: 1.0
+
+engine-config:
+  entry-scene: prologue
+
+# ─────────────────────────────────────────────────────────
+# Type aliases and enums
+# ─────────────────────────────────────────────────────────
+
+type Gold       = Int(0, 500)
+type Prestige   = Int(0, 100)
+type MemberStatus = available | on-mission | injured | retired
+type WeaponKind   = sword | bow | staff
+
+type MemberInfo:
+  status:    MemberStatus
+  skill:     Int(1, 10)
+  hire-cost: Int(5, 50)
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state guild/gold      : Gold        = 200
+state guild/prestige  : Prestige    = 10
+state guild/day       : Int(1, 30)  = 1
+state guild/ready     : Bool        = false
+
+state members/{m}: MemberInfo  max: 8
+
+state player/companion : Option(SymbolOf(members))
+state player/weapon    : Option(WeaponKind)
+
+# ─────────────────────────────────────────────────────────
+# Watches
+# ─────────────────────────────────────────────────────────
+
+watch guild/gold      "Gold"
+watch guild/prestige  "Prestige"
+watch guild/day       "Day"
+watch player/weapon   "Weapon"
+
+# ─────────────────────────────────────────────────────────
+# Verify
+# ─────────────────────────────────────────────────────────
+
+verify "gold never goes negative":
+  verify-always guild/gold >= 0
+
+verify "prestige never goes negative":
+  verify-always guild/prestige >= 0
+
+verify "hiring spends guild gold":
+  requires guild/gold >= members/aldric/hire-cost
+  after (hire-member 'aldric):
+    guild/gold < guild/gold@before
+
+verify "dispatch earns prestige":
+  requires player/companion != nil
+  after (dispatch-mission):
+    guild/prestige > guild/prestige@before
+
+# ─────────────────────────────────────────────────────────
+# Pure functions
+# ─────────────────────────────────────────────────────────
+
+"Return the companion-specific scene name for a computed goto."
+fn companion-scene key:
+  match key:
+    'aldric : 'talk-aldric
+    'mira   : 'talk-mira
+    'zhen   : 'talk-zhen
+    _       : 'no-companion
+
+fn can-hire? m:
+  members/{m}/status = 'available  and  guild/gold >= members/{m}/hire-cost
+
+fn available-count:
+  find members where: members/{members}/status = 'available count
+
+fn injured-count:
+  find members where: members/{members}/status = 'injured count
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+"Populate the guild roster.  Must be called once at game start."
+fn init-guild:
+  set! members/aldric/status    'available
+  set! members/aldric/skill     8
+  set! members/aldric/hire-cost 30
+  set! members/mira/status      'available
+  set! members/mira/skill       6
+  set! members/mira/hire-cost   20
+  set! members/zhen/status      'available
+  set! members/zhen/skill       9
+  set! members/zhen/hire-cost   40
+  set! members/bran/status      'available
+  set! members/bran/skill       4
+  set! members/bran/hire-cost   10
+  set! members/lyra/status      'injured
+  set! members/lyra/skill       7
+  set! members/lyra/hire-cost   25
+  set! guild/ready true
+
+"Hire adventurer m as your companion."
+fn hire-member m:
+  pre:  members/{m}/status = 'available
+  pre:  guild/gold >= members/{m}/hire-cost
+  dec!  guild/gold members/{m}/hire-cost
+  set!  members/{m}/status 'on-mission
+  set!  player/companion m
+
+"Equip a weapon from the armory."
+fn equip-weapon w:
+  set! player/weapon w
+
+"Return the current weapon to the rack."
+fn unequip:
+  set! player/weapon nil
+
+"Release the companion back to available."
+fn dismiss-companion:
+  pre:  player/companion != nil
+  set!  members/{player/companion}/status 'available
+  set!  player/companion nil
+
+"Dispatch a mission: advance the day and gain prestige."
+fn dispatch-mission:
+  pre:  player/companion != nil
+  pre:  guild/day < 30
+  inc!  guild/day 1
+  inc!  guild/prestige 5
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene prologue:
+  Welcome to the Expedition Guild.
+  You manage a roster of adventurers, equip them for battle,
+  and dispatch missions to build your guild's prestige.
+
+  * Begin
+    init-guild
+    -> guild-hall
+
+scene guild-hall:
+  Day {guild/day} of 30.  Gold: {guild/gold}.  Prestige: {guild/prestige}.
+  Companion: {player/companion ?? 'none}.  Weapon: {player/weapon ?? 'unarmed}.
+
+  Available adventurers (top 4 by skill):
+  {find members where: members/{members}/status = 'available order-by: members/{members}/skill desc limit: 4}
+
+  Injured and unable to travel: {injured-count} adventurer(s).
+
+  * [guild/gold > 0] Hire from the roster
+    => hire-roster
+
+  * [true] Visit the armory
+    => armory
+
+  * [player/companion != nil] Talk to your companion
+    -> (companion-scene player/companion)
+
+  * [player/companion != nil] Depart on a mission
+    => mission-briefing
+
+  * [player/companion = nil and available-count > 0] Wait a day (rest)
+    inc! guild/day 1
+    -> guild-hall
+
+  * [guild/day >= 30] The season is over — see how the guild fared.
+    -> guild-epilogue
+
+scene hire-roster:
+  The guild notice board.  Available adventurers (best four by skill):
+  {find members where: members/{members}/status = 'available order-by: members/{members}/skill desc limit: 4}
+
+  * [can-hire? 'aldric] Hire Aldric  (skill {members/aldric/skill}, cost {members/aldric/hire-cost} gold)
+    hire-member 'aldric
+    -> guild-hall
+
+  * [can-hire? 'mira] Hire Mira  (skill {members/mira/skill}, cost {members/mira/hire-cost} gold)
+    hire-member 'mira
+    -> guild-hall
+
+  * [can-hire? 'zhen] Hire Zhen  (skill {members/zhen/skill}, cost {members/zhen/hire-cost} gold)
+    hire-member 'zhen
+    -> guild-hall
+
+  * [can-hire? 'bran] Hire Bran  (skill {members/bran/skill}, cost {members/bran/hire-cost} gold)
+    hire-member 'bran
+    -> guild-hall
+
+  * Back to the hall
+    -> guild-hall
+
+scene armory:
+  The armory.  Your current weapon: {player/weapon ?? 'unarmed}.
+
+  * [player/weapon != 'sword] Take the sword
+    equip-weapon 'sword
+    -> armory
+
+  * [player/weapon != 'bow] Take the bow
+    equip-weapon 'bow
+    -> armory
+
+  * [player/weapon != 'staff] Take the staff
+    equip-weapon 'staff
+    -> armory
+
+  * [player/weapon != nil] Return your weapon to the rack
+    unequip
+    -> armory
+
+  * Back to the hall
+    -> guild-hall
+
+scene talk-aldric:
+  Aldric, the veteran swordsman, leans against the wall.
+  "Ready when you are, Commander. Just say the word and we march."
+  His hand rests on the pommel of his blade.
+
+  * [player/companion = 'aldric] Dismiss Aldric
+    dismiss-companion
+    -> guild-hall
+
+  * Return to the hall
+    -> guild-hall
+
+scene talk-mira:
+  Mira sharpens her arrows by the fire, humming softly.
+  "The wind is right for travel. I have been watching the treeline."
+  She nods towards the eastern path.
+
+  * [player/companion = 'mira] Dismiss Mira
+    dismiss-companion
+    -> guild-hall
+
+  * Return to the hall
+    -> guild-hall
+
+scene talk-zhen:
+  Zhen meditates cross-legged on the cold stone floor.
+  "Each mission is a brushstroke. The season is our canvas."
+  She opens one eye and smiles faintly.
+
+  * [player/companion = 'zhen] Dismiss Zhen
+    dismiss-companion
+    -> guild-hall
+
+  * Return to the hall
+    -> guild-hall
+
+scene no-companion:
+  The common room is quiet.  No one waits for your orders yet.
+  The hearth crackles and the empty chairs stare back at you.
+
+  * Return to the hall
+    -> guild-hall
+
+scene mission-briefing:
+  {player/companion ?? 'unknown} steps forward as you unroll the contract.
+
+  """
+  EXPEDITION CONTRACT
+  -------------------
+  Destination : The Thornwood Ruins
+  Duration    : One day
+  Reward      : Prestige and experience
+  Risk        : Moderate
+
+  The client reports unusual activity near the old watch-tower.
+  Your companion will scout ahead while you coordinate from camp.
+  Return before nightfall.
+  """
+
+  Weapon in hand: {player/weapon ?? 'unarmed}.
+  Guild funds committed: {guild/gold} gold.
+
+  * Depart on the mission  (Day {guild/day} -> Day {guild/day + 1}, +5 Prestige)
+    dispatch-mission
+    -> guild-hall
+
+  * Cancel — return to the hall
+    -> guild-hall
+
+scene guild-epilogue:
+  The season ends on Day {guild/day}.
+  Final gold: {guild/gold}.  Final prestige: {guild/prestige}.
+
+  if guild/prestige >= 60:
+    """
+    ACCLAIMED GUILD
+    ---------------
+    Merchants across the realm speak of your guild in hushed tones
+    of admiration.  New recruits queue at the door.  The Expedition
+    Guild has earned a legendary reputation this season.
+    """
+  else:
+    if guild/prestige >= 30:
+      The guild made solid progress.  A respectable season.
+      Word of your deeds has spread through the region.
+    else:
+      A quiet season.  The guild survives, but its name is not yet known
+      beyond the city walls.  Perhaps next season will bring more glory.

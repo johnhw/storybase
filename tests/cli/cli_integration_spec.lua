@@ -193,6 +193,7 @@ local DEMO_SB_FILES = {
   "demos/demo06_buried_keep.sb",
   "demos/demo07_oracle.sb",
   "demos/demo10_market_bell.sb",
+  "demos/demo11_expedition_guild.sb",
 }
 
 describe("CLI compile: demo .sb files", function()
@@ -278,6 +279,7 @@ local DEMO_STEPS = {
   ["demos/demo06_buried_keep.sb"] = 6, -- torches run out in ~4 steps auto-play
   ["demos/demo07_oracle.sb"]    = 10,  -- journey ends at day 8; reaches finale in ~9 steps
   ["demos/demo10_market_bell.sb"] = 20, -- buy/sell loop; auto stays in day-1 trading
+  ["demos/demo11_expedition_guild.sb"] = 15, -- guild management; hire+dispatch loop
 }
 
 describe("CLI run --auto --steps N: all demo files run without error", function()
@@ -764,6 +766,85 @@ describe("CLI demo10_market_bell: multi-axis time model + schedules + verify", f
     assert.is_truthy(choices[1].label:find("festival"), choices[1].label)
     game:choose(1)
     assert.equal("festival-end", game:current_scene())
+  end)
+end)
+
+-- ── demo11: expedition guild ─────────────────────────────────────────────────
+
+describe("CLI demo11_expedition_guild: type aliases + Option(T) + find + computed-goto", function()
+  it("compiles without errors", function()
+    local rc, out, err = run_cli({"compile", "demos/demo11_expedition_guild.sb"})
+    assert.equal(0, rc, "demo11 compile failed:\n" .. out .. err)
+  end)
+
+  it("init-guild populates roster and find renders member list", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo11_expedition_guild.sb")
+    game:init()
+    game:choose(1)  -- Begin (calls init-guild)
+    local narr = game:render()
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("zhen"), text)  -- highest skill member visible
+    assert.is_truthy(text:find("aldric"), text)
+    assert.is_truthy(text:find("1 adventurer"), text)  -- lyra is injured
+  end)
+
+  it("hiring Aldric spends gold and sets companion (Option(T))", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo11_expedition_guild.sb")
+    game:init()
+    game:choose(1)  -- Begin
+    game:choose(1)  -- Hire from roster
+    game:choose(1)  -- Hire Aldric (skill 8, cost 30)
+    assert.equal(170, game:get("guild/gold"))
+    assert.equal("aldric", game:get("player/companion"))
+  end)
+
+  it("computed goto routes to companion-specific scene", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo11_expedition_guild.sb")
+    game:init()
+    game:choose(1)  -- Begin
+    game:choose(1)  -- Hire from roster
+    game:choose(1)  -- Hire Aldric
+    game:choose(3)  -- Talk to companion → computed goto → talk-aldric
+    assert.equal("talk-aldric", game:current_scene())
+  end)
+
+  it("dismiss companion restores member status via dynamic path {player/companion}", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo11_expedition_guild.sb")
+    game:init()
+    game:choose(1)  -- Begin
+    game:choose(1)  -- Hire from roster
+    game:choose(1)  -- Hire Aldric
+    game:choose(3)  -- Talk to Aldric
+    game:choose(1)  -- Dismiss Aldric
+    assert.is_nil(game:get("player/companion"))
+    assert.equal("available", game:get("members/aldric/status"))
+  end)
+
+  it("dispatch mission advances day and gains prestige", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo11_expedition_guild.sb")
+    game:init()
+    game:choose(1)  -- Begin
+    game:choose(1)  -- Hire from roster
+    game:choose(1)  -- Hire Aldric
+    game:choose(4)  -- Depart on mission → mission-briefing
+    game:choose(1)  -- Depart
+    assert.equal(2, game:get("guild/day"))
+    assert.equal(15, game:get("guild/prestige"))
+  end)
+
+  it("nil-coalescing ?? renders 'none' when companion is nil", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo11_expedition_guild.sb")
+    game:init()
+    game:choose(1)  -- Begin
+    local narr = game:render()
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("none"), text)  -- player/companion ?? 'none
   end)
 end)
 

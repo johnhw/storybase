@@ -241,6 +241,18 @@ describe("lexer — interpolated paths", function()
     assert.equal("INTERP_PATH", t.kind)
     assert.equal("world/{region}/{zone}/name", t.value)
   end)
+
+  it("lexes a path interpolation with a path expression (player/companion)", function()
+    local t = tok("members/{player/companion}/status", 1)
+    assert.equal("INTERP_PATH", t.kind)
+    assert.equal("members/{player/companion}/status", t.value)
+  end)
+
+  it("lexes a path interpolation with a multi-segment path expression", function()
+    local t = tok("data/{a/b/c}/value", 1)
+    assert.equal("INTERP_PATH", t.kind)
+    assert.equal("data/{a/b/c}/value", t.value)
+  end)
 end)
 
 -- ── Named argument tokens ─────────────────────────────────────────────────────

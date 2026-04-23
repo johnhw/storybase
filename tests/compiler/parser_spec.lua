@@ -753,6 +753,16 @@ describe("parser — path expressions", function()
     assert.are.equal("npc", s.expr.segments[2].interp)
     assert.are.equal("hp", s.expr.segments[3])
   end)
+
+  it("parses an interpolated path with a path expression in braces", function()
+    local s, _ = first_stmt("members/{player/companion}/status")
+    assert.are.equal(ast.K.EXPR_STMT, s.kind)
+    assert.are.equal(ast.K.INTERP_PATH, s.expr.kind)
+    assert.are.equal(3, #s.expr.segments)
+    assert.are.equal("members", s.expr.segments[1])
+    assert.are.equal("player/companion", s.expr.segments[2].interp)
+    assert.are.equal("status", s.expr.segments[3])
+  end)
 end)
 
 -- ── Binary operator expressions ───────────────────────────────────────────────
