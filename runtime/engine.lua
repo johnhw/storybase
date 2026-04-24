@@ -117,19 +117,20 @@ function M.new(game_table, opts)
   local sched  = sched_mod.new(store, log)
 
   local eng = {
-    _game        = game_table,
-    _opts        = opts,
-    _scene_stack = {},
-    _max_stack   = max_stack,
-    _log         = log,
-    _state       = store,
-    _fns         = game_table.fns    or {},
-    _scenes      = game_table.scenes or {},
-    _actors      = actors,
-    _scheduler   = sched,
-    _io_out      = opts.io_out or io.stdout,
-    _io_in       = opts.io_in  or io.stdin,
-    _grids       = {},  -- name → {cells, width, height, cell_type, default_val}
+    _game             = game_table,
+    _opts             = opts,
+    _scene_stack      = {},
+    _max_stack        = max_stack,
+    _log              = log,
+    _state            = store,
+    _fns              = game_table.fns    or {},
+    _scenes           = game_table.scenes or {},
+    _actors           = actors,
+    _scheduler        = sched,
+    _io_out           = opts.io_out or io.stdout,
+    _io_in            = opts.io_in  or io.stdin,
+    _grids            = {},  -- name → {cells, width, height, cell_type, default_val}
+    _pending_narration = {},  -- dialogue objects emitted by say in fn bodies
   }
 
   -- ── Scene stack ─────────────────────────────────────────────
@@ -203,14 +204,15 @@ function M.new(game_table, opts)
   ---@param fn_name string  name to record in log entries
   ---@return table
   function eng:make_ctx(fn_name)
-    local ctx       = eval.new_ctx(self._state, self._fns, fn_name, self._game)
-    ctx.actors      = self._actors
-    ctx.scheduler   = self._scheduler
-    ctx.debug       = self._debug   -- may be nil (no debug server attached)
-    ctx.grids       = self._grids   -- tile grid data (may be empty table)
-    ctx.engine_ref  = self          -- for engine/ pseudo-path reads
-    ctx._in_bfs     = self._in_bfs  -- propagate BFS-mode guard (prevents recursive BFS)
-    ctx.scene_stack = self._scene_stack  -- BFS builtins need the live scene stack
+    local ctx          = eval.new_ctx(self._state, self._fns, fn_name, self._game)
+    ctx.actors         = self._actors
+    ctx.scheduler      = self._scheduler
+    ctx.debug          = self._debug   -- may be nil (no debug server attached)
+    ctx.grids          = self._grids   -- tile grid data (may be empty table)
+    ctx.engine_ref     = self          -- for engine/ pseudo-path reads
+    ctx._in_bfs        = self._in_bfs  -- propagate BFS-mode guard (prevents recursive BFS)
+    ctx.scene_stack    = self._scene_stack  -- BFS builtins need the live scene stack
+    ctx.narration_buf  = self._pending_narration  -- say output buffer (fn bodies)
     return ctx
   end
 
@@ -245,6 +247,11 @@ function M.new(game_table, opts)
       elseif sub.kind == "if_expr" then
         local body = eval.eval_expr(sub.condition, ctx) and sub.then_body or sub.else_body
         self:_render_narration_items(narration, body, ctx)
+      elseif sub.kind == "say_stmt" then
+        local old_buf = ctx.narration_buf
+        ctx.narration_buf = narration  -- emit directly into narration
+        eval.eval_stmt(sub, ctx)
+        ctx.narration_buf = old_buf
       elseif sub.kind == "scene_goto" or sub.kind == "scene_enter" then
         eval.eval_stmt(sub, ctx)  -- sets ctx.signal
       end
@@ -263,8 +270,15 @@ function M.new(game_table, opts)
       return { "Unknown scene: " .. tostring(scene_name) }, {}, nil
     end
 
-    local ctx       = self:make_ctx("scene:" .. scene_name)
+    -- Prepend any dialogue objects accumulated during the previous fn-body execution
     local narration = {}
+    for _, obj in ipairs(self._pending_narration) do
+      narration[#narration + 1] = obj
+    end
+    self._pending_narration = {}
+
+    local ctx       = self:make_ctx("scene:" .. scene_name)
+    ctx.narration_buf = narration  -- say in scene body emits directly here
     local choices   = {}
     local choice_idx = 0
     local nav_signal = nil
@@ -281,6 +295,9 @@ function M.new(game_table, opts)
         if cond then
           narration[#narration + 1] = self:render_text(item.text, ctx)
         end
+
+      elseif item.kind == "say_stmt" then
+        eval.eval_stmt(item, ctx)  -- emits into ctx.narration_buf = narration
 
       elseif item.kind == "choice" then
         local visible = true
@@ -500,7 +517,13 @@ function M.new(game_table, opts)
     local narration, choices, nav_signal = self:render_scene(scene_name)
     self:out("")
     for _, line in ipairs(narration) do
-      if line ~= "" then self:out(line) end
+      if type(line) == "table" then
+        -- Dialogue object: display as "Speaker: text"
+        local label = line.display or line.speaker or "?"
+        self:out(label .. ": " .. tostring(line.text or ""))
+      elseif line ~= "" then
+        self:out(line)
+      end
     end
     self:out("")
 

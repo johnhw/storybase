@@ -1448,3 +1448,104 @@ fn clear-all:
 ]])
   end)
 end)
+
+-- ── speaker / say ─────────────────────────────────────────────────────────────
+describe("speaker declarations", function()
+  local BASE = [[
+engine-config:
+  entry-scene: s
+scene s:
+  * Done -> s
+]]
+
+  local function check_hint(src, code)
+    local _, diags = compile(src)
+    for _, d in ipairs(diags) do
+      if d.level == "hint" and d.code == code then return d end
+    end
+    local found = {}
+    for _, d in ipairs(diags) do table.insert(found, d.level .. ":" .. d.code) end
+    error("expected hint " .. code .. " but got: " .. table.concat(found, ", "))
+  end
+
+  it("declared speaker passes with no diagnostic", function()
+    check_ok([[
+speaker aldric:
+  display: "Aldric"
+  color: "#c8a96e"
+engine-config:
+  entry-scene: s
+scene s:
+  say aldric: Hello.
+  * Done -> s
+]])
+  end)
+
+  it("duplicate speaker declaration emits DUPLICATE_NAME error", function()
+    check_err([[
+speaker aldric:
+  display: "Aldric"
+speaker aldric:
+  display: "Aldric 2"
+engine-config:
+  entry-scene: s
+scene s:
+  * Done -> s
+]], "DUPLICATE_NAME")
+  end)
+
+  it("undeclared static speaker name emits UNDECLARED_SPEAKER hint", function()
+    local d = check_hint([[
+engine-config:
+  entry-scene: s
+scene s:
+  say ghost: Boo!
+  * Done -> s
+]], "UNDECLARED_SPEAKER")
+    assert.truthy(d.message:find("ghost"))
+  end)
+
+  it("dynamic speaker expression emits no diagnostic", function()
+    check_ok([[
+state current-speaker: String
+engine-config:
+  entry-scene: s
+scene s:
+  say (current-speaker): Hello.
+  * Done -> s
+]])
+  end)
+
+  it("speaker decl is registered in symtab.speakers", function()
+    local st = symtab([[
+speaker mira:
+  display: "Mira"
+  color: "#7ab8c2"
+engine-config:
+  entry-scene: s
+scene s:
+  * Done -> s
+]])
+    assert.truthy(st.speakers["mira"])
+    assert.equal("mira", st.speakers["mira"].name)
+  end)
+
+  it("say in fn body marks fn as transaction (impure)", function()
+    local typed = compile([[
+speaker aldric:
+  display: "Aldric"
+engine-config:
+  entry-scene: s
+fn speak:
+  say 'aldric "Hello."
+scene s:
+  * Done -> s
+]])
+    local fn_decl
+    for _, d in ipairs(typed.decls) do
+      if d.kind == "fn_decl" and d.name == "speak" then fn_decl = d; break end
+    end
+    assert.truthy(fn_decl)
+    assert.is_true(fn_decl.is_transaction)
+  end)
+end)

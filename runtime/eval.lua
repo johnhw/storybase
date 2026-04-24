@@ -82,6 +82,7 @@ local K = {
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
+  SAY_STMT           = "say_stmt",
 }
 
 -- ============================================================
@@ -129,6 +130,7 @@ local function child_ctx(parent, fn_name)
     scene_stack = parent.scene_stack,
     counterfactual_depth = parent.counterfactual_depth,  -- propagate nesting depth
     _in_bfs  = parent._in_bfs,   -- propagate BFS-mode guard (prevents recursive BFS)
+    narration_buf = parent.narration_buf,  -- propagate say output buffer
     nil_vars = {},   -- tracks variable names explicitly bound to nil
   }
   -- Copy parent vars and nil_vars into child (shadowing allowed)
@@ -1967,6 +1969,30 @@ eval_stmt = function(node, ctx)
   elseif k == K.FN_CALL then
     -- fn_call appearing directly as a statement (not wrapped in expr_stmt)
     ctx.retval = call_fn(node.name, node.args, ctx)
+
+  elseif k == K.SAY_STMT then
+    -- Resolve speaker name to string
+    local spk_name
+    if node.speaker then
+      local v = eval_expr(node.speaker, ctx)
+      spk_name = v ~= nil and tostring(v) or nil
+    end
+    -- Look up speaker metadata from game schema
+    local speakers = ctx.game and ctx.game.schema and ctx.game.schema.speakers or {}
+    local meta     = spk_name and speakers[spk_name]
+    local display  = meta and meta.display or spk_name
+    local color    = meta and meta.color
+    -- Render each line and emit a dialogue object into the narration buffer
+    local buf = ctx.narration_buf
+    for _, line in ipairs(node.lines or {}) do
+      local text = M.render_text(line, ctx)
+      if text ~= "" then
+        local obj = { speaker = spk_name, display = display, color = color, text = text }
+        if buf then
+          buf[#buf + 1] = obj
+        end
+      end
+    end
 
   -- Scene navigation
   elseif k == K.SCENE_GOTO then

@@ -1780,3 +1780,108 @@ scene s:
     assert.is_true(no_errors(src), "expected no parse errors for counterfactual with options")
   end)
 end)
+
+-- ── say / speaker ─────────────────────────────────────────────────────────────
+describe("say statement", function()
+  it("parses scene-body block form", function()
+    local src = [[
+engine-config:
+  entry-scene: s
+scene s:
+  say aldric:
+    Ready when you are.
+    Another line.
+  * Done -> s
+]]
+    local tree, diags = parse(src)
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors, "unexpected parse errors")
+    local scene = tree.decls[2]
+    assert.equal("scene_decl", scene.kind)
+    local say = scene.body[1]
+    assert.equal("say_stmt", say.kind)
+    assert.equal("symbol_lit", say.speaker.kind)
+    assert.equal("aldric", say.speaker.name)
+    assert.equal(2, #say.lines)
+  end)
+
+  it("parses scene-body inline form", function()
+    local src = [[
+engine-config:
+  entry-scene: s
+scene s:
+  say mira: The wind is right.
+  * Done -> s
+]]
+    local tree, diags = parse(src)
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors)
+    local say = tree.decls[2].body[1]
+    assert.equal("say_stmt", say.kind)
+    assert.equal("mira", say.speaker.name)
+    assert.equal(1, #say.lines)
+  end)
+
+  it("parses fn-body inline form", function()
+    local src = [[
+engine-config:
+  entry-scene: s
+fn greet:
+  say 'aldric "Hello there."
+scene s:
+  * Done -> s
+]]
+    local tree, diags = parse(src)
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors)
+    local fn = tree.decls[2]
+    assert.equal("fn_decl", fn.kind)
+    local say = fn.body[1]
+    assert.equal("say_stmt", say.kind)
+    assert.equal("aldric", say.speaker.name)
+    assert.equal(1, #say.lines)
+  end)
+end)
+
+describe("speaker declaration", function()
+  it("parses speaker decl with display and color", function()
+    local src = [[
+speaker aldric:
+  display: "Aldric the Bold"
+  color:   "#c8a96e"
+engine-config:
+  entry-scene: s
+scene s:
+  * Done -> s
+]]
+    local tree, diags = parse(src)
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors)
+    local spk = tree.decls[1]
+    assert.equal("speaker_decl", spk.kind)
+    assert.equal("aldric", spk.name)
+    assert.equal("Aldric the Bold", spk.display)
+    assert.equal("#c8a96e", spk.color)
+  end)
+
+  it("parses speaker decl with no fields", function()
+    local src = [[
+speaker narrator:
+engine-config:
+  entry-scene: s
+scene s:
+  * Done -> s
+]]
+    local tree, diags = parse(src)
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors)
+    local spk = tree.decls[1]
+    assert.equal("speaker_decl", spk.kind)
+    assert.equal("narrator", spk.name)
+  end)
+end)

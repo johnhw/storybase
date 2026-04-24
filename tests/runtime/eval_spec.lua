@@ -1915,3 +1915,129 @@ hook copier:
     assert.equal(42, eng._state:get("world/copy"))
   end)
 end)
+
+-- ── say statement ─────────────────────────────────────────────────────────────
+local compiler_mod = require("compiler.compiler")
+local engine_mod2  = require("runtime.engine")
+
+describe("say statement eval", function()
+  local function compile_and_engine(src)
+    local gt = compiler_mod.compile(src, "say_test.sb")
+    assert.is_not_nil(gt, "compile failed")
+    local eng = engine_mod2.new(gt)
+    eng:init()
+    return eng
+  end
+
+  it("say in scene body produces dialogue object in narration", function()
+    local src = [[
+speaker aldric:
+  display: "Aldric the Bold"
+  color:   "#c8a96e"
+engine-config:
+  entry-scene: s
+scene s:
+  say aldric: Ready when you are.
+  * Done -> s
+]]
+    local eng = compile_and_engine(src)
+    local narration = eng:render_scene("s")
+    assert.equal(1, #narration)
+    local obj = narration[1]
+    assert.equal("table", type(obj))
+    assert.equal("aldric", obj.speaker)
+    assert.equal("Aldric the Bold", obj.display)
+    assert.equal("#c8a96e", obj.color)
+    assert.equal("Ready when you are.", obj.text)
+  end)
+
+  it("undeclared speaker uses name as display, nil color", function()
+    local src = [[
+engine-config:
+  entry-scene: s
+scene s:
+  say ghost: Boo!
+  * Done -> s
+]]
+    local eng = compile_and_engine(src)
+    local narration = eng:render_scene("s")
+    assert.equal(1, #narration)
+    local obj = narration[1]
+    assert.equal("ghost", obj.speaker)
+    assert.equal("ghost", obj.display)
+    assert.is_nil(obj.color)
+    assert.equal("Boo!", obj.text)
+  end)
+
+  it("multi-line say block produces one object per line", function()
+    local src = [[
+speaker mira:
+  display: "Mira"
+engine-config:
+  entry-scene: s
+scene s:
+  say mira:
+    First line.
+    Second line.
+  * Done -> s
+]]
+    local eng = compile_and_engine(src)
+    local narration = eng:render_scene("s")
+    assert.equal(2, #narration)
+    assert.equal("mira", narration[1].speaker)
+    assert.equal("First line.", narration[1].text)
+    assert.equal("Second line.", narration[2].text)
+  end)
+
+  it("mixed narration and dialogue keeps flat order", function()
+    local src = [[
+speaker aldric:
+  display: "Aldric"
+engine-config:
+  entry-scene: s
+scene s:
+  The door opens.
+  say aldric: Come in.
+  Silence follows.
+  * Done -> s
+]]
+    local eng = compile_and_engine(src)
+    local narration = eng:render_scene("s")
+    assert.equal(3, #narration)
+    assert.equal("string", type(narration[1]))
+    assert.equal("table",  type(narration[2]))
+    assert.equal("string", type(narration[3]))
+    assert.equal("The door opens.", narration[1])
+    assert.equal("Come in.", narration[2].text)
+    assert.equal("Silence follows.", narration[3])
+  end)
+
+  it("say in fn body accumulates via pending_narration, prepended to next scene render", function()
+    local src = [[
+speaker aldric:
+  display: "Aldric"
+engine-config:
+  entry-scene: intro
+fn speak:
+  say 'aldric "Hello from fn."
+scene intro:
+  The scene begins.
+  * Greet:
+    speak
+    -> intro
+]]
+    local eng = compile_and_engine(src)
+    -- Execute choice 1 (Greet) which calls speak, which emits a say
+    eng:do_choice("intro", 1)
+    -- _pending_narration should now contain the dialogue object from speak
+    -- On next render_scene, it's prepended to the narration
+    local narration = eng:render_scene("intro")
+    local dialogue_found = false
+    for _, item in ipairs(narration) do
+      if type(item) == "table" and item.text == "Hello from fn." then
+        dialogue_found = true
+      end
+    end
+    assert.is_true(dialogue_found, "expected dialogue from fn body in narration")
+  end)
+end)

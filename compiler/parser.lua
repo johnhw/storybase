@@ -824,7 +824,7 @@ local function can_start_arg(p)
 end
 
 -- Forward declarations (mutual recursion)
-local parse_expr, parse_stmt, parse_body_items
+local parse_expr, parse_stmt, parse_body_items, parse_narration_text
 
 -- ── Atom (no application argument collection) ──────────────────────────────
 -- Used for collecting function-call arguments so we don't recurse infinitely.
@@ -1950,6 +1950,28 @@ parse_stmt = function(p)
   end
   if t.kind == "KEYWORD" then
     if t.value == "pass" then p:adv(); p:skip_to_eol(); return ast.pass_stmt(tpos) end
+    if t.value == "say"  then
+      -- Function/choice-body form: say <speaker> <text>
+      -- speaker: NAMED_ARG | SYMBOL | IDENT | OP "(" expr OP ")"
+      -- text:    narration text to end of line
+      p:adv()  -- consume "say"
+      local t2 = p:cur()
+      local speaker
+      if t2.kind == "NAMED_ARG" then
+        speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
+      elseif t2.kind == "SYMBOL" then
+        speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
+      elseif t2.kind == "IDENT" then
+        speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
+      elseif t2.kind == "OP" and t2.value == "(" then
+        p:adv(); speaker = parse_expr(p); p:expect("OP", ")")
+      else
+        p:emit_err(ast.E.BAD_EXPRESSION, "expected speaker after 'say'", t2.pos)
+        p:skip_to_eol(); return nil
+      end
+      local text = parse_narration_text(p)
+      return ast.say_stmt(speaker, { text }, tpos)
+    end
   end
 
   -- Scene navigation in fn/choice bodies
@@ -2024,7 +2046,7 @@ end
 -- Spacing is reconstructed from token column positions so that punctuation
 -- adjacent to words (commas, periods, apostrophes) is not padded with spaces.
 -- Consumes up to and including the NEWLINE.
-local function parse_narration_text(p)
+parse_narration_text = function(p)
   local text = {}
   local buf = {}
   local prev_end = nil  -- column just past the last character of the previous token
@@ -2064,6 +2086,26 @@ local function parse_narration_text(p)
   flush()
   p:match("NEWLINE")
   return text
+end
+
+-- Parse an indented block of narration lines for a say statement.
+-- Returns a list of text-item lists (one per line).
+local function parse_say_block(p)
+  local lines = {}
+  p:skip_newlines()
+  if not p:at("INDENT") then
+    p:emit_err(ast.E.EXPECTED_TOKEN, "expected indented block after 'say ... :'")
+    return lines
+  end
+  p:adv()  -- consume INDENT
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    local text = parse_narration_text(p)
+    if text and #text > 0 then lines[#lines + 1] = text end
+  end
+  if p:at("DEDENT") then p:adv() end
+  return lines
 end
 
 parse_body_items = function(p, is_scene)
@@ -2116,6 +2158,46 @@ parse_body_items = function(p, is_scene)
         item = parse_when_stmt(p, true) -- scene mode
       elseif t.kind == "KEYWORD" and t.value == "match" then
         local e = parse_match_expr(p); item = ast.expr_stmt(e, tpos)
+
+      elseif t.kind == "KEYWORD" and t.value == "say" then
+        -- Scene-body say: say <speaker>: block-or-inline
+        -- speaker: NAMED_ARG | SYMBOL | IDENT | OP "(" expr OP ")" then OP ":"
+        p:adv()  -- consume "say"
+        local t2 = p:cur()
+        local speaker, bad_speaker = nil, false
+        if t2.kind == "NAMED_ARG" then
+          -- say aldric: ...  (NAMED_ARG already has colon consumed by lexer)
+          speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
+        elseif t2.kind == "SYMBOL" then
+          speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
+          p:expect("OP", ":", "expected ':' after speaker name")
+        elseif t2.kind == "IDENT" then
+          speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
+          p:expect("OP", ":", "expected ':' after speaker name")
+        elseif t2.kind == "OP" and t2.value == "(" then
+          p:adv(); speaker = parse_expr(p); p:expect("OP", ")")
+          p:expect("OP", ":", "expected ':' after ')'")
+        else
+          p:emit_err(ast.E.BAD_EXPRESSION, "expected speaker after 'say'", t2.pos)
+          p:skip_to_eol(); bad_speaker = true
+        end
+        if not bad_speaker then
+          -- Block or inline form
+          local lines
+          if p:at("NEWLINE") or p:at("EOF") then
+            p:match("NEWLINE")
+            if p:at("INDENT") then
+              lines = parse_say_block(p)
+            else
+              lines = {}
+            end
+          else
+            -- Inline: rest of line is the single dialogue line
+            local text = parse_narration_text(p)
+            lines = (#text > 0) and { text } or {}
+          end
+          item = ast.say_stmt(speaker, lines, tpos)
+        end
 
       else
         -- Narration line: collect remaining tokens as text
@@ -3039,6 +3121,45 @@ local function parse_hook_decl(p, doc)
   return { _multi_decl = true, decls = result }
 end
 
+-- ── Speaker declaration ──────────────────────────────────────────────────────
+
+local function parse_speaker_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume "speaker"
+  local name
+  if p:at("NAMED_ARG") then
+    name = p:adv().value
+  elseif p:at("IDENT") then
+    name = p:adv().value
+    p:expect("OP", ":", "expected ':' after speaker name")
+  else
+    p:emit_err(ast.E.BAD_DECLARATION, "expected speaker name after 'speaker'", p:cur().pos)
+    p:skip_to_eol(); return nil
+  end
+  local display, color = nil, nil
+  p:skip_newlines()
+  if p:at("INDENT") then
+    p:adv()  -- consume INDENT
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+      local ft = p:cur()
+      if ft.kind == "NAMED_ARG" then
+        local fname = ft.value; p:adv()
+        local sv = p:cur()
+        if fname == "display" and sv.kind == "STRING" then
+          display = sv.value; p:adv()
+        elseif fname == "color" and sv.kind == "STRING" then
+          color = sv.value; p:adv()
+        end
+      end
+      p:skip_to_eol()
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+  return ast.speaker_decl(name, display, color, doc, tpos)
+end
+
 -- ============================================================
 -- Top-level dispatch
 -- ============================================================
@@ -3063,6 +3184,7 @@ local function parse_decl(p, doc)
         or t.value == "watch-when" then return parse_watch_decl(p, doc)
     elseif t.value == "bounded"    then return parse_bounded_decl(p, doc)
     elseif t.value == "macro"      then return parse_macro_decl(p, doc)
+    elseif t.value == "speaker"    then return parse_speaker_decl(p, doc)
     else
       p:skip_to_eol()
       p:skip_block()

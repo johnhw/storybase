@@ -60,6 +60,11 @@ function M.warning(code, message, pos, note)
   return _diag("warning", code, message, pos, note)
 end
 
+--- Construct an info/hint diagnostic (below warning level).
+function M.hint(code, message, pos, note)
+  return _diag("hint", code, message, pos, note)
+end
+
 -- ============================================================
 -- Error codes
 -- ============================================================
@@ -106,6 +111,8 @@ M.E = {
   SUPERFICIAL_IN_COND      = "SUPERFICIAL_IN_COND",
   SUPERFICIAL_PARAM        = "SUPERFICIAL_PARAM",
   RANDOM_SUPERFICIAL       = "RANDOM_SUPERFICIAL",
+  -- Dialogue attribution
+  UNDECLARED_SPEAKER       = "UNDECLARED_SPEAKER",
   -- Perceives enforcement
   PERCEIVES_VIOLATION      = "PERCEIVES_VIOLATION",
   -- Pre/post conditions
@@ -282,6 +289,8 @@ M.K.SCENE_GOTO          = "scene_goto"       -- -> name / -> (expr)
 M.K.SCENE_ENTER         = "scene_enter"      -- => name
 M.K.SCENE_EXIT          = "scene_exit"       -- <-
 M.K.INLINE_EXPR         = "inline_expr"      -- {expr} inside narration
+M.K.SAY_STMT            = "say_stmt"         -- say speaker: text (attributed dialogue)
+M.K.SPEAKER_DECL        = "speaker_decl"     -- speaker name: display/color metadata
 
 -- ── Query / search forms ──────────────────────────────────────
 M.K.FIND_EXPR           = "find_expr"          -- find family where...
@@ -323,6 +332,7 @@ local DECL_KINDS = {
   [M.K.SCENE_DECL]     = true, [M.K.MACRO_DECL]      = true,
   [M.K.MIGRATION_DECL] = true, [M.K.DEFGRID_DECL]    = true,
   [M.K.TAG_DECL]       = true, [M.K.HOOK_DECL]       = true,
+  [M.K.SPEAKER_DECL]   = true,
 }
 
 local MUT_KINDS = {
@@ -709,6 +719,23 @@ end
 function M.pass_stmt(pos)    return M.node(M.K.PASS_STMT, {}, pos) end
 function M.expr_stmt(expr, pos) return M.node(M.K.EXPR_STMT, { expr = expr }, pos) end
 
+--- say_stmt: attributed dialogue.
+--- speaker: expression node (symbol_lit, path_expr, etc.) or nil
+--- lines:   list of text-item lists; each element is one line of dialogue
+---          (same format as narration_line.text — list of strings and inline_expr nodes)
+function M.say_stmt(speaker, lines, pos)
+  return M.node(M.K.SAY_STMT, { speaker = speaker, lines = lines or {} }, pos)
+end
+
+--- speaker_decl: optional UI metadata for a named speaker.
+--- name:    string key used in say statements
+--- display: optional human-readable name for UI
+--- color:   optional CSS hex color string for UI
+function M.speaker_decl(name, display, color, doc, pos)
+  return M.node(M.K.SPEAKER_DECL,
+    { name = name, display = display, color = color, doc = doc }, pos)
+end
+
 -- ── Collection literals ───────────────────────────────────────
 
 function M.set_lit(elements, pos)
@@ -905,13 +932,15 @@ end
 --- The returned table tracks errors and warnings separately and provides
 --- helper methods for pushing, merging, and testing diagnostics.
 function M.new_accum()
-  local acc = { errors = {}, warnings = {}, all = {} }
+  local acc = { errors = {}, warnings = {}, hints = {}, all = {} }
 
   --- Push a single diagnostic.
   function acc:push(diag)
     table.insert(self.all, diag)
     if diag.level == "error" then
       table.insert(self.errors, diag)
+    elseif diag.level == "hint" then
+      table.insert(self.hints, diag)
     else
       table.insert(self.warnings, diag)
     end

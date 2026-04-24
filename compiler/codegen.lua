@@ -766,6 +766,21 @@ local function emit_hooks(decls)
   return hooks
 end
 
+--- Emit speaker declarations into a name-keyed map for the schema.
+local function emit_speakers(decls)
+  local speakers = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.SPEAKER_DECL then
+      speakers[node.name] = {
+        display = node.display or node.name,
+        color   = node.color,
+        doc     = node.doc,
+      }
+    end
+  end
+  return speakers
+end
+
 local function emit_migrations(decls)
   local migrations = {}
   for _, node in ipairs(decls) do
@@ -859,6 +874,7 @@ function M.emit(typed_ast, opts)
       relations        = relations,
       engine_config    = eng_cfg,
       time_model       = time_mdl,
+      speakers         = emit_speakers(decls),
     },
     fns        = emit_fns(decls, opts),
     scenes     = emit_scenes(decls),

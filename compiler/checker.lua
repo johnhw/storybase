@@ -30,6 +30,7 @@ local function new_symtab()
     scenes    = {},  -- name → SCENE_DECL node
     families  = {},  -- family_name → STATE_FAMILY node
     grids     = {},  -- name → DEFGRID_DECL node
+    speakers  = {},  -- name → SPEAKER_DECL node
   }
 end
 
@@ -157,6 +158,17 @@ local function pass1_collect(acc, symtab, program)
           "previous declaration at line " .. symtab.grids[name].pos.line)
       else
         symtab.grids[name] = node
+      end
+
+    elseif kind == k.SPEAKER_DECL then
+      local name = node.name
+      if symtab.speakers[name] then
+        err(acc, ast.E.DUPLICATE_NAME,
+          "speaker '" .. name .. "' already declared",
+          node.pos,
+          "previous declaration at line " .. symtab.speakers[name].pos.line)
+      else
+        symtab.speakers[name] = node
       end
     end
     -- MODULE_DECL, IMPORT_DECL, SCHEMA_VERSION, ENGINE_CONFIG, TIME_MODEL
@@ -603,6 +615,8 @@ local MUTATION_NAMES = {
 local function has_mutation(node)
   if not node then return false end
   if ast.is_mut(node) then return true end
+  -- say stmt is effectful (impure)
+  if node.kind == ast.K.SAY_STMT then return true end
   -- A mutation primitive parsed in expression context becomes a fn_call node
   if node.kind == ast.K.FN_CALL and MUTATION_NAMES[node.name] then return true end
   -- Recurse into known child fields
@@ -1722,6 +1736,49 @@ local function pass7_check_contracts(acc, symtab_data, program)
 end
 
 -- ============================================================
+-- Pass — Undeclared speaker hints
+-- ============================================================
+
+--- Walk a list of scene/fn body items and emit UNDECLARED_SPEAKER hints
+--- for SAY_STMT nodes whose speaker is a static IDENT or SYMBOL not in symtab.speakers.
+local function check_speakers_in_body(acc, symtab, body)
+  local k = ast.K
+  for _, node in ipairs(body or {}) do
+    if not node or type(node) ~= "table" then
+    elseif node.kind == k.SAY_STMT then
+      local spk = node.speaker
+      -- Only static symbols/idents are checked; dynamic exprs are skipped
+      if spk and spk.kind == k.SYMBOL_LIT then
+        local name = spk.name
+        if type(name) == "string" and not symtab.speakers[name] then
+          table.insert(acc.diags, ast.hint(
+            ast.E.UNDECLARED_SPEAKER,
+            "speaker '" .. name .. "' has no declaration",
+            spk.pos,
+            "add 'speaker " .. name .. ":' to provide display/color metadata"))
+        end
+      end
+    elseif node.kind == k.WHEN_STMT then
+      check_speakers_in_body(acc, symtab, node.body)
+    elseif node.kind == k.IF_EXPR then
+      check_speakers_in_body(acc, symtab, node.then_body)
+      check_speakers_in_body(acc, symtab, node.else_body)
+    end
+  end
+end
+
+local function pass_check_speakers(acc, symtab, program)
+  local k = ast.K
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.SCENE_DECL then
+      check_speakers_in_body(acc, symtab, node.body)
+    elseif node.kind == k.FN_DECL then
+      check_speakers_in_body(acc, symtab, node.body)
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -1761,6 +1818,7 @@ function M.check(ast_root, filename)
   pass6_write_sets(acc, ast_root)
   pass7_check_contracts(acc, symtab, ast_root)
   pass_recursive_scenes(acc, ast_root)
+  pass_check_speakers(acc, symtab, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

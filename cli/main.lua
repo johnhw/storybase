@@ -98,7 +98,9 @@ local function print_diags(diags, source_map)
 
   for _, d in ipairs(diags.all or {}) do
     local loc   = string.format("%s:%d:%d", d.file or "?", d.line or 0, d.col or 0)
-    local label = (d.level == "error") and "error" or "warning"
+    local label = (d.level == "error") and "error"
+                  or (d.level == "hint") and "hint"
+                  or "warning"
     io.stderr:write(string.format("%s: %s [%s]: %s\n", loc, label, d.code, d.message))
 
     -- Print source context if we have the source and a valid line number

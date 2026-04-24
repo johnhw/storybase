@@ -1,0 +1,159 @@
+module demo-say
+  version: 1.0
+
+# Speaker declarations: optional UI metadata (display name, color).
+# Any name is valid; undeclared speakers just get an INFO hint.
+
+speaker aldric:
+  display: "Aldric the Bold"
+  color:   "#c8a96e"
+
+speaker mira:
+  display: "Mira Ashveil"
+  color:   "#7ab8c2"
+
+speaker narrator:
+  display: "Narrator"
+
+engine-config:
+  entry-scene: tavern
+
+state player/companion: Option(Enum(aldric, mira))
+state world/day: Int(1, 30) = 1
+state quest/started: Bool = false
+
+# Function-body say: emits dialogue from within a fn.
+# Output accumulates in _pending_narration and is prepended to the next scene render.
+
+fn aldric-greets:
+  say 'aldric "Ready when you are, Commander."
+  say 'aldric "I've been sharpening my blade all morning."
+
+fn mira-greets:
+  say 'mira "The wind is right for travel today."
+
+# Dynamic speaker: resolved from state at runtime.
+fn companion-speaks message:
+  say (player/companion) {message}
+
+scene tavern:
+  The tavern hums with activity as you enter.
+
+  say narrator: Two figures rise from a corner table.
+
+  # Block form: multiple lines attributed to one speaker.
+  say aldric:
+    Ah, you're finally here.
+    I was beginning to wonder if you'd changed your mind.
+
+  # Inline form: single line.
+  say mira: The map is ready. We leave when you say.
+
+  Aldric rests a hand on his sword hilt. Mira rolls up a parchment.
+
+  * Choose Aldric as companion:
+    set! player/companion 'aldric
+    aldric-greets
+    -> journey
+  * Choose Mira as companion:
+    set! player/companion 'mira
+    mira-greets
+    -> journey
+  * Ask about the quest:
+    -> quest-info
+
+scene quest-info:
+  say narrator: Mira spreads the map across the table.
+
+  say mira:
+    The ruin lies two days east of here.
+    We'll cross the Ashfen marsh at dawn.
+
+  say aldric: And better armed than not. Just saying.
+
+  # Undeclared speaker: emits an INFO hint at compile time (not an error).
+  say innkeeper: Safe travels. Watch the marsh at night.
+
+  * Very well, let's go:
+    set! quest/started true
+    -> choose-companion
+
+scene choose-companion:
+  say narrator: You turn to your companions.
+
+  say aldric: Your call, Commander. Who rides with you?
+
+  * Take Aldric:
+    set! player/companion 'aldric
+    aldric-greets
+    -> journey
+  * Take Mira:
+    set! player/companion 'mira
+    mira-greets
+    -> journey
+
+scene journey:
+  say narrator:
+    The road stretches east beneath grey skies.
+    By midday the Ashfen marsh comes into view.
+
+  # Dynamic speaker: resolved from player/companion state at runtime.
+  say (player/companion): I'll scout ahead. Stay close.
+
+  inc! world/day 1
+
+  * Press on:
+    -> marsh
+  * Make camp here:
+    -> camp
+
+scene marsh:
+  say narrator: The marsh reeks of damp earth and old wood.
+
+  when player/companion = 'aldric:
+    say aldric: Careful where you step.
+
+  when player/companion = 'mira:
+    say mira: I know a dry path through. Follow in my footsteps.
+
+  * Cross the marsh:
+    inc! world/day 1
+    -> ruin
+  * Turn back:
+    -> camp
+
+scene camp:
+  The fire crackles. Stars emerge between the clouds.
+
+  say narrator: Your companion settles across the fire.
+
+  companion-speaks "What's weighing on your mind?"
+
+  * Talk about the quest:
+    -> journey
+  * Rest until morning:
+    inc! world/day 1
+    -> journey
+
+scene ruin:
+  say narrator:
+    The ruin rises from the marsh like a broken tooth.
+    Silence swallows every sound.
+
+  say (player/companion):
+    This is it. Stay sharp.
+    Whatever's in there, we face it together.
+
+  * Enter the ruin:
+    -> end-scene
+
+scene end-scene:
+  say narrator: The story continues beyond these words.
+
+  You and your companion step into the dark.
+
+  * Play again:
+    set! player/companion nil
+    set! world/day 1
+    set! quest/started false
+    -> tavern
