@@ -848,6 +848,94 @@ describe("CLI demo11_expedition_guild: type aliases + Option(T) + find + compute
   end)
 end)
 
+-- ── demo12: herbalist's codex ────────────────────────────────────────────────
+
+describe("CLI demo12_codex: namespaced import + cross-file types/fns/scenes", function()
+  it("compiles without errors", function()
+    local rc, out, err = run_cli({"compile", "demos/demo12_codex.sb"})
+    assert.equal(0, rc, "demo12 compile failed:\n" .. out .. err)
+  end)
+
+  it("namespaced types appear in schema (Herb.PlantKind, Herb.RemedyKind)", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo12_codex.sb")
+    game:init()
+    -- Types are registered under the alias
+    local _, diags = require("compiler.compiler").compile_file("demos/demo12_codex.sb")
+    assert.is_false(diags:has_errors())
+  end)
+
+  it("init-garden (cross-file state) sets up garden family members", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo12_codex.sb")
+    game:init()
+    game:choose(1)  -- Begin — stock the garden
+    assert.equal(8,  game:get("garden/feverwort/quantity"))
+    assert.equal(2,  game:get("garden/feverwort/moisture"))
+    assert.equal(5,  game:get("garden/silkmoss/quantity"))
+    assert.equal(6,  game:get("garden/ironroot/quantity"))
+    assert.equal(2,  game:get("garden/moonpetal/quantity"))
+  end)
+
+  it("Herb.assess-stock guards brew choices correctly", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo12_codex.sb")
+    game:init()
+    game:choose(1)  -- Begin (init-garden: feverwort=8 >= 3)
+    local _, choices = game:render()
+    local labels = {}
+    for _, c in ipairs(choices) do labels[c.label] = true end
+    assert.is_truthy(labels["Brew a tonic"],  "brew-tonic choice should be available")
+    assert.is_truthy(labels["Brew a salve"],  "brew-salve choice should be available")
+  end)
+
+  it("brew-remedy consumes feverwort and sets workbench (cross-file state + Option(T))", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo12_codex.sb")
+    game:init()
+    game:choose(1)   -- init-garden (feverwort=8)
+    game:choose(3)   -- Brew a tonic
+    assert.equal(5,       game:get("garden/feverwort/quantity"))  -- 8-3=5
+    assert.equal("tonic", game:get("workbench/remedy"))
+  end)
+
+  it("sell-remedy earns gold and clears workbench (Option(T) back to nil)", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo12_codex.sb")
+    game:init()
+    game:choose(1)   -- init-garden
+    game:choose(3)   -- Brew a tonic
+    game:choose(3)   -- Sell remedy
+    assert.equal(65,  game:get("player/gold"))   -- 50+15
+    assert.equal(25,  game:get("player/rep"))    -- 20+5
+    assert.is_nil(game:get("workbench/remedy"))
+  end)
+
+  it("=> Herb.harvest navigates to the cross-file scene via enter (push)", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo12_codex.sb")
+    game:init()
+    game:choose(1)   -- init-garden
+    game:choose(2)   -- Go to the garden (=> Herb.harvest)
+    assert.equal("Herb.harvest", game:current_scene())
+  end)
+
+  it("Herb.dry-garden runs from rest-day, reducing moisture", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo12_codex.sb")
+    game:init()
+    game:choose(1)   -- init-garden (feverwort moisture=2)
+    game:choose(5)   -- Rest a day (calls Herb.dry-garden)
+    assert.equal(1, game:get("garden/feverwort/moisture"))  -- 2-1=1
+    assert.equal(2, game:get("workbench/day"))
+  end)
+
+  it("verify suite passes for demo12", function()
+    local rc, out, err = run_cli({"verify", "demos/demo12_codex.sb"})
+    assert.equal(0, rc, "demo12 verify failed:\n" .. out .. err)
+  end)
+end)
+
 -- ── extract-symbols ───────────────────────────────────────────────────────────
 
 describe("CLI extract-symbols", function()

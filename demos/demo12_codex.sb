@@ -1,0 +1,169 @@
+# demo12_codex.sb
+# The Herbalist's Codex — a two-file herbalism game.
+#
+# Features demonstrated:
+#   import "codex_lib.sb" as Herb   — namespaced import with alias
+#   State declarations are global   — no prefix; garden/{p} is accessible unqualified
+#   Cross-file type reference       — Option(Herb.RemedyKind)
+#   Cross-file fn calls             — Herb.assess-stock, Herb.dry-garden
+#   Cross-file scene navigation     — => Herb.harvest
+#   Multiline strings               — lore entries with """..."""
+#   verify after across files       — post-call assertions on cross-file fns
+#
+# Run: storybase run demos/demo12_codex.sb
+
+module codex-main
+  version: 1.0
+
+import "codex_lib.sb" as Herb
+
+engine-config:
+  entry-scene: workshop
+
+# ─────────────────────────────────────────────────────────
+# State (global, no namespace prefix)
+# ─────────────────────────────────────────────────────────
+
+state workbench/remedy : Option(Herb.RemedyKind)
+state workbench/day    : Int(1, 20) = 1
+state player/gold      : Int(0, 200) = 50
+state player/rep       : Int(0, 100) = 20
+
+# ─────────────────────────────────────────────────────────
+# Watches
+# ─────────────────────────────────────────────────────────
+
+watch player/gold    "Gold"
+watch player/rep     "Reputation"
+watch workbench/day  "Day"
+
+# ─────────────────────────────────────────────────────────
+# Verify
+# ─────────────────────────────────────────────────────────
+
+verify "gold never goes negative":
+  verify-always player/gold >= 0
+
+verify "reputation never goes negative":
+  verify-always player/rep >= 0
+
+verify "brewing consumes feverwort":
+  requires Herb.assess-stock 'feverwort 3
+  after (brew-remedy 'tonic):
+    garden/feverwort/quantity < garden/feverwort/quantity@before
+
+verify "selling clears workbench":
+  requires workbench/remedy != nil
+  after (sell-remedy):
+    workbench/remedy = nil
+
+verify "dry-garden reduces moisture":
+  requires (garden/feverwort/moisture ?? 0) > 0
+  after (Herb.dry-garden):
+    garden/feverwort/moisture < garden/feverwort/moisture@before
+
+# ─────────────────────────────────────────────────────────
+# Local functions
+# ─────────────────────────────────────────────────────────
+
+"Set up the garden with starter quantities."
+fn init-garden:
+  set! garden/feverwort/quantity 8
+  set! garden/feverwort/moisture 2
+  set! garden/silkmoss/quantity  5
+  set! garden/silkmoss/moisture  1
+  set! garden/ironroot/quantity  6
+  set! garden/ironroot/moisture  3
+  set! garden/moonpetal/quantity 2
+  set! garden/moonpetal/moisture 0
+
+"Brew a remedy from feverwort (costs 3 units)."
+fn brew-remedy r:
+  pre:  Herb.assess-stock 'feverwort 3
+  dec!  garden/feverwort/quantity 3
+  set!  workbench/remedy r
+
+"Sell the remedy on the workbench for 15 gold and +5 rep."
+fn sell-remedy:
+  pre:  workbench/remedy != nil
+  inc!  player/gold 15
+  inc!  player/rep  5
+  set!  workbench/remedy nil
+
+"Rest one day: dry the garden and advance the calendar."
+fn rest-day:
+  pre:  workbench/day < 20
+  Herb.dry-garden
+  inc!  workbench/day 1
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene workshop:
+  """
+  THE HERBALIST'S WORKSHOP
+  ========================
+  Bundles of dried herbs hang from the rafters.
+  Glass jars line the shelves, each labelled in careful script.
+  The workbench is worn smooth by years of mortar and pestle.
+  """
+
+  Day {workbench/day} of 20.
+  Gold: {player/gold}.  Reputation: {player/rep}.
+  Workbench: {workbench/remedy ?? 'empty}.
+
+  * [true] Begin — stock the garden
+    init-garden
+    -> workshop
+
+  * [true] Go to the garden
+    => Herb.harvest
+
+  * [Herb.assess-stock 'feverwort 3 and workbench/remedy = nil] Brew a tonic
+    brew-remedy 'tonic
+    -> workshop
+
+  * [Herb.assess-stock 'feverwort 3 and workbench/remedy = nil] Brew a salve
+    brew-remedy 'salve
+    -> workshop
+
+  * [workbench/remedy != nil] Sell remedy (+15 gold, +5 rep)
+    sell-remedy
+    -> workshop
+
+  * [workbench/day < 20] Rest a day (garden dries, day advances)
+    rest-day
+    -> workshop
+
+  * [workbench/day >= 20 or player/rep >= 60] Close the codex
+    -> epilogue
+
+scene epilogue:
+  """
+  CLOSING THE CODEX
+  -----------------
+  You press the leather cover shut and set your quill aside.
+  The season's work is recorded in careful columns of ink.
+  """
+
+  if player/rep >= 60:
+    """
+    MASTER HERBALIST
+    ----------------
+    Word of your remedies has spread far.
+    Merchants leave offerings at your door.
+    The Codex names you among the great herbalists of the age.
+    """
+  else:
+    if player/gold >= 100:
+      A profitable season.  The shelves are stocked and the purse is heavy.
+      Your reputation grows, one remedy at a time.
+    else:
+      A modest season.  The plants are patient teachers.
+      There is always more to learn from the garden.
+
+  Final gold: {player/gold}.  Final reputation: {player/rep}.
+
+  * Read again
+    -> workshop

@@ -1,0 +1,106 @@
+# codex_lib.sb
+# Shared types, state, and helpers for demo12_codex.sb.
+# Imported by demo12_codex.sb with alias Herb.
+#
+# Features shown here:
+#   type enum, type record, state family, pure fn, mutating fn, scene
+
+module codex-lib
+  version: 1.0
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+"A species of plant that can be grown in the garden."
+type PlantKind = feverwort | silkmoss | ironroot | moonpetal
+
+"A finished remedy that can be brewed and sold."
+type RemedyKind = tonic | salve | elixir | poultice
+
+"One bed in the herbalist's garden."
+type GardenBed:
+  quantity: Int(0, 20)
+  moisture: Int(0, 5)
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+"The four garden beds, one per plant species."
+state garden/{p}: GardenBed  max: 4
+
+# ─────────────────────────────────────────────────────────
+# Pure helpers
+# ─────────────────────────────────────────────────────────
+
+"True when plant has at least min-qty units available for harvest."
+fn assess-stock plant min-qty:
+  (garden/{plant}/quantity ?? 0) >= min-qty
+
+"True when every garden bed is dry (moisture = 0)."
+fn fully-dry?:
+  all? (path-list garden) fn(p): garden/{p}/moisture = 0
+
+# ─────────────────────────────────────────────────────────
+# Transaction helpers
+# ─────────────────────────────────────────────────────────
+
+"Reduce moisture in all beds by 1 (drying pass)."
+fn dry-garden:
+  for p in (path-list garden):
+    when garden/{p}/moisture > 0:
+      dec! garden/{p}/moisture 1
+
+"Water all garden beds (reset moisture to 3)."
+fn water-garden:
+  for p in (path-list garden):
+    set! garden/{p}/moisture 3
+
+# ─────────────────────────────────────────────────────────
+# Scene (shared)
+# ─────────────────────────────────────────────────────────
+
+scene harvest:
+  """
+  THE GARDEN
+  ----------
+  You step outside into the cool morning air.
+  Dew clings to the broad leaves of the feverwort.
+  Silkmoss carpets the northern bed in pale green.
+  Ironroot breaks the soil in thick, iron-grey spears.
+  Moonpetal blooms only now, in the half-light before dawn.
+  """
+
+  Feverwort: {garden/feverwort/quantity} units  (moisture {garden/feverwort/moisture})
+  Silkmoss:  {garden/silkmoss/quantity} units  (moisture {garden/silkmoss/moisture})
+  Ironroot:  {garden/ironroot/quantity} units  (moisture {garden/ironroot/moisture})
+  Moonpetal: {garden/moonpetal/quantity} units  (moisture {garden/moonpetal/moisture})
+
+  * [(garden/feverwort/quantity ?? 0) < 20] Tend feverwort (+3 qty, needs water)
+    inc! garden/feverwort/quantity 3
+    set! garden/feverwort/moisture 4
+    -> harvest
+
+  * [(garden/silkmoss/quantity ?? 0) < 20] Tend silkmoss (+2 qty, needs water)
+    inc! garden/silkmoss/quantity 2
+    set! garden/silkmoss/moisture 4
+    -> harvest
+
+  * [(garden/ironroot/quantity ?? 0) < 20] Tend ironroot (+4 qty, needs water)
+    inc! garden/ironroot/quantity 4
+    set! garden/ironroot/moisture 4
+    -> harvest
+
+  * [(garden/moonpetal/quantity ?? 0) < 20] Tend moonpetal (+1 qty, delicate)
+    inc! garden/moonpetal/quantity 1
+    set! garden/moonpetal/moisture 3
+    -> harvest
+
+  * Water all beds
+    water-garden
+    -> harvest
+
+  * Return to the workshop
+    dry-garden
+    <-
