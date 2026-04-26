@@ -228,6 +228,18 @@ describe("checker pass 2 — type resolution", function()
   it("resolves UMap(K, V)", function()
     check_ok("type L = a | b\ntype M = UMap(String, L)")
   end)
+
+  it("SymbolOf accepts a pipe-form named enum type", function()
+    check_ok("type Dir = north | south\ntype K = SymbolOf(Dir)")
+  end)
+
+  it("SymbolOf accepts an Enum(...) alias", function()
+    check_ok("type Dir = Enum(north, south)\ntype K = SymbolOf(Dir)")
+  end)
+
+  it("SymbolOf rejects an undeclared name", function()
+    check_err("type K = SymbolOf(NoSuch)", ast.E.UNDEFINED_TYPE)
+  end)
 end)
 
 -- ============================================================

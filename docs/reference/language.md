@@ -197,6 +197,16 @@ type Status   = alive | dead | unconscious
 type Location = village | forest | dungeon | castle
 ```
 
+Enum types declared with `type` can be referenced by name anywhere a type expression is required. The inline `Enum(a, b, c)` form works in a single state declaration but cannot be referenced by name elsewhere. If you need to use the same enum in multiple state paths or record fields, promote it to a named type:
+
+```
+# Instead of: state world/dir: Enum(up, down, left, right) = 'up
+type Direction = Enum(up, down, left, right)
+state world/dir: Direction = 'up
+```
+
+Note: `type Direction = Enum(...)` creates a named alias for the inline form. The `type X = a | b | c` form is equivalent and preferred for readability.
+
 **Range alias:**
 
 ```
@@ -465,12 +475,13 @@ Macros are inlined at each call site. They may not be recursive.
 |--------|-------------|-----------------|
 | `Bool` | Boolean | 2 |
 | `Int(min, max)` | Bounded integer | `max - min + 1` |
-| `Enum(a, b, c)` | Inline anonymous enum | N values |
+| `Enum(a, b, c)` | Inline anonymous enum (cannot be referenced by name) | N values |
 | `Option(T)` | T or nil | `|T| + 1` |
 | `Set(T, max)` | Bounded set | Σ C(|T|, i) for i = 0..max |
 | `List(T, max)` | Bounded ordered list | `(|T| + 1)^max` |
 | `Symbol` | Untyped symbol (avoid; emits warning) | ∞ |
 | `SymbolOf(Family)` | Typed entity-family key | `|Family|` |
+| `SymbolOf(EnumType)` | Symbol constrained to a named enum's values | `|EnumType|` |
 | `TypeName` | Named enum, record, or variant | product / sum of fields |
 
 ### Superficial types
@@ -1027,6 +1038,7 @@ Emit attributed dialogue inline within a scene. Two forms are supported.
 say aldric: Ready when you are, Commander.
 say mira:   The wind is right for travel today.
 say (player/companion): I'll scout ahead. Stay close.
+say 'aldric "Function-body style also accepted."
 ```
 
 **Block form** — multiple lines attributed to the same speaker:
@@ -1037,7 +1049,9 @@ say aldric:
   I was beginning to wonder if you'd changed your mind.
 ```
 
-The speaker may be a bare identifier, a symbol literal (e.g. `'aldric`), a `NAMED_ARG` token (identifier followed immediately by `:`), or a parenthesised expression. The dynamic form `say (expr):` resolves the speaker symbol at runtime — useful when the speaker depends on game state.
+The speaker may be a bare identifier, a `NAMED_ARG` token (identifier followed immediately by `:`), a symbol literal `'name` (in which case the `:` is optional), or a parenthesised expression. The dynamic form `say (expr):` resolves the speaker symbol at runtime — useful when the speaker depends on game state.
+
+Both the scene-body form (`say aldric: text`) and the function-body form (`say 'aldric "text"`) are accepted in scene bodies.
 
 ### Choices
 

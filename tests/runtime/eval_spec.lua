@@ -2320,6 +2320,35 @@ scene intro:
     end
     assert.is_true(dialogue_found, "expected dialogue from fn body in narration")
   end)
+
+  it("symbol-form say ('speaker text) works in scene body", function()
+    local src = [[
+speaker mira:
+  display: "Mira"
+engine-config:
+  entry-scene: s
+scene s:
+  'mira "Scene body with symbol form."
+  * go -> s
+]]
+    -- Actually that's narration, not say. Test say 'speaker in scene body:
+    local src2 = [[
+speaker mira:
+  display: "Mira"
+engine-config:
+  entry-scene: s
+scene s:
+  say 'mira "Symbol-style in scene."
+  * go -> s
+]]
+    local eng = compile_and_engine(src2)
+    local narration = eng:render_scene("s")
+    local found = false
+    for _, item in ipairs(narration) do
+      if type(item) == "table" and item.speaker == "mira" then found = true end
+    end
+    assert.is_true(found, "expected mira say in scene narration")
+  end)
 end)
 
 -- ============================================================

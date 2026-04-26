@@ -5,27 +5,19 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-04-25)
+## Current Status (2026-04-26)
 
 All eight implementation phases complete. Demos 01–12 tested end-to-end via `--cli` mode.
-**1763 tests passing.**
+**1024 unit tests passing (busted tests/ excluding debug_http and cli_integration).
+143 CLI integration tests passing.**
 
-Language review pass in progress: bugs fixed, break/continue/return added, not-in? added, exports filtering enforced, documentation updated. Remaining: QoL ergonomics tasks.
+Language review pass complete. All 20 tasks addressed (bugs fixed, features added, docs updated).
 
 ---
 
 ## Active Tasks
 
-### Language Review — QoL / Ergonomics (in progress)
-
-- [x] **Free `let` bindings (no mandatory body scope)** — already implemented; added tests and documentation.
-- [x] **`for` loop `else` clause** — implemented: `else:` block after `for` body runs when collection is empty. Tests added, docs updated.
-- [x] **`UList` / `UMap` runtime support** — `UList` fully works with `push!`/`pop!`/`size`/`for`. Added `map-set!`, `map-delete!`, `map-get`, `map-size`, `map-keys` for `UMap`. Tests and docs added.
-- [x] **`with` mixin conflict error should name both source types** — already implemented; error message names both types.
-- [ ] **`spawn!` shorthand using declared type defaults** — `spawn! npcs 'bob Npc()` requires spelling out all fields even when `Npc` declares defaults. Add `spawn! npcs 'bob` or `spawn! npcs 'bob Npc.default` that fills in declared defaults.
-- [ ] **Unify `say` syntax between scene bodies and function bodies** — scene form uses `say speaker: text`, fn form uses `say 'speaker "text"`. Consider accepting both forms in both contexts, or document the distinction more clearly as intentional.
-- [ ] **Inline `Enum(a, b, c)` unusable as a named type** — `state foo: Enum(up, down)` works, but the type can't be referenced by name in function signatures or other state declarations. Any reuse must be promoted to a `type` declaration. Consider allowing type aliases for inline enums, or emit a hint suggesting promotion.
-- [ ] **`SymbolOf` on named enum types** — currently `SymbolOf(F)` requires `F` to be an entity family with backing state. Add `SymbolOf(EnumType)` so a typed symbol can be used without declaring a family, e.g. as a map key or option value over a declared enum.
+No active tasks. All planned demos, implementation phases, and language review tasks are complete.
 
 ---
 

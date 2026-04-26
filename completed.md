@@ -5,6 +5,22 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## Language Review Pass 2 ✅ COMPLETE (2026-04-26)
+
+1024 unit tests passing. 143 CLI integration tests passing.
+
+### QoL Features Added
+- **Free `let` bindings** — already implemented; tests and docs added.
+- **`for` loop `else` clause** — `else:` block runs when collection is empty.
+- **`UMap` runtime operations** — `map-set!`, `map-delete!`, `map-get`, `map-size`, `map-keys`.
+- **`spawn!` shorthand** — `spawn! family 'key` (without record arg) already worked via defaults; confirmed and documented.
+- **Unified `say` syntax** — `say 'speaker "text"` form now accepted in scene bodies (colon optional after symbol speaker).
+- **`SymbolOf(EnumType)`** — checker extended to accept named enum types (both `type X = a|b` and `type X = Enum(a,b)` forms).
+- **Inline Enum promotion hint** — documented that inline `Enum(a,b)` can't be referenced by name; added type table clarification and promotion guide.
+- **`with` mixin conflict error** — already named both source types; confirmed and tests passed.
+
+---
+
 ## Language Review Pass 1 ✅ COMPLETE (2026-04-25)
 
 1763 tests passing.

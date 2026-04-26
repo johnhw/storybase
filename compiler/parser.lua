@@ -2196,7 +2196,8 @@ parse_body_items = function(p, is_scene)
           speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
         elseif t2.kind == "SYMBOL" then
           speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
-          p:expect("OP", ":", "expected ':' after speaker name")
+          -- colon is optional when speaker is a symbol literal (fn-body style)
+          if p:at("OP", ":") then p:adv() end
         elseif t2.kind == "IDENT" then
           speaker = ast.symbol_lit(t2.value, t2.pos); p:adv()
           p:expect("OP", ":", "expected ':' after speaker name")

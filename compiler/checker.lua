@@ -232,12 +232,19 @@ local function resolve_type_expr(acc, symtab, texpr)
         texpr.pos)
     end
   elseif kind == k.TYPE_SYMBOL_OF then
-    -- Validate that the family name refers to a declared entity family
+    -- Validate that the argument refers to a declared entity family OR a named enum type
     local fname = texpr.family
-    if fname and not symtab.families[fname] then
-      err(acc, ast.E.UNDEFINED_TYPE,
-        "SymbolOf references undeclared entity family '" .. fname .. "'",
-        texpr.pos)
+    if fname then
+      local is_family = symtab.families[fname] ~= nil
+      local td = symtab.types[fname]
+      local is_enum = td and (td.kind == k.TYPE_ENUM or
+        (td.kind == k.TYPE_ALIAS and td.type_expr and td.type_expr.kind == k.TYPE_ENUM_INLINE))
+      if not is_family and not is_enum then
+        err(acc, ast.E.UNDEFINED_TYPE,
+          "SymbolOf('" .. fname .. "') — '" .. fname ..
+          "' is not a declared entity family or named enum type",
+          texpr.pos)
+      end
     end
 
   elseif kind == k.TYPE_SYMBOL then
