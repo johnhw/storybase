@@ -114,6 +114,12 @@ local function resolve_default(d)
     return d.name
   elseif d.tag == "empty_set" or d.tag == "empty_list" or d.tag == "empty_map" then
     return {}
+  elseif d.tag == "set" or d.tag == "list" then
+    local result = {}
+    for _, item in ipairs(d.items or {}) do
+      result[#result+1] = resolve_default(item)
+    end
+    return result
   elseif d.tag == "record" then
     local r = {}
     if type(d.fields) == "table" then

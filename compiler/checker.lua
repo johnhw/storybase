@@ -334,21 +334,21 @@ local function check_default_value(acc, symtab, default_node, texpr, label)
     -- (EMPTY_SET/LIST also acceptable as "no value" for collections inside Option)
 
   elseif tk == k.TYPE_SET then
-    if dk ~= k.EMPTY_SET then
+    if dk ~= k.EMPTY_SET and dk ~= k.SET_LIT then
       err(acc, ast.E.BAD_DEFAULT,
-        label .. ": Set default must be (set)", default_node.pos)
+        label .. ": Set default must be (set) or a set literal {'val, ...}", default_node.pos)
     end
 
   elseif tk == k.TYPE_LIST then
-    if dk ~= k.EMPTY_LIST then
+    if dk ~= k.EMPTY_LIST and dk ~= k.LIST_LIT then
       err(acc, ast.E.BAD_DEFAULT,
-        label .. ": List default must be []", default_node.pos)
+        label .. ": List default must be [] or a list literal ['val, ...]", default_node.pos)
     end
 
   elseif tk == k.TYPE_ULIST then
-    if dk ~= k.EMPTY_LIST then
+    if dk ~= k.EMPTY_LIST and dk ~= k.LIST_LIT then
       err(acc, ast.E.BAD_DEFAULT,
-        label .. ": UList default must be []", default_node.pos)
+        label .. ": UList default must be [] or a list literal ['val, ...]", default_node.pos)
     end
 
   elseif tk == k.TYPE_UMAP then

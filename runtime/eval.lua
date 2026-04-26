@@ -206,6 +206,8 @@ eval_expr = function(node, ctx)
   elseif k == K.INT_LIT or k == K.FLOAT_LIT then return node.value
   elseif k == K.STRING_LIT or k == K.MULTILINE_STRING then return node.value
   elseif k == K.SYMBOL_LIT then return node.name  -- symbols are strings internally
+  -- Named-arg node appearing as an expression (e.g. after macro param substitution)
+  elseif k == K.NAMED_ARG then return eval_expr(node.value, ctx)
 
   -- Path read
   elseif k == K.PATH_EXPR then

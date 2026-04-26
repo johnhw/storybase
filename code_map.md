@@ -644,6 +644,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo12_codex.sb` + `codex_lib.sb` | two-file split via `import "codex_lib.sb" as Herb` (namespaced alias), cross-file `Option(Herb.RemedyKind)`, cross-file fn calls (`Herb.assess-stock`, `Herb.dry-garden`), cross-file scene nav (`=> Herb.harvest`), state family (`garden/{p}: GardenBed`), multiline strings, `verify after` across files with cross-file `requires` |
 | `demo13_healers_ward.sb` | `speaker` declarations with `display:`/`color:`, all `say` forms (bare-id, block, dynamic `(expr):`), `say` in fn bodies (buffered → prepended to next scene), `post:` with `path@before` on both plain and interpolated paths, multi-line lambda body in `find patients where: fn(k):\n  let...\n  return`, `count family where: fn(k):` syntax, entity family `patients/{k}: Patient max: 8` |
 | `demo14_kingdoms_records.sb` | `schema-version: 4`, full migration chain 1→2→3→4: `add` (String field), `rename` + `drop`, `transform` (`fn old: old * 100`), `rename-enum` (`'at-war → 'warring`); `post:` on `advance-year`; simple game loop with census browse/update/advance |
+| `demo15_spellwright.sb` | hygienic macros: `with-mana-cost cost body:` (resource-guard + hygienic `let`) and `craft-spell ingredient body:` (ingredient-check + body-splice); both macros composed in three spell-casting fns; `post:` with `@before`; entity family `spells/{spell}: SpellRecord`; Set-literal state default `Set(ComponentKind, 10) = {'dragonscale, ...}`; `verify` blocks |
 
 ---
 

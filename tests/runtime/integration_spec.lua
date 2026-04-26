@@ -596,3 +596,117 @@ scene blacksmith-shop:
     assert.is_false(has_deliver, "deliver choice should be hidden when ore=0")
   end)
 end)
+
+-- ============================================================
+-- Scenario: macro NAMED_ARG parameter substitution
+-- Regression test for the bug where 'param:' at end of a condition
+-- line was parsed as a NAMED_ARG token and not substituted by
+-- the macro expander, causing guards to always see nil instead of
+-- the actual argument value.
+-- ============================================================
+
+describe("macro NAMED_ARG parameter substitution", function()
+  local SRC = [[
+module named-arg-macro-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type ItemKind = apple | banana | cherry
+
+state player/bag:   Set(ItemKind, 5) = {'apple, 'banana}
+state player/used:  Int(0, 10) = 0
+
+macro use-item kind body:
+  if contains? player/bag kind:
+    remove! player/bag kind
+    inc! player/used 1
+    body
+  else:
+    pass
+
+fn use-apple:
+  use-item kind: 'apple:
+    pass
+
+fn use-cherry:
+  use-item kind: 'cherry:
+    pass
+
+scene main:
+  pass
+]]
+
+  it("compiles without errors", function()
+    local sb = require("lib.storybase")
+    local g, err = sb.from_source(SRC, "named-arg-macro-test.sb")
+    assert.is_nil(err, tostring(err))
+    assert.is_not_nil(g)
+  end)
+
+  it("use-item consumes an item that is present", function()
+    local sb = require("lib.storybase")
+    local g = sb.from_source(SRC, "named-arg-macro-test.sb")
+    g:init()
+    assert.equal(0, g:get("player/used"))
+    g:call("use-apple")
+    assert.equal(1, g:get("player/used"))
+  end)
+
+  it("use-item does nothing when item is absent", function()
+    local sb = require("lib.storybase")
+    local g = sb.from_source(SRC, "named-arg-macro-test.sb")
+    g:init()
+    g:call("use-cherry")   -- cherry not in bag
+    assert.equal(0, g:get("player/used"))
+  end)
+end)
+
+-- ============================================================
+-- Scenario: set-literal state defaults
+-- Regression test for the bug where Set/List state defaults given
+-- as literals (e.g. {'a, 'b}) were silently ignored — the parser,
+-- codegen, runtime, and checker all needed fixing.
+-- ============================================================
+
+describe("set-literal state defaults", function()
+  local SRC = [[
+module set-default-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+type Color = red | green | blue
+
+state player/colors: Set(Color, 5) = {'red, 'green}
+state player/score:  Int(0, 100)   = 0
+
+scene main:
+  pass
+]]
+
+  it("state initializes with set literal default", function()
+    local sb = require("lib.storybase")
+    local g, err = sb.from_source(SRC, "set-default-test.sb")
+    assert.is_nil(err, tostring(err))
+    g:init()
+    -- The set should contain 'red' and 'green'
+    local colors = g:get("player/colors")
+    assert.is_not_nil(colors)
+    local found_red, found_green = false, false
+    for _, v in ipairs(colors or {}) do
+      if v == "red"   then found_red   = true end
+      if v == "green" then found_green = true end
+    end
+    assert.is_true(found_red,   "set default should contain 'red")
+    assert.is_true(found_green, "set default should contain 'green")
+  end)
+
+  it("set default has correct size", function()
+    local sb = require("lib.storybase")
+    local g = sb.from_source(SRC, "set-default-test.sb")
+    g:init()
+    local colors = g:get("player/colors")
+    assert.equal(2, #(colors or {}))
+  end)
+end)

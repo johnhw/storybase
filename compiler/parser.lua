@@ -325,16 +325,63 @@ parse_default_value = function(p)
       p:adv()
       return ast.node(ast.K.EMPTY_LIST, {}, tpos)
     end
-    -- skip non-empty list
-    local depth = 1
-    while depth > 0 and not p:at("EOF") do
-      if p:at("OP", "[") then depth = depth + 1
-      elseif p:at("OP", "]") then depth = depth - 1
-      end
-      if depth > 0 then p:adv() end
+    -- Parse non-empty list literal [elem, ...]
+    local elements = {}
+    while not p:at("OP", "]") and not p:at("EOF") and not p:at("NEWLINE") do
+      local elem = parse_default_value(p)
+      if elem then elements[#elements+1] = elem end
+      if p:at("OP", ",") then p:adv() end
     end
     p:match("OP", "]")
-    return nil
+    return ast.list_lit(elements, tpos)
+
+  elseif t.kind == "OP" and t.value == "{" then
+    p:adv()
+    if p:at("OP", "}") then
+      p:adv()
+      return ast.node(ast.K.EMPTY_MAP, {}, tpos)
+    end
+    -- Parse elements; if first is followed by ":" it's a map, else a set
+    local first_elem = parse_default_value(p)
+    if p:at("OP", ":") then
+      -- Map literal: {key: val, ...}
+      p:adv()  -- consume ":"
+      local first_val = parse_default_value(p)
+      local entries = {}
+      if first_elem then
+        local key = (first_elem.kind == ast.K.SYMBOL_LIT and first_elem.name)
+                 or (first_elem.kind == ast.K.STRING_LIT and first_elem.value)
+                 or tostring(first_elem)
+        entries[#entries+1] = ast.named_arg(key, first_val, tpos)
+      end
+      if p:at("OP", ",") then p:adv() end
+      while not p:at("OP", "}") and not p:at("EOF") and not p:at("NEWLINE") do
+        local k_elem = parse_default_value(p)
+        if p:at("OP", ":") then p:adv() end
+        local v_elem = parse_default_value(p)
+        if k_elem then
+          local key = (k_elem.kind == ast.K.SYMBOL_LIT and k_elem.name)
+                   or (k_elem.kind == ast.K.STRING_LIT and k_elem.value)
+                   or tostring(k_elem)
+          entries[#entries+1] = ast.named_arg(key, v_elem, tpos)
+        end
+        if p:at("OP", ",") then p:adv() end
+      end
+      p:match("OP", "}")
+      return ast.map_lit(entries, tpos)
+    else
+      -- Set literal: {elem, elem, ...}
+      local elements = {}
+      if first_elem then elements[#elements+1] = first_elem end
+      if p:at("OP", ",") then p:adv() end
+      while not p:at("OP", "}") and not p:at("EOF") and not p:at("NEWLINE") do
+        local elem = parse_default_value(p)
+        if elem then elements[#elements+1] = elem end
+        if p:at("OP", ",") then p:adv() end
+      end
+      p:match("OP", "}")
+      return ast.set_lit(elements, tpos)
+    end
   end
 
   return nil

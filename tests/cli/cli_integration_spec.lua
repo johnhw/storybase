@@ -1112,6 +1112,70 @@ describe("CLI demo14_kingdoms_records: schema migration chain 1->4", function()
   end)
 end)
 
+-- ── demo15: spellwright's workshop ────────────────────────────────────────────
+
+describe("CLI demo15_spellwright: macros, set defaults, entity family", function()
+  local sb_mod = require("lib.storybase")
+
+  it("compiles without errors", function()
+    local rc, out, err = run_cli({"compile", "demos/demo15_spellwright.sb"})
+    assert.equal(0, rc, "demo15 compile failed:\n" .. out .. err)
+  end)
+
+  it("starts with mana=80 and 3 components pre-loaded (set literal default)", function()
+    local game = sb_mod.load("demos/demo15_spellwright.sb")
+    game:init()
+    assert.equal(80,  game:get("player/mana"))
+    assert.equal(100, game:get("player/health"))
+    local comps = game:get("player/components")
+    assert.equal(3, #(comps or {}))
+  end)
+
+  it("cast-fireball deducts mana and consumes dragonscale", function()
+    local game = sb_mod.load("demos/demo15_spellwright.sb")
+    game:init()
+    game:choose(1)   -- Enter the workshop (init scene)
+    game:choose(1)   -- Cast Fireball
+    assert.equal(60, game:get("player/mana"))
+    assert.equal(1,  game:get("world/spells-cast"))
+    assert.is_true(game:get("spells/fireball/learned"))
+  end)
+
+  it("cast-heal-beam increases health (capped at 100)", function()
+    local game = sb_mod.load("demos/demo15_spellwright.sb")
+    game:init()
+    game:choose(1)   -- Enter the workshop
+    game:choose(1)   -- Cast Fireball (mana 80->60)
+    game:choose(1)   -- Cast Ice Shard (mana 60->45)
+    game:choose(1)   -- Cast Heal Beam (mana 45->20)
+    assert.equal(20,  game:get("player/mana"))
+    assert.equal(100, game:get("player/health"))
+    assert.equal(3,   game:get("world/spells-cast"))
+  end)
+
+  it("entity family spells initialises all four spell records", function()
+    local game = sb_mod.load("demos/demo15_spellwright.sb")
+    game:init()
+    game:choose(1)   -- Enter the workshop (triggers init-workshop)
+    assert.is_not_nil(game:get("spells/fireball"))
+    assert.is_not_nil(game:get("spells/ice-shard"))
+    assert.is_not_nil(game:get("spells/heal-beam"))
+    assert.is_not_nil(game:get("spells/binding-rune"))
+    assert.equal(false, game:get("spells/binding-rune/learned"))
+  end)
+
+  it("verify suite passes", function()
+    local rc, out, err = run_cli({"verify", "demos/demo15_spellwright.sb"})
+    assert.equal(0, rc, "demo15 verify failed:\n" .. out .. err)
+  end)
+
+  it("runs with --auto for 15 steps without error", function()
+    local rc, _, err = run_cli({"run", "--auto", "--steps", "15",
+                                 "demos/demo15_spellwright.sb"})
+    assert.equal(0, rc, "demo15 --auto run failed:\n" .. err)
+  end)
+end)
+
 -- ── extract-symbols ───────────────────────────────────────────────────────────
 
 describe("CLI extract-symbols", function()

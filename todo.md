@@ -8,16 +8,19 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-26)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–14 tested end-to-end via `--cli` mode.
-**1792 unit tests passing (busted tests/ excluding debug_http and cli_integration).
-158 CLI integration tests passing.**
+Demos 01–15 tested end-to-end via `--cli` mode.
+**1811 unit tests passing (busted tests/).
+165 CLI integration tests passing.**
 
-**Parser bug fixed in Demo 14 implementation:**
-- `parse_migration_decl`: trailing `p:skip_to_eol()` after each op was unconditional, causing
-  ops following a multi-line `transform` block to be silently swallowed. Now each single-line
-  op branch calls `p:skip_to_eol()` itself; `transform` (which handles its own block) does not.
+**Bugs fixed during Demo 15 implementation (macro system + set-literal defaults):**
+- Parser: `{...}` set literals not parsed in `parse_default_value`
+- Codegen: `emit_default` didn't handle SET_LIT/LIST_LIT nodes  
+- Runtime: `resolve_default` had no "set"/"list" tag handler
+- Checker: rejected SET_LIT as a valid Set default
+- Macro expander: NAMED_ARG nodes (param followed by `:` acting as block-body delimiter)
+  not substituted — added NAMED_ARG case to `subst` in `expand_macro_body`
 
-Next up: demos 15–16 covering macros and advanced find queries.
+Next up: demo 16 covering advanced find queries + counterfactual.
 See **Active Tasks** below.
 
 **Language bugs fixed in Demo 13 implementation:**
@@ -145,14 +148,20 @@ share the same structure (ingredient check → mana cost → effect), making mac
 `transcribe` (learn a new spell recipe), `out-of-mana` (defeat/rest state)
 
 **Implementation checklist:**
-- [ ] Write `demos/demo15_spellwright.sb` with two macro declarations
-- [ ] Confirm macro expansion runs without error (compile + run)
-- [ ] Confirm hygiene: generated names do not shadow user names (add a test in
-  `tests/compiler/macro_spec.lua` using the demo source)
-- [ ] Add CLI integration tests
-- [ ] Run `busted tests/` — all tests green
-- [ ] Update `code_map.md`
-- [ ] Commit
+- [x] Write `demos/demo15_spellwright.sb` with two macro declarations
+- [x] Confirm macro expansion runs without error (compile + run)
+- [x] Confirm hygiene: generated names do not shadow user names
+- [x] Add CLI integration tests
+- [x] Run `busted tests/` — all tests green (1811 passing)
+- [x] Update `code_map.md`
+- [x] Commit
+
+**Bugs fixed during implementation:**
+- Parser: `{...}` set literals not parsed in `parse_default_value`
+- Codegen: `emit_default` didn't handle SET_LIT/LIST_LIT nodes
+- Runtime: `resolve_default` had no "set"/"list" tag handling
+- Checker: rejected SET_LIT as a valid Set default
+- Macro expander: NAMED_ARG nodes (param followed by `:`) not substituted in macro bodies
 
 ---
 

@@ -249,6 +249,18 @@ local function emit_default(node)
   elseif node.kind == k.EMPTY_SET   then return { tag = "empty_set" }
   elseif node.kind == k.EMPTY_LIST  then return { tag = "empty_list" }
   elseif node.kind == k.EMPTY_MAP   then return { tag = "empty_map" }
+  elseif node.kind == k.SET_LIT then
+    local items = {}
+    for _, item in ipairs(node.elements or {}) do
+      items[#items+1] = emit_default(item)
+    end
+    return { tag = "set", items = items }
+  elseif node.kind == k.LIST_LIT then
+    local items = {}
+    for _, item in ipairs(node.elements or {}) do
+      items[#items+1] = emit_default(item)
+    end
+    return { tag = "list", items = items }
   elseif node.kind == k.RECORD_CONSTRUCTOR then
     local fields = {}
     for _, f in ipairs(node.fields or {}) do

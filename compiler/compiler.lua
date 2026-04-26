@@ -310,6 +310,17 @@ local function expand_macro_body(stmts, param_map, body_param, body_stmts, hyg_p
       local rn = renames and renames[node.name]
       if rn then return { kind=K.FN_CALL, name=rn, args={}, pos=node.pos } end
     end
+    -- NAMED_ARG: if name matches a macro param, substitute the whole node with
+    -- the param value.  This handles 'param:' at the end of a condition line
+    -- where the lexer fuses identifier+colon into one NAMED_ARG token.
+    if k == K.NAMED_ARG then
+      local pval = param_map[node.name]
+      if pval ~= nil then return pval end
+      local rn = renames and renames[node.name]
+      if rn then
+        return { kind=K.NAMED_ARG, name=rn, value=subst(node.value, renames), pos=node.pos }
+      end
+    end
     -- Single-segment path_expr: rename if local var (used as mutation target, e.g. set! i)
     if k == K.PATH_EXPR then
       local segs = node.segments
@@ -430,10 +441,17 @@ local function walk_and_expand(stmts, macros, diags, expanding, filename)
           end
         end
 
-        -- Build param substitution map
+        -- Build param substitution map.
+        -- Named-arg call syntax produces NAMED_ARG nodes in stmt.args; unwrap
+        -- them to get the actual expression value so the substituted AST is clean.
         local param_map = {}
         for i, pname in ipairs(expr_params) do
-          param_map[pname] = stmt.args[i]
+          local arg = stmt.args[i]
+          if arg and arg.kind == ast.K.NAMED_ARG then
+            param_map[pname] = arg.value
+          else
+            param_map[pname] = arg
+          end
         end
 
         -- Hygiene prefix: _m<N>_ where N is an expansion counter
