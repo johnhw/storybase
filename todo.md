@@ -8,11 +8,16 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-26)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–13 tested end-to-end via `--cli` mode.
-**1784 unit tests passing (busted tests/ excluding debug_http and cli_integration).
-151 CLI integration tests passing.**
+Demos 01–14 tested end-to-end via `--cli` mode.
+**1792 unit tests passing (busted tests/ excluding debug_http and cli_integration).
+158 CLI integration tests passing.**
 
-Next up: demos 14–16 covering schema migration, macros, and advanced find queries.
+**Parser bug fixed in Demo 14 implementation:**
+- `parse_migration_decl`: trailing `p:skip_to_eol()` after each op was unconditional, causing
+  ops following a multi-line `transform` block to be silently swallowed. Now each single-line
+  op branch calls `p:skip_to_eol()` itself; `transform` (which handles its own block) does not.
+
+Next up: demos 15–16 covering macros and advanced find queries.
 See **Active Tasks** below.
 
 **Language bugs fixed in Demo 13 implementation:**
@@ -102,12 +107,12 @@ command against a hand-crafted v1 save fixture in `tests/fixtures/kingdoms_v1.sb
 or via a unit test in the migration spec.
 
 **Implementation checklist:**
-- [ ] Write `demos/demo14_kingdoms_records.sb` with `schema-version: 4` and all four migrations
-- [ ] Confirm all four migration kinds parse and compile without errors
-- [ ] Write `tests/runtime/migrate_demo14_spec.lua` exercising the full 1→2→3→4 chain
-- [ ] Add CLI integration tests (compile + run --auto)
-- [ ] Run `busted tests/` — all tests green
-- [ ] Update `code_map.md`
+- [x] Write `demos/demo14_kingdoms_records.sb` with `schema-version: 4` and all four migrations
+- [x] Confirm all four migration kinds parse and compile without errors
+- [x] Write `tests/runtime/migrate_demo14_spec.lua` exercising the full 1→2→3→4 chain
+- [x] Add CLI integration tests (compile + run --auto)
+- [x] Run `busted tests/` — all tests green (1792 unit + 158 CLI)
+- [x] Update `code_map.md`
 - [ ] Commit
 
 ---

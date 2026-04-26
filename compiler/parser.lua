@@ -2634,6 +2634,7 @@ local function parse_migration_decl(p, _doc)
           new_path = p:cur().value; p:adv()
         end
         ops[#ops + 1] = { op = "rename", old_path = old_path, new_path = new_path }
+        p:skip_to_eol()
 
       elseif ct.kind == "IDENT" and ct.value == "rename-enum" then
         p:adv()
@@ -2652,6 +2653,7 @@ local function parse_migration_decl(p, _doc)
           new_sym = p:cur().value; p:adv()
         end
         ops[#ops + 1] = { op = "rename-enum", path = path, old_sym = old_sym, new_sym = new_sym }
+        p:skip_to_eol()
 
       elseif ct.kind == "IDENT" and ct.value == "add" then
         p:adv()
@@ -2663,6 +2665,7 @@ local function parse_migration_decl(p, _doc)
         p:expect("OP", "=", "expected '=' in add op")
         local val_expr = parse_expr(p)
         ops[#ops + 1] = { op = "add", path = path, value = val_expr }
+        p:skip_to_eol()
 
       elseif ct.kind == "IDENT" and ct.value == "drop" then
         p:adv()
@@ -2672,10 +2675,11 @@ local function parse_migration_decl(p, _doc)
           path = p:cur().value; p:adv()
         end
         ops[#ops + 1] = { op = "drop", path = path }
+        p:skip_to_eol()
 
       elseif ct.kind == "IDENT" and ct.value == "transform" then
         p:adv()
-        -- transform path: fn old: expr
+        -- transform path: fn old: expr  (multi-line body — skip_to_eol handled inside)
         local path = nil
         if p:at("PATH") or p:at("IDENT") or p:at("NAMED_ARG") then
           -- Consume the path — it may end with ':' if NAMED_ARG
@@ -2709,11 +2713,11 @@ local function parse_migration_decl(p, _doc)
           if p:at("DEDENT") then p:adv() end
         end
         ops[#ops + 1] = { op = "transform", path = path, expr = transform_expr }
+        -- do NOT call skip_to_eol here: already advanced past the block
 
       else
         p:skip_to_eol()
       end
-      p:skip_to_eol()
     end
     if p:at("DEDENT") then p:adv() end
   end

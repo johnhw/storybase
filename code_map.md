@@ -604,7 +604,8 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/counterfactual_spec.lua` | Counterfactual branching |
 | `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec; hot reload schema migration; spawn/despawn events |
 | `tests/runtime/debug_http_spec.lua` | HTTP/SSE transport: lifecycle, GET /, POST /command, get-scene/do-choice, SSE events (23 tests) |
-| `tests/runtime/migrate_spec.lua` | Migration runner |
+| `tests/runtime/migrate_spec.lua` | Migration runner unit tests (all op kinds, chain ordering) |
+| `tests/runtime/migrate_demo14_spec.lua` | Integration test for demo14's full 1→4 migration chain |
 | `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |
 | `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |
 | `tests/cli/compact_spec.lua` | compact CLI command |
@@ -642,6 +643,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo11_expedition_guild.sb` | type aliases (`type Gold = Int(0,500)`), `Option(T)` + `??`, `find` with `where:`/`order-by:`/`limit:`/`count`, computed `goto` via `-> (fn arg)`, multiline strings, `verify after requires`, `@before` in verify |
 | `demo12_codex.sb` + `codex_lib.sb` | two-file split via `import "codex_lib.sb" as Herb` (namespaced alias), cross-file `Option(Herb.RemedyKind)`, cross-file fn calls (`Herb.assess-stock`, `Herb.dry-garden`), cross-file scene nav (`=> Herb.harvest`), state family (`garden/{p}: GardenBed`), multiline strings, `verify after` across files with cross-file `requires` |
 | `demo13_healers_ward.sb` | `speaker` declarations with `display:`/`color:`, all `say` forms (bare-id, block, dynamic `(expr):`), `say` in fn bodies (buffered → prepended to next scene), `post:` with `path@before` on both plain and interpolated paths, multi-line lambda body in `find patients where: fn(k):\n  let...\n  return`, `count family where: fn(k):` syntax, entity family `patients/{k}: Patient max: 8` |
+| `demo14_kingdoms_records.sb` | `schema-version: 4`, full migration chain 1→2→3→4: `add` (String field), `rename` + `drop`, `transform` (`fn old: old * 100`), `rename-enum` (`'at-war → 'warring`); `post:` on `advance-year`; simple game loop with census browse/update/advance |
 
 ---
 

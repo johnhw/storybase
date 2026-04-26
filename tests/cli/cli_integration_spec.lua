@@ -1030,6 +1030,88 @@ describe("CLI demo13_healers_ward: speaker/say + post: + multi-line lambdas", fu
   end)
 end)
 
+-- ── demo14: kingdom's records ────────────────────────────────────────────────
+
+describe("CLI demo14_kingdoms_records: schema migration chain 1->4", function()
+  local sb_mod = require("lib.storybase")
+
+  it("compiles without errors", function()
+    local rc, out, err = run_cli({"compile", "demos/demo14_kingdoms_records.sb"})
+    assert.equal(0, rc, "demo14 compile failed:\n" .. out .. err)
+  end)
+
+  it("starts at year 1200 with population 80000 and status peaceful", function()
+    local game = sb_mod.load("demos/demo14_kingdoms_records.sb")
+    game:init()
+    assert.equal(1200,      game:get("world/year"))
+    assert.equal(80000,     game:get("world/population"))
+    assert.equal("peaceful",game:get("world/kingdom-status"))
+    assert.equal(0,         game:get("world/reports-filed"))
+  end)
+
+  it("advance-year increments year and reports-filed (post: enforced)", function()
+    local game = sb_mod.load("demos/demo14_kingdoms_records.sb")
+    game:init()
+    -- choice 4 = "File the annual census report"
+    game:choose(4)
+    assert.equal(1201, game:get("world/year"))
+    assert.equal(1,    game:get("world/reports-filed"))
+  end)
+
+  it("review-chronicle choice appears only after filing a report", function()
+    local game = sb_mod.load("demos/demo14_kingdoms_records.sb")
+    game:init()
+    -- Initial: reports-filed = 0, chronicle choice should not appear
+    local _, choices_before = game:render()
+    local chronicle_before = false
+    for _, c in ipairs(choices_before or {}) do
+      if c.label:find("chronicle") then chronicle_before = true end
+    end
+    assert.is_false(chronicle_before, "chronicle choice should not appear before any report")
+
+    -- File a report (choice 4)
+    game:choose(4)
+    local _, choices_after = game:render()
+    local chronicle_after = false
+    for _, c in ipairs(choices_after or {}) do
+      if c.label:find("chronicle") then chronicle_after = true end
+    end
+    assert.is_true(chronicle_after, "chronicle choice should appear after filing a report")
+  end)
+
+  it("migration chain 1->4 on a v1 cache produces correct v4 state", function()
+    local compiler_mod = require("compiler.compiler")
+    local migrate_mod  = require("runtime.migrate")
+    local gt, diags = compiler_mod.compile_file("demos/demo14_kingdoms_records.sb")
+    assert.equal(0, #(diags and diags.errors or {}))
+
+    local cache = {
+      ["world/year"]           = 1210,
+      ["world/census-count"]   = 800,
+      ["world/kingdom-status"] = "at-war",
+      ["world/trade-surplus"]  = 100,
+      ["world/reports-filed"]  = 10,
+    }
+    local mdiags = migrate_mod.migrate(cache, gt.migrations, 1, 4, gt)
+    assert.equal(0, #(mdiags.errors or {}))
+    assert.equal(80000,    cache["world/population"])
+    assert.equal("warring",cache["world/kingdom-status"])
+    assert.is_nil(cache["world/census-count"])
+    assert.is_nil(cache["world/treasury-notes"])
+  end)
+
+  it("verify suite passes", function()
+    local rc, out, err = run_cli({"verify", "demos/demo14_kingdoms_records.sb"})
+    assert.equal(0, rc, "demo14 verify failed:\n" .. out .. err)
+  end)
+
+  it("runs with --auto for 10 steps without error", function()
+    local rc, _, err = run_cli({"run", "--auto", "--steps", "10",
+                                 "demos/demo14_kingdoms_records.sb"})
+    assert.equal(0, rc, "demo14 --auto run failed:\n" .. err)
+  end)
+end)
+
 -- ── extract-symbols ───────────────────────────────────────────────────────────
 
 describe("CLI extract-symbols", function()

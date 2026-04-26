@@ -1,0 +1,161 @@
+module demo14-kingdoms-records
+  version: 1.0
+
+# Demo 14 — The Kingdom's Records
+#
+# Demonstrates:
+#   • schema-version declaration (v4)
+#   • migration 1->2: add  (new String field)
+#   • migration 2->3: rename + drop
+#   • migration 3->4: transform (fn old: old * 100) + rename-enum ('at-war -> 'warring)
+#
+# Run with:  storybase run demos/demo14_kingdoms_records.sb
+
+schema-version: 4
+
+engine-config:
+  entry-scene: archive
+
+# ── Types (v4 schema) ─────────────────────────────────────────────────────────
+
+type KingdomStatus = peaceful | warring | prosperous | declining
+
+# ── State (v4 schema) ─────────────────────────────────────────────────────────
+#
+# History:
+#   v1: world/census-count (Int), world/kingdom-status (includes 'at-war)
+#   v2: + world/treasury-notes (String, dropped in v3)
+#   v3: census-count renamed to population, treasury-notes dropped
+#   v4: population scaled x100, 'at-war renamed to 'warring
+
+state world/year:           Int(1200, 1299) = 1200
+state world/population:     Int(0, 9999999) = 80000
+state world/kingdom-status: KingdomStatus   = 'peaceful
+state world/trade-surplus:  Int(0, 9999)    = 150
+state world/reports-filed:  Int(0, 99)      = 0
+
+# ── Migration chain ────────────────────────────────────────────────────────────
+
+migration 1 -> 2:
+  add world/treasury-notes = ""
+
+migration 2 -> 3:
+  rename world/census-count -> world/population
+  drop   world/treasury-notes
+
+migration 3 -> 4:
+  transform world/population:
+    fn old: old * 100
+  rename-enum world/kingdom-status 'at-war -> 'warring
+
+# ── Functions ─────────────────────────────────────────────────────────────────
+
+fn status-label s:
+  return match s:
+    'peaceful:   "Peaceful"
+    'warring:    "Warring"
+    'prosperous: "Prosperous"
+    'declining:  "Declining"
+    _:           "Unknown"
+
+fn years-elapsed:
+  return world/year - 1200
+
+fn at-war?:
+  return world/kingdom-status = 'warring
+
+fn at-peace?:
+  return world/kingdom-status = 'peaceful
+
+fn prosperous?:
+  return world/kingdom-status = 'prosperous
+
+fn advance-year:
+  post: world/year = world/year@before + 1
+  post: world/reports-filed = world/reports-filed@before + 1
+  inc! world/year 1
+  inc! world/reports-filed 1
+  when world/trade-surplus > 200:
+    set! world/kingdom-status 'prosperous
+  when world/trade-surplus < 50 and world/kingdom-status = 'peaceful:
+    set! world/kingdom-status 'declining
+
+# ── Scenes ────────────────────────────────────────────────────────────────────
+
+scene archive:
+  The Royal Archive — vaulted chambers beneath the palace where the kingdom's records are kept.
+  Year {world/year}. Reigning for {years-elapsed} year(s).
+  Population: {world/population}. Status: {status-label world/kingdom-status}.
+  Reports filed: {world/reports-filed}.
+
+  * Inspect the current census records:
+    => view-records
+  * Update the kingdom's official status:
+    => update-status
+  * Adjust the trade figures:
+    => adjust-trade
+  * File the annual census report:
+    advance-year
+    -> archive
+  * [world/reports-filed > 0] Review the chronicle:
+    => review-chronicle
+
+scene view-records:
+  Census Records — Year {world/year}
+
+  Population:    {world/population} souls.
+  Kingdom status: {status-label world/kingdom-status}.
+  Trade surplus:  {world/trade-surplus} gold marks.
+  Reports filed:  {world/reports-filed}.
+
+  * Return to archive:
+    <-
+
+scene update-status:
+  Amend the official record of the kingdom's standing.
+
+  * [not at-peace?] Record that peace has been restored:
+    set! world/kingdom-status 'peaceful
+    <-
+  * [not at-war?] Record that war has been declared:
+    set! world/kingdom-status 'warring
+    <-
+  * [not prosperous?] Record a period of prosperity:
+    set! world/kingdom-status 'prosperous
+    <-
+  * Return without changes:
+    <-
+
+scene adjust-trade:
+  The ledgers hold the trade-surplus figures. Revise them as circumstances demand.
+
+  * Record increased trade (add 50 marks):
+    inc! world/trade-surplus 50
+    <-
+  * Record reduced trade (subtract 50 marks):
+    dec! world/trade-surplus 50
+    <-
+  * Return without changes:
+    <-
+
+scene review-chronicle:
+  The chronicle records {world/reports-filed} annual report(s) since the reign began in year 1200.
+  We are now in year {world/year}, {years-elapsed} year(s) since the reign began.
+  The kingdom is currently: {status-label world/kingdom-status}.
+
+  * Return to archive:
+    <-
+
+# ── Verification ─────────────────────────────────────────────────────────────
+
+verify "population is always non-negative":
+  from-any-state:
+    world/population >= 0
+
+verify "year never retreats":
+  from-any-state:
+    world/year >= 1200
+
+verify "warring kingdom can always be set to peaceful":
+  when world/kingdom-status = 'warring:
+    can-reach? world/kingdom-status = 'peaceful  depth: 5
