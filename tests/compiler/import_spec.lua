@@ -573,16 +573,17 @@ scene s:
   end)
 end)
 
--- ── module exports: (WARN_EXPORTS_NOT_ENFORCED) ───────────────────────────────
+-- ── module exports: filtering ─────────────────────────────────────────────────
 
-describe("import resolver: module exports warning", function()
-  it("emits WARN_EXPORTS_NOT_ENFORCED when imported module has exports:", function()
+describe("import resolver: module exports filtering", function()
+  it("exported names are accessible in the importing file", function()
     local lib = tmpfile([[
 module exports-lib
   version: 1.0
   exports: [Color]
 
 type Color = red | green
+type Secret = hidden | revealed
 state world:
   color: Color = 'red
 ]])
@@ -602,17 +603,99 @@ scene s:
 ]], lib))
     local gt, diags = compiler.compile_file(main)
     os.remove(lib); os.remove(main)
-    -- Should compile (exports: is a warning, not a hard error)
-    assert.is_not_nil(gt)
-    assert.is_false(diags:has_errors())
-    local found = false
-    for _, w in ipairs(diags.warnings or {}) do
-      if w.code == "WARN_EXPORTS_NOT_ENFORCED" then found = true end
-    end
-    assert.is_true(found, "expected WARN_EXPORTS_NOT_ENFORCED warning")
+    assert.is_not_nil(gt, "should compile successfully")
+    assert.is_false(diags:has_errors(), table.concat(
+      (function() local t={}; for _,e in ipairs(diags.errors or {}) do t[#t+1]=e.message end; return t end)(), "; "))
   end)
 
-  it("module exports: is parsed and stored in AST", function()
+  it("non-exported names are not accessible in the importing file", function()
+    local lib = tmpfile([[
+module exports-lib2
+  version: 1.0
+  exports: [Color]
+
+type Color = red | green
+type Secret = hidden | revealed
+]])
+    local main = tmpfile(string.format([[
+module exports-main2
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+state player:
+  secret: Secret = 'hidden
+
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    -- Secret is not exported → should be an error (UNDEFINED_TYPE or similar)
+    assert.is_true(diags:has_errors(), "expected error: Secret is not exported")
+  end)
+
+  it("non-exported functions are not callable from importing file", function()
+    local lib = tmpfile([[
+module fn-exports-lib
+  version: 1.0
+  exports: [visible-fn]
+
+fn visible-fn:
+  -> 42
+
+fn hidden-fn:
+  -> 99
+]])
+    local main = tmpfile(string.format([[
+module fn-exports-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+scene s:
+  let x = (hidden-fn):
+    Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    -- hidden-fn not exported → should error
+    assert.is_true(diags:has_errors(), "expected error: hidden-fn is not exported")
+  end)
+
+  it("state declarations always pass through regardless of exports:", function()
+    local lib = tmpfile([[
+module state-exports-lib
+  version: 1.0
+  exports: [Color]
+
+type Color = red | green
+state world:
+  color: Color = 'red
+]])
+    local main = tmpfile(string.format([[
+module state-exports-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+scene s:
+  Done.
+]], lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    -- state world/color should be present even though only Color is in exports
+    assert.is_not_nil(gt, "should compile")
+    assert.is_false(diags:has_errors())
+  end)
+
+  it("module exports: list is parsed and stored in AST", function()
     local src = [[
 module parsed-exports
   version: 1.0
@@ -622,11 +705,6 @@ engine-config:
 scene s:
   Done.
 ]]
-    local typed_ast, diags = compiler.parse_and_check(src, "parsed-exports.sb")
-    -- exports are not enforced so no error on the main file itself
-    -- (warning only applies when the module is imported by another file)
-    assert.is_not_nil(typed_ast or diags)
-    -- Find the module decl and verify exports were parsed
     local typed, _ = compiler.parse_and_check(src, "x.sb")
     if typed then
       for _, decl in ipairs(typed.decls or {}) do

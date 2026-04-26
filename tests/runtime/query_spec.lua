@@ -110,6 +110,123 @@ describe("find query: where clause", function()
 end)
 
 -- ============================================================
+-- find query: or-where clause
+-- ============================================================
+
+describe("find query: or-where clause", function()
+  it("or-where ORs with preceding where clause", function()
+    local c = make_ctx({
+      ["npcs/guard/hp"]  = 100,
+      ["npcs/mage/hp"]   = 30,
+      ["npcs/thief/hp"]  = 50,
+      ["npcs/boss/hp"]   = 10,
+      ["npcs/boss/boss"] = true,
+    })
+    -- where hp > 60 or-where boss = true
+    local cond_hp = binop(">",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "hp" } },
+      int_lit(60))
+    local cond_boss = binop("=",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "boss" } },
+      { kind = "bool_lit", value = true })
+    local result = query.find(c, "npcs", {
+      { kind = "where",    condition = cond_hp },
+      { kind = "or_where", condition = cond_boss },
+    })
+    table.sort(result)
+    -- guard (hp=100 passes first branch) and boss (boss=true passes second branch)
+    assert.same({ "boss", "guard" }, result)
+  end)
+
+  it("multiple where before or-where ANDs them together", function()
+    local c = make_ctx({
+      ["npcs/guard/hp"]     = 100,
+      ["npcs/guard/alive"]  = true,
+      ["npcs/mage/hp"]      = 80,
+      ["npcs/mage/alive"]   = false,
+      ["npcs/boss/hp"]      = 10,
+      ["npcs/boss/alive"]   = false,
+      ["npcs/boss/special"] = true,
+    })
+    -- where hp > 60 where alive = true or-where special = true
+    -- = (hp>60 AND alive) OR special
+    local cond_hp = binop(">",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "hp" } },
+      int_lit(60))
+    local cond_alive = binop("=",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "alive" } },
+      { kind = "bool_lit", value = true })
+    local cond_special = binop("=",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "special" } },
+      { kind = "bool_lit", value = true })
+    local result = query.find(c, "npcs", {
+      { kind = "where",    condition = cond_hp },
+      { kind = "where",    condition = cond_alive },
+      { kind = "or_where", condition = cond_special },
+    })
+    table.sort(result)
+    -- guard: hp=100 AND alive=true → passes first branch
+    -- boss:  special=true → passes second branch
+    -- mage:  hp=80 but alive=false → fails first; special=nil → fails second
+    assert.same({ "boss", "guard" }, result)
+  end)
+
+  it("multiple or-where clauses independently OR", function()
+    local c = make_ctx({
+      ["npcs/a/tag"] = "friendly",
+      ["npcs/b/tag"] = "hostile",
+      ["npcs/c/tag"] = "neutral",
+      ["npcs/d/tag"] = "boss",
+    })
+    local function tag_eq(v)
+      return binop("=",
+        { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "tag" } },
+        { kind = "string_lit", value = v })
+    end
+    -- where tag=friendly or-where tag=hostile or-where tag=boss
+    local result = query.find(c, "npcs", {
+      { kind = "where",    condition = tag_eq("friendly") },
+      { kind = "or_where", condition = tag_eq("hostile") },
+      { kind = "or_where", condition = tag_eq("boss") },
+    })
+    table.sort(result)
+    assert.same({ "a", "b", "d" }, result)
+  end)
+
+  it("or-where followed by where ANDs into the new branch", function()
+    local c = make_ctx({
+      ["npcs/a/type"]  = "fighter",
+      ["npcs/a/elite"] = true,
+      ["npcs/b/type"]  = "fighter",
+      ["npcs/b/elite"] = false,
+      ["npcs/c/type"]  = "mage",
+      ["npcs/c/elite"] = true,
+    })
+    -- where type=fighter or-where type=mage where elite=true
+    -- = (type=fighter) OR (type=mage AND elite=true)
+    local cond_fighter = binop("=",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "type" } },
+      { kind = "string_lit", value = "fighter" })
+    local cond_mage = binop("=",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "type" } },
+      { kind = "string_lit", value = "mage" })
+    local cond_elite = binop("=",
+      { kind = "interp_path", segments = { "npcs", { interp = "npcs" }, "elite" } },
+      { kind = "bool_lit", value = true })
+    local result = query.find(c, "npcs", {
+      { kind = "where",    condition = cond_fighter },
+      { kind = "or_where", condition = cond_mage },
+      { kind = "where",    condition = cond_elite },
+    })
+    table.sort(result)
+    -- a: fighter → passes first branch
+    -- b: fighter → passes first branch
+    -- c: mage AND elite=true → passes second branch
+    assert.same({ "a", "b", "c" }, result)
+  end)
+end)
+
+-- ============================================================
 -- find query: order-by
 -- ============================================================
 

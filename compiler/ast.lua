@@ -241,8 +241,11 @@ M.K.IF_EXPR             = "if_expr"          -- if cond: then [else: else_body]
 M.K.WHEN_STMT           = "when_stmt"        -- when cond: body  (no else)
 M.K.MATCH_EXPR          = "match_expr"       -- match expr: arms...
 M.K.COND_EXPR           = "cond_expr"        -- cond: arms...
-M.K.FOR_STMT            = "for_stmt"         -- for var in expr: body
+M.K.FOR_STMT            = "for_stmt"         -- for var in expr: body [else: body]
 M.K.WHILE_STMT          = "while_stmt"       -- while cond: body
+M.K.BREAK_STMT          = "break_stmt"       -- break (exit loop)
+M.K.CONTINUE_STMT       = "continue_stmt"    -- continue (next iteration)
+M.K.RETURN_STMT         = "return_stmt"      -- return expr (early function exit)
 M.K.LET_STMT            = "let_stmt"         -- let bindings: body
 M.K.LAMBDA_EXPR         = "lambda_expr"      -- fn(params): body
 M.K.PASS_STMT           = "pass_stmt"        -- pass (no-op)
@@ -265,6 +268,8 @@ M.K.REMOVE_MUT          = "remove_mut"       -- remove! path value
 M.K.CLEAR_MUT           = "clear_mut"        -- clear! path
 M.K.PUSH_MUT            = "push_mut"         -- push! path value
 M.K.POP_MUT             = "pop_mut"          -- pop! path
+M.K.MAP_SET_MUT         = "map_set_mut"      -- map-set! path key value
+M.K.MAP_DELETE_MUT      = "map_delete_mut"   -- map-delete! path key
 M.K.RELATE_MUT          = "relate_mut"       -- relate! rel a b
 M.K.UNRELATE_MUT        = "unrelate_mut"     -- unrelate! rel a b
 M.K.SPAWN_MUT           = "spawn_mut"        -- spawn! family key record
@@ -340,6 +345,7 @@ local MUT_KINDS = {
   [M.K.DEC_MUT]             = true, [M.K.ADD_MUT]      = true,
   [M.K.REMOVE_MUT]          = true, [M.K.CLEAR_MUT]    = true,
   [M.K.PUSH_MUT]            = true, [M.K.POP_MUT]      = true,
+  [M.K.MAP_SET_MUT]         = true, [M.K.MAP_DELETE_MUT] = true,
   [M.K.RELATE_MUT]          = true, [M.K.UNRELATE_MUT] = true,
   [M.K.SPAWN_MUT]           = true, [M.K.DESPAWN_MUT]  = true,
   [M.K.SEND_MUT]            = true, [M.K.TIME_INC_MUT] = true,
@@ -696,12 +702,24 @@ function M.cond_arm(condition, body, pos)
   return M.node(M.K.COND_ARM, { condition = condition, body = body or {} }, pos)
 end
 
-function M.for_stmt(var, iter, body, pos)
-  return M.node(M.K.FOR_STMT, { var = var, iter = iter, body = body or {} }, pos)
+function M.for_stmt(var, iter, body, else_body, pos)
+  return M.node(M.K.FOR_STMT, { var = var, iter = iter, body = body or {}, else_body = else_body }, pos)
 end
 
 function M.while_stmt(condition, body, pos)
   return M.node(M.K.WHILE_STMT, { condition = condition, body = body or {} }, pos)
+end
+
+function M.break_stmt(pos)
+  return M.node(M.K.BREAK_STMT, {}, pos)
+end
+
+function M.continue_stmt(pos)
+  return M.node(M.K.CONTINUE_STMT, {}, pos)
+end
+
+function M.return_stmt(expr, pos)
+  return M.node(M.K.RETURN_STMT, { expr = expr }, pos)
 end
 
 function M.let_stmt(bindings, body, pos)
@@ -777,6 +795,12 @@ function M.push_mut(path, value, pos)
 end
 function M.pop_mut(path, pos)
   return M.node(M.K.POP_MUT, { path = path }, pos)
+end
+function M.map_set_mut(path, key, value, pos)
+  return M.node(M.K.MAP_SET_MUT, { path = path, key = key, value = value }, pos)
+end
+function M.map_delete_mut(path, key, pos)
+  return M.node(M.K.MAP_DELETE_MUT, { path = path, key = key }, pos)
 end
 function M.relate_mut(rel, a, b, pos)
   return M.node(M.K.RELATE_MUT, { rel = rel, a = a, b = b }, pos)

@@ -12,10 +12,11 @@ Complete StoryBase syntax specification. For an introduction see the [tutorials]
 4. [Expressions](#expressions)
 5. [Statements](#statements)
 6. [Scene Syntax](#scene-syntax)
-7. [Type System](#type-system)
-8. [Path Syntax](#path-syntax)
-9. [Module System](#module-system)
-10. [Error Codes](#error-codes)
+7. [Dialogue and Speaker System](#dialogue-and-speaker-system)
+8. [Type System](#type-system)
+9. [Path Syntax](#path-syntax)
+10. [Module System](#module-system)
+11. [Error Codes](#error-codes)
 
 ---
 
@@ -393,6 +394,56 @@ migration 2 -> 3:
 
 Applied in order when loading a save with an older schema version. See the [schema migration how-to](../howto/schema_migration.md).
 
+### `speaker`
+
+```
+speaker aldric:
+  display: "Aldric the Bold"
+  color:   "#c8a96e"
+```
+
+Declares optional UI metadata for a named speaker. Both fields are optional.
+
+| Field | Description |
+|-------|-------------|
+| `display:` | Human-readable name shown in the UI (string) |
+| `color:` | CSS hex color for the speaker's name or bubble (string) |
+
+Speakers do not need to be declared to be used in `say` statements — an undeclared speaker emits an `INFO` hint at compile time but is not an error. Declared speakers make the metadata available to the Lua embedding API.
+
+### `hook`
+
+Hooks execute additional code before or after specific functions, or before/after all functions carrying a given tag.
+
+**Function-level hooks** (by function name):
+
+```
+hook before: attack:
+  inc! world/pre-attack-count 1
+
+hook after: attack:
+  when player/health <= 0:
+    set! player/status 'dead
+```
+
+`hook before: fn-name:` — body runs before `fn-name` executes.
+`hook after: fn-name:` — body runs after `fn-name` executes.
+
+**Tag-level hooks** (by function tag):
+
+```
+hook combat: pre:
+  log-combat-start
+
+hook combat: post:
+  check-victory-condition
+```
+
+`hook tag-name: pre:` — body runs before every function tagged `[combat]`.
+`hook tag-name: post:` — body runs after every function tagged `[combat]`.
+
+In an `after:` or `post:` hook body, the `changes` variable is bound to a list of `{path, old, new}` tables describing every state mutation made during the hooked function's execution.
+
 ### `macro`
 
 ```
@@ -432,6 +483,16 @@ Macros are inlined at each call site. They may not be recursive.
 | `UMap(K, V)` | Unbounded map |
 
 Superficial values may never appear in conditional expressions or drive game logic.
+
+`UList` supports `push!`, `pop!`, `size`, `count`, and `for` iteration. The `UMap` type must be declared as a named type alias before use in state declarations. `UMap` supports:
+
+| Operation | Description |
+|-----------|-------------|
+| `map-set! path key value` | Set a key in a UMap |
+| `map-delete! path key` | Remove a key from a UMap |
+| `(map-get path key)` | Read a value (nil if absent) |
+| `(map-size path)` | Number of entries |
+| `(map-keys path)` | List of all keys |
 
 ### Function types
 
@@ -485,6 +546,8 @@ In `post:` blocks only: the value of `path` at the start of the function call.
 ```
 post: player/gold = player/gold@before - price
 ```
+
+**Propagation into called functions:** The `path@before` snapshot is also available inside functions called from within `post:` blocks or postcondition expressions. This means a helper function called during postcondition evaluation can read `path@before` values from the outer function's snapshot. This behaviour is intentional and allows postcondition logic to be factored into shared helpers.
 
 ### Arithmetic and comparisons
 
@@ -617,6 +680,21 @@ player/waypoints[0]     # first element
 player/waypoints[-1]    # last element
 player/waypoints[1:4]   # elements 1–3 (0-based, end exclusive)
 ```
+
+### Collection builtins
+
+| Builtin | Arguments | Returns | Description |
+|---------|-----------|---------|-------------|
+| `contains? coll item` | collection, any | Bool | True if item is in the collection |
+| `not-in? item coll` | any, collection | Bool | True if item is **not** in the collection |
+| `empty? coll` | collection | Bool | True if the collection has no elements |
+| `count coll` | collection | Int | Number of elements |
+| `size coll` | collection | Int | Alias for `count` |
+| `union a b` | Set, Set | Set | Elements in either set (no duplicates) |
+| `intersect a b` | Set, Set | Set | Elements in both sets |
+| `difference a b` | Set, Set | Set | Elements in `a` but not `b` |
+
+`not-in? item coll` is sugar for `not (contains? coll item)` and reduces double-negative noise in guards.
 
 ---
 
@@ -759,6 +837,16 @@ let base  = base-damage
 
 Sequential local bindings. Each binding may reference previous ones.
 
+**Free (no-body) form:** omit the `:` and body to bind a variable into the enclosing function scope for the remainder of that function:
+
+```
+let x = (random-int 1 20)
+let bonus = x + modifier
+set! player/total bonus
+```
+
+Multiple free `let` statements accumulate in the same scope; each can reference those above it.
+
 ### `for`
 
 ```
@@ -769,6 +857,15 @@ for npc in (path-list npcs):
 
 Iterate over a list or `path-list`.
 
+**`else` clause:** an optional `else:` block executes when the collection is empty (the loop body never ran):
+
+```
+for item in world/items:
+  process item
+else:
+  set! world/result 'none
+```
+
 ### `while`
 
 ```
@@ -778,6 +875,36 @@ while combat/active and player/status = 'alive:
 ```
 
 Loop while condition holds. Body may call mutation primitives.
+
+**Iteration safety limit:** `while` loops are capped at 10,000 iterations. Exceeding this limit raises a runtime error (`while loop exceeded 10000 iteration safety limit`). Infinite-loop bugs are caught rather than silently truncating state.
+
+### `break` and `continue`
+
+```
+for item in player/inventory:
+  if item = 'key:
+    break
+  process-item item
+
+while world/ticks < 100:
+  inc! world/ticks 1
+  if world/ticks = 50:
+    continue
+  do-work
+```
+
+`break` exits the innermost `for` or `while` loop immediately. `continue` skips the remaining body of the current iteration and proceeds to the next one.
+
+### `return`
+
+```
+fn classify n:
+  if n > 50:
+    return 'high
+  return 'low
+```
+
+`return expr` exits a function early and returns the given value. Execution of subsequent statements in the function body is skipped. Without an early `return`, a function's return value is the result of the last expression-type statement.
 
 ### `when`
 
@@ -808,6 +935,20 @@ match player/class:
   _:
     pass
 ```
+
+### `say` (function body)
+
+Emit attributed dialogue from inside a function or macro body.
+
+```
+say 'aldric "Ready when you are, Commander."
+say 'mira   "The wind is right for travel today."
+say (player/companion) "I'll scout ahead."
+```
+
+**Syntax:** `say <speaker> <text-expr>`
+
+The speaker may be a symbol literal (`'name`), an identifier, or a parenthesised expression that resolves to a symbol at runtime. The text is a string literal or interpolated string. Dialogue objects emitted inside function bodies are prepended to the narration of the scene that called the function.
 
 ### `pass`
 
@@ -876,6 +1017,28 @@ else:
   You could have done better.
 ```
 
+### `say` in scene bodies
+
+Emit attributed dialogue inline within a scene. Two forms are supported.
+
+**Inline form** — single line:
+
+```
+say aldric: Ready when you are, Commander.
+say mira:   The wind is right for travel today.
+say (player/companion): I'll scout ahead. Stay close.
+```
+
+**Block form** — multiple lines attributed to the same speaker:
+
+```
+say aldric:
+  Ah, you're finally here.
+  I was beginning to wonder if you'd changed your mind.
+```
+
+The speaker may be a bare identifier, a symbol literal (e.g. `'aldric`), a `NAMED_ARG` token (identifier followed immediately by `:`), or a parenthesised expression. The dynamic form `say (expr):` resolves the speaker symbol at runtime — useful when the speaker depends on game state.
+
 ### Choices
 
 ```
@@ -900,6 +1063,103 @@ Optional guard:
 | `-> (expr)` | Computed goto: `expr` must evaluate to a scene name |
 | `=> name` | Enter: push current scene onto stack, go to `name` |
 | `<-` | Exit: pop stack, return to previous scene |
+
+---
+
+## Dialogue and Speaker System
+
+StoryBase has a first-class dialogue attribution system for writing interactive fiction with multiple named characters.
+
+### Speaker declarations
+
+```
+speaker aldric:
+  display: "Aldric the Bold"
+  color:   "#c8a96e"
+
+speaker mira:
+  display: "Mira Ashveil"
+  color:   "#7ab8c2"
+```
+
+Declare named speakers at the top level. Both `display:` and `color:` are optional. Speakers do not need to be declared; an undeclared speaker name is valid but emits an `INFO` hint at compile time.
+
+### The `say` statement
+
+`say` emits attributed dialogue. It is legal in scene bodies, choice bodies, function bodies, and macros.
+
+**Scene-body inline form:**
+
+```
+say aldric: Ah, you're finally here.
+```
+
+**Scene-body block form:**
+
+```
+say aldric:
+  Ah, you're finally here.
+  I was beginning to wonder if you'd changed your mind.
+```
+
+**Function-body form:**
+
+```
+fn aldric-greets:
+  say 'aldric "Ready when you are, Commander."
+  say 'aldric "I've been sharpening my blade all morning."
+```
+
+The scene-body form uses a colon separator; the function-body form places the text directly after the speaker.
+
+### Dynamic speakers
+
+The speaker expression may be any expression wrapped in parentheses:
+
+```
+say (player/companion): I'll scout ahead.
+```
+
+At runtime the expression is evaluated and its symbol value is used as the speaker key. If the result is `nil` (e.g. an `Option` that is not set), the line is still emitted but has no speaker attribution.
+
+### Narration output format
+
+`say` statements produce *dialogue objects* in the narration list rather than plain strings. Each dialogue object is a Lua table with the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `speaker` | string or nil | Raw speaker key (symbol name) |
+| `display` | string or nil | Human-readable name from the `speaker` declaration, or the raw key if undeclared |
+| `color` | string or nil | CSS hex color from the `speaker` declaration, or nil if undeclared |
+| `text` | string | Rendered dialogue text (with `{expr}` interpolation applied) |
+
+Plain narration lines remain plain strings. Hosts must check `type(line) == "table"` to distinguish dialogue objects from narration strings.
+
+```lua
+local narration, choices = game:render()
+for _, line in ipairs(narration) do
+  if type(line) == "table" then
+    -- Attributed dialogue
+    local label = line.display or line.speaker or "?"
+    print(label .. ": " .. line.text)
+  else
+    -- Plain narration
+    print(line)
+  end
+end
+```
+
+### Ordering: fn-body say before scene narration
+
+Dialogue emitted by `say` inside a function that is called from a choice body accumulates in a pending buffer. When the next scene renders, that buffered dialogue is prepended to the scene's narration so it appears in the correct narrative order.
+
+This guarantee applies transitively: if a choice body calls function A, which calls function B, all `say` statements from both A and B are buffered and prepended to the next scene's narration in call order (A's lines before B's, which are before the scene's own narration lines).
+
+**Summary of ordering guarantees:**
+- `say` in a choice body: appears immediately before the next scene renders.
+- `say` in a function called from a choice body: buffered and prepended to the next scene.
+- `say` in nested function calls: buffered in call order, all prepended before scene narration.
+- `say` in scene bodies: appears at the position it is written in the scene narration list.
 
 ---
 
@@ -1004,4 +1264,3 @@ Import cycles are a compile error.
 | `PERCEIVES_VIOLATION` | warning | Actor reads a path outside its `perceives:` list |
 | `UNTYPED_SYMBOL` | warning | `Symbol` used where `SymbolOf(F)` would give better bounds |
 | `UNSUPPORTED_FEATURE` | error | Feature not yet implemented (e.g., `import "f" as Alias` — use flat import) |
-| `WARN_EXPORTS_NOT_ENFORCED` | warning | Module declares `exports:` but import filtering is not yet enforced |

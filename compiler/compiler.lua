@@ -46,6 +46,21 @@ local SKIP_ON_IMPORT = {
   [ast.K.ENGINE_CONFIG]  = true,
 }
 
+--- Declaration kinds that are subject to exports: filtering.
+--- State/relation/grid/speaker/verify/hook declarations are always exported.
+local EXPORTS_FILTERABLE = {
+  [ast.K.FN_DECL]       = true,
+  [ast.K.SCENE_DECL]    = true,
+  [ast.K.ACTOR_DECL]    = true,
+  [ast.K.SCHEDULE_DECL] = true,
+  [ast.K.BOUNDED_DECL]  = true,
+  [ast.K.MACRO_DECL]    = true,
+  [ast.K.TYPE_ENUM]     = true,
+  [ast.K.TYPE_ALIAS]    = true,
+  [ast.K.TYPE_RECORD]   = true,
+  [ast.K.TYPE_VARIANT]  = true,
+}
+
 --- Apply namespace prefix to all non-state declarations from a namespaced import.
 --- Renames type/fn/scene/actor/schedule/bounded/macro declarations to "Alias.Name",
 --- and rewrites all internal cross-references accordingly.
@@ -200,23 +215,36 @@ local function resolve_imports(ast_root, source_file, diags, in_progress)
               in_progress[imp_path] = true
               resolve_imports(imp_ast, imp_path, diags, in_progress)
               in_progress[imp_path] = nil
+              -- Apply exports: filtering before namespace renaming (names are originals here)
+              local exports_set = nil
+              for _, d in ipairs(imp_ast.decls or {}) do
+                if d.kind == ast.K.MODULE_DECL and d.exports and #d.exports > 0 then
+                  exports_set = {}
+                  for _, n in ipairs(d.exports) do exports_set[n] = true end
+                  break
+                end
+              end
+              if exports_set then
+                local filtered = {}
+                for _, d in ipairs(imp_ast.decls or {}) do
+                  if EXPORTS_FILTERABLE[d.kind] then
+                    if d.name and exports_set[d.name] then
+                      filtered[#filtered + 1] = d
+                    end
+                  else
+                    filtered[#filtered + 1] = d
+                  end
+                end
+                imp_ast.decls = filtered
+              end
               -- Apply namespace prefix if this is an aliased import
               if decl.alias then
                 apply_import_namespace(imp_ast, decl.alias)
               end
-              -- Splice non-metadata declarations before current position
+              -- Splice non-metadata declarations
               for _, d in ipairs(imp_ast.decls or {}) do
                 if not SKIP_ON_IMPORT[d.kind] then
                   new_decls[#new_decls+1] = d
-                end
-                -- Warn if the imported module declares exports: (not yet enforced)
-                if d.kind == ast.K.MODULE_DECL and d.exports and #d.exports > 0 then
-                  diags:push_warning(ast.W.EXPORTS_NOT_ENFORCED,
-                    string.format(
-                      "module '%s' declares exports: but export enforcement is not yet "
-                      .. "implemented; all names are exported unconditionally",
-                      d.name or "?"),
-                    d.pos or ast.pos(imp_path, 0, 0))
                 end
               end
             end

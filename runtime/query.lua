@@ -76,13 +76,28 @@ function M.find(ctx, family, clauses)
     local passes = true
 
     if #where_conditions > 0 then
-      -- All where conditions are ANDed; or_where is also AND for now
-      for _, cond_clause in ipairs(where_conditions) do
-        local ok, v = pcall(eval_mod.eval_expr, cond_clause.condition, child)
-        if not ok or not v then
-          passes = false
-          break
+      -- Build OR-groups: consecutive 'where' clauses AND together within a group;
+      -- each 'or_where' starts a new OR branch. Entity passes if any branch passes.
+      local or_groups = {}
+      local cur = {}
+      for _, clause in ipairs(where_conditions) do
+        if clause.kind == "or_where" then
+          if #cur > 0 then or_groups[#or_groups + 1] = cur end
+          cur = { clause }
+        else
+          cur[#cur + 1] = clause
         end
+      end
+      if #cur > 0 then or_groups[#or_groups + 1] = cur end
+
+      passes = false
+      for _, group in ipairs(or_groups) do
+        local all = true
+        for _, cond_clause in ipairs(group) do
+          local ok, v = pcall(eval_mod.eval_expr, cond_clause.condition, child)
+          if not ok or not v then all = false; break end
+        end
+        if all then passes = true; break end
       end
     end
 

@@ -633,12 +633,60 @@ end)
 describe("eval_stmt: for_stmt", function()
   it("iterates over a list and accumulates", function()
     local c = ctx({ ["sum"] = 0 })
-    -- for x in [1,2,3]: sum = sum + x
     local iter_node = { kind="list_lit", elements={ int_lit(1), int_lit(2), int_lit(3) } }
     local body = { { kind="inc_mut", path=path("sum"), amount=path("x") } }
     local node = { kind="for_stmt", var="x", iter=iter_node, body=body }
     eval.eval_stmt(node, c)
     assert.equal(6, c.state:get("sum"))
+  end)
+
+  it("else body runs when list is empty", function()
+    local c = ctx({ ["flag"] = 0 })
+    local iter_node = { kind="list_lit", elements={} }
+    local body = { { kind="inc_mut", path=path("flag"), amount=int_lit(1) } }
+    local else_body = { { kind="set_mut", path=path("flag"), value=int_lit(99) } }
+    local node = { kind="for_stmt", var="x", iter=iter_node, body=body, else_body=else_body }
+    eval.eval_stmt(node, c)
+    assert.equal(99, c.state:get("flag"))
+  end)
+
+  it("else body does not run when list is non-empty", function()
+    local c = ctx({ ["flag"] = 0 })
+    local iter_node = { kind="list_lit", elements={ int_lit(1) } }
+    local body = { { kind="inc_mut", path=path("flag"), amount=int_lit(1) } }
+    local else_body = { { kind="set_mut", path=path("flag"), value=int_lit(99) } }
+    local node = { kind="for_stmt", var="x", iter=iter_node, body=body, else_body=else_body }
+    eval.eval_stmt(node, c)
+    assert.equal(1, c.state:get("flag"))
+  end)
+
+  it("for else parsed from source: else runs on empty collection", function()
+    local compiler = require("compiler.compiler")
+    local log_mod  = require("runtime.log")
+    local state_mod= require("runtime.state")
+    local src = [[
+module t
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world:
+  result: Int(0, 9999) = 0
+  items: List(Symbol, 10) = (list)
+fn check:
+  for x in world/items:
+    set! world/result 1
+  else:
+    set! world/result 42
+scene s:
+  * go -> s
+]]
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    st:init_defaults()
+    eval.call_fn("check", {}, c)
+    assert.equal(42, st:get("world/result"))
   end)
 end)
 
@@ -652,6 +700,157 @@ describe("eval_stmt: while_stmt", function()
     eval.eval_stmt(node, c)
     assert.equal(5, c.state:get("n"))
   end)
+
+  it("raises an error when iteration limit is exceeded", function()
+    local c = ctx({ ["n"] = 0 })
+    -- while true (never terminates)
+    local always_true = { kind="bool_lit", value=true }
+    local body = { { kind="inc_mut", path=path("n"), amount=int_lit(1) } }
+    local node = { kind="while_stmt", condition=always_true, body=body }
+    local ok, err = pcall(eval.eval_stmt, node, c)
+    assert.is_false(ok, "expected error for infinite loop")
+    assert.is_true(err:find("10000") ~= nil or err:find("limit") ~= nil,
+      "error should mention the iteration limit")
+  end)
+end)
+
+describe("eval_stmt: break_stmt in for loop", function()
+  it("stops iteration early", function()
+    local sb = require("lib.storybase")
+    local game, err = sb.from_source([[
+module break-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world:
+  count: Int(0,100) = 0
+
+fn count-to-3:
+  for i in [1, 2, 3, 4, 5]:
+    if i > 3:
+      break
+    inc! world/count 1
+
+scene s:
+  Done.
+]], "break-test.sb")
+    assert.is_not_nil(game, tostring(err))
+    game:init()
+    game:call("count-to-3")
+    assert.equal(3, game:get("world/count"))
+  end)
+
+  it("continue skips to next iteration", function()
+    local sb = require("lib.storybase")
+    local game, err = sb.from_source([[
+module continue-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world:
+  count: Int(0,100) = 0
+
+fn count-odds:
+  for i in [1, 2, 3, 4, 5]:
+    if i = 2:
+      continue
+    if i = 4:
+      continue
+    inc! world/count 1
+
+scene s:
+  Done.
+]], "continue-test.sb")
+    assert.is_not_nil(game, tostring(err))
+    game:init()
+    game:call("count-odds")
+    -- 1, 3, 5 counted (2 and 4 skipped)
+    assert.equal(3, game:get("world/count"))
+  end)
+end)
+
+describe("eval_stmt: break_stmt in while loop", function()
+  it("break exits while loop", function()
+    local sb = require("lib.storybase")
+    local game, err = sb.from_source([[
+module while-break-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world:
+  n: Int(0,100) = 0
+
+fn count-while:
+  while world/n < 10:
+    inc! world/n 1
+    if world/n = 5:
+      break
+
+scene s:
+  Done.
+]], "while-break-test.sb")
+    assert.is_not_nil(game, tostring(err))
+    game:init()
+    game:call("count-while")
+    assert.equal(5, game:get("world/n"))
+  end)
+end)
+
+describe("eval_stmt: return_stmt (early function exit)", function()
+  it("returns a value from a conditional branch", function()
+    local sb = require("lib.storybase")
+    local game, err = sb.from_source([[
+module return-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world:
+  result: Int(0,100) = 0
+
+fn classify n:
+  if n > 50:
+    return 99
+  return 1
+
+scene s:
+  Done.
+]], "return-test.sb")
+    assert.is_not_nil(game, tostring(err))
+    game:init()
+    local big = game:call("classify", 80)
+    assert.equal(99, big)
+    local small = game:call("classify", 10)
+    assert.equal(1, small)
+  end)
+
+  it("return stops subsequent mutations from running", function()
+    local sb = require("lib.storybase")
+    local game, err = sb.from_source([[
+module return-halt-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world:
+  n: Int(0,100) = 0
+
+fn maybe-inc flag:
+  if not flag:
+    return 0
+  inc! world/n 10
+  return world/n
+
+scene s:
+  Done.
+]], "return-halt-test.sb")
+    assert.is_not_nil(game, tostring(err))
+    game:init()
+    -- flag=false: early return, n stays 0
+    game:call("maybe-inc", false)
+    assert.equal(0, game:get("world/n"))
+    -- flag=true: mutation runs
+    game:call("maybe-inc", true)
+    assert.equal(10, game:get("world/n"))
+  end)
 end)
 
 describe("eval_stmt: let_stmt", function()
@@ -663,6 +862,66 @@ describe("eval_stmt: let_stmt", function()
     local node = { kind="let_stmt", bindings={binding}, body=body }
     eval.eval_stmt(node, c)
     assert.equal(10, c.state:get("y"))
+  end)
+
+  it("free form (no body) binds into enclosing ctx.vars", function()
+    local c = ctx({})
+    -- let x = 42  (no body)
+    local binding = { kind="let_binding", name="x", expr=int_lit(42) }
+    local node = { kind="let_stmt", bindings={binding}, body={} }
+    eval.eval_stmt(node, c)
+    assert.equal(42, c.vars["x"])
+  end)
+
+  it("free form lets are visible to subsequent statements in same fn", function()
+    local compiler = require("compiler.compiler")
+    local log_mod  = require("runtime.log")
+    local state_mod= require("runtime.state")
+    local src = [[
+module t
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world:
+  result: Int(0, 9999) = 0
+fn compute:
+  let x = 10
+  let y = x + 5
+  set! world/result y
+scene s:
+  * go -> s
+]]
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    st:init_defaults()
+    eval.call_fn("compute", {}, c)
+    assert.equal(15, st:get("world/result"))
+  end)
+
+  it("free form let works in choice body", function()
+    local compiler = require("compiler.compiler")
+    local engine_mod = require("runtime.engine")
+    local src = [[
+module t
+  version: 1.0
+engine-config:
+  entry-scene: start
+state world:
+  result: Int(0, 9999) = 0
+scene start:
+  "pick"
+  * go
+    let n = 7
+    set! world/result n
+    -> start
+]]
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local eng = engine_mod.new(gt)
+    eng:init()
+    eng:do_choice("start", 1)
+    assert.equal(7, eng._state:get("world/result"))
   end)
 end)
 
@@ -1693,6 +1952,27 @@ describe("stdlib: collection builtins", function()
     assert.is_false(eval.eval_expr(node, c))
   end)
 
+  it("not-in? returns true when item is absent", function()
+    local c = ctx({})
+    local node = fn_call("not-in?", {kind="string_lit", value="z"}, list_lit("a","b","c"))
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
+  it("not-in? returns false when item is present", function()
+    local c = ctx({})
+    local node = fn_call("not-in?", {kind="string_lit", value="b"}, list_lit("a","b","c"))
+    assert.is_false(eval.eval_expr(node, c))
+  end)
+
+  it("not-in? works with map-style sets", function()
+    local c = ctx({})
+    c.vars["s"] = {alpha=true, beta=true}
+    local node = fn_call("not-in?",
+      {kind="string_lit", value="gamma"},
+      {kind="fn_call", name="s", args={}})
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
   it("union merges two sets without duplicates", function()
     local c = ctx({})
     local result = eval.eval_expr(fn_call("union", list_lit("a","b"), list_lit("b","c")), c)
@@ -2039,5 +2319,84 @@ scene intro:
       end
     end
     assert.is_true(dialogue_found, "expected dialogue from fn body in narration")
+  end)
+end)
+
+-- ============================================================
+-- UMap runtime operations
+-- ============================================================
+
+describe("UMap: map-set! / map-get / map-delete!", function()
+  local compiler = require("compiler.compiler")
+  local log_mod  = require("runtime.log")
+  local state_mod= require("runtime.state")
+  local eval     = require("runtime.eval")
+
+  local function run_fn(src, fn_name)
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    st:init_defaults()
+    eval.call_fn(fn_name, {}, c)
+    return st, c
+  end
+
+  local src = [[
+module t
+  version: 1.0
+engine-config:
+  entry-scene: s
+type Scores = UMap(Symbol, Int(0, 9999))
+state world:
+  scores: Scores = {}
+fn add-score:
+  map-set! world/scores 'alice 100
+  map-set! world/scores 'bob 200
+fn remove-score:
+  map-delete! world/scores 'alice
+scene s:
+  .
+]]
+
+  it("map-set! stores key-value pairs in a UMap", function()
+    local st = run_fn(src, "add-score")
+    local scores = st:get("world/scores")
+    assert.is_table(scores)
+    assert.equal(100, scores["alice"])
+    assert.equal(200, scores["bob"])
+  end)
+
+  it("map-get reads a value from a UMap", function()
+    local get_src = src .. [[
+fn get-alice:
+  let v = (map-get world/scores 'alice)
+  set! world/scores {}
+  map-set! world/scores 'result v
+]]
+    local gt = assert(compiler.compile(get_src, "t.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    st:init_defaults()
+    eval.call_fn("add-score", {}, c)
+    eval.call_fn("get-alice", {}, c)
+    local scores = st:get("world/scores")
+    assert.equal(100, scores["result"])
+  end)
+
+  it("map-delete! removes a key from a UMap", function()
+    local st = run_fn(src, "add-score")
+    -- manually call remove-score
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local l  = log_mod.new()
+    local st2 = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st2, gt.fns, "test", gt)
+    st2:init_defaults()
+    eval.call_fn("add-score", {}, c)
+    eval.call_fn("remove-score", {}, c)
+    local scores = st2:get("world/scores")
+    assert.is_nil(scores["alice"])
+    assert.equal(200, scores["bob"])
   end)
 end)

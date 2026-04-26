@@ -306,4 +306,3 @@ All diagnostics use the format:
 | `PERCEIVES_VIOLATION` | Actor reads a path not listed in its `perceives:` block |
 | `IMPURE_IN_PURE` | (warning variant) Function inferred as impure but used in pure context |
 | `UNTYPED_SYMBOL` | `Symbol` used where a typed `SymbolOf(Family)` would give better bounds |
-| `WARN_EXPORTS_NOT_ENFORCED` | A module declares `exports:` but import filtering is not enforced at runtime |

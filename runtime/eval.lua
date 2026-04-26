@@ -37,6 +37,9 @@ local K = {
   COND_EXPR          = "cond_expr",
   FOR_STMT           = "for_stmt",
   WHILE_STMT         = "while_stmt",
+  BREAK_STMT         = "break_stmt",
+  CONTINUE_STMT      = "continue_stmt",
+  RETURN_STMT        = "return_stmt",
   LET_STMT           = "let_stmt",
   LET_BINDING        = "let_binding",
   LAMBDA_EXPR        = "lambda_expr",
@@ -61,6 +64,8 @@ local K = {
   CLEAR_MUT          = "clear_mut",
   PUSH_MUT           = "push_mut",
   POP_MUT            = "pop_mut",
+  MAP_SET_MUT        = "map_set_mut",
+  MAP_DELETE_MUT     = "map_delete_mut",
   SPAWN_MUT          = "spawn_mut",
   DESPAWN_MUT        = "despawn_mut",
   RELATE_MUT         = "relate_mut",
@@ -892,6 +897,16 @@ local BUILTINS = {
     if collection[item] then return true end
     return false
   end,
+  ["not-in?"] = function(args, ctx)
+    local item       = eval_expr(args[1], ctx)
+    local collection = eval_expr(args[2], ctx)
+    if type(collection) ~= "table" then return true end
+    for _, v in ipairs(collection) do
+      if v == item then return false end
+    end
+    if collection[item] then return false end
+    return true
+  end,
   ["union"] = function(args, ctx)
     local a = eval_expr(args[1], ctx)
     local b = eval_expr(args[2], ctx)
@@ -932,6 +947,26 @@ local BUILTINS = {
     local list = eval_expr(args[1], ctx)
     if type(list) ~= "table" then return 0 end
     return #list
+  end,
+  ["map-get"] = function(args, ctx)
+    local map = eval_expr(args[1], ctx)
+    local key = eval_expr(args[2], ctx)
+    if type(map) ~= "table" then return nil end
+    return map[key]
+  end,
+  ["map-size"] = function(args, ctx)
+    local map = eval_expr(args[1], ctx)
+    if type(map) ~= "table" then return 0 end
+    local n = 0
+    for _ in pairs(map) do n = n + 1 end
+    return n
+  end,
+  ["map-keys"] = function(args, ctx)
+    local map = eval_expr(args[1], ctx)
+    if type(map) ~= "table" then return {} end
+    local keys = {}
+    for k in pairs(map) do keys[#keys + 1] = k end
+    return keys
   end,
   -- ── Relation query builtins ──────────────────────────────────────────────────
   -- Relation name is the first arg, passed as a bare IDENT (0-arg fn_call returns its name).
@@ -1648,12 +1683,12 @@ call_fn = function(name, args, ctx)
     end
   end
 
-  -- Propagate any scene-navigation signal
-  if sub.signal then
+  -- Propagate scene-navigation signals but not function-internal ones
+  if sub.signal and sub.signal.type ~= "return" then
     ctx.signal = sub.signal
   end
 
-  -- Return value: set by expression-type statements (cond, match, fn_call, expr_stmt)
+  -- Return value: set by expression-type statements, explicit return, or retval propagation
   return sub.retval
 end
 
@@ -1724,6 +1759,24 @@ eval_stmt = function(node, ctx)
     local path = eval_path(node.path, ctx)
     ctx.state:pop(path, ctx.fn_name)
 
+  elseif k == K.MAP_SET_MUT then
+    local path = eval_path(node.path, ctx)
+    local key  = eval_expr(node.key, ctx)
+    local val  = eval_expr(node.value, ctx)
+    local map  = ctx.state:get(path) or {}
+    local new_map = {}
+    for k2, v in pairs(map) do new_map[k2] = v end
+    new_map[key] = val
+    ctx.state:set(path, new_map, ctx.fn_name)
+
+  elseif k == K.MAP_DELETE_MUT then
+    local path = eval_path(node.path, ctx)
+    local key  = eval_expr(node.key, ctx)
+    local map  = ctx.state:get(path) or {}
+    local new_map = {}
+    for k2, v in pairs(map) do if k2 ~= key then new_map[k2] = v end end
+    ctx.state:set(path, new_map, ctx.fn_name)
+
   elseif k == K.SPAWN_MUT then
     -- family is a bare string (IDENT), key and record are exprs
     local family = node.family  -- string
@@ -1767,6 +1820,7 @@ eval_stmt = function(node, ctx)
       local sub = child_ctx(ctx)
       eval_stmts(node.body, sub)
       if sub.signal then ctx.signal = sub.signal end
+      if sub.retval ~= nil then ctx.retval = sub.retval end
     end
 
   elseif k == K.IF_EXPR then
@@ -1792,22 +1846,39 @@ eval_stmt = function(node, ctx)
 
   elseif k == K.FOR_STMT then
     local list = eval_expr(node.iter, ctx)
+    local iterated = false
     if type(list) == "table" then
       for _, val in ipairs(list) do
+        iterated = true
         local sub = child_ctx(ctx)
         sub.vars[node.var] = val
         eval_stmts(node.body, sub)
-        if sub.signal then ctx.signal = sub.signal; return end
+        if sub.signal then
+          local st = sub.signal.type
+          if st == "break"    then return end
+          if st == "continue" then -- continue to next iteration
+          else ctx.signal = sub.signal; return end
+        end
       end
+    end
+    if not iterated and node.else_body then
+      eval_stmts(node.else_body, ctx)
     end
 
   elseif k == K.WHILE_STMT then
-    local limit = 10000  -- safety limit
-    while eval_expr(node.condition, ctx) and limit > 0 do
+    local limit = 10000
+    while eval_expr(node.condition, ctx) do
+      if limit <= 0 then
+        error("while loop exceeded 10000 iteration safety limit")
+      end
       local sub = child_ctx(ctx)
       eval_stmts(node.body, sub)
-      if sub.signal then ctx.signal = sub.signal; return end
-      -- Merge any var changes back? No — stmts mutate state directly.
+      if sub.signal then
+        local st = sub.signal.type
+        if st == "break"    then return end
+        if st == "continue" then -- continue to next iteration
+        else ctx.signal = sub.signal; return end
+      end
       limit = limit - 1
     end
 
@@ -1959,6 +2030,16 @@ eval_stmt = function(node, ctx)
         ctx.state:set_time(ax.axis, value)
       end
     end
+
+  elseif k == K.BREAK_STMT then
+    ctx.signal = { type = "break" }
+
+  elseif k == K.CONTINUE_STMT then
+    ctx.signal = { type = "continue" }
+
+  elseif k == K.RETURN_STMT then
+    if node.expr then ctx.retval = eval_expr(node.expr, ctx) end
+    ctx.signal = { type = "return" }
 
   elseif k == K.PASS_STMT then
     -- no-op

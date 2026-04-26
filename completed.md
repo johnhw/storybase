@@ -5,6 +5,27 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## Language Review Pass 1 ✅ COMPLETE (2026-04-25)
+
+1763 tests passing.
+
+### Bugs Fixed
+- **`or-where` in `find`** — `query.lua`: rebuilt OR-group logic; consecutive `where` clauses AND within a group, `or-where` starts a new OR branch. Any `find` using `or-where` now gets correct OR semantics.
+- **`exports:` filtering enforced** — `compiler/compiler.lua`: replaced `WARN_EXPORTS_NOT_ENFORCED` with actual filter; filterable kinds (fn, type, scene, actor, schedule, bounded, macro) are filtered against the `exports:` list; state/relation/grid/speaker/verify/hook always pass through.
+- **`while` iteration limit now errors** — `eval.lua`: changed silent truncation at 10,000 iterations to a raised runtime error.
+
+### Missing Features Added
+- **`break` / `continue` in `for` and `while` loops** — added AST nodes, keywords, parser rules, and signal-based eval. Loops intercept break (exit) and continue (next iteration) signals.
+- **Early `return` from functions** — `return <expr>` statement added end-to-end. `call_fn` consumes the return signal; return value propagated via `ctx.retval`.
+- **`not-in?` builtin** — `(not-in? item collection)` sugar for `not (contains? coll item)`. Works on lists and sets.
+- **`empty?` builtin** — was already implemented; confirmed and documented.
+
+### Documentation Updated
+- `docs/reference/language.md`: added `hook` section, `while` limit warning, `break`/`continue` section, `return` section, `path@before` propagation note, `say` ordering guarantee, collection builtins table.
+- `docs/reference/cli.md`: removed `WARN_EXPORTS_NOT_ENFORCED` from warnings table.
+
+---
+
 ## Demo 10 — "The Market Bell" ✅ COMPLETE (2026-04-19)
 
 1706 tests passing. Multi-axis time model demonstrated end-to-end.

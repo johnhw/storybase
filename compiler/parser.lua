@@ -1365,7 +1365,14 @@ local function parse_for_stmt(p)
   end
   p:skip_to_eol()
   local body = parse_body_items(p, false)
-  return ast.for_stmt(var_name, iter, body, tpos)
+  local else_body = nil
+  p:skip_newlines()
+  if p:at("NAMED_ARG", "else") then
+    p:adv()  -- consume "else:" (NAMED_ARG already consumed the ':')
+    p:match("NEWLINE")
+    else_body = parse_body_items(p, false)
+  end
+  return ast.for_stmt(var_name, iter, body, else_body, tpos)
 end
 
 --- Parse a while loop statement: while cond: body
@@ -1740,6 +1747,14 @@ local MUTATION_TABLE = {
     local path = parse_mut_path(p)
     p:skip_to_eol(); return ast.pop_mut(path, pos)
   end,
+  ["map-set!"] = function(p, pos)
+    local path = parse_mut_path(p); local key = parse_expr(p); local val = parse_expr(p)
+    p:skip_to_eol(); return ast.map_set_mut(path, key, val, pos)
+  end,
+  ["map-delete!"] = function(p, pos)
+    local path = parse_mut_path(p); local key = parse_expr(p)
+    p:skip_to_eol(); return ast.map_delete_mut(path, key, pos)
+  end,
   ["spawn!"]   = function(p, pos)
     local fam = p:at("IDENT") and p:adv().value or "?"
     local key = parse_expr(p)
@@ -1949,7 +1964,18 @@ parse_stmt = function(p)
     local e = parse_cond_expr(p); return ast.expr_stmt(e, tpos)
   end
   if t.kind == "KEYWORD" then
-    if t.value == "pass" then p:adv(); p:skip_to_eol(); return ast.pass_stmt(tpos) end
+    if t.value == "pass"     then p:adv(); p:skip_to_eol(); return ast.pass_stmt(tpos)     end
+    if t.value == "break"    then p:adv(); p:skip_to_eol(); return ast.break_stmt(tpos)    end
+    if t.value == "continue" then p:adv(); p:skip_to_eol(); return ast.continue_stmt(tpos) end
+    if t.value == "return" then
+      p:adv()  -- consume "return"
+      local expr = nil
+      if not p:at("NEWLINE") and not p:at("EOF") and not p:at("DEDENT") then
+        expr = parse_expr(p)
+      end
+      p:skip_to_eol()
+      return ast.return_stmt(expr, tpos)
+    end
     if t.value == "say"  then
       -- Function/choice-body form: say <speaker> <text>
       -- speaker: NAMED_ARG | SYMBOL | IDENT | OP "(" expr OP ")"
