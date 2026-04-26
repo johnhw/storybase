@@ -95,6 +95,11 @@ function M.find(ctx, family, clauses)
         local all = true
         for _, cond_clause in ipairs(group) do
           local ok, v = pcall(eval_mod.eval_expr, cond_clause.condition, child)
+          -- If condition evaluated to a lambda closure, call it with the entity key
+          if ok and type(v) == "table" and v._lambda then
+            local call_lambda = eval_mod.call_lambda
+            ok, v = pcall(call_lambda, v, {key}, child)
+          end
           if not ok or not v then all = false; break end
         end
         if all then passes = true; break end

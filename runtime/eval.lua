@@ -701,6 +701,7 @@ local function call_lambda(lam, args, ctx)
     result = eval_expr(body, sub)
   else
     eval_stmts(body, sub)
+    result = sub.retval  -- multi-line lambda: use retval from return stmt or last expr
   end
   return result
 end
@@ -879,6 +880,15 @@ local BUILTINS = {
     for _ in pairs(v) do count = count + 1 end
     return count
   end,
+  ["count"] = function(args, ctx)  -- alias for size
+    local v = eval_expr(args[1], ctx)
+    if type(v) ~= "table" then return 0 end
+    local n = #v
+    if n > 0 then return n end
+    local count = 0
+    for _ in pairs(v) do count = count + 1 end
+    return count
+  end,
   ["empty?"] = function(args, ctx)
     local v = eval_expr(args[1], ctx)
     if type(v) ~= "table" then return true end
@@ -933,6 +943,19 @@ local BUILTINS = {
     local result = {}
     for _, v in ipairs(a) do
       if b_set[tostring(v)] ~= nil then result[#result+1] = v end
+    end
+    return result
+  end,
+  ["difference"] = function(args, ctx)
+    local a = eval_expr(args[1], ctx)
+    local b = eval_expr(args[2], ctx)
+    if type(a) ~= "table" then return {} end
+    if type(b) ~= "table" then return a end
+    local b_set = {}
+    for _, v in ipairs(b) do b_set[tostring(v)] = true end
+    local result = {}
+    for _, v in ipairs(a) do
+      if not b_set[tostring(v)] then result[#result+1] = v end
     end
     return result
   end,
@@ -1591,9 +1614,16 @@ call_fn = function(name, args, ctx)
       sub.vars[pname] = arg_vals[i]
     end
   end
-  -- Propagate before_snapshot for path@before in post: conditions
+  -- Set up before_snapshot for path@before in post: conditions.
+  -- If the caller already has one, propagate it (we're inside a verify/counterfactual).
+  -- Otherwise, if this fn has post: conditions and we're in dev mode, snapshot now.
   if ctx.before_snapshot then
     sub.before_snapshot = ctx.before_snapshot
+  elseif #(fn.post or {}) > 0 and ctx.state and ctx.state._cache
+      and not (ctx.game and ctx.game.production) then
+    local snap = {}
+    for k, v in pairs(ctx.state._cache) do snap[k] = v end
+    sub.before_snapshot = snap
   end
 
   -- Check pre: conditions
@@ -1656,8 +1686,9 @@ call_fn = function(name, args, ctx)
 
   -- Check post: conditions (only when a before_snapshot is provided)
   if sub.before_snapshot and #(fn.post or {}) > 0 then
-    for _, post_expr in ipairs(fn.post) do
-      local ok = eval_expr(post_expr, sub)
+    for _, post_node in ipairs(fn.post) do
+      local expr_to_eval = (post_node.kind == K.EXPR_STMT) and post_node.expr or post_node
+      local ok = eval_expr(expr_to_eval, sub)
       if not ok then
         error("Postcondition failed in " .. name)
       end
@@ -2198,6 +2229,10 @@ end
 ---@return any
 function M.call_fn(name, args, ctx)
   return call_fn(name, args, ctx)
+end
+
+function M.call_lambda(lam, args, ctx)
+  return call_lambda(lam, args, ctx)
 end
 
 return M

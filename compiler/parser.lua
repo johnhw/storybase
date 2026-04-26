@@ -876,7 +876,18 @@ local function parse_atom(p)
     end
     return path_node
   elseif t.kind == "INTERP_PATH" then
-    p:adv(); return make_interp_path(t.value, tpos)
+    p:adv()
+    local ipath_node = make_interp_path(t.value, tpos)
+    -- Check for @before suffix on interpolated paths
+    if p:at("OP", "@") then
+      local nx = p:peek()
+      if nx and nx.kind == "IDENT" and nx.value == "before" then
+        p:adv()  -- consume "@"
+        p:adv()  -- consume "before"
+        return ast.path_at_before(ipath_node, tpos)
+      end
+    end
+    return ipath_node
   elseif t.kind == "IDENT" and t.value == "counterfactual" then
     -- counterfactual [from: expr] [simulate: true] do: (indented block)
     p:adv()
@@ -910,14 +921,18 @@ local function parse_atom(p)
     end
     return ast.counterfactual_expr(from_tick, transitions, simulate, tpos)
 
-  elseif t.kind == "IDENT" and t.value == "find" then
-    -- find family [where: expr] [order-by: path asc|desc] [limit: N] [count]
-    p:adv()  -- consume "find"
+  elseif t.kind == "IDENT" and (t.value == "find" or t.value == "count") then
+    -- find/count family [where: expr] [order-by: path asc|desc] [limit: N] [count]
+    local is_count_form = (t.value == "count")
+    p:adv()  -- consume "find" or "count"
     local family_name = ""
     if p:at("IDENT") or p:at("PATH") then
       family_name = p:adv().value
     end
     local clauses = {}
+    if is_count_form then
+      clauses[#clauses+1] = { kind = "count" }
+    end
     -- Parse inline clauses (same line) or indented block
     local function parse_find_clauses_inline()
       while p:at("NAMED_ARG") do
@@ -1448,7 +1463,7 @@ local function parse_let_stmt(p)
   return ast.let_stmt(bindings, {}, tpos)
 end
 
---- Parse a lambda expression: fn(params): body_expr
+--- Parse a lambda expression: fn(params): body_expr  OR  fn(params):\n  block
 local function parse_lambda(p)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD "fn"
@@ -1462,7 +1477,13 @@ local function parse_lambda(p)
     p:expect("OP", ")", "expected ')' to close lambda params")
   end
   p:expect("OP", ":", "expected ':' after lambda params")
-  local body = parse_expr(p)
+  -- Multi-line block body: fn(params):\n  stmts...
+  local body
+  if p:at("NEWLINE") or p:at("INDENT") then
+    body = parse_body_items(p, false)
+  else
+    body = parse_expr(p)
+  end
   return ast.lambda_expr(params, body, tpos)
 end
 
@@ -1502,6 +1523,18 @@ local function parse_primary(p)
   -- Special IDENTs that are parsed as structured expressions (not fn calls)
   if t.kind == "IDENT" and t.value == "find" then
     return parse_atom(p)
+  end
+
+  -- "count family where: ..." → FIND_EXPR with count clause (not the builtin count)
+  if t.kind == "IDENT" and t.value == "count" then
+    local nx = p:peek()
+    if nx and (nx.kind == "IDENT" or nx.kind == "PATH") then
+      -- lookahead: if the token after the family name is a NAMED_ARG, it's a find-count
+      local nx2 = p.tokens[p.pos + 2]  -- token 2 positions ahead
+      if nx2 and nx2.kind == "NAMED_ARG" then
+        return parse_atom(p)
+      end
+    end
   end
 
   if t.kind == "IDENT" and t.value == "counterfactual" then

@@ -1,0 +1,295 @@
+module demo13-healers-ward
+  version: 1.0
+
+# Demo 13 — The Healer's Ward
+#
+# Demonstrates:
+#   • speaker declarations with display: and color: metadata
+#   • say in scene bodies: bare identifier (NAMED_ARG) form, block form, dynamic form
+#   • say in function bodies: dialogue buffered and prepended to next scene narration
+#   • say 'symbol "text" form in function bodies
+#   • post: conditions with path@before (simple state and interpolated entity paths)
+#   • multi-line lambda body (fn(k):\n  stmts... return) in a find where: clause
+
+# ── Speaker declarations ─────────────────────────────────────────────────────
+
+speaker healer:
+  display: "Healer"
+  color:   "#a8d8a8"
+
+speaker elara:
+  display: "Elara (Nurse)"
+  color:   "#f0c080"
+
+speaker rook:
+  display: "Rook"
+  color:   "#c08080"
+
+speaker linden:
+  display: "Linden"
+  color:   "#80a8c0"
+
+speaker mira:
+  display: "Mira"
+  color:   "#c080c0"
+
+# ── Engine config ────────────────────────────────────────────────────────────
+
+engine-config:
+  entry-scene: start
+
+# ── Types ────────────────────────────────────────────────────────────────────
+
+type Condition = wounded | feverish | recovering | stable | discharged
+
+type Patient:
+  name:      String
+  condition: Condition
+  health:    Int(0, 100)
+  speaker:   Symbol
+  treated:   Bool = false
+
+# ── State ────────────────────────────────────────────────────────────────────
+
+state world/herbs:    Int(0, 20) = 12
+state world/bandages: Int(0, 20) = 8
+state world/day:      Int(1, 7)  = 1
+
+state patients/{k}: Patient  max: 8
+
+# World-level state for scene selection
+state world/selected-patient: Symbol = 'rook
+
+# ── Initialisation ───────────────────────────────────────────────────────────
+
+fn init-ward:
+  pre: not (path-exists? patients/rook/health)
+  spawn! patients 'rook    Patient(name: "Rook",   condition: 'wounded,  health: 35, speaker: 'rook)
+  spawn! patients 'linden  Patient(name: "Linden", condition: 'feverish, health: 45, speaker: 'linden)
+  spawn! patients 'mira    Patient(name: "Mira",   condition: 'stable,   health: 70, speaker: 'mira)
+
+# ── Query helpers ─────────────────────────────────────────────────────────────
+
+# Find patients who urgently need treatment.
+# Demonstrates: multi-line lambda body with let bindings and explicit return.
+fn find-urgent:
+  return find patients where: fn(k):
+    let low-health = patients/{k}/health < 50
+    let untreated  = not patients/{k}/treated
+    return low-health and untreated
+
+# Find patients ready to be discharged.
+fn find-dischargeable:
+  return find patients where: fn(k):
+    let good-cond = patients/{k}/condition = 'recovering or patients/{k}/condition = 'stable
+    return good-cond and not patients/{k}/treated
+
+fn count-untreated:
+  return count patients where: fn(k): not patients/{k}/treated
+
+fn any-urgent?:
+  return any? (path-list patients) fn(k):
+    patients/{k}/health < 50 and not patients/{k}/treated
+
+fn any-dischargeable?:
+  return any? (path-list patients) fn(k):
+    let good = patients/{k}/condition = 'recovering or patients/{k}/condition = 'stable
+    return good and not patients/{k}/treated
+
+fn all-treated?:
+  return all? (path-list patients) fn(k): patients/{k}/treated or patients/{k}/condition = 'discharged
+
+# ── Selection helpers ─────────────────────────────────────────────────────────
+
+fn select-urgent:
+  let urgent = find-urgent
+  let key = list-get urgent 1 ?? 'rook
+  set! world/selected-patient key
+
+fn select-dischargeable:
+  let ready = find-dischargeable
+  let key = list-get ready 1 ?? 'mira
+  set! world/selected-patient key
+
+# ── Treatment functions ───────────────────────────────────────────────────────
+
+# Apply bandages to a wounded patient.
+# Demonstrates: say in function body (buffered → prepended to next scene),
+#               post: with path@before on supply path,
+#               post: with path@before on interpolated entity path.
+fn apply-bandage key:
+  pre:
+    world/bandages > 0
+    patients/{key}/condition = 'wounded
+  post:
+    world/bandages = world/bandages@before - 1
+    patients/{key}/health >= patients/{key}/health@before
+  dec! world/bandages 1
+  inc! patients/{key}/health 25
+  set! patients/{key}/treated true
+  when patients/{key}/health >= 75:
+    set! patients/{key}/condition 'recovering
+  # say in function body: buffered and prepended to next scene's narration
+  say 'elara "Wound cleaned and dressed. Watch for infection."
+  say (patients/{key}/speaker) "That stings — but I already feel steadier."
+
+# Administer herbal remedy to a feverish patient.
+# Same feature demonstration as apply-bandage.
+fn apply-herbs key:
+  pre:
+    world/herbs > 0
+    patients/{key}/condition = 'feverish
+  post:
+    world/herbs = world/herbs@before - 1
+    patients/{key}/health >= patients/{key}/health@before
+  dec! world/herbs 1
+  inc! patients/{key}/health 20
+  set! patients/{key}/treated true
+  when patients/{key}/health >= 70:
+    set! patients/{key}/condition 'recovering
+  say 'elara "Drink this. It will draw out the fever."
+  say (patients/{key}/speaker) "Bitter... but I feel a little better already."
+
+# Discharge a recovering or stable patient.
+fn discharge key:
+  pre:
+    patients/{key}/condition = 'recovering or patients/{key}/condition = 'stable
+  post:
+    patients/{key}/condition = 'discharged
+  set! patients/{key}/condition 'discharged
+  set! patients/{key}/treated true
+  say 'elara "Safe travels. Return if the symptoms worsen."
+  say (patients/{key}/speaker) "Thank you, healer. I won't forget this."
+
+fn reset-treated:
+  for k in (path-list patients):
+    when patients/{k}/condition != 'discharged:
+      set! patients/{k}/treated false
+
+fn condition-label cond:
+  return match cond:
+    'wounded:    "wounded"
+    'feverish:   "feverish"
+    'recovering: "recovering"
+    'stable:     "stable"
+    'discharged: "discharged"
+    _:           "unknown"
+
+# ── Scenes ───────────────────────────────────────────────────────────────────
+
+scene start:
+  The healer's ward — a long room filled with cots and the quiet sounds of the infirm.
+
+  * Enter the ward:
+    init-ward
+    -> ward
+
+scene ward:
+  # Block form: multiple lines attributed to one speaker.
+  say elara:
+    Good morning, healer. Day {world/day} in the ward.
+    Herbs remaining: {world/herbs}. Bandages: {world/bandages}.
+
+  [count-untreated > 0] {count-untreated} patient(s) still need attention today.
+  [count-untreated = 0] All patients have been seen today.
+
+  # Dynamic say: speaker resolved from patient state via path expression.
+  # Demonstrates the (expr): form with an interpolated path as the speaker source.
+  when patients/rook/health < 50 and not patients/rook/treated:
+    say (patients/rook/speaker): Is the healer here? I need help.
+  when patients/linden/health < 50 and not patients/linden/treated:
+    say (patients/linden/speaker): Please — I can barely sit up.
+  when patients/mira/health < 50 and not patients/mira/treated:
+    say (patients/mira/speaker): Healer, my side aches.
+
+  * [any-urgent?] Treat an urgent patient:
+    select-urgent
+    => treat-urgent
+  * [any-dischargeable?] Discharge a patient who has recovered:
+    select-dischargeable
+    => discharge-patient
+  * Rest until tomorrow:
+    -> rest
+  * [all-treated?] Close the ward for the day:
+    -> ward-closed
+
+scene treat-urgent:
+  The far corner of the ward holds those most in need.
+
+  # Inline say in scene body (bare identifier / NAMED_ARG form).
+  say healer: Let me take a look at you.
+
+  {patients/{world/selected-patient}/name} lies here.
+  Condition: {condition-label (patients/{world/selected-patient}/condition)}.
+  Health: {patients/{world/selected-patient}/health}/100.
+
+  # Block-form say in scene body.
+  say elara:
+    This one needs immediate attention.
+    Prioritise them above the others.
+
+  # Dynamic form in scene body: speaker resolved from entity path.
+  say (patients/{world/selected-patient}/speaker):
+    I've been waiting.
+    Please — it hurts.
+
+  * [patients/{world/selected-patient}/condition = 'wounded and world/bandages > 0] Apply bandages:
+    apply-bandage world/selected-patient
+    <-
+  * [patients/{world/selected-patient}/condition = 'feverish and world/herbs > 0] Administer herbs:
+    apply-herbs world/selected-patient
+    <-
+  * Return to ward without treating:
+    <-
+
+scene discharge-patient:
+  A patient sits on the edge of their cot, ready to leave.
+
+  # Dynamic speaker form.
+  say (patients/{world/selected-patient}/speaker): Am I free to go?
+
+  # Block form in scene body.
+  say healer:
+    Your condition has improved enough.
+    Come back if anything changes.
+
+  * Discharge {patients/{world/selected-patient}/name}:
+    discharge world/selected-patient
+    <-
+  * Keep them one more day:
+    set! patients/{world/selected-patient}/treated true
+    <-
+
+scene rest:
+  # Inline say in scene body.
+  say elara: The ward grows quiet. {count-untreated} patient(s) remained unseen today.
+
+  say healer: We do what we can.
+
+  inc! world/day 1
+  reset-treated
+  -> ward
+
+scene ward-closed:
+  # Block-form say in scene body.
+  say elara:
+    All patients seen. A good day's work.
+    Rest now. Tomorrow brings more.
+
+  The ward falls quiet as the last lamp is shuttered.
+
+  * Begin a new day:
+    inc! world/day 1
+    reset-treated
+    -> ward
+
+# ── Verification ─────────────────────────────────────────────────────────────
+
+verify "discharged patients have positive health":
+  from-any-state:
+    all? (path-list patients) fn(k):
+      not (patients/{k}/condition = 'discharged) or patients/{k}/health > 0
+
+verify "supplies never go negative":
+  from-any-state:
+    world/herbs >= 0 and world/bandages >= 0

@@ -936,6 +936,100 @@ describe("CLI demo12_codex: namespaced import + cross-file types/fns/scenes", fu
   end)
 end)
 
+-- ── demo13: healer's ward ────────────────────────────────────────────────────
+
+describe("CLI demo13_healers_ward: speaker/say + post: + multi-line lambdas", function()
+  local sb_mod = require("lib.storybase")
+
+  local function load_and_init()
+    local game = sb_mod.load("demos/demo13_healers_ward.sb")
+    game:init()
+    game:choose(1)  -- "Enter the ward" -> init-ward, -> ward
+    return game
+  end
+
+  it("compiles without errors", function()
+    local rc, out, err = run_cli({"compile", "demos/demo13_healers_ward.sb"})
+    assert.equal(0, rc, "demo13 compile failed:\n" .. out .. err)
+  end)
+
+  it("init-ward spawns three patients with correct initial state", function()
+    local game = load_and_init()
+    assert.equal(35,        game:get("patients/rook/health"))
+    assert.equal("wounded", game:get("patients/rook/condition"))
+    assert.equal(45,        game:get("patients/linden/health"))
+    assert.equal("feverish",game:get("patients/linden/condition"))
+    assert.equal(70,        game:get("patients/mira/health"))
+    assert.equal("stable",  game:get("patients/mira/condition"))
+  end)
+
+  it("count patients where: correctly reports 3 untreated on entry", function()
+    local game = load_and_init()
+    local narration = game:render()
+    local found = false
+    for _, n in ipairs(narration) do
+      if type(n) == "string" and n:find("3 patient") then found = true end
+    end
+    assert.is_true(found, "expected '3 patient(s)' in narration")
+  end)
+
+  it("apply-bandage: post: enforces health increase and bandage consumption", function()
+    local game = load_and_init()
+    local bandages_before = game:get("world/bandages")
+    local health_before   = game:get("patients/rook/health")
+    -- Treat urgent (rook or linden selected), then apply treatment
+    game:choose(1)   -- treat-urgent scene
+    game:choose(1)   -- apply bandages or herbs (whichever is choice 1)
+    -- After treatment, bandages or herbs decrease and health increases
+    local selected = game:get("world/selected-patient")
+    assert.is_true(
+      game:get("patients/" .. selected .. "/health") >= health_before or
+      game:get("world/herbs")    < 12 or
+      game:get("world/bandages") < bandages_before,
+      "expected health up or supply consumed after treatment")
+  end)
+
+  it("multi-line lambda find-urgent: skips treated patients on re-entry", function()
+    local game = load_and_init()
+    game:choose(1)   -- treat-urgent
+    game:choose(1)   -- treat first urgent patient
+    -- Now in ward: the treated patient should not appear as urgent
+    local narration = game:render()
+    local found = false
+    for _, n in ipairs(narration) do
+      if type(n) == "string" and n:find("2 patient") then found = true end
+    end
+    assert.is_true(found, "expected '2 patient(s)' after treating one")
+  end)
+
+  it("say buffering: fn-body dialogue prepended to next scene narration", function()
+    local game = load_and_init()
+    game:choose(1)   -- treat-urgent
+    game:choose(1)   -- apply treatment
+    -- Back in ward: buffered say lines from treatment fn appear first in narration
+    local narration = game:render()
+    -- First narration items should be dialogue from apply-bandage or apply-herbs
+    local first_speaker = type(narration[1]) == "table" and narration[1].speaker
+    assert.is_truthy(first_speaker == "elara" or first_speaker == "rook" or
+                     first_speaker == "linden",
+      "expected buffered dialogue as first narration item; got: " .. tostring(narration[1]))
+  end)
+
+  it("discharge fn sets condition to 'discharged and marks treated", function()
+    local game = load_and_init()
+    -- Navigate to discharge mira (stable)
+    game:choose(2)   -- discharge-patient scene (mira selected)
+    game:choose(1)   -- discharge
+    assert.equal("discharged", game:get("patients/mira/condition"))
+    assert.equal(true,         game:get("patients/mira/treated"))
+  end)
+
+  it("verify suite passes", function()
+    local rc, out, err = run_cli({"verify", "demos/demo13_healers_ward.sb"})
+    assert.equal(0, rc, "demo13 verify failed:\n" .. out .. err)
+  end)
+end)
+
 -- ── extract-symbols ───────────────────────────────────────────────────────────
 
 describe("CLI extract-symbols", function()

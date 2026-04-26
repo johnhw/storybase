@@ -448,8 +448,8 @@ Optional tile grid extension algorithms. Required by eval.lua grid builtins.
 
 ---
 
-### `runtime/query.lua` (235 lines)
-Relation and family queries.
+### `runtime/query.lua` (~250 lines)
+Relation and family queries. `where:` clauses support both expressions and lambda predicates (lambda is called with the entity key).
 
 - `M.find(ctx, family, clauses)` → `[key, ...]`  (family member filter)
 - `M.adjacent(relation, source)` → `[target, ...]`
@@ -641,6 +641,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo10_market_bell.sb` | multi-axis `time-model` (`axes: [day, hour]`, `wrap: [none, 24]`), `time-inc!` on hour axis (browsing) and day axis (rest), `time-set!` (reset hour to morning), `every: [day: +1]` schedule (morning-bell), `at: [day: +4]` one-shot schedule (grand-festival), `cancel-schedule!`, `engine/emit`, `watch`/`watch-when`, `verify-always`, `verify after` |
 | `demo11_expedition_guild.sb` | type aliases (`type Gold = Int(0,500)`), `Option(T)` + `??`, `find` with `where:`/`order-by:`/`limit:`/`count`, computed `goto` via `-> (fn arg)`, multiline strings, `verify after requires`, `@before` in verify |
 | `demo12_codex.sb` + `codex_lib.sb` | two-file split via `import "codex_lib.sb" as Herb` (namespaced alias), cross-file `Option(Herb.RemedyKind)`, cross-file fn calls (`Herb.assess-stock`, `Herb.dry-garden`), cross-file scene nav (`=> Herb.harvest`), state family (`garden/{p}: GardenBed`), multiline strings, `verify after` across files with cross-file `requires` |
+| `demo13_healers_ward.sb` | `speaker` declarations with `display:`/`color:`, all `say` forms (bare-id, block, dynamic `(expr):`), `say` in fn bodies (buffered → prepended to next scene), `post:` with `path@before` on both plain and interpolated paths, multi-line lambda body in `find patients where: fn(k):\n  let...\n  return`, `count family where: fn(k):` syntax, entity family `patients/{k}: Patient max: 8` |
 
 ---
 
