@@ -8,9 +8,20 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-26)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–15 tested end-to-end via `--cli` mode.
-**1811 unit tests passing (busted tests/).
-165 CLI integration tests passing.**
+Demos 01–16 tested end-to-end via `--cli` mode.
+**1818 unit tests passing (busted tests/).
+172 CLI integration tests passing.**
+
+**Bugs fixed during Demo 16 implementation (advanced find + counterfactual simulate):**
+- Parser: `counterfactual do:` block used `parse_expr` not `parse_stmt` — mutations like
+  `set!` in the block were parsed as FN_CALLs and failed with "Undefined function: set!".
+  Fixed by calling `parse_stmt` for each line, and `eval_stmts` (not `eval_expr`) in the runtime.
+- Runtime: `strategy: 'depth-first` / `'breadth-first` symbols not normalised to internal
+  "dfs"/"bfs" codes before being passed to `search.lua`. Fixed by normalising in both
+  `can-reach?` and `find-path` builtin handlers.
+- Demo: `can-reach? world/route-status = 'open` parsed as `(can-reach? world/route-status) = 'open`
+  (the `=` was consumed as a binary op at the call-site). Fixed by parenthesising the condition
+  to `can-reach? (world/route-status = 'open)`.
 
 **Bugs fixed during Demo 15 implementation (macro system + set-literal defaults):**
 - Parser: `{...}` set literals not parsed in `parse_default_value`
@@ -19,9 +30,6 @@ Demos 01–15 tested end-to-end via `--cli` mode.
 - Checker: rejected SET_LIT as a valid Set default
 - Macro expander: NAMED_ARG nodes (param followed by `:` acting as block-body delimiter)
   not substituted — added NAMED_ARG case to `subst` in `expand_macro_body`
-
-Next up: demo 16 covering advanced find queries + counterfactual.
-See **Active Tasks** below.
 
 **Language bugs fixed in Demo 13 implementation:**
 - `call_lambda`: multi-line lambda body retval now captured (`result = sub.retval`)
@@ -199,16 +207,16 @@ connected-to returns false)
 capital is always connected to at least one coastal city.
 
 **Implementation checklist:**
-- [ ] Write `demos/demo16_cartographers_web.sb`
-- [ ] Confirm `or-where` returns union of results (not intersection)
-- [ ] Confirm `connected-to via` returns correct set
-- [ ] Confirm `inverse-adjacent?` returns correct reverse-adjacency set
-- [ ] Confirm `strategy:` and `budget:` params are accepted by `can-reach?` and `find-path`
-- [ ] Confirm `counterfactual simulate: true` includes the scheduled event in the branch
-- [ ] Add CLI integration tests
-- [ ] Run `busted tests/` — all tests green
-- [ ] Update `code_map.md`
-- [ ] Commit
+- [x] Write `demos/demo16_cartographers_web.sb`
+- [x] Confirm `or-where` returns union of results (not intersection)
+- [x] Confirm `connected-to via` returns correct set
+- [x] Confirm `inverse-adjacent?` returns correct reverse-adjacency set
+- [x] Confirm `strategy:` and `budget:` params are accepted by `can-reach?` and `find-path`
+- [x] Confirm `counterfactual simulate: true` includes the scheduled event in the branch
+- [x] Add CLI integration tests
+- [x] Run `busted tests/` — all tests green (1818 passing)
+- [x] Update `code_map.md`
+- [x] Commit
 
 ---
 

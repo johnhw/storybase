@@ -373,9 +373,7 @@ eval_expr = function(node, ctx)
     cf_ctx.actors              = ctx.actors
     cf_ctx.scheduler           = ctx.scheduler
     cf_ctx.counterfactual_depth = cf_depth  -- propagate nesting depth
-    for _, trans_expr in ipairs(node.transitions or {}) do
-      pcall(eval_expr, trans_expr, cf_ctx)
-    end
+    pcall(eval_stmts, node.transitions or {}, cf_ctx)
     -- simulate: true — run one round of actor behaviors + scheduler on the copy
     if node.simulate and ctx.actors then
       local actors_mod = require("runtime.actors")
@@ -1094,7 +1092,12 @@ local BUILTINS = {
           if type(b) == "number" then budget = b end
         elseif a.name == "strategy" then
           local s = eval_expr(a.value, ctx)
-          if type(s) == "string" then strategy = s end
+          if type(s) == "string" then
+            -- Normalise long-form aliases to internal identifiers
+            if s == "breadth-first" then s = "bfs"
+            elseif s == "depth-first" then s = "dfs" end
+            strategy = s
+          end
         end
       end
     end
@@ -1170,7 +1173,12 @@ local BUILTINS = {
           if type(b) == "number" then budget = b end
         elseif a.name == "strategy" then
           local s = eval_expr(a.value, ctx)
-          if type(s) == "string" then strategy = s end
+          if type(s) == "string" then
+            -- Normalise long-form aliases to internal identifiers
+            if s == "breadth-first" then s = "bfs"
+            elseif s == "depth-first" then s = "dfs" end
+            strategy = s
+          end
         end
       end
     end

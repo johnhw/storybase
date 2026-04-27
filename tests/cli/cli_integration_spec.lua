@@ -1176,6 +1176,69 @@ describe("CLI demo15_spellwright: macros, set defaults, entity family", function
   end)
 end)
 
+-- ── demo16: cartographer's web ───────────────────────────────────────────────
+
+describe("CLI demo16_cartographers_web: or-where, connected-to, inverse-adjacent, counterfactual simulate", function()
+  local sb_mod = require("lib.storybase")
+
+  it("compiles without errors", function()
+    local rc, out, err = run_cli({"compile", "demos/demo16_cartographers_web.sb"})
+    assert.equal(0, rc, "demo16 compile failed:\n" .. out .. err)
+  end)
+
+  it("starts with 5 cities, 4 trade hubs, 2 coastal after init", function()
+    local game = sb_mod.load("demos/demo16_cartographers_web.sb")
+    game:init()
+    game:choose(1)  -- Begin mapping (init-map)
+    -- hub-count = markets (capital-city, market-town) + coastal (port-city, village) = 4
+    assert.is_not_nil(game:get("cities/capital-city"))
+    assert.is_not_nil(game:get("cities/port-city"))
+    assert.equal(true, game:get("cities/capital-city/has-market"))
+    assert.equal(true, game:get("cities/port-city/coastal"))
+  end)
+
+  it("open-village-road sets route-status to open and inc turn", function()
+    local game = sb_mod.load("demos/demo16_cartographers_web.sb")
+    game:init()
+    game:choose(1)  -- Begin mapping
+    assert.equal("closed", game:get("world/route-status"))
+    game:call("open-village-road")
+    assert.equal("open", game:get("world/route-status"))
+    assert.equal(1, game:get("world/turn"))
+  end)
+
+  it("counterfactual simulate: true — preview gold increments by route-bonus", function()
+    local game = sb_mod.load("demos/demo16_cartographers_web.sb")
+    game:init()
+    game:choose(1)  -- Begin mapping
+    -- Before opening, preview gold should be 500 + 50 (route-bonus fires in counterfactual)
+    local preview = game:call("preview-open-route")
+    assert.equal(550, preview)
+    -- Real gold unchanged
+    assert.equal(500, game:get("player/gold"))
+  end)
+
+  it("trigger-crisis severs port road and sets crisis-active", function()
+    local game = sb_mod.load("demos/demo16_cartographers_web.sb")
+    game:init()
+    game:choose(1)  -- Begin mapping
+    assert.equal(false, game:get("world/crisis-active"))
+    game:call("trigger-crisis")
+    assert.equal(true, game:get("world/crisis-active"))
+  end)
+
+  it("verify suite passes", function()
+    local rc, out, err = run_cli({"verify", "demos/demo16_cartographers_web.sb"})
+    assert.equal(0, rc, "demo16 verify failed:\n" .. out .. err)
+  end)
+
+  it("runs with --auto for 10 steps without error", function()
+    local rc, _, err = run_cli({"run", "--auto", "--steps", "10",
+                                 "demos/demo16_cartographers_web.sb"})
+    assert.equal(0, rc, "demo16 --auto run failed:\n" .. err)
+  end)
+end)
+
 -- ── extract-symbols ───────────────────────────────────────────────────────────
 
 describe("CLI extract-symbols", function()

@@ -960,7 +960,7 @@ local function parse_atom(p)
         while not p:at("DEDENT") and not p:at("EOF") do
           p:skip_newlines()
           if p:at("DEDENT") or p:at("EOF") then break end
-          local call_expr = parse_expr(p); p:skip_to_eol()
+          local call_expr = parse_stmt(p)
           if call_expr then transitions[#transitions+1] = call_expr end
         end
         if p:at("DEDENT") then p:adv() end
