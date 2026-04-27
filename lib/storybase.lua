@@ -100,6 +100,10 @@ function M._make_game(game_table)
       self:_emit(event_name, { event = event_name, payload = payload, tick = tick })
     end
     self._eng:init()
+    -- Wire mutation events to game listeners (after init so _state exists)
+    self._eng._state._mutation_hook = function(path, old, new_val, fn_name)
+      self:_emit("mutation", { path = path, old = old, new = new_val, fn = fn_name })
+    end
     return self
   end
 

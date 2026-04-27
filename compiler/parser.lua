@@ -1828,11 +1828,11 @@ local MUTATION_TABLE = {
     p:skip_to_eol(); return ast.pop_mut(path, pos)
   end,
   ["map-set!"] = function(p, pos)
-    local path = parse_mut_path(p); local key = parse_expr(p); local val = parse_expr(p)
+    local path = parse_mut_path(p); local key = parse_atom(p); local val = parse_expr(p)
     p:skip_to_eol(); return ast.map_set_mut(path, key, val, pos)
   end,
   ["map-delete!"] = function(p, pos)
-    local path = parse_mut_path(p); local key = parse_expr(p)
+    local path = parse_mut_path(p); local key = parse_atom(p)
     p:skip_to_eol(); return ast.map_delete_mut(path, key, pos)
   end,
   ["spawn!"]   = function(p, pos)

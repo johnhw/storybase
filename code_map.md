@@ -195,13 +195,14 @@ store:init_defaults()            -- apply schema defaults to cache
 **Internal fields:**
 - `store._cache` — flat `{[path]=value}` table (read directly by search/verify BFS)
 - `store._log` — transaction log object
+- `store._mutation_hook` — optional `function(path, old, new_val, fn_name)` called on every state write (used by `lib/storybase.lua` to fire `game:on("mutation", ...)` events)
 - `store._clamp_hook` — optional `function(path, attempted, clamped, fn_name)` called on clamp
 - `store._spawn_hook` — optional `function(family, key, init, fn_name)` called after spawn
 - `store._despawn_hook` — optional `function(family, key, fn_name)` called after despawn
 
 ---
 
-### `runtime/eval.lua` (1284 lines)
+### `runtime/eval.lua` (~1420 lines)
 Expression and statement evaluator. All evaluation goes through here.
 
 - `M.new_ctx(state, fns, fn_name, game)` → ctx
@@ -244,6 +245,31 @@ verify-always    → bool  (BFS negation check)
 probability      → float  (weighted BFS, optional depth:/threshold:)
 optimal-path     → [{scene, label, index}, ...]  (Dijkstra, optional by:/depth:)
 find-counterexample → frozen GameState | nil
+-- UMap builtins (all paths must contain "/"):
+map-get          path key → value | nil
+map-size         path → Int
+map-keys         path → List
+map-values       path → List
+map-contains-key? path key → Bool
+map-set          path key value → new UMap  (pure)
+map-delete       path key → new UMap  (pure)
+map-merge        path-a path-b → new UMap  (pure)
+-- UList builtins (all paths must contain "/"):
+ulist-size       path → Int
+ulist-get        path index → T | nil
+ulist-first      path → T | nil
+ulist-last       path → T | nil
+ulist-index-of   path value → Int | nil
+ulist-contains?  path value → Bool
+ulist-append     path value → new UList  (pure)
+ulist-prepend    path value → new UList  (pure)
+ulist-remove-at  path index → new UList  (pure)
+ulist-remove     path value → new UList  (pure)
+ulist-concat     path-a path-b → new UList  (pure)
+ulist-slice      path from to → new UList  (pure)
+ulist-reverse    path → new UList  (pure)
+ulist-map        path fn(v): expr → new UList  (pure)
+ulist-filter     path fn(v): condition → new UList  (pure)
 -- Tile grid builtins (require ctx.grids populated by engine):
 grid-get         grid-name x y → cell value
 grid-set!        grid-name x y value → nil (mutation)
@@ -558,7 +584,7 @@ Single-step scripting mode for `storybase run --cli save.sbd`.
 
 ## lib/
 
-### `lib/storybase.lua` (~400 lines)
+### `lib/storybase.lua` (~420 lines)
 Public Lua API for embedding StoryBase in another Lua program.
 - `M.load(filepath)` → game object (compiles from file)
 - `M.from_source(source, filename?)` → game object (compiles from string)
@@ -618,8 +644,22 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
 | `tests/fuzz/log_fuzz_spec.lua` | Property test: log serialise/deserialise round-trip; replay determinism |
 | `tests/fuzz/perf_benchmark_spec.lua` | Performance benchmark: can_reach depth=50, probability, find_path |
+| `tests/runtime/ulist_spec.lua` | UList(T) and UMap(K,V) builtin tests: all 15 pure UList ops, 8 UMap ops, mutation primitives, Lua interop (60 tests) |
 
 Run all tests: `busted tests/`
+
+---
+
+## examples/
+
+Standalone Lua scripts demonstrating the StoryBase embedding API. Run from the repo root.
+
+| File | What it demonstrates |
+|------|----------------------|
+| `examples/bounded_interop_game.sb` | Merchant/courier game: `UList(String)` ledger, `bounded` reputation handler, entity family with `max:`, `advance-season`, `hire-courier`, `complete-contract` |
+| `examples/bounded_lua_interop.lua` | Comprehensive embedding API walkthrough: `sb.load`, `game:init`, `game:register_bounded`, `game:on("mutation")`, `game:call`, `game:get`, `game:find`, `game:eval`, `game:counterfactual`, `game:save`/`game:load`, `game:docs`; all UList and UMap builtins exercised |
+
+Run: `lua5.4 examples/bounded_lua_interop.lua`
 
 ---
 

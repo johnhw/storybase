@@ -5,11 +5,15 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-04-26)
+## Current Status (2026-04-27)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–16 tested end-to-end via `--cli` mode.
-**1818 unit tests passing (busted tests/).
+UList(T) runtime fully implemented (15 pure builtins + mutation primitives).
+UMap(K,V) runtime completed (map-values, map-contains-key?, map-set, map-delete, map-merge added).
+Bounded Lua interop example: `examples/bounded_interop_game.sb` + `examples/bounded_lua_interop.lua`.
+Mutation events now fire correctly via `game:on("mutation", ...)`.
+**1878 unit tests passing (busted tests/).
 172 CLI integration tests passing.**
 
 **Bugs fixed during Demo 16 implementation (advanced find + counterfactual simulate):**
@@ -222,11 +226,7 @@ capital is always connected to at least one coastal city.
 
 ### Remaining Coverage Gaps (not yet scheduled as demos)
 
-- **Bounded computation Lua handler** (`game:register_bounded`) — this is an embedding-API
-  feature, not a `.sb` feature. A future `examples/bounded_lua_interop.lua` embedder script
-  (alongside a matching `.sb` file) is the right vehicle, not a CLI demo. Deferred.
-- **Multi-line lambda bodies** — will be covered naturally in Demo 13 (`find` query in
-  `healers_ward.sb`). No additional demo needed.
+- **Multi-line lambda bodies** — covered in Demo 13 (`find` query in `healers_ward.sb`). Done.
 - **`time-set!`** — covered adequately by demo10. No additional demo needed.
 - **Custom tags and hooks** — covered by demo06. No additional demo needed beyond current coverage.
 
@@ -236,7 +236,3 @@ capital is always connected to at least one coastal city.
 
 - [ ] Every public function in every module has at least one passing and one failing test.
 - [ ] ANSI colour output in CLI for attributed dialogue.
-- [ ] **`UList` runtime support** — `UList(T)` type exists in the checker but has no runtime
-  operations (no list-append etc.). Either add builtins or document as a pure-declaration stub.
-  (`UMap` is fully implemented as of pass 2.)
-- [ ] Bounded computation Lua handler demo — `examples/bounded_lua_interop.lua` embedder script.

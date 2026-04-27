@@ -1,0 +1,152 @@
+# bounded_interop_game.sb
+# Demonstrates bounded computation Lua interop.
+#
+# Theme: A travelling merchant who hires couriers based on an external
+# reputation-scoring system (the bounded computation) and keeps an
+# unbounded UList(String) ledger for display.
+
+module bounded-interop
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: market
+
+# ── Types ──────────────────────────────────────────────────────────────
+
+type Reputation  = unknown | poor | fair | good | excellent
+type CourierKind = foot-runner | horse-rider | ship-captain
+type Season      = spring | summer | autumn | winter
+
+# ── State ──────────────────────────────────────────────────────────────
+
+state merchant:
+  gold:      Int(0, 9999)   = 500
+  contracts: Int(0, 20)     = 0
+  season:    Season         = 'spring
+  ledger:    UList(String)  = []
+
+state world:
+  turn:    Int(0, 9999) = 0
+  weather: Int(0, 10)   = 5
+
+state couriers/{courier}: courier-record  max: 8
+
+type courier-record:
+  name:       String       = "Unknown"
+  kind:       CourierKind  = 'foot-runner
+  reputation: Reputation   = 'unknown
+  hired:      Bool         = false
+  fee:        Int(0, 999)  = 50
+
+# ── Bounded computation ────────────────────────────────────────────────
+
+"Rate a courier's reputation. Lua handler: 'game.reputation.assess'"
+bounded assess-reputation courier:
+  returns:      Reputation
+  distribution: conditioned-on couriers/{courier}/reputation
+  reads:        [world/weather, couriers/{courier}/kind, couriers/{courier}/hired]
+  lua:          "game.reputation.assess"
+
+# ── Pure functions ─────────────────────────────────────────────────────
+
+fn can-hire? courier:
+  not couriers/{courier}/hired  and  merchant/gold >= couriers/{courier}/fee
+
+fn hired-count:
+  find courier
+    where couriers/{courier}/hired = true
+    count
+
+fn ledger-summary:
+  str "Turn " (tostring world/turn) " | Gold: " (tostring merchant/gold) " | Contracts: " (tostring merchant/contracts)
+
+# ── Transaction functions ──────────────────────────────────────────────
+
+fn advance-season:
+  inc! world/turn 1
+  set! merchant/season (match merchant/season:
+    'spring: 'summer
+    'summer: 'autumn
+    'autumn: 'winter
+    'winter: 'spring)
+  push! merchant/ledger (ledger-summary)
+
+fn hire-courier courier:
+  pre:  can-hire? courier
+  dec!  merchant/gold couriers/{courier}/fee
+  set!  couriers/{courier}/hired true
+  push! merchant/ledger (str "Hired " couriers/{courier}/name " for " (tostring couriers/{courier}/fee) " gold")
+
+fn complete-contract courier:
+  pre:  couriers/{courier}/hired = true
+  inc!  merchant/contracts 1
+  inc!  merchant/gold 200
+  set!  couriers/{courier}/hired false
+  push! merchant/ledger (str "Contract via " couriers/{courier}/name " done (+200 gold)")
+
+fn rate-courier courier:
+  let rep = (assess-reputation courier):
+    set! couriers/{courier}/reputation rep
+    push! merchant/ledger (str "Rated " couriers/{courier}/name ": " (tostring rep))
+
+fn dismiss-courier courier:
+  set! couriers/{courier}/hired false
+  push! merchant/ledger (str "Dismissed " couriers/{courier}/name)
+
+# ── Scenes ─────────────────────────────────────────────────────────────
+
+scene market:
+  The market square. Season: {merchant/season}. Gold: {merchant/gold}. Contracts: {merchant/contracts}.
+
+  * [can-hire? 'swift-anna] Hire Swift Anna (foot-runner, 50g)
+    hire-courier 'swift-anna
+    -> market
+
+  * [can-hire? 'iron-bart] Hire Iron Bart (horse-rider, 120g)
+    hire-courier 'iron-bart
+    -> market
+
+  * [can-hire? 'captain-mo] Hire Captain Mo (ship-captain, 250g)
+    hire-courier 'captain-mo
+    -> market
+
+  * Rate all couriers
+    rate-courier 'swift-anna
+    rate-courier 'iron-bart
+    rate-courier 'captain-mo
+    -> market
+
+  * [couriers/swift-anna/hired = true] Complete contract (Anna)
+    complete-contract 'swift-anna
+    -> market
+
+  * [couriers/iron-bart/hired = true] Complete contract (Bart)
+    complete-contract 'iron-bart
+    -> market
+
+  * [couriers/captain-mo/hired = true] Complete contract (Mo)
+    complete-contract 'captain-mo
+    -> market
+
+  * Advance season
+    advance-season
+    -> market
+
+# ── Watches ──────────────────────────────────────────────────────────
+
+watch merchant/gold       "Gold"
+watch merchant/contracts  "Contracts"
+watch world/turn          "Turn"
+watch merchant/season     "Season"
+
+# ── Verify ───────────────────────────────────────────────────────────
+
+verify "merchant gold never goes negative":
+  verify-always merchant/gold >= 0
+
+verify "completing a contract yields gold":
+  requires couriers/swift-anna/hired = true
+  after (complete-contract 'swift-anna):
+    merchant/gold >= merchant/gold@before

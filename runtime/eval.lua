@@ -991,6 +991,169 @@ local BUILTINS = {
     for k in pairs(map) do keys[#keys + 1] = k end
     return keys
   end,
+  ["map-values"] = function(args, ctx)
+    local map = eval_expr(args[1], ctx)
+    if type(map) ~= "table" then return {} end
+    local vals = {}
+    for _, v in pairs(map) do vals[#vals + 1] = v end
+    return vals
+  end,
+  ["map-contains-key?"] = function(args, ctx)
+    local map = eval_expr(args[1], ctx)
+    local key = eval_expr(args[2], ctx)
+    if type(map) ~= "table" then return false end
+    return map[key] ~= nil
+  end,
+  ["map-merge"] = function(args, ctx)
+    local a = eval_expr(args[1], ctx)
+    local b = eval_expr(args[2], ctx)
+    local result = {}
+    if type(a) == "table" then for k, v in pairs(a) do result[k] = v end end
+    if type(b) == "table" then for k, v in pairs(b) do result[k] = v end end
+    return result
+  end,
+  -- map-set / map-delete: pure versions (return new map, do not mutate state)
+  ["map-set"] = function(args, ctx)
+    local map = eval_expr(args[1], ctx)
+    local key = eval_expr(args[2], ctx)
+    local val = eval_expr(args[3], ctx)
+    local result = {}
+    if type(map) == "table" then for k, v in pairs(map) do result[k] = v end end
+    result[key] = val
+    return result
+  end,
+  ["map-delete"] = function(args, ctx)
+    local map = eval_expr(args[1], ctx)
+    local key = eval_expr(args[2], ctx)
+    if type(map) ~= "table" then return {} end
+    local result = {}
+    for k, v in pairs(map) do if k ~= key then result[k] = v end end
+    return result
+  end,
+  -- ── UList pure builtins ─────────────────────────────────────────────────────
+  -- UList(T) is an unbounded superficial list. Stored as a Lua sequence table.
+  -- Mutations use push!/pop!/clear!/set![idx].  These builtins are pure
+  -- (return new tables; do not touch the state store).
+  ["ulist-size"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    if type(list) ~= "table" then return 0 end
+    return #list
+  end,
+  ["ulist-get"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local idx  = eval_expr(args[2], ctx) or 1
+    if type(list) ~= "table" then return nil end
+    if idx < 0 then idx = #list + idx + 1 end
+    return list[idx]
+  end,
+  ["ulist-first"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    if type(list) ~= "table" or #list == 0 then return nil end
+    return list[1]
+  end,
+  ["ulist-last"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    if type(list) ~= "table" or #list == 0 then return nil end
+    return list[#list]
+  end,
+  ["ulist-index-of"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local val  = eval_expr(args[2], ctx)
+    if type(list) ~= "table" then return nil end
+    for i, v in ipairs(list) do if v == val then return i end end
+    return nil
+  end,
+  ["ulist-contains?"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local val  = eval_expr(args[2], ctx)
+    if type(list) ~= "table" then return false end
+    for _, v in ipairs(list) do if v == val then return true end end
+    return false
+  end,
+  ["ulist-append"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local val  = eval_expr(args[2], ctx)
+    local result = {}
+    if type(list) == "table" then for _, v in ipairs(list) do result[#result+1] = v end end
+    result[#result+1] = val
+    return result
+  end,
+  ["ulist-prepend"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local val  = eval_expr(args[2], ctx)
+    local result = { val }
+    if type(list) == "table" then for _, v in ipairs(list) do result[#result+1] = v end end
+    return result
+  end,
+  ["ulist-remove-at"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local idx  = eval_expr(args[2], ctx) or 1
+    if type(list) ~= "table" then return {} end
+    local n = #list
+    if idx < 0 then idx = n + idx + 1 end
+    local result = {}
+    for i, v in ipairs(list) do if i ~= idx then result[#result+1] = v end end
+    return result
+  end,
+  ["ulist-remove"] = function(args, ctx)
+    local list  = eval_expr(args[1], ctx)
+    local val   = eval_expr(args[2], ctx)
+    if type(list) ~= "table" then return {} end
+    local removed = false
+    local result  = {}
+    for _, v in ipairs(list) do
+      if not removed and v == val then removed = true
+      else result[#result+1] = v end
+    end
+    return result
+  end,
+  ["ulist-concat"] = function(args, ctx)
+    local a = eval_expr(args[1], ctx)
+    local b = eval_expr(args[2], ctx)
+    local result = {}
+    if type(a) == "table" then for _, v in ipairs(a) do result[#result+1] = v end end
+    if type(b) == "table" then for _, v in ipairs(b) do result[#result+1] = v end end
+    return result
+  end,
+  ["ulist-slice"] = function(args, ctx)
+    local list  = eval_expr(args[1], ctx)
+    local from  = eval_expr(args[2], ctx) or 1
+    local to    = eval_expr(args[3], ctx)
+    if type(list) ~= "table" then return {} end
+    local n = #list
+    if from < 0 then from = n + from + 1 end
+    if not to then to = n elseif to < 0 then to = n + to + 1 end
+    local result = {}
+    for i = from, to do if list[i] ~= nil then result[#result+1] = list[i] end end
+    return result
+  end,
+  ["ulist-reverse"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    if type(list) ~= "table" then return {} end
+    local result = {}
+    for i = #list, 1, -1 do result[#result+1] = list[i] end
+    return result
+  end,
+  ["ulist-map"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local fn   = eval_expr(args[2], ctx)
+    if type(list) ~= "table" then return {} end
+    local result = {}
+    for _, v in ipairs(list) do
+      result[#result+1] = call_lambda(fn, {v}, ctx)
+    end
+    return result
+  end,
+  ["ulist-filter"] = function(args, ctx)
+    local list = eval_expr(args[1], ctx)
+    local fn   = eval_expr(args[2], ctx)
+    if type(list) ~= "table" then return {} end
+    local result = {}
+    for _, v in ipairs(list) do
+      if call_lambda(fn, {v}, ctx) then result[#result+1] = v end
+    end
+    return result
+  end,
   -- ── Relation query builtins ──────────────────────────────────────────────────
   -- Relation name is the first arg, passed as a bare IDENT (0-arg fn_call returns its name).
   -- e.g. `adjacent? exits 'village` → rel_name="exits", source="village"
@@ -1570,7 +1733,10 @@ call_fn = function(name, args, ctx)
   -- Bounded function call
   local bounded_def = ctx.game and ctx.game.bounded and ctx.game.bounded[name]
   if bounded_def then
-    if ctx.game._bounded_handlers and ctx.game._bounded_handlers[name] then
+    -- Handler may be registered under the SB function name or the lua: dotted name
+    local handlers = ctx.game._bounded_handlers
+    local handler  = handlers and (handlers[name] or handlers[bounded_def.lua])
+    if handler then
       -- Evaluate first argument
       local first_arg = args and args[1] and eval_expr(args[1], ctx) or nil
       -- Snapshot the reads
@@ -1578,7 +1744,7 @@ call_fn = function(name, args, ctx)
       for _, path in ipairs(bounded_def.reads or {}) do
         snap[path] = ctx.state:get(path)
       end
-      local result = ctx.game._bounded_handlers[name](first_arg, snap)
+      local result = handler(first_arg, snap)
       -- Log as a random-draw entry for audit/replay
       if ctx.state and ctx.state._log then
         ctx.state._log:append({

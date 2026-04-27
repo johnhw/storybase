@@ -1369,6 +1369,12 @@ local function resolve_write_path(path_node, env, acc)
     end
     result[table.concat(parts, "/")] = true
 
+  elseif path_node.kind == k.INDEX_EXPR then
+    -- Indexed list write: set! path[n] val  (§4.4 — legal for List and UList)
+    -- Resolve the base path; the static write-set is the base path itself.
+    local base_writes = resolve_write_path(path_node.base, env, acc)
+    for p in pairs(base_writes) do result[p] = true end
+
   else
     -- A computed or non-path node in write position
     table.insert(acc.diags, ast.error(

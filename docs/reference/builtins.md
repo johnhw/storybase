@@ -85,6 +85,76 @@ all? crew/roster fn(m): crew/{m}/hp > 0
 
 ## Collections
 
+### `size` / `count`
+
+```
+size  <collection>  →  Int
+count <collection>  →  Int
+```
+
+Returns the number of elements in a `Set`, `List`, or `UList`. `count` is an alias for `size`.
+
+```
+size player/inventory       # number of items carried
+count player/waypoints      # same as size
+```
+
+---
+
+### `empty?`
+
+```
+empty? <collection>  →  Bool
+```
+
+Returns `true` if the collection has no elements.
+
+```
+empty? player/inventory
+```
+
+---
+
+### `contains?`
+
+```
+contains? <collection> <item>  →  Bool
+```
+
+Returns `true` if `item` is in the collection.
+
+```
+contains? player/inventory 'sword
+```
+
+---
+
+### `not-in?`
+
+```
+not-in? <item> <collection>  →  Bool
+```
+
+Returns `true` if `item` is **not** in the collection. Sugar for `not (contains? coll item)`.
+
+```
+not-in? 'key player/inventory
+```
+
+---
+
+### `union` / `intersect` / `difference`
+
+```
+union      <a> <b>  →  Set
+intersect  <a> <b>  →  Set
+difference <a> <b>  →  Set
+```
+
+Set operations. `union` returns elements in either set, `intersect` elements in both, `difference` elements in `a` but not `b`.
+
+---
+
 ### `min`
 
 ```
@@ -140,6 +210,322 @@ Returns a uniformly random integer in `[min, max]` (inclusive). The call is logg
 ```
 random-int 1 6          # d6 roll
 random-int 0 10         # damage modifier
+```
+
+---
+
+## UList Builtins
+
+`UList(T)` is an unbounded ordered list. It is stored as a Lua sequence table and is **superficial** (not included in state-space analysis). All pure builtins below return a *new* list without mutating state.
+
+**Mutation primitives** (in transaction functions only): `push!`, `pop!`, `clear!`, `set! path[n] val`.
+
+---
+
+### `ulist-size`
+
+```
+ulist-size <path>  →  Int
+```
+
+Returns the number of elements in the list.
+
+```
+ulist-size merchant/ledger
+```
+
+---
+
+### `ulist-get`
+
+```
+ulist-get <path> <index>  →  T | nil
+```
+
+Returns the element at 1-based `index` (negative indices count from the end: `-1` = last). Returns nil for out-of-bounds.
+
+```
+ulist-get world/notes 1
+ulist-get world/notes (0 - 1)   # last element (use expr form for negative literals)
+```
+
+---
+
+### `ulist-first` / `ulist-last`
+
+```
+ulist-first <path>  →  T | nil
+ulist-last  <path>  →  T | nil
+```
+
+Return the first or last element, or nil if the list is empty.
+
+```
+ulist-first merchant/ledger
+ulist-last  merchant/ledger
+```
+
+---
+
+### `ulist-index-of`
+
+```
+ulist-index-of <path> <value>  →  Int | nil
+```
+
+Returns the 1-based index of the first occurrence of `value`, or nil if not found.
+
+```
+ulist-index-of world/notes "urgent"
+```
+
+---
+
+### `ulist-contains?`
+
+```
+ulist-contains? <path> <value>  →  Bool
+```
+
+Returns `true` if `value` appears anywhere in the list.
+
+```
+ulist-contains? world/notes "urgent"
+```
+
+---
+
+### `ulist-append` / `ulist-prepend`
+
+```
+ulist-append  <path> <value>  →  UList(T)
+ulist-prepend <path> <value>  →  UList(T)
+```
+
+Return a new list with `value` added at the end (append) or beginning (prepend). The stored list is unchanged.
+
+```
+ulist-append  merchant/ledger "new entry"
+ulist-prepend merchant/ledger "header"
+```
+
+---
+
+### `ulist-remove-at`
+
+```
+ulist-remove-at <path> <index>  →  UList(T)
+```
+
+Returns a new list with the element at 1-based `index` removed.
+
+```
+ulist-remove-at world/notes 2
+```
+
+---
+
+### `ulist-remove`
+
+```
+ulist-remove <path> <value>  →  UList(T)
+```
+
+Returns a new list with the **first** occurrence of `value` removed.
+
+```
+ulist-remove world/notes "stale"
+```
+
+---
+
+### `ulist-concat`
+
+```
+ulist-concat <path-a> <path-b>  →  UList(T)
+```
+
+Returns a new list that is the concatenation of both lists.
+
+```
+ulist-concat merchant/ledger world/archive
+```
+
+---
+
+### `ulist-slice`
+
+```
+ulist-slice <path> <from> <to>  →  UList(T)
+```
+
+Returns a new list containing elements from 1-based `from` (inclusive) to `to` (inclusive). Out-of-range indices are clamped silently.
+
+```
+ulist-slice merchant/ledger 1 5
+ulist-slice merchant/ledger (ulist-size merchant/ledger - 1) (ulist-size merchant/ledger)
+```
+
+---
+
+### `ulist-reverse`
+
+```
+ulist-reverse <path>  →  UList(T)
+```
+
+Returns a new list with element order reversed.
+
+```
+ulist-reverse merchant/ledger
+```
+
+---
+
+### `ulist-map`
+
+```
+ulist-map <path>  fn(<var>): <expr>  →  UList(U)
+```
+
+Returns a new list where each element has been transformed by the lambda.
+
+```
+ulist-map world/notes fn(s): str "[" s "]"
+```
+
+---
+
+### `ulist-filter`
+
+```
+ulist-filter <path>  fn(<var>): <condition>  →  UList(T)
+```
+
+Returns a new list containing only elements for which the lambda returns true.
+
+```
+ulist-filter world/notes fn(s): ulist-contains? (ulist-slice (str s) 1 4) "gold"
+```
+
+---
+
+## UMap Builtins
+
+`UMap(K, V)` is an unbounded key-value map. It is **superficial** (not included in state-space analysis). All pure builtins return a *new* map without mutating state.
+
+**Mutation primitives** (in transaction functions only): `map-set!`, `map-delete!`.
+
+---
+
+### `map-size`
+
+```
+map-size <path>  →  Int
+```
+
+Returns the number of key-value pairs in the map.
+
+```
+map-size store/kv
+```
+
+---
+
+### `map-keys`
+
+```
+map-keys <path>  →  List of K
+```
+
+Returns all keys as a list (order unspecified).
+
+```
+map-keys store/kv
+```
+
+---
+
+### `map-values`
+
+```
+map-values <path>  →  List of V
+```
+
+Returns all values as a list (order corresponds to `map-keys`).
+
+```
+map-values store/kv
+```
+
+---
+
+### `map-get`
+
+```
+map-get <path> <key>  →  V | nil
+```
+
+Returns the value for `key`, or nil if not present.
+
+```
+map-get store/kv "alpha"
+```
+
+---
+
+### `map-contains-key?`
+
+```
+map-contains-key? <path> <key>  →  Bool
+```
+
+Returns `true` if `key` is present in the map.
+
+```
+map-contains-key? store/kv "beta"
+```
+
+---
+
+### `map-set` (pure)
+
+```
+map-set <path> <key> <value>  →  UMap(K, V)
+```
+
+Returns a new map with `key` set to `value`. The stored map is unchanged.
+
+```
+map-set store/kv "delta" 40
+```
+
+---
+
+### `map-delete` (pure)
+
+```
+map-delete <path> <key>  →  UMap(K, V)
+```
+
+Returns a new map with `key` removed. The stored map is unchanged.
+
+```
+map-delete store/kv "alpha"
+```
+
+---
+
+### `map-merge`
+
+```
+map-merge <path-a> <path-b>  →  UMap(K, V)
+```
+
+Returns a new map combining both maps; keys in `b` override keys in `a`.
+
+```
+map-merge store/kv (map-set store/kv "delta" 40)
 ```
 
 ---
