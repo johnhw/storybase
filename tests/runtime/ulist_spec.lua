@@ -674,6 +674,49 @@ fn set-label k v:
     local inv = g:get("store/inventory")
     assert.is_nil(inv["ring"])
   end)
+
+  -- Regression: UMap save/load round-trip (snapshot serialiser must handle hash tables)
+  it("save/load preserves multiple UMap entries across two separate calls", function()
+    local g = make3()
+    g:call("set-item", "sword", 3)
+    local path = os.tmpname() .. ".sbd"
+    local ok, e = g:save(path)
+    assert.is_true(ok, tostring(e))
+
+    -- Load into fresh instance and add a second item
+    local g2, err = require("lib.storybase").from_source(MAP_SRC2, "umap-test")
+    assert.is_nil(err)
+    g2:init()
+    local ok2, e2 = g2:load(path)
+    assert.is_true(ok2, tostring(e2))
+
+    -- "sword" must survive the round-trip
+    assert.equal(3, g2:get("store/inventory")["sword"])
+
+    -- Adding a second key must not erase the first
+    g2:call("set-item", "shield", 2)
+    local inv = g2:get("store/inventory")
+    assert.equal(3, inv["sword"])
+    assert.equal(2, inv["shield"])
+
+    os.remove(path)
+  end)
+
+  it("UMap with hyphenated string keys serialises and deserialises correctly", function()
+    local g = make3()
+    g:call("set-label", "fire-arrow", "fire-arrow")
+    g:call("set-label", "ice-bolt", "ice-bolt")
+    local path = os.tmpname() .. ".sbd"
+    g:save(path)
+
+    local g2, err = require("lib.storybase").from_source(MAP_SRC2, "umap-test")
+    assert.is_nil(err); g2:init()
+    g2:load(path)
+    local labels = g2:get("store/labels")
+    assert.equal("fire-arrow", labels["fire-arrow"])
+    assert.equal("ice-bolt",   labels["ice-bolt"])
+    os.remove(path)
+  end)
 end)
 
 -- ── UList composition: use in fn body + event observation ────────────────────

@@ -1618,6 +1618,26 @@ describe("parser — indexed list access", function()
     assert.equal(ast.K.INDEX_EXPR, node.path.kind)
     assert.equal(1, node.path.index.value)
   end)
+
+  it("parses path[var:end] as slice_expr when from is a variable (NAMED_ARG fix)", function()
+    -- 'start:' would be lexed as NAMED_ARG; parser must recover the identifier
+    local body = parse_fn_body("  queue/orders[start:end]\n")
+    local node = (body[1].kind == "expr_stmt") and body[1].expr or body[1]
+    assert.equal(ast.K.SLICE_EXPR, node.kind)
+    assert.equal(ast.K.FN_CALL,    node.from.kind)
+    assert.equal("start",          node.from.name)
+    assert.equal(ast.K.FN_CALL,    node.to.kind)
+    assert.equal("end",            node.to.name)
+  end)
+
+  it("parses path[var:literal] as slice_expr with mixed bounds", function()
+    local body = parse_fn_body("  items[n:10]\n")
+    local node = (body[1].kind == "expr_stmt") and body[1].expr or body[1]
+    assert.equal(ast.K.SLICE_EXPR, node.kind)
+    assert.equal(ast.K.FN_CALL,    node.from.kind)
+    assert.equal("n",              node.from.name)
+    assert.equal(10,               node.to.value)
+  end)
 end)
 
 -- ── verify declarations ────────────────────────────────────────────────────────

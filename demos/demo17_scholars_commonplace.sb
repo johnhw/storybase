@@ -1,0 +1,205 @@
+# demo17_scholars_commonplace.sb
+# A scholar collecting research notes and tracking citations.
+#
+# Features demonstrated:
+#   UList(String) notes/entries   — push!/pop!, ulist-size/first/last/slice/reverse/filter/contains?
+#   UMap(String, Int) notes/citations — map-set!/map-delete!, map-get/map-size/map-keys/map-contains-key?
+#   for loop in scene body (new)  — iterate UList/UMap results as scene narration
+#   ulist-filter over map-keys    — find heavily-cited authors
+#   ulist-slice with negative indices — last N entries
+#   ulist-concat, ulist-append    — pure list construction in verify
+#   map-merge                     — pure map merge in verify
+#
+# Run with:  storybase run demos/demo17_scholars_commonplace.sb
+
+module scholars-commonplace
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: study
+
+# ── State ──────────────────────────────────────────────────────────────────────
+
+state notes:
+  entries:   UList(String)           = []
+  citations: UMap(String, Int(0,99)) = {}
+
+state scholar:
+  gold:       Int(0, 999) = 50
+  reputation: Int(0, 100) = 10
+
+# ── Pure helpers ───────────────────────────────────────────────────────────────
+
+fn entry-count:
+  ulist-size notes/entries
+
+fn citation-count author:
+  map-get notes/citations author ?? 0
+
+fn author-count:
+  map-size notes/citations
+
+fn heavily-cited:
+  ulist-filter (map-keys notes/citations) fn(a): (citation-count a) >= 3
+
+fn has-any-heavy?:
+  ulist-size (heavily-cited) > 0
+
+fn recent-three:
+  ulist-slice notes/entries (0 - 3) (0 - 1)
+
+fn oldest-first:
+  ulist-reverse notes/entries
+
+fn has-entry? text:
+  ulist-contains? notes/entries text
+
+fn has-cited? author:
+  map-contains-key? notes/citations author
+
+# ── Transaction functions ──────────────────────────────────────────────────────
+
+fn record-note text author:
+  push! notes/entries text
+  map-set! notes/citations author (citation-count author + 1)
+
+fn revise-last:
+  pre: entry-count > 0
+  pop! notes/entries
+  push! notes/entries "Revised: the previous entry has been corrected and re-filed."
+
+fn cite-again author:
+  pre: has-cited? author
+  map-set! notes/citations author (citation-count author + 1)
+  inc! scholar/reputation 2
+
+fn retire-author author:
+  pre: has-cited? author
+  map-delete! notes/citations author
+  dec! scholar/reputation 1
+
+fn publish:
+  pre: entry-count >= 3
+  inc! scholar/gold 30
+  inc! scholar/reputation 15
+
+# ── Scenes ────────────────────────────────────────────────────────────────────
+
+scene study:
+  The scholar's study. Entries: {entry-count}. Authors indexed: {author-count}.
+  Gold: {scholar/gold}. Reputation: {scholar/reputation}.
+
+  * Add alchemy note (cites Paracelsus)
+    record-note "Sulfur and mercury bind under heat at the seventh hour." "Paracelsus"
+    -> study
+
+  * Add astronomy note (cites Ptolemy)
+    record-note "The fifth sphere carries an irregular periodic motion." "Ptolemy"
+    -> study
+
+  * Add natural philosophy note (cites Aristotle)
+    record-note "The unmoved mover acts through final causation alone." "Aristotle"
+    -> study
+
+  * [has-cited? "Paracelsus"] Re-cite Paracelsus (confirms alchemy note)
+    cite-again "Paracelsus"
+    -> study
+
+  * [has-cited? "Ptolemy"] Re-cite Ptolemy (parallax data supports astronomy entry)
+    cite-again "Ptolemy"
+    -> study
+
+  * [entry-count > 0] Revise last entry
+    revise-last
+    -> study
+
+  * [entry-count > 0] Review recent notes
+    -> recent-view
+
+  * [author-count > 0] Browse citation index
+    -> citation-view
+
+  * [has-any-heavy?] Inspect heavily-cited authors
+    -> heavy-view
+
+  * [author-count > 0] Retire Aristotle from index (map-delete!)
+    retire-author "Aristotle"
+    -> study
+
+  * [entry-count >= 3] Publish monograph (+30g, +15 rep)
+    publish
+    -> study
+
+# Recent notes: uses ulist-slice with negative indices, and for loop in scene body
+scene recent-view:
+  Most recent entry: {ulist-last notes/entries ?? "(none)"}
+  Oldest entry: {ulist-first notes/entries ?? "(none)"}
+
+  Last three (oldest-to-newest within that window):
+  for entry in (recent-three):
+    - {entry}
+  else:
+    (none yet)
+
+  Newest-first (ulist-reverse):
+  for entry in (oldest-first):
+    > {entry}
+  else:
+    (no entries recorded yet)
+
+  * Back to study
+    -> study
+
+# Citation index: uses for loop over map-keys, map-get in body
+scene citation-view:
+  Citation index — {author-count} author(s):
+  for author in (map-keys notes/citations):
+    {author}: {citation-count author} citation(s)
+  else:
+    (no authors cited yet)
+
+  * Back to study
+    -> study
+
+# Heavily cited: uses ulist-filter over map-keys as the iterable
+scene heavy-view:
+  Authors with 3 or more citations:
+  for author in (heavily-cited):
+    {author} — {citation-count author} total citation(s)
+  else:
+    (none have 3+ citations yet)
+
+  * Back to study
+    -> study
+
+# ── Verify ────────────────────────────────────────────────────────────────────
+
+verify "sizes are always non-negative":
+  verify-always entry-count >= 0  and  author-count >= 0
+
+verify "entries never lost by cite-again":
+  requires entry-count >= 1  and  has-cited? "Ptolemy"
+  after (cite-again "Ptolemy"):
+    entry-count >= 1
+
+verify "publish increases gold":
+  requires entry-count >= 3
+  after (publish):
+    scholar/gold > scholar/gold@before
+
+verify "retire removes author from index":
+  requires has-cited? "Aristotle"
+  after (retire-author "Aristotle"):
+    not (has-cited? "Aristotle")
+
+verify "ulist-append is pure and ulist-concat doubles length":
+  requires entry-count >= 2
+  after (record-note "Extra" "Galen"):
+    ulist-size (ulist-append notes/entries "X") = entry-count + 1
+
+verify "map-merge combines two maps":
+  requires has-cited? "Ptolemy"
+  after (cite-again "Ptolemy"):
+    map-size (map-merge notes/citations notes/citations) = author-count

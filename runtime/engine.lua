@@ -254,6 +254,21 @@ function M.new(game_table, opts)
         ctx.narration_buf = old_buf
       elseif sub.kind == "scene_goto" or sub.kind == "scene_enter" then
         eval.eval_stmt(sub, ctx)  -- sets ctx.signal
+      elseif sub.kind == "for_stmt" then
+        local list = eval.eval_expr(sub.iter, ctx)
+        local iterated = false
+        if type(list) == "table" then
+          for _, val in ipairs(list) do
+            iterated = true
+            local sub_ctx = eval.child_ctx_vars(ctx, {[sub.var] = val})
+            sub_ctx.narration_buf = narration
+            self:_render_narration_items(narration, sub.body, sub_ctx)
+            if sub_ctx.signal then ctx.signal = sub_ctx.signal; break end
+          end
+        end
+        if not iterated and sub.else_body then
+          self:_render_narration_items(narration, sub.else_body, ctx)
+        end
       end
       if ctx.signal then return end  -- stop on navigation signal
     end
@@ -334,6 +349,24 @@ function M.new(game_table, opts)
         if body then
           self:_render_narration_items(narration, body, ctx)
         end
+
+      elseif item.kind == "for_stmt" then
+        -- for loop at scene level — iterate and render narration for each element
+        local list = eval.eval_expr(item.iter, ctx)
+        local iterated = false
+        if type(list) == "table" then
+          for _, val in ipairs(list) do
+            iterated = true
+            local sub = eval.child_ctx_vars(ctx, {[item.var] = val})
+            sub.narration_buf = narration
+            self:_render_narration_items(narration, item.body, sub)
+            if sub.signal then nav_signal = sub.signal; break end
+          end
+        end
+        if not iterated and item.else_body then
+          self:_render_narration_items(narration, item.else_body, ctx)
+        end
+        if nav_signal then break end
       end
     end
 

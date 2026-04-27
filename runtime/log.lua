@@ -214,7 +214,8 @@ local function ser_val(v)
     else
       for k, val in pairs(v) do
         if type(k) == "string" then
-          parts[#parts + 1] = k .. "=" .. ser_val(val)
+          -- Always use bracket notation so hyphenated keys like "swift-anna" round-trip
+          parts[#parts + 1] = "[" .. string.format("%q", k) .. "]=" .. ser_val(val)
         elseif type(k) == "number" then
           parts[#parts + 1] = "[" .. k .. "]=" .. ser_val(val)
         end
@@ -309,15 +310,33 @@ function M.serialise_snapshot(seq, cache, time)
     elseif type(v) == "string" then
       parts[#parts + 1] = string.format("%q", v)
     elseif type(v) == "table" then
-      -- Shallow serialise (arrays only — cache values are sets/lists)
-      local ap = {}
-      for i, x in ipairs(v) do
-        if type(x) == "string" then ap[i] = string.format("%q", x)
-        elseif type(x) == "number" then ap[i] = string.format("%.14g", x)
-        elseif type(x) == "boolean" then ap[i] = tostring(x)
-        else ap[i] = "nil" end
+      -- Serialise array-like (UList, Set sequence) or hash-like (UMap, Set with string keys)
+      local n = #v
+      if n > 0 then
+        -- Array-like: UList, List, etc.
+        local ap = {}
+        for i = 1, n do
+          local x = v[i]
+          if type(x) == "string" then ap[i] = string.format("%q", x)
+          elseif type(x) == "number" then ap[i] = string.format("%.14g", x)
+          elseif type(x) == "boolean" then ap[i] = tostring(x)
+          else ap[i] = "nil" end
+        end
+        parts[#parts + 1] = "{" .. table.concat(ap, ",") .. "}"
+      else
+        -- Hash-like: UMap(K,V) or Set stored as {key=true}
+        local mp = {}
+        for k, val in pairs(v) do
+          local ks = "[" .. string.format("%q", tostring(k)) .. "]"
+          local vs
+          if type(val) == "string" then vs = string.format("%q", val)
+          elseif type(val) == "number" then vs = string.format("%.14g", val)
+          elseif type(val) == "boolean" then vs = tostring(val)
+          else vs = "nil" end
+          mp[#mp + 1] = ks .. "=" .. vs
+        end
+        parts[#parts + 1] = "{" .. table.concat(mp, ",") .. "}"
       end
-      parts[#parts + 1] = "{" .. table.concat(ap, ",") .. "}"
     else
       parts[#parts + 1] = "nil"
     end

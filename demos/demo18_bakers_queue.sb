@@ -1,0 +1,158 @@
+# demo18_bakers_queue.sb
+# A baker managing a morning order queue and filling orders from the oven.
+#
+# Features demonstrated:
+#   SLICE_EXPR  path[from:to]      — slice a UList state path directly
+#   INDEX_EXPR  path[n]            — index into a UList state path
+#   for … else:                    — else branch runs when the list is empty
+#   UList(String) queue/orders     — push!/pop!/clear!, ulist-size, slice
+#
+# Run with:  storybase run demos/demo18_bakers_queue.sb
+
+module bakers-queue
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: bakery
+
+# ── State ──────────────────────────────────────────────────────────────────────
+
+state queue:
+  orders: UList(String) = []
+
+state baker:
+  gold:     Int(0, 999) = 20
+  flour:    Int(0, 50)  = 30
+  loaves:   Int(0, 30)  = 0
+  day:      Int(0, 99)  = 1
+
+# ── Pure helpers ───────────────────────────────────────────────────────────────
+
+fn queue-length:
+  ulist-size queue/orders
+
+fn has-orders?:
+  queue-length > 0
+
+fn next-order:
+  queue/orders[1]
+
+fn top-two:
+  queue/orders[1:2]
+
+fn window start end:
+  queue/orders[start:end]
+
+fn can-bake?:
+  baker/flour >= 5  and  baker/loaves < 28
+
+# ── Transaction functions ──────────────────────────────────────────────────────
+
+fn take-order customer:
+  push! queue/orders customer
+
+fn fill-next:
+  pre: has-orders?  and  baker/loaves >= 1
+  pop! queue/orders
+  dec! baker/loaves 1
+  inc! baker/gold 8
+
+fn bake-batch:
+  pre: can-bake?
+  dec! baker/flour 5
+  inc! baker/loaves 6
+
+fn restock:
+  inc! baker/flour 20
+
+fn close-day:
+  clear! queue/orders
+  inc! baker/day 1
+  dec! baker/gold 5
+
+# ── Scenes ────────────────────────────────────────────────────────────────────
+
+scene bakery:
+  Day {baker/day}. Gold: {baker/gold}. Flour: {baker/flour} units. Loaves: {baker/loaves}.
+  Queue length: {queue-length}.
+
+  when has-orders?:
+    Next order: {next-order}.
+
+  * Take an order from Aldric
+    take-order "Aldric"
+    -> bakery
+
+  * Take an order from Brenna
+    take-order "Brenna"
+    -> bakery
+
+  * Take an order from Corvus
+    take-order "Corvus"
+    -> bakery
+
+  * Take an order from Delia
+    take-order "Delia"
+    -> bakery
+
+  * [can-bake?] Bake a batch (-5 flour, +6 loaves)
+    bake-batch
+    -> bakery
+
+  * [baker/flour < 20] Restock flour (+20)
+    restock
+    -> bakery
+
+  * [has-orders?  and  baker/loaves >= 1] Fill next order ({next-order}) +8g
+    fill-next
+    -> bakery
+
+  * [queue-length >= 2] Preview the queue
+    -> queue-view
+
+  * [has-orders?] End the day (clear queue, -5g)
+    close-day
+    -> bakery
+
+# Queue view: uses SLICE_EXPR (path[a:b]) and INDEX_EXPR (path[n]) directly,
+#             plus for…else: in both code and scene body
+scene queue-view:
+  Current queue ({queue-length} orders):
+
+  First order (INDEX_EXPR path[1]): {queue/orders[1]}
+
+  Top two (SLICE_EXPR path[1:2]):
+  for order in (top-two):
+    {order}
+  else:
+    (fewer than 2 orders)
+
+  Window 2 to 3 (path[2:3]):
+  for order in (window 2 3):
+    {order}
+  else:
+    (fewer than 2 orders in queue)
+
+  Full queue:
+  for order in (queue/orders[1:99]):
+    {order}
+
+  * Back
+    -> bakery
+
+# ── Verify ────────────────────────────────────────────────────────────────────
+
+verify "queue never has negative length":
+  verify-always queue-length >= 0
+
+verify "filling an order reduces queue by one":
+  requires has-orders?  and  baker/loaves >= 1
+  after (fill-next):
+    queue-length = queue-length@before - 1  or  queue-length = 0
+
+verify "baking always increases loaves":
+  requires can-bake?
+  after (bake-batch):
+    baker/loaves > baker/loaves@before

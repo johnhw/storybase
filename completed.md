@@ -5,6 +5,26 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## Stale Task Cleanup ✅ (2026-04-26)
+
+The following items were listed as open in todo.md but had already been completed in Language Review passes 1 and 2. Moved to completed.
+
+### Language Review — QoL / Ergonomics (all done in Pass 2)
+- **Free `let` bindings** — already implemented; confirmed and documented.
+- **Unified `say` syntax** — `say 'speaker "text"` accepted in scene bodies.
+- **Inline `Enum(a,b,c)` unusable as named type** — promotion hint documented, type table clarified.
+- **`for` loop `else` clause** — `else:` block runs when collection is empty.
+- **`with` mixin conflict error** — already named both source types; confirmed.
+- **`SymbolOf(EnumType)`** — checker extended to accept named enum types.
+
+### Language Review — Documentation Gaps (all done in Pass 1)
+- **`hook` declarations in `language.md`** — hooks section added.
+- **`while` iteration safety limit** — 10,000-iteration cap and error documented.
+- **`path@before` propagation into called functions** — documented in reference.
+- **`say` ordering guarantee** — buffer/prepend behaviour explicitly documented.
+
+---
+
 ## Language Review Pass 2 ✅ COMPLETE (2026-04-26)
 
 1024 unit tests passing. 143 CLI integration tests passing.

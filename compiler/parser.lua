@@ -906,11 +906,22 @@ local function parse_atom(p)
     -- Check for indexed access: path[n] or path[a:b]
     if p:at("OP", "[") then
       p:adv()  -- consume "["
-      local idx = parse_expr(p)
+      -- Special case: the lexer may have consumed "ident:" as a NAMED_ARG token
+      -- (e.g. in path[start:end], "start:" is lexed as NAMED_ARG "start").
+      -- Detect this and treat the identifier as the lower bound of a slice.
+      local idx, slice_colon_consumed = nil, false
+      if p:at("NAMED_ARG") then
+        local na = p:cur()
+        idx = ast.fn_call(na.value, {}, na.pos)
+        p:adv()
+        slice_colon_consumed = true
+      else
+        idx = parse_expr(p)
+      end
       -- Optionally: path[a:b] slice — parse optional ':' and end
       local idx2 = nil
-      if p:at("OP", ":") then
-        p:adv()
+      if slice_colon_consumed or p:at("OP", ":") then
+        if not slice_colon_consumed then p:adv() end  -- consume ':'
         if not p:at("OP", "]") then
           idx2 = parse_expr(p)
         end
@@ -1407,8 +1418,9 @@ local function parse_cond_expr(p)
   return ast.cond_expr(arms, tpos)
 end
 
---- Parse a for loop statement: for var in expr: body
-local function parse_for_stmt(p)
+--- Parse a for loop statement: for var in expr: body [else: else_body]
+--- is_scene: if true the loop body is parsed in scene mode (narration lines allowed).
+local function parse_for_stmt(p, is_scene)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD "for"
   local var_name = p:at("IDENT") and p:adv().value or "?"
@@ -1426,13 +1438,13 @@ local function parse_for_stmt(p)
     p:expect("OP", ":", "expected ':' after for expression")
   end
   p:skip_to_eol()
-  local body = parse_body_items(p, false)
+  local body = parse_body_items(p, is_scene or false)
   local else_body = nil
   p:skip_newlines()
   if p:at("NAMED_ARG", "else") then
     p:adv()  -- consume "else:" (NAMED_ARG already consumed the ':')
     p:match("NEWLINE")
-    else_body = parse_body_items(p, false)
+    else_body = parse_body_items(p, is_scene or false)
   end
   return ast.for_stmt(var_name, iter, body, else_body, tpos)
 end
@@ -1647,13 +1659,32 @@ local function parse_primary(p)
       p:expect("OP", ")", "expected ')' to close record constructor")
       return ast.record_constructor(name, fields, tpos)
     end
-    -- Check for index access: name[expr] — must come before arg collection
-    -- so that `items[1]` is not parsed as `items([1])`.
+    -- Check for index/slice access: name[expr] or name[a:b]
+    -- Must come before arg collection so `items[1]` is not parsed as `items([1])`.
     if p:at("OP", "[") then
       p:adv()  -- consume "["
-      local idx = parse_expr(p)
+      -- NAMED_ARG fix: lexer produces "ident:" as single token, recover identifier
+      local idx, slice_colon_consumed = nil, false
+      if p:at("NAMED_ARG") then
+        local na = p:cur()
+        idx = ast.fn_call(na.value, {}, na.pos)
+        p:adv()
+        slice_colon_consumed = true
+      else
+        idx = parse_expr(p)
+      end
+      local idx2 = nil
+      if slice_colon_consumed or p:at("OP", ":") then
+        if not slice_colon_consumed then p:adv() end  -- consume ':'
+        if not p:at("OP", "]") then
+          idx2 = parse_expr(p)
+        end
+      end
       p:expect("OP", "]", "expected ']' to close index")
       local base = ast.fn_call(name, {}, tpos)
+      if idx2 then
+        return ast.slice_expr(base, idx, idx2, tpos)
+      end
       return ast.index_expr(base, idx, tpos)
     end
     local args = {}
@@ -2259,9 +2290,11 @@ parse_body_items = function(p, is_scene)
         p:adv(); p:skip_to_eol(); item = ast.scene_exit(tpos)
 
       elseif t.kind == "KEYWORD" and t.value == "if" then
-        item = parse_if_expr(p, true)   -- scene mode
+        item = parse_if_expr(p, true)    -- scene mode
       elseif t.kind == "KEYWORD" and t.value == "when" then
-        item = parse_when_stmt(p, true) -- scene mode
+        item = parse_when_stmt(p, true)  -- scene mode
+      elseif t.kind == "KEYWORD" and t.value == "for" then
+        item = parse_for_stmt(p, true)   -- scene mode: body parsed as narration
       elseif t.kind == "KEYWORD" and t.value == "match" then
         local e = parse_match_expr(p); item = ast.expr_stmt(e, tpos)
 

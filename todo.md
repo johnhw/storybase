@@ -8,13 +8,27 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-04-27)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–16 tested end-to-end via `--cli` mode.
+Demos 01–18 tested end-to-end via `--cli` mode.
 UList(T) runtime fully implemented (15 pure builtins + mutation primitives).
 UMap(K,V) runtime completed (map-values, map-contains-key?, map-set, map-delete, map-merge added).
 Bounded Lua interop example: `examples/bounded_interop_game.sb` + `examples/bounded_lua_interop.lua`.
 Mutation events now fire correctly via `game:on("mutation", ...)`.
-**1878 unit tests passing (busted tests/).
-172 CLI integration tests passing.**
+**1885 unit tests passing (busted tests/).**
+
+**Bugs fixed during Demos 17–18 implementation (UList/UMap demos + SLICE_EXPR/for..else):**
+- `serialise_snapshot` used `ipairs` for table values — silently dropped all UMap hash keys on save.
+  Fixed by detecting array vs hash and using `pairs` with `["k"]=v` bracket notation for hash tables.
+- `ser_val` used bare `k=val` for string keys — broke hyphenated keys (e.g. `swift-anna`).
+  Fixed to always use `["k"]=val` bracket notation for string keys.
+- `for` loops in scene bodies were silently dropped (parser sent them to narration handler;
+  engine had no `for_stmt` case in `_render_narration_items`/`render_scene`).
+  Fixed: added `is_scene` param to `parse_for_stmt`; added `for_stmt` handling in engine.
+- SLICE_EXPR broken for variable bounds in two places:
+  1. `parse_atom` PATH branch: `path[start:end]` — `start:` lexed as NAMED_ARG, fix recovers ident.
+  2. `parse_primary` IDENT branch: `items[n:10]` — same fix; also upgraded from INDEX_EXPR-only
+     to full SLICE_EXPR support with NAMED_ARG recovery.
+- Unquoted narration text required in `for` body for `{var}` interpolation (quoted strings are
+  treated literally by the parser).
 
 **Bugs fixed during Demo 16 implementation (advanced find + counterfactual simulate):**
 - Parser: `counterfactual do:` block used `parse_expr` not `parse_stmt` — mutations like
@@ -224,11 +238,35 @@ capital is always connected to at least one coastal city.
 
 ---
 
+#### Demo 17 — "The Scholar's Commonplace" (UList + UMap)
+
+**File:** `demos/demo17_scholars_commonplace.sb` ✓ Complete
+
+- UList(String) + UMap(String, Int) demonstrated end-to-end
+- All 15 UList pure builtins exercised; all UMap builtins exercised
+- `for...else:` in scene body narration (unquoted text with `{var}` interpolation)
+- Negative-index `ulist-slice` for "last N entries"
+- `ulist-filter` over `map-keys` for "heavily-cited authors"
+- Implementation checklist: [x] all complete, 1885 tests green
+
+#### Demo 18 — "The Baker's Queue" (SLICE_EXPR + for..else)
+
+**File:** `demos/demo18_bakers_queue.sb` ✓ Complete
+
+- `queue/orders[1]` — INDEX_EXPR on state path
+- `queue/orders[1:2]` — SLICE_EXPR with literal bounds
+- `fn window start end: queue/orders[start:end]` — SLICE_EXPR with variable bounds (NAMED_ARG fix)
+- `for...else:` in scene body (else fires when list empty)
+- Implementation checklist: [x] all complete
+
+---
+
 ### Remaining Coverage Gaps (not yet scheduled as demos)
 
 - **Multi-line lambda bodies** — covered in Demo 13 (`find` query in `healers_ward.sb`). Done.
 - **`time-set!`** — covered adequately by demo10. No additional demo needed.
 - **Custom tags and hooks** — covered by demo06. No additional demo needed beyond current coverage.
+- **debug server / bundle / REPL / compact / extract-symbols / LSP** — CLI tools not covered by demos; defer.
 
 ---
 

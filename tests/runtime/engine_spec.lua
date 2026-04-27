@@ -911,6 +911,79 @@ end)
 -- npc-speed: extra post_action passes per player turn
 -- ============================================================
 
+-- ============================================================
+-- for_stmt in scene body narration
+-- ============================================================
+
+describe("engine: for loop in scene body narration", function()
+
+  local src = [[
+module for-narr-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state bag:
+  items: UList(String) = []
+fn add-item item:
+  push! bag/items item
+scene main:
+  for item in (bag/items[1:99]):
+    Item: {item}
+  else:
+    (no items)
+  * Add apple
+    add-item "apple"
+    -> main
+  * Add banana
+    add-item "banana"
+    -> main
+  * Done -> done
+scene done:
+  Finished.
+]]
+
+  local function make_eng()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, "compile errors: " .. tostring(errs[1] and errs[1].message))
+    local io_out = { write = function() end }
+    local eng = engine_mod.new(gt, { io_out = io_out })
+    eng:init()
+    return eng
+  end
+
+  it("renders else branch when list is empty", function()
+    local eng = make_eng()
+    local narr = eng:render_scene("main")
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("no items"), "expected '(no items)' in: " .. text)
+    assert.is_falsy(text:find("Item:"))
+  end)
+
+  it("renders loop body with interpolated variable after items added", function()
+    local eng = make_eng()
+    eng:do_choice("main", 1)  -- add apple
+    eng:do_choice("main", 2)  -- add banana
+    local narr = eng:render_scene("main")
+    local text = table.concat(narr, " ")
+    assert.is_truthy(text:find("Item: apple"),  "expected 'Item: apple' in: "  .. text)
+    assert.is_truthy(text:find("Item: banana"), "expected 'Item: banana' in: " .. text)
+    assert.is_falsy(text:find("no items"))
+  end)
+
+  it("else branch disappears once list has items", function()
+    local eng = make_eng()
+    eng:do_choice("main", 1)  -- add apple
+    local narr = eng:render_scene("main")
+    local text = table.concat(narr, " ")
+    assert.is_falsy(text:find("no items"))
+  end)
+
+end)
+
+-- ============================================================
+-- npc-speed: extra post_action passes per player turn
+-- ============================================================
+
 describe("engine: npc-speed runs extra actor passes", function()
 
   local src = [[
