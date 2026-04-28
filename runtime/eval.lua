@@ -707,6 +707,63 @@ local function call_lambda(lam, args, ctx)
   return result
 end
 
+-- Build a full BFS-ready cache snapshot from ctx: copies _state._cache,
+-- time axes (__time/<axis>), and scheduler state (__sched/<name>/...).
+-- Must match the encoding used by search.lua clone_cache.
+local function make_search_cache(ctx)
+  local cache = {}
+  for k, v in pairs(ctx.state._cache) do
+    if type(v) == "table" then
+      local copy = {}
+      for i, x in ipairs(v) do copy[i] = x end
+      cache[k] = copy
+    else
+      cache[k] = v
+    end
+  end
+  for axis, val in pairs(ctx.state._time or {}) do
+    cache["__time/" .. axis] = val
+  end
+  -- Capture scheduler state (mirrors search.lua clone_cache encoding)
+  local sched = ctx.scheduler
+  local gt    = ctx.game
+  if sched then
+    local static_sched = (gt and gt.schedules) or {}
+    local all_names = {}
+    for name in pairs(static_sched) do all_names[name] = true end
+    for name in pairs(sched._static or {}) do all_names[name] = true end
+    for name in pairs(all_names) do
+      local ss = sched._static and sched._static[name]
+      local prefix = "__sched/" .. name
+      cache[prefix .. "/x"] = ss and 1 or 0
+      if ss then
+        for axis, val in pairs(ss.next_fire or {}) do
+          cache[prefix .. "/nf/" .. axis] = val
+        end
+        for axis in pairs(ss.fired or {}) do
+          cache[prefix .. "/fired/" .. axis] = 1
+        end
+        if not static_sched[name] and ss.fn_body then
+          cache[prefix .. "/fn"] = ss.fn_body
+          local e_i = 0
+          for _, entry in ipairs((ss.trigger or {}).every or {}) do
+            e_i = e_i + 1
+            cache[prefix .. "/trig/ev/" .. e_i .. "/ax"] = entry.axis
+            cache[prefix .. "/trig/ev/" .. e_i .. "/v"]  = entry.value
+          end
+          local a_i = 0
+          for _, entry in ipairs((ss.trigger or {}).at or {}) do
+            a_i = a_i + 1
+            cache[prefix .. "/trig/at/" .. a_i .. "/ax"] = entry.axis
+            cache[prefix .. "/trig/at/" .. a_i .. "/v"]  = entry.value
+          end
+        end
+      end
+    end
+  end
+  return cache
+end
+
 --- Built-in functions.
 local BUILTINS = {
   ["path-list"] = function(args, ctx)
@@ -1325,20 +1382,7 @@ local BUILTINS = {
       end
     end
 
-    -- Snapshot current state (cache + time axes)
-    local cache = {}
-    for k, v in pairs(ctx.state._cache) do
-      if type(v) == "table" then
-        local copy = {}
-        for i, x in ipairs(v) do copy[i] = x end
-        cache[k] = copy
-      else
-        cache[k] = v
-      end
-    end
-    for axis, val in pairs(ctx.state._time or {}) do
-      cache["__time/" .. axis] = val
-    end
+    local cache = make_search_cache(ctx)
 
     -- Scene stack: from ctx if available, otherwise use entry scene
     local stack = ctx.scene_stack
@@ -1406,19 +1450,7 @@ local BUILTINS = {
       end
     end
 
-    local cache = {}
-    for k, v in pairs(ctx.state._cache) do
-      if type(v) == "table" then
-        local copy = {}
-        for i, x in ipairs(v) do copy[i] = x end
-        cache[k] = copy
-      else
-        cache[k] = v
-      end
-    end
-    for axis, val in pairs(ctx.state._time or {}) do
-      cache["__time/" .. axis] = val
-    end
+    local cache = make_search_cache(ctx)
 
     local stack = ctx.scene_stack
     if not stack then
@@ -1471,12 +1503,7 @@ local BUILTINS = {
         local d = eval_expr(a.value, ctx); if type(d) == "number" then depth = d end
       end
     end
-    -- Build initial BFS snapshot (cache + time axes)
-    local cache = {}
-    for k, v in pairs(ctx.state._cache) do
-      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
-    end
-    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
+    local cache = make_search_cache(ctx)
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}
@@ -1511,11 +1538,7 @@ local BUILTINS = {
         if a.name == "threshold" and type(d) == "number" then threshold = d end
       end
     end
-    local cache = {}
-    for k, v in pairs(ctx.state._cache) do
-      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
-    end
-    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
+    local cache = make_search_cache(ctx)
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}
@@ -1549,11 +1572,7 @@ local BUILTINS = {
         if a.name == "by"    then by_expr = a.value end
       end
     end
-    local cache = {}
-    for k, v in pairs(ctx.state._cache) do
-      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
-    end
-    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
+    local cache = make_search_cache(ctx)
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}
@@ -1602,11 +1621,7 @@ local BUILTINS = {
         local d = eval_expr(a.value, ctx); if type(d) == "number" then depth = d end
       end
     end
-    local cache = {}
-    for k, v in pairs(ctx.state._cache) do
-      cache[k] = type(v) == "table" and (function() local c={}; for i,x in ipairs(v) do c[i]=x end; return c end)() or v
-    end
-    for axis, val in pairs(ctx.state._time or {}) do cache["__time/" .. axis] = val end
+    local cache = make_search_cache(ctx)
     local stack = ctx.scene_stack or (function()
       local e = ctx.game.schema and ctx.game.schema.engine_config and ctx.game.schema.engine_config["entry-scene"]
       return e and {e} or {}

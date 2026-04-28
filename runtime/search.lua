@@ -38,15 +38,55 @@ local function clone_flat(cache)
   return snap
 end
 
---- Clone cache + time from a state store object.
---- Time axes are stored as "__time/<axis>" keys so they participate
---- in cycle detection via hash_state without special-casing.
-local function clone_cache(store)
+--- Clone cache + time + scheduler state from a state store + scheduler.
+--- Time axes stored as "__time/<axis>" keys.
+--- Scheduler state stored as "__sched/<name>/nf/<axis>", "__sched/<name>/fired/<axis>",
+--- "__sched/<name>/x" (exists: 1|0) so they participate in hash_state automatically.
+local function clone_cache(store, scheduler, game_table)
   local snap = clone_flat(store._cache or store)
-  -- Also capture time axes (present on real store objects, absent on plain dicts)
+  -- Capture time axes
   if type(store) == "table" and type(store._time) == "table" then
     for axis, val in pairs(store._time) do
       snap["__time/" .. axis] = val
+    end
+  end
+  -- Capture scheduler state (static + dynamic schedules)
+  if scheduler then
+    local static_sched = (game_table and game_table.schedules) or {}
+    -- Collect all schedule names we care about
+    local all_names = {}
+    for name in pairs(static_sched) do all_names[name] = true end
+    for name in pairs(scheduler._static or {}) do all_names[name] = true end
+    for name in pairs(all_names) do
+      local ss = scheduler._static and scheduler._static[name]
+      local prefix = "__sched/" .. name
+      snap[prefix .. "/x"] = ss and 1 or 0  -- exists flag
+      if ss then
+        for axis, val in pairs(ss.next_fire or {}) do
+          snap[prefix .. "/nf/" .. axis] = val
+        end
+        for axis in pairs(ss.fired or {}) do
+          snap[prefix .. "/fired/" .. axis] = 1
+        end
+        -- Dynamic schedule: record fn_body name for reconstruction
+        if not static_sched[name] and ss.fn_body then
+          snap[prefix .. "/fn"] = ss.fn_body
+          -- Store trigger config (every entries)
+          local e_i = 0
+          for _, entry in ipairs((ss.trigger or {}).every or {}) do
+            e_i = e_i + 1
+            snap[prefix .. "/trig/ev/" .. e_i .. "/ax"] = entry.axis
+            snap[prefix .. "/trig/ev/" .. e_i .. "/v"]  = entry.value
+          end
+          -- at entries
+          local a_i = 0
+          for _, entry in ipairs((ss.trigger or {}).at or {}) do
+            a_i = a_i + 1
+            snap[prefix .. "/trig/at/" .. a_i .. "/ax"] = entry.axis
+            snap[prefix .. "/trig/at/" .. a_i .. "/v"]  = entry.value
+          end
+        end
+      end
     end
   end
   return snap
@@ -74,7 +114,8 @@ local function hash_state(cache, stack)
 end
 
 --- Restore an engine instance's state from a cache snapshot + scene stack.
---- Handles "__time/<axis>" keys by writing them to eng._state._time.
+--- Handles "__time/<axis>" keys (time axes) and "__sched/<name>/..." keys
+--- (scheduler state) as special fields; everything else goes to _state._cache.
 local function restore_engine(eng, cache, stack)
   -- Clear and restore the value cache
   for k in pairs(eng._state._cache) do eng._state._cache[k] = nil end
@@ -82,21 +123,107 @@ local function restore_engine(eng, cache, stack)
   if type(eng._state._time) == "table" then
     for k in pairs(eng._state._time) do eng._state._time[k] = 0 end
   end
+
+  -- Collect scheduler state from special keys (applied after cache pass)
+  -- sched_data[name] = { exists, nf={axis=val,...}, fired={axis=true,...}, fn, trig_ev, trig_at }
+  local sched_data = {}
+
   -- Apply the snapshot
   for k, v in pairs(cache) do
-    local axis = k:match("^__time/(.+)$")
-    if axis then
+    local time_axis = k:match("^__time/(.+)$")
+    if time_axis then
       if type(eng._state._time) == "table" then
-        eng._state._time[axis] = v
+        eng._state._time[time_axis] = v
       end
-    elseif type(v) == "table" then
-      local copy = {}
-      for i, x in ipairs(v) do copy[i] = x end
-      eng._state._cache[k] = copy
     else
-      eng._state._cache[k] = v
+      local sched_name, rest = k:match("^__sched/([^/]+)/(.+)$")
+      if sched_name then
+        local d = sched_data[sched_name]
+        if not d then
+          d = { exists=0, nf={}, fired={}, fn=nil, trig_ev={}, trig_at={} }
+          sched_data[sched_name] = d
+        end
+        if rest == "x" then
+          d.exists = v
+        elseif rest == "fn" then
+          d.fn = v
+        else
+          local nf_axis = rest:match("^nf/(.+)$")
+          if nf_axis then d.nf[nf_axis] = v; goto sched_done end
+          local fired_axis = rest:match("^fired/(.+)$")
+          if fired_axis then d.fired[fired_axis] = true; goto sched_done end
+          -- Dynamic trigger: trig/ev/<i>/ax or trig/ev/<i>/v
+          local ev_i, field = rest:match("^trig/ev/(%d+)/(.+)$")
+          if ev_i then
+            local idx = tonumber(ev_i)
+            d.trig_ev[idx] = d.trig_ev[idx] or {}
+            if field == "ax" then d.trig_ev[idx].axis = v
+            else d.trig_ev[idx].value = v end
+            goto sched_done
+          end
+          local at_i, at_field = rest:match("^trig/at/(%d+)/(.+)$")
+          if at_i then
+            local idx = tonumber(at_i)
+            d.trig_at[idx] = d.trig_at[idx] or {}
+            if at_field == "ax" then d.trig_at[idx].axis = v
+            else d.trig_at[idx].value = v end
+          end
+          ::sched_done::
+        end
+      elseif type(v) == "table" then
+        local copy = {}
+        for i, x in ipairs(v) do copy[i] = x end
+        eng._state._cache[k] = copy
+      else
+        eng._state._cache[k] = v
+      end
     end
   end
+
+  -- Apply scheduler state from snapshot
+  if next(sched_data) ~= nil and eng._scheduler then
+    local static_sched = (eng._game and eng._game.schedules) or {}
+    for name, d in pairs(sched_data) do
+      if d.exists == 0 then
+        -- Schedule was removed (cancel-schedule! or at: exhausted)
+        eng._scheduler._static[name] = nil
+      else
+        -- Schedule exists: update its next_fire and fired thresholds
+        local ss = eng._scheduler._static[name]
+        if ss then
+          -- Override thresholds from snapshot
+          ss.next_fire = {}
+          for axis, val in pairs(d.nf) do ss.next_fire[axis] = val end
+          ss.fired = {}
+          for axis in pairs(d.fired) do ss.fired[axis] = true end
+        elseif not static_sched[name] and d.fn then
+          -- Dynamic schedule not in game_table: reconstruct from snapshot
+          local fn_decl = eng._fns and eng._fns[d.fn]
+          local body    = fn_decl and fn_decl.body or {}
+          local ev_list, at_list = {}, {}
+          for _, e in ipairs(d.trig_ev) do
+            if e then ev_list[#ev_list+1] = { axis=e.axis, value=e.value } end
+          end
+          for _, e in ipairs(d.trig_at) do
+            if e then at_list[#at_list+1] = { axis=e.axis, value=e.value } end
+          end
+          local trigger = { every=ev_list, at=at_list, offset={} }
+          local fire_at = {}
+          for _, e in ipairs(at_list) do fire_at[e.axis] = e.value end
+          eng._scheduler._static[name] = {
+            name      = name,
+            trigger   = trigger,
+            body      = body,
+            fn_body   = d.fn,
+            next_fire = d.nf,
+            fire_at   = fire_at,
+            fired     = d.fired,
+          }
+        end
+      end
+    end
+  end
+
   -- Restore the scene stack
   eng._scene_stack = {}
   for _, s in ipairs(stack) do eng._scene_stack[#eng._scene_stack + 1] = s end
@@ -356,7 +483,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
           if ok2 then
             pcall(function() eng2:post_action() end)
 
-            local new_cache = clone_cache(eng2._state)
+            local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
             local new_stack = {}
             for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
 
@@ -401,7 +528,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
       restore_engine(eng_t, item.cache, item.stack)
       local ok_t = pcall(function() eng_t:autonomous_turn() end)
       if ok_t then
-        local new_cache_t = clone_cache(eng_t._state)
+        local new_cache_t = clone_cache(eng_t._state, eng_t._scheduler, game_table)
         local new_stack_t = {}
         for _, s in ipairs(eng_t._scene_stack) do
           new_stack_t[#new_stack_t + 1] = s
@@ -537,7 +664,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
           if ok2 then
             pcall(function() eng2:post_action() end)
 
-            local new_cache = clone_cache(eng2._state)
+            local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
             local new_stack = {}
             for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
 
@@ -588,7 +715,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
       restore_engine(eng_t, item.cache, item.stack)
       local ok_t = pcall(function() eng_t:autonomous_turn() end)
       if ok_t then
-        local new_cache_t = clone_cache(eng_t._state)
+        local new_cache_t = clone_cache(eng_t._state, eng_t._scheduler, game_table)
         local new_stack_t = {}
         for _, s in ipairs(eng_t._scene_stack) do new_stack_t[#new_stack_t + 1] = s end
         local h_t = hash_state(new_cache_t, new_stack_t)
@@ -694,7 +821,7 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn,
         if ok2 then
           pcall(function() eng2:post_action() end)
 
-          local new_cache = clone_cache(eng2._state)
+          local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
           local new_stack = {}
           for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack+1] = s end
 
@@ -793,7 +920,7 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
       if ok2 then
         pcall(function() eng2:post_action() end)
 
-        local new_cache = clone_cache(eng2._state)
+        local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
         local new_stack = {}
         for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack+1] = s end
 
@@ -913,7 +1040,7 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
         if ok2 then
           pcall(function() eng2:post_action() end)
 
-          local new_cache = clone_cache(eng2._state)
+          local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
           local new_stack = {}
           for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
 

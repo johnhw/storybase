@@ -311,9 +311,13 @@ capital is always connected to at least one coastal city.
   contains `clear!`, `time-inc!`, `time-set!`, `send!`, `cancel-schedule!`, or `schedule!`.
   4 tests added to checker_spec.lua.
 
-- [ ] **#5 Dynamic `schedule!` invisible to BFS** — `search.lua` enumerates only statically
-  declared schedules from `game_table.schedules`. Schedules created at runtime via `schedule!`
-  are not included in future-state search, producing incorrect reachability results.
+- [x] **#5 Dynamic `schedule!` invisible to BFS** — Fixed: `search.lua:clone_cache` now
+  encodes full scheduler state into snapshots using `__sched/<name>/...` keys (next_fire,
+  fired, fn_body, trigger entries for dynamic schedules). `restore_engine` decodes these keys
+  and applies them to `eng._scheduler._static`. `make_search_cache(ctx)` helper added to
+  eval.lua (before BUILTINS table) and wired into all 6 BFS builtins (can-reach?, find-path,
+  verify-always, probability, optimal-path, find-counterexample), replacing the old manual
+  cache-building blocks that omitted scheduler state.
 
 ### Low Priority
 

@@ -80,11 +80,16 @@ Render the current scene, returning narration and choices.
 
 ```lua
 local narration, choices = game:render()
--- narration: list of strings (narrative lines)
--- choices:   list of {index=N, label="text"} tables
 
 for _, line in ipairs(narration) do
-  print(line)
+  if type(line) == "table" then
+    -- Attributed dialogue from a `say` statement
+    local label = line.display or line.speaker or "?"
+    print(label .. ": " .. line.text)
+  else
+    -- Plain narration string
+    print(line)
+  end
 end
 for _, choice in ipairs(choices) do
   print(choice.index .. ") " .. choice.label)
@@ -93,7 +98,13 @@ end
 
 **Returns:** `narration_list, choices_list`
 
-- `narration_list` — ordered list of strings; each is a rendered narration line (with `{expr}` interpolation applied).
+- `narration_list` — ordered list of items. Each item is either:
+  - A **string** — a plain rendered narration line (with `{expr}` interpolation applied).
+  - A **table** — a dialogue object emitted by a `say` statement, with fields:
+    - `speaker` (string or nil) — raw speaker key
+    - `display` (string or nil) — human-readable name from the `speaker` declaration
+    - `color` (string or nil) — CSS hex color from the `speaker` declaration
+    - `text` (string) — rendered dialogue text
 - `choices_list` — list of tables, each with `index` (1-based integer) and `label` (string). Only choices whose guard condition is true are included.
 
 ---
