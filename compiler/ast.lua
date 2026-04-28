@@ -115,6 +115,8 @@ M.E = {
   UNDECLARED_SPEAKER       = "UNDECLARED_SPEAKER",
   -- Perceives enforcement
   PERCEIVES_VIOLATION      = "PERCEIVES_VIOLATION",
+  -- Tag checks
+  IRREVERSIBLE_IN_REVERSIBLE = "IRREVERSIBLE_IN_REVERSIBLE",
   -- Pre/post conditions
   PRE_NOT_BOOL             = "PRE_NOT_BOOL",
   POST_NOT_BOOL            = "POST_NOT_BOOL",

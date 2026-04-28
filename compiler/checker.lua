@@ -724,6 +724,86 @@ local function pass3_infer_purity(acc, program)
 end
 
 -- ============================================================
+-- Pass 3c — reversible tag verification
+-- ============================================================
+
+-- Mutations that cannot be undone by replaying from a checkpoint.
+local IRREVERSIBLE_MUT_KINDS = {
+  [ast.K.CLEAR_MUT]           = "clear!",
+  [ast.K.TIME_INC_MUT]        = "time-inc!",
+  [ast.K.TIME_SET_MUT]        = "time-set!",
+  [ast.K.SEND_MUT]            = "send!",
+  [ast.K.CANCEL_SCHEDULE_MUT] = "cancel-schedule!",
+  [ast.K.SCHEDULE_MUT]        = "schedule!",
+}
+
+--- Return the first irreversible mutation node found in a subtree, or nil.
+local function find_irreversible(node)
+  if not node or type(node) ~= "table" then return nil end
+  if IRREVERSIBLE_MUT_KINDS[node.kind] then return node end
+  for _, f in ipairs({ "body", "then_body", "else_body", "args",
+                       "arms", "choices", "clauses", "bindings" }) do
+    local v = node[f]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        local found = find_irreversible(child)
+        if found then return found end
+        -- also recurse into arm bodies
+        if type(child) == "table" and child.body then
+          if type(child.body) == "table" and not child.body.kind then
+            for _, s in ipairs(child.body) do
+              local f2 = find_irreversible(s)
+              if f2 then return f2 end
+            end
+          else
+            local f2 = find_irreversible(child.body)
+            if f2 then return f2 end
+          end
+        end
+      end
+    end
+  end
+  for _, f in ipairs({ "condition", "expr", "value", "amount",
+                       "left", "right", "inner_expr" }) do
+    local found = find_irreversible(node[f])
+    if found then return found end
+  end
+  return nil
+end
+
+--- For each fn tagged [reversible], verify no irreversible mutation appears in its body.
+local function pass3c_check_reversible(acc, program)
+  local k = ast.K
+  -- Build a map fn_name → fn_decl for call-site checks
+  local fn_map = {}
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then fn_map[node.name] = node end
+  end
+
+  for _, node in ipairs(program.decls) do
+    if node.kind ~= k.FN_DECL then goto continue end
+    local is_reversible = false
+    for _, tag in ipairs(node.tags or {}) do
+      if tag == "reversible" then is_reversible = true; break end
+    end
+    if not is_reversible then goto continue end
+
+    -- Check body directly
+    for _, s in ipairs(node.body or {}) do
+      local bad = find_irreversible(s)
+      if bad then
+        err(acc, ast.E.IRREVERSIBLE_IN_REVERSIBLE,
+          "fn '" .. (node.name or "?") .. "' is tagged [reversible] but contains '" ..
+          (IRREVERSIBLE_MUT_KINDS[bad.kind] or bad.kind) .. "', which cannot be undone",
+          bad.pos or node.pos)
+        break
+      end
+    end
+    ::continue::
+  end
+end
+
+-- ============================================================
 -- Pass 3b — Transaction-in-pure-context checks + uses-bounded tag
 -- ============================================================
 
@@ -1826,6 +1906,7 @@ function M.check(ast_root, filename)
   pass2_check(acc, symtab, ast_root)
   pass3_infer_purity(acc, ast_root)
   pass3b_check_call_purity(acc, ast_root)
+  pass3c_check_reversible(acc, ast_root)
   pass4_check_perceives(acc, ast_root)
   pass5_check_boundary(acc, symtab, ast_root)
   pass6_write_sets(acc, ast_root)

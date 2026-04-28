@@ -306,9 +306,10 @@ capital is always connected to at least one coastal city.
 
 ### Medium Priority
 
-- [ ] **#4 `reversible` tag does nothing** — checker stores the tag but verifies nothing. Spec
-  §7.4 says compiler verifies all mutations in a `reversible`-tagged function are invertible.
-  Currently a silent no-op that misleads authors.
+- [x] **#4 `reversible` tag does nothing** — Fixed: `pass3c_check_reversible` added to
+  checker.lua. Emits `IRREVERSIBLE_IN_REVERSIBLE` error when a `[reversible]`-tagged fn body
+  contains `clear!`, `time-inc!`, `time-set!`, `send!`, `cancel-schedule!`, or `schedule!`.
+  4 tests added to checker_spec.lua.
 
 - [ ] **#5 Dynamic `schedule!` invisible to BFS** — `search.lua` enumerates only statically
   declared schedules from `game_table.schedules`. Schedules created at runtime via `schedule!`
@@ -324,8 +325,9 @@ capital is always connected to at least one coastal city.
   (`if key == rf.src or not M.reachable(...)`). "Within 0 hops of village" finds nothing,
   which may surprise authors.
 
-- [ ] **#8 `random-enum` O(N) type lookup** — `eval.lua` iterates `ctx.game.schema.types` list
-  on every call to find the enum. Should build a name-indexed map at game load time.
+- [x] **#8 `random-enum` O(N) type lookup** — Fixed: `engine:init()` now builds
+  `schema._type_index = {[name]=type}` once; `random-enum` uses it for O(1) lookup,
+  with fallback to list scan for bare eval contexts.
 
 ---
 

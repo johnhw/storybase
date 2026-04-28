@@ -1561,3 +1561,80 @@ scene s:
     assert.is_true(fn_decl.is_transaction)
   end)
 end)
+
+-- ============================================================
+-- reversible tag verification (pass3c)
+-- ============================================================
+
+describe("checker: [reversible] tag", function()
+  local BASE = [[
+engine-config:
+  entry-scene: s
+scene s:
+  * Done -> s
+]]
+
+  it("fn with only reversible mutations passes", function()
+    check_ok([[
+state player:
+  health: Int(0,100) = 50
+  has-key: Bool = false
+  items: Set(Bool, 5) = (set)
+  log: List(Bool, 5) = []
+]] .. BASE .. [[
+fn safe-fn:
+  tags: [reversible]
+  inc! player/health 10
+  dec! player/health 5
+  set! player/has-key true
+  add! player/items true
+  remove! player/items true
+  push! player/log true
+  pop! player/log
+]])
+  end)
+
+  it("fn with clear! triggers IRREVERSIBLE_IN_REVERSIBLE", function()
+    check_err([[
+state player:
+  items: Set(Bool, 5) = (set)
+]] .. BASE .. [[
+fn bad-fn:
+  tags: [reversible]
+  clear! player/items
+]], "IRREVERSIBLE_IN_REVERSIBLE")
+  end)
+
+  it("fn with time-inc! triggers IRREVERSIBLE_IN_REVERSIBLE", function()
+    check_err([[
+]] .. BASE .. [[
+fn bad-time:
+  tags: [reversible]
+  time-inc! tick:
+]], "IRREVERSIBLE_IN_REVERSIBLE")
+  end)
+
+  it("fn with send! triggers IRREVERSIBLE_IN_REVERSIBLE", function()
+    check_err([[
+type Msg:
+  | ping:
+actor bot:
+  state: {}
+  perceives: []
+  behavior: bot-fn
+fn bot-fn: pass
+]] .. BASE .. [[
+fn bad-send:
+  tags: [reversible]
+  send! bot (Msg/ping)
+]], "IRREVERSIBLE_IN_REVERSIBLE")
+  end)
+
+  it("fn without [reversible] tag is not checked", function()
+    check_ok([[
+]] .. BASE .. [[
+fn unchecked:
+  time-inc! tick:
+]])
+  end)
+end)
