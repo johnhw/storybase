@@ -1206,3 +1206,60 @@ scene end-scene:
     assert.is_not_nil(path)
   end)
 end)
+
+-- ============================================================
+-- Bug #5 regression: dynamic schedule! visible to BFS
+-- ============================================================
+
+describe("search — dynamic schedule! in BFS", function()
+  it("can_reach finds goal requiring dynamic schedule to fire twice", function()
+    -- Scene "setup" creates a dynamic schedule (every 1 turn, increments ticks).
+    -- BFS must propagate scheduler state across clone_cache / restore_engine,
+    -- so the schedule continues to fire in subsequent "loop" steps.
+    -- Note: schedule! trigger uses bare integer (not +N) to avoid parse_expr unary issue.
+    local src = [[
+module dyn-sched-bfs
+  version: 1.0
+engine-config:
+  entry-scene: setup
+time-model:
+  axes: [turn]
+
+state world:
+  ticks: Int(0, 100) = 0
+
+fn inc-ticks:
+  inc! world/ticks 1
+
+scene setup:
+  * Arm
+    schedule! 'dyn-ticker every: [turn: 1] fn: inc-ticks
+    time-inc! turn: 1
+    -> loop
+
+scene loop:
+  * Wait
+    time-inc! turn: 1
+    -> loop
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local engine_mod_local = require("runtime.engine")
+    local eng = engine_mod_local.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+    for axis, val in pairs(eng._state._time or {}) do
+      cache["__time/" .. axis] = val
+    end
+
+    -- ticks >= 2 requires: Arm (fires once, ticks=1) + Wait (fires again, ticks=2)
+    local reached = search_mod.can_reach(
+      gt, cache, { "setup" },
+      function(c) return (c["world/ticks"] or 0) >= 2 end,
+      10
+    )
+    assert.is_true(reached, "expected dynamic schedule to increment ticks to >=2")
+  end)
+end)

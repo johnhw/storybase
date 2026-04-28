@@ -110,8 +110,8 @@ function M.find(ctx, family, clauses)
     if passes and #compiled_rel_filters > 0 then
       for _, rf in ipairs(compiled_rel_filters) do
         if rf.kind == "within" then
-          -- key must be reachable from rf.src within rf.hops hops (source excluded)
-          if key == rf.src or not M.reachable(rf.relation, rf.src, key, rf.hops) then
+          -- key must be reachable from rf.src within rf.hops hops (source included: 0 hops = src itself)
+          if not M.reachable(rf.relation, rf.src, key, rf.hops) then
             passes = false; break
           end
         elseif rf.kind == "connected_to" then

@@ -353,6 +353,30 @@ local function path_matches(pattern, path)
     return false
   end
 
+  -- Handle !segment negation: player/!inventory matches player/health but not player/inventory.
+  -- Replace each !seg with * for the wildcard match, then verify path segments are not negated values.
+  if pattern:find("!") then
+    local neg = {}   -- {position → negated_segment}
+    local norm_segs = {}
+    local idx = 0
+    for seg in (pattern .. "/"):gmatch("([^/]*)/") do
+      idx = idx + 1
+      if seg:sub(1,1) == "!" then
+        neg[idx] = seg:sub(2)
+        norm_segs[#norm_segs + 1] = "*"
+      else
+        norm_segs[#norm_segs + 1] = seg
+      end
+    end
+    if not path_matches(table.concat(norm_segs, "/"), path) then return false end
+    local path_segs = {}
+    for seg in (path .. "/"):gmatch("([^/]*)/") do path_segs[#path_segs + 1] = seg end
+    for i, neg_val in pairs(neg) do
+      if path_segs[i] == neg_val then return false end
+    end
+    return true
+  end
+
   -- Convert to a Lua pattern:
   --   1. Escape Lua magic chars (not *)
   --   2. Replace ** with a NUL placeholder so it is not touched by the * step
@@ -368,7 +392,7 @@ end
 --- Return true when `pattern` contains any wildcard character that requires
 --- iterating all cache keys rather than doing an exact lookup.
 local function is_pattern(s)
-  return s:find("%*") ~= nil or s:find("%(") ~= nil
+  return s:find("%*") ~= nil or s:find("%(") ~= nil or s:find("!") ~= nil
 end
 
 -- ============================================================

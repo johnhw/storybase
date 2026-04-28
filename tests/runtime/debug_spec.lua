@@ -1211,6 +1211,51 @@ scene main:
     assert.is_nil(fired["player/gold"],    "player/gold should NOT fire")
   end)
 
+  it("watch player/!gold fires for health and mana but NOT gold", function()
+    local gt, errs = compile(PATTERN_SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local srv = debug_mod.new(eng)
+    srv:start()
+    local fired = {}
+    srv:on("watch-fired", function(p) fired[p.path] = true end)
+    srv:register_watch("player/!gold", "Not gold")
+    srv:check_watches()
+
+    assert.is_true(fired["player/health"], "player/health should fire (not negated)")
+    assert.is_true(fired["player/mana"],   "player/mana should fire (not negated)")
+    assert.is_nil(fired["player/gold"],    "player/gold should NOT fire (negated)")
+  end)
+
+  it("watch pattern declarations compile from .sb source (**, (a|b), !field)", function()
+    local src = [[
+module pat-decl
+  version: 1.0
+engine-config:
+  entry-scene: main
+state player:
+  health: Int(0,100) = 80
+  mana:   Int(0,100) = 60
+  gold:   Int(0,999) = 10
+watch player/** "Deep"
+watch player/(health|mana) "HP or MP"
+watch player/!gold "Not gold"
+scene main:
+  * Go -> main
+]]
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    assert.equal(3, #(gt.watches or {}))
+    local paths = {}
+    for _, w in ipairs(gt.watches) do
+      paths[table.concat(w.path.segments or {}, "/")] = true
+    end
+    assert.is_true(paths["player/**"],          "** pattern stored")
+    assert.is_true(paths["player/(health|mana)"], "(a|b) pattern stored")
+    assert.is_true(paths["player/!gold"],        "!field pattern stored")
+  end)
+
   it("exact path watch still works correctly", function()
     local gt, errs = compile(PATTERN_SRC)
     assert.equal(0, #errs, errs[1] and errs[1].message)

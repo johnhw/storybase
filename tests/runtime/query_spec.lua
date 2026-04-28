@@ -630,14 +630,14 @@ describe("find: within N hops clause", function()
       cave    = { village = true },
     })
 
-    -- within 1 hop of village: directly forest and cave
+    -- within 1 hop of village: village (source) + directly forest and cave
     local src_expr = sym_node("village")
     local clauses = {
       { kind = "within", relation_name = "exits", hops = 1, from = src_expr }
     }
     local result = query.find(c, "places", clauses)
     table.sort(result)
-    assert.same({ "cave", "forest" }, result)
+    assert.same({ "cave", "forest", "village" }, result)
   end)
 
   it("within 2 hops includes transitively reachable members", function()
@@ -656,12 +656,38 @@ describe("find: within N hops clause", function()
     local clauses2 = { { kind = "within", relation_name = "exits", hops = 2, from = src_expr } }
     local result2 = query.find(c, "places", clauses2)
     table.sort(result2)
-    assert.same({ "forest", "mountain" }, result2)
+    assert.same({ "forest", "mountain", "village" }, result2)
 
     local clauses1 = { { kind = "within", relation_name = "exits", hops = 1, from = src_expr } }
     local result1 = query.find(c, "places", clauses1)
     table.sort(result1)
-    assert.same({ "forest" }, result1)
+    assert.same({ "forest", "village" }, result1)
+  end)
+
+  -- Bug #7 fix: source node should be included (it is 0 hops from itself)
+  it("within 0 hops returns only the source itself", function()
+    local c = make_places_ctx({
+      ["places/village/name"] = "village",
+      ["places/forest/name"]  = "forest",
+    }, { village = { forest = true } })
+    local src_expr = sym_node("village")
+    local clauses = { { kind = "within", relation_name = "exits", hops = 0, from = src_expr } }
+    local result = query.find(c, "places", clauses)
+    assert.same({ "village" }, result)
+  end)
+
+  it("within N hops includes the source node", function()
+    local c = make_places_ctx({
+      ["places/village/name"] = "village",
+      ["places/forest/name"]  = "forest",
+      ["places/cave/name"]    = "cave",
+    }, { village = { forest = true, cave = true } })
+    local src_expr = sym_node("village")
+    local clauses = { { kind = "within", relation_name = "exits", hops = 1, from = src_expr } }
+    local result = query.find(c, "places", clauses)
+    table.sort(result)
+    -- village (source) + forest + cave all within 1 hop
+    assert.same({ "cave", "forest", "village" }, result)
   end)
 end)
 

@@ -707,6 +707,51 @@ local function call_lambda(lam, args, ctx)
   return result
 end
 
+-- Path pattern matching (mirrors debug.lua path_matches; used by query-history/query-changes).
+-- Supports: * (single segment), ** (any segments), (a|b) alternation, !seg negation.
+local function _path_pattern_matches(pattern, path)
+  if pattern == "*"  then return true end
+  if pattern == path then return true end
+  -- Expand (a|b|c) alternation groups recursively
+  local alt_s, alt_e = pattern:find("%((.-)%)")
+  if alt_s then
+    local before    = pattern:sub(1, alt_s - 1)
+    local alt_inner = pattern:sub(alt_s + 1, alt_e - 1)
+    local after     = pattern:sub(alt_e + 1)
+    for branch in alt_inner:gmatch("[^|]+") do
+      if _path_pattern_matches(before .. branch .. after, path) then return true end
+    end
+    return false
+  end
+  -- Handle !segment negation
+  if pattern:find("!") then
+    local neg = {}
+    local norm_segs = {}
+    local idx = 0
+    for seg in (pattern .. "/"):gmatch("([^/]*)/") do
+      idx = idx + 1
+      if seg:sub(1,1) == "!" then
+        neg[idx] = seg:sub(2)
+        norm_segs[#norm_segs + 1] = "*"
+      else
+        norm_segs[#norm_segs + 1] = seg
+      end
+    end
+    if not _path_pattern_matches(table.concat(norm_segs, "/"), path) then return false end
+    local path_segs = {}
+    for seg in (path .. "/"):gmatch("([^/]*)/") do path_segs[#path_segs + 1] = seg end
+    for i, neg_val in pairs(neg) do
+      if path_segs[i] == neg_val then return false end
+    end
+    return true
+  end
+  local lp = pattern:gsub("([%.%+%-%^%$%(%)%[%]%%])", "%%%1")
+  lp = lp:gsub("%*%*", "\0")
+  lp = lp:gsub("%*", "[^/]+")
+  lp = lp:gsub("\0", ".*")
+  return path:match("^" .. lp .. "$") ~= nil
+end
+
 -- Build a full BFS-ready cache snapshot from ctx: copies _state._cache,
 -- time axes (__time/<axis>), and scheduler state (__sched/<name>/...).
 -- Must match the encoding used by search.lua clone_cache.
@@ -1314,6 +1359,7 @@ local BUILTINS = {
     return ctx.state._log:query_at(path, time_val)
   end,
   -- query-history path → [{time, old, new}, ...]  (all recorded changes)
+  -- path may be a pattern (player/*, player/(health|mana), player/!inventory) — returns union.
   ["query-history"] = function(args, ctx)
     if not ctx.state or not ctx.state._log then return {} end
     local arg = args[1]
@@ -1324,9 +1370,20 @@ local BUILTINS = {
       path = eval_expr(arg, ctx)
     end
     if type(path) ~= "string" then return {} end
-    return ctx.state._log:query_history(path, nil, nil)
+    local log = ctx.state._log
+    if path:find("%*") or path:find("%(") or path:find("!") then
+      local result = {}
+      for _, e in ipairs(log._entries or {}) do
+        if e.path and _path_pattern_matches(path, e.path) then
+          result[#result + 1] = { time = e.time, old = e.old, new = e.new, path = e.path }
+        end
+      end
+      return result
+    end
+    return log:query_history(path, nil, nil)
   end,
   -- query-changes path [last-n: N] → [{time, old, new}, ...]  (most recent N)
+  -- path may be a pattern — returns union of matches, most recent last_n total.
   ["query-changes"] = function(args, ctx)
     if not ctx.state or not ctx.state._log then return {} end
     local arg = args[1]
@@ -1344,7 +1401,20 @@ local BUILTINS = {
         last_n = eval_expr(a.value, ctx)
       end
     end
-    return ctx.state._log:query_changes(path, last_n)
+    local log = ctx.state._log
+    if path:find("%*") or path:find("%(") or path:find("!") then
+      local all = {}
+      for _, e in ipairs(log._entries or {}) do
+        if e.path and _path_pattern_matches(path, e.path) then
+          all[#all + 1] = { time = e.time, old = e.old, new = e.new, path = e.path }
+        end
+      end
+      local start = math.max(1, #all - (last_n or #all) + 1)
+      local result = {}
+      for i = start, #all do result[#result + 1] = all[i] end
+      return result
+    end
+    return log:query_changes(path, last_n)
   end,
 
   ["can-reach?"] = function(args, ctx)

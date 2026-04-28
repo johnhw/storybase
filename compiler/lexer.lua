@@ -372,10 +372,34 @@ function M.tokenize(source, filename)
             break
           end
         elseif next_ch == '*' then
-          -- Wildcard segment: npcs/*/health
+          -- Wildcard segment: npcs/*/health  or  player/**/strength
           adv()  -- consume '/'
-          adv()  -- consume '*'
-          table.insert(segments, '*')
+          adv()  -- consume first '*'
+          if peek() == '*' then
+            adv()  -- consume second '*'
+            table.insert(segments, '**')
+          else
+            table.insert(segments, '*')
+          end
+        elseif next_ch == '(' then
+          -- Alternation group: player/(health|mana)
+          adv()  -- consume '/'
+          adv()  -- consume '('
+          local alt_start = pos
+          while peek() ~= ')' and peek() ~= '' do adv() end
+          local alt_inner = s:sub(alt_start, pos - 1)
+          if peek() == ')' then adv() end  -- consume ')'
+          table.insert(segments, '(' .. alt_inner .. ')')
+        elseif next_ch == '!' then
+          -- Negation segment: player/!inventory
+          adv()  -- consume '/'
+          adv()  -- consume '!'
+          if is_alpha(peek()) then
+            local neg_seg = scan_ident_seg()
+            table.insert(segments, '!' .. neg_seg)
+          else
+            break
+          end
         elseif next_ch == '{' then
           adv()  -- consume '/'
           -- Scan {ident} interpolation segment

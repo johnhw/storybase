@@ -13,7 +13,7 @@ UList(T) runtime fully implemented (15 pure builtins + mutation primitives).
 UMap(K,V) runtime completed (map-values, map-contains-key?, map-set, map-delete, map-merge added).
 Bounded Lua interop example: `examples/bounded_interop_game.sb` + `examples/bounded_lua_interop.lua`.
 Mutation events now fire correctly via `game:on("mutation", ...)`.
-**1885 unit tests passing (busted tests/).**
+**1945 unit tests passing (busted tests/).**
 
 **Bugs fixed during Demos 17–18 implementation (UList/UMap demos + SLICE_EXPR/for..else):**
 - `serialise_snapshot` used `ipairs` for table values — silently dropped all UMap hash keys on save.
@@ -317,17 +317,24 @@ capital is always connected to at least one coastal city.
   and applies them to `eng._scheduler._static`. `make_search_cache(ctx)` helper added to
   eval.lua (before BUILTINS table) and wired into all 6 BFS builtins (can-reach?, find-path,
   verify-always, probability, optimal-path, find-counterexample), replacing the old manual
-  cache-building blocks that omitted scheduler state.
+  cache-building blocks that omitted scheduler state. Regression test added to search_spec.lua:
+  "can_reach finds goal requiring dynamic schedule to fire twice".
 
 ### Low Priority
 
-- [ ] **#6 Path patterns in query context unimplemented** — spec §4.3 lists `player/*`,
-  `player/**/field`, `player/(health|mana)`, `player/!field` for `find`/`watch`/`verify`.
-  No pattern matching is implemented anywhere.
+- [x] **#6 Path patterns in query context** — Implemented for `watch` and `query-history`/`query-changes`.
+  Lexer now tokenises `**`, `(a|b)`, and `!field` as path segments. `debug.lua:path_matches` handles
+  `!field` negation (was missing). `is_pattern` detects `!` in addition to `*`/`(`. `query-history`
+  and `query-changes` builtins in eval.lua expand patterns against log entries using `_path_pattern_matches`.
+  `find`/`verify`/`can-reach?` WHERE-clause patterns deferred (semantics unclear; low real-world demand).
+  9 new tests added (debug_spec: `!field` negation + .sb declaration parsing; eval_spec: pattern expansion
+  in query-history for `*`, `(a|b)`, `!field`).
 
-- [ ] **#7 `within N hops` excludes source** — `query.lua:114` excludes the source node itself
-  (`if key == rf.src or not M.reachable(...)`). "Within 0 hops of village" finds nothing,
-  which may surprise authors.
+- [x] **#7 `within N hops` excludes source** — Fixed: removed `key == rf.src or` from `query.lua:114`.
+  `M.reachable(rel, src, src, hops)` already returns `true` (source==target fast path), so source is
+  now included in `within N hops` results. "Within 0 hops" returns only the source itself. 4 new
+  tests in query_spec.lua (0-hops source only, N-hops includes source, updated 2 existing tests that
+  had wrong expected values).
 
 - [x] **#8 `random-enum` O(N) type lookup** — Fixed: `engine:init()` now builds
   `schema._type_index = {[name]=type}` once; `random-enum` uses it for O(1) lookup,
