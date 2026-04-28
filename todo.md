@@ -261,12 +261,30 @@ capital is always connected to at least one coastal city.
 
 ---
 
+#### Demo 19 — "The Signal Tower" (debug server + watches)
+
+**File:** `demos/demo19_signal_tower.sb` ✓ Complete
+
+- 10× `watch` declarations (live path values in browser Watches panel)
+- 5× `watch-when` declarations (positive-edge conditional alerts)
+- `engine-config debug-port: 7373` declared in engine-config
+- `verify-always` invariants: beacon/visibility safety (448 BFS states), fatigue bounds, delivered ≤ signals
+- `after (fn): expr@before` postcondition verify blocks
+- Storm-extinguishes-beacon game logic (found and fixed by BFS verifier)
+- `tests/runtime/debug_demo19_spec.lua`: 26 unit tests covering get-state, get-log,
+  time-travel, watch-when positive-edge, mutation events, clamp-event, hot reload,
+  get-schema, breakpoints
+- 9 CLI integration tests added to `tests/cli/cli_integration_spec.lua`
+- **1920 unit tests + 181 CLI tests passing**
+
+---
+
 ### Remaining Coverage Gaps (not yet scheduled as demos)
 
 - **Multi-line lambda bodies** — covered in Demo 13 (`find` query in `healers_ward.sb`). Done.
 - **`time-set!`** — covered adequately by demo10. No additional demo needed.
 - **Custom tags and hooks** — covered by demo06. No additional demo needed beyond current coverage.
-- **debug server / bundle / REPL / compact / extract-symbols / LSP** — CLI tools not covered by demos; defer.
+- **bundle / REPL / compact / extract-symbols / LSP** — CLI tools not covered by demos; defer.
 
 ---
 

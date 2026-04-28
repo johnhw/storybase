@@ -630,6 +630,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/counterfactual_spec.lua` | Counterfactual branching |
 | `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec; hot reload schema migration; spawn/despawn events |
 | `tests/runtime/debug_http_spec.lua` | HTTP/SSE transport: lifecycle, GET /, POST /command, get-scene/do-choice, SSE events (23 tests) |
+| `tests/runtime/debug_demo19_spec.lua` | Debug feature integration tests using demo19 (signal tower): get-state, get-log, time-travel, watch-when, mutation events, clamp-event, hot reload, get-schema (26 tests) |
 | `tests/runtime/migrate_spec.lua` | Migration runner unit tests (all op kinds, chain ordering) |
 | `tests/runtime/migrate_demo14_spec.lua` | Integration test for demo14's full 1→4 migration chain |
 | `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |
@@ -688,6 +689,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo16_cartographers_web.sb` | advanced find queries: `or-where` (trade hubs = markets ∪ coastal), `connected-to 'capital-city via roads`, `inverse-adjacent? roads 'port-city`; `find` with `order-by + limit + or-where`; `can-reach?` with `strategy: 'depth-first`; `find-path` with `strategy: 'breadth-first`; `counterfactual simulate: true` (route-bonus schedule fires in branch); `relate!/unrelate!` dynamic road mutations; entity family `cities/{city}: CityRecord` |
 | `demo17_scholars_commonplace.sb` | `UList(String)` + `UMap(String, Int)` state; all 15 UList pure builtins (`ulist-size`, `ulist-slice` with negative indices, `ulist-reverse`, `ulist-filter`, `ulist-append`, `ulist-contains?`, `ulist-concat`, etc.); all UMap builtins (`map-get`, `map-size`, `map-keys`, `map-contains-key?`, `map-merge`); `push!/pop!` + `map-set!/map-delete!` mutations; `for...else:` in scene body with `{var}` interpolation |
 | `demo18_bakers_queue.sb` | `UList(String)` order queue; `path[n]` INDEX_EXPR on state path; `path[a:b]` SLICE_EXPR with literal bounds; `fn window s e: path[s:e]` SLICE_EXPR with variable bounds (NAMED_ARG lexer fix); `for...else:` in scene body (else branch fires when list empty); `push!/pop!/clear!` mutations |
+| `demo19_signal_tower.sb` | debug server showcase: 10× `watch` (live path values in browser), 5× `watch-when` (positive-edge conditional alerts), `engine-config debug-port`, `verify-always` invariants (beacon/visibility safety enforced by BFS, 448 states), `after (fn): @before` postcondition verify; storm-extinguishes-beacon game logic; serves as the subject for `debug_demo19_spec.lua` |
 
 ---
 

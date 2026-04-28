@@ -1590,3 +1590,104 @@ describe("CLI: help for new commands", function()
     assert.is_truthy((out .. _):find("--debug"), "expected --debug in run help")
   end)
 end)
+
+-- ── demo19: signal tower (debug server + watches) ────────────────────────────
+
+describe("CLI demo19_signal_tower: debug server + watches", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo19_signal_tower.sb"})
+    assert.equal(0, rc, "demo19 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo19_signal_tower.sb"})
+    assert.equal(0, rc, "demo19 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto run 15 steps completes without error", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "15",
+                                   "demos/demo19_signal_tower.sb"})
+    assert.equal(0, rc, "demo19 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Signal Tower"), out)
+  end)
+
+  it("send-signal reduces pending and increases delivered", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo19_signal_tower.sb")
+    game:init()
+    local pending_before   = game:get("messages/pending")
+    local delivered_before = game:get("messages/delivered")
+    game:choose(1)  -- Send next signal (choice 1 in initial state)
+    assert.equal(pending_before   - 1, game:get("messages/pending"))
+    assert.equal(delivered_before + 1, game:get("messages/delivered"))
+  end)
+
+  it("light-beacon sets tower/beacon to true", function()
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo19_signal_tower.sb")
+    game:init()
+    -- Send all 3 pending signals so "Send next signal" is gone; then light beacon
+    game:choose(1) game:choose(1) game:choose(1)
+    -- Now "Light the beacon" should be the first choice (no pending messages)
+    assert.equal(false, game:get("tower/beacon"))
+    game:choose(1)  -- Light the beacon
+    assert.equal(true, game:get("tower/beacon"))
+  end)
+
+  it("storm-rolls-in extinguishes the beacon", function()
+    -- Initial: 7 choices. After 3 sends (pending→0), 6 choices (no "Send signal").
+    -- Choices with no pending + beacon=false: 1=Light beacon, 2=Rest, 3=Take msg,
+    --   4=Overcast, 5=Storm, 6=Advance day.
+    -- After Light beacon (choice 1): 6 choices: 1=Douse, 2=Rest, 3=Take msg,
+    --   4=Overcast, 5=Storm, 6=Advance day.
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo19_signal_tower.sb")
+    game:init()
+    game:choose(1) game:choose(1) game:choose(1)  -- send 3 signals (pending 3→0)
+    game:choose(1)  -- Light the beacon (choice 1 when pending=0)
+    assert.equal(true, game:get("tower/beacon"))
+    game:choose(5)  -- Storm rolls in (choice 5 with beacon lit, no pending)
+    assert.equal(false, game:get("tower/beacon"))
+    assert.equal(true,  game:get("weather/storm"))
+  end)
+
+  it("rest-shift increases focus and decreases fatigue", function()
+    -- After 1 send: choices are 1=Send, 2=Light beacon, 3=Rest, 4=Take, 5=Overcast,
+    --   6=Storm, 7=Advance. Rest = choice 3.
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo19_signal_tower.sb")
+    game:init()
+    game:choose(1)  -- send-signal (-1 focus, +1 fatigue)
+    local focus_after_send   = game:get("operator/focus")   -- 9
+    local fatigue_after_send = game:get("operator/fatigue") -- 1
+    game:choose(3)  -- rest-shift (+3 focus, -3 fatigue)
+    assert.is_true(game:get("operator/focus")   > focus_after_send)
+    assert.is_true(game:get("operator/fatigue") < fatigue_after_send)
+  end)
+
+  it("advance-day increments day counter", function()
+    -- Initial 7 choices; choice 7 = Advance to next day
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo19_signal_tower.sb")
+    game:init()
+    local day_before = game:get("tower/day")
+    game:choose(7)  -- Advance to next day
+    assert.equal(day_before + 1, game:get("tower/day"))
+  end)
+
+  it("reaches final-report scene when day >= 10", function()
+    -- Advancing from day 1→10 keeps same 7-choice layout each turn.
+    -- On day 10, choice 7 switches from "Advance" to "File final report".
+    local sb = require("lib.storybase")
+    local game = sb.load("demos/demo19_signal_tower.sb")
+    game:init()
+    for _ = 1, 9 do game:choose(7) end  -- advance days 1→10
+    assert.equal(10, game:get("tower/day"))
+    game:choose(7)  -- File final report (replaces Advance when day >= 10)
+    local narr = table.concat(game:render(), " ")
+    assert.is_truthy(narr:find("[Ww]atch complete"), narr)
+  end)
+end)

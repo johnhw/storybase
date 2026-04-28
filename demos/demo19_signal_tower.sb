@@ -1,0 +1,258 @@
+# demo19_signal_tower.sb
+# A medieval signal tower operator manages message traffic, monitors weather,
+# and keeps the beacon lit during dark hours.
+#
+# Features demonstrated:
+#   watch                — live path watches shown in the debug browser Watches panel
+#   watch-when           — conditional watches; fires once on positive edge (false→true)
+#   engine-config debug-port — custom debug port declared in engine-config
+#   verify-always        — global state invariants
+#   after (fn):          — postcondition verify with @before references
+#   requires             — verify precondition (states from which the scenario starts)
+#
+# ── Running with the debug server ──────────────────────────────────────────────
+#
+#   Debug mode  (terminal drives game; browser is read-only):
+#     lua5.4 cli/main.lua run --debug demos/demo19_signal_tower.sb
+#     open http://localhost:7374
+#
+#   Serve mode  (browser drives game entirely):
+#     lua5.4 cli/main.lua run --serve demos/demo19_signal_tower.sb
+#     open http://localhost:7374
+#
+#   Browser panels:
+#     Watches   — live values for every watch/watch-when below
+#     State     — browse all paths; filter with patterns like "tower/*"
+#     Mutations — every state change with function name and sequence number
+#     Timeline  — drag slider to time-travel to any past tick (read-only snapshot)
+#
+#   TCP protocol (port 7373):
+#     echo '{"cmd":"get-state","pattern":"*"}' | nc localhost 7373
+#     echo '{"cmd":"time-travel","seq":3}'     | nc localhost 7373
+#     echo '{"cmd":"eval","expr":"messages/delivered + messages/pending"}' | nc localhost 7373
+#
+# Run without debug server:
+#   lua5.4 cli/main.lua run demos/demo19_signal_tower.sb
+
+module signal-tower
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: tower
+  debug-port:  7373
+
+# ── Types ──────────────────────────────────────────────────────────────────────
+
+type Weather = clear | overcast | storm
+
+# ── State ──────────────────────────────────────────────────────────────────────
+
+state tower:
+  beacon:       Bool        = false
+  signal-count: Int(0, 999) = 0
+  day:          Int(1, 99)  = 1
+
+state operator:
+  focus:   Int(0, 10) = 10
+  fatigue: Int(0, 10) = 0
+
+state messages:
+  pending:   Int(0, 20)  = 3
+  delivered: Int(0, 999) = 0
+
+state weather:
+  kind:       Weather    = 'clear
+  visibility: Int(0, 10) = 8
+  storm:      Bool       = false
+
+# ── Pure helpers ───────────────────────────────────────────────────────────────
+
+fn can-signal?:
+  weather/visibility > 2  and  operator/focus >= 2
+
+fn beacon-off?:
+  tower/beacon = false
+
+fn exhausted?:
+  operator/fatigue >= 8
+
+fn rested?:
+  operator/fatigue < 8
+
+fn overloaded?:
+  messages/pending >= 10
+
+fn survey-complete?:
+  messages/delivered >= 10
+
+fn clear-sky?:
+  weather/kind = 'clear
+
+# ── Transaction functions ──────────────────────────────────────────────────────
+
+fn send-signal:
+  pre: can-signal?  and  messages/pending > 0
+  inc! tower/signal-count 1
+  dec! messages/pending 1
+  inc! messages/delivered 1
+  dec! operator/focus 1
+  inc! operator/fatigue 1
+
+fn light-beacon:
+  pre: weather/visibility > 2  and  beacon-off?
+  set! tower/beacon true
+  inc! tower/signal-count 1
+
+fn douse-beacon:
+  pre: tower/beacon
+  set! tower/beacon false
+
+fn rest-shift:
+  pre: rested?
+  inc! operator/focus 3
+  dec! operator/fatigue 3
+
+fn take-message:
+  inc! messages/pending 1
+
+fn storm-rolls-in:
+  pre: weather/kind = 'clear  or  weather/kind = 'overcast
+  set! weather/kind 'storm
+  set! weather/storm true
+  dec! weather/visibility 6
+  set! tower/beacon false
+
+fn overcast-arrives:
+  pre: weather/kind = 'clear
+  set! weather/kind 'overcast
+  set! weather/storm false
+  dec! weather/visibility 3
+
+fn weather-clears:
+  pre: weather/storm
+  set! weather/kind 'clear
+  set! weather/storm false
+  set! weather/visibility 8
+
+fn advance-day:
+  inc! tower/day 1
+  inc! messages/pending 2
+  set! operator/focus 10
+  set! operator/fatigue 0
+  set! weather/kind 'clear
+  set! weather/storm false
+  set! weather/visibility 8
+
+# ── Scenes ────────────────────────────────────────────────────────────────────
+
+scene tower:
+  Day {tower/day}. Signal Tower Active.
+  Beacon: {tower/beacon}. Signals today: {tower/signal-count}.
+  Operator — focus: {operator/focus}/10, fatigue: {operator/fatigue}/10.
+  Queue: {messages/pending} pending, {messages/delivered} delivered total.
+  Weather: {weather/kind}, visibility {weather/visibility}/10.
+
+  [can-signal?  and  messages/pending > 0] Messages waiting for transmission. The air is clear enough to signal.
+  [weather/storm] Storm conditions — visibility {weather/visibility}/10. The beacon has been extinguished. Signalling is impossible.
+  [exhausted?] The operator is near exhaustion. Rest before sending further signals.
+  [overloaded?] WARNING: Message backlog is critical — {messages/pending} messages queued!
+
+  * [can-signal?  and  messages/pending > 0] Send next signal (-1 focus, +1 fatigue)
+    send-signal
+    -> tower
+
+  * [weather/visibility > 2  and  beacon-off?] Light the beacon
+    light-beacon
+    -> tower
+
+  * [tower/beacon] Douse the beacon
+    douse-beacon
+    -> tower
+
+  * [rested?] Rest shift (recover +3 focus, -3 fatigue)
+    rest-shift
+    -> tower
+
+  * Take an incoming message (+1 pending)
+    take-message
+    -> tower
+
+  * [clear-sky?] Overcast rolls in (-3 visibility)
+    overcast-arrives
+    -> tower
+
+  * [weather/kind = 'clear  or  weather/kind = 'overcast] Storm rolls in (-6 visibility)
+    storm-rolls-in
+    -> tower
+
+  * [weather/storm] Storm clears (visibility restored)
+    weather-clears
+    -> tower
+
+  * [tower/day < 10] Advance to next day (restore focus, +2 pending)
+    advance-day
+    -> tower
+
+  * [tower/day >= 10] File final report
+    -> final-report
+
+scene final-report:
+  Day {tower/day}. Watch complete.
+  Total signals transmitted: {tower/signal-count}.
+  Messages delivered: {messages/delivered}.
+  The tower log is sealed and sent to the relay station.
+
+  [messages/delivered >= 10]
+  Commendation: Exemplary service — {messages/delivered} messages relayed!
+
+  [messages/delivered < 5]
+  Note: Low throughput recorded. Review operator schedule.
+
+  * Begin new watch
+    -> tower
+
+# ── Watches ────────────────────────────────────────────────────────────────────
+# Watches register live monitoring with the debug server in --debug / --serve mode.
+# The browser Watches panel (http://localhost:7374) shows all values below in real time.
+# watch-when fires once when its condition first becomes true (positive-edge detection):
+#   it will not re-fire until the condition returns to false and becomes true again.
+
+watch tower/beacon         "Beacon"
+watch tower/signal-count   "Signals Sent"
+watch tower/day            "Day"
+watch operator/focus       "Focus"
+watch operator/fatigue     "Fatigue"
+watch messages/pending     "Pending"
+watch messages/delivered   "Delivered"
+watch weather/kind         "Weather"
+watch weather/visibility   "Visibility"
+watch weather/storm        "Storm"
+
+watch-when tower/beacon         "Beacon is lit!"
+watch-when weather/storm        "Storm rolling in — visibility dropping!"
+watch-when exhausted?           "Operator near exhaustion — rest recommended!"
+watch-when overloaded?          "Message backlog critical!"
+watch-when survey-complete?     "Survey complete — 10 messages delivered!"
+
+# ── Verify ────────────────────────────────────────────────────────────────────
+
+verify "delivered count never exceeds signals sent":
+  verify-always messages/delivered <= tower/signal-count
+
+verify "fatigue stays in bounds":
+  verify-always operator/fatigue >= 0
+
+verify "beacon only lit when visibility allows":
+  verify-always (not tower/beacon)  or  weather/visibility > 2
+
+verify "sending a signal reduces pending by one":
+  requires can-signal?  and  messages/pending > 0
+  after (send-signal):
+    messages/pending = messages/pending@before - 1
+
+verify "sending a signal increases delivered by one":
+  requires can-signal?  and  messages/pending > 0
+  after (send-signal):
+    messages/delivered = messages/delivered@before + 1
