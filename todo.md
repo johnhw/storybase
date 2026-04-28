@@ -297,10 +297,9 @@ capital is always connected to at least one coastal city.
   `ctx.rng` with `math.random()` fallback only when no rng is present. 7 new logging/determinism
   tests added.
 
-- [ ] **#2 `query-at`, `query-history`, `query-changes` not callable from `.sb`** — log.lua
-  implements all three but no BUILTIN entry exists in eval.lua. Any script author who tries gets
-  a mysterious "undefined function". Fix: add three BUILTIN entries that delegate to
-  `ctx.state._log`.
+- [x] **#2 `query-at`, `query-history`, `query-changes` not callable from `.sb`** — Fixed:
+  three BUILTIN entries added to eval.lua delegating to `ctx.state._log`. Supports `time:` named
+  arg for `query-at` and `last-n:` for `query-changes`. 5 tests added.
 
 - [x] **#3 `random-bool` crash with no argument** — Fixed: guard changed to
   `(args[1] and eval_expr(args[1], ctx)) or 0.5`. Test added.

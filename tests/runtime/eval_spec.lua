@@ -1226,6 +1226,78 @@ fn check-interp member:
 end)
 
 -- ============================================================
+-- Historical log query builtins: query-at, query-history, query-changes
+-- ============================================================
+
+describe("builtin: query-at / query-history / query-changes", function()
+  local log_mod2   = require("runtime.log")
+  local state_mod2 = require("runtime.state")
+
+  local function make_state_with_history()
+    local l = log_mod2.new()
+    local s = state_mod2.new({types={}, states={}}, l)
+    s:set("player/health", 100, "init")
+    s:set("player/health", 80,  "damage")
+    s:set("player/health", 60,  "damage2")
+    return s, l
+  end
+
+  it("query-history returns all changes for a path", function()
+    local s, _ = make_state_with_history()
+    local c = eval.new_ctx(s, {}, "test")
+    local node = fn_call("query-history", { kind="path_expr", segments={"player", "health"} })
+    local result = eval.eval_expr(node, c)
+    assert.is_table(result)
+    assert.equal(3, #result)
+    assert.equal(100, result[1].new)
+    assert.equal(80,  result[2].new)
+    assert.equal(60,  result[3].new)
+  end)
+
+  it("query-changes with last-n: 2 returns last 2 changes", function()
+    local s, _ = make_state_with_history()
+    local c = eval.new_ctx(s, {}, "test")
+    local node = fn_call("query-changes",
+      { kind="path_expr", segments={"player", "health"} },
+      { kind="named_arg", name="last-n", value={ kind="int_lit", value=2 } })
+    local result = eval.eval_expr(node, c)
+    assert.is_table(result)
+    assert.equal(2, #result)
+    assert.equal(80, result[1].new)
+    assert.equal(60, result[2].new)
+  end)
+
+  it("query-at with no time: returns current value", function()
+    local s, _ = make_state_with_history()
+    local c = eval.new_ctx(s, {}, "test")
+    local node = fn_call("query-at", { kind="path_expr", segments={"player", "health"} })
+    local result = eval.eval_expr(node, c)
+    assert.equal(60, result)
+  end)
+
+  it("query-at with time: seq 1 returns value at seq 1", function()
+    local s, l = make_state_with_history()
+    local c = eval.new_ctx(s, {}, "test")
+    -- First entry has seq=1 (value 100), second seq=2 (80), third seq=3 (60)
+    local first_seq = l:entries()[1].seq
+    local node = fn_call("query-at",
+      { kind="path_expr", segments={"player", "health"} },
+      { kind="named_arg", name="time", value={ kind="int_lit", value=first_seq } })
+    local result = eval.eval_expr(node, c)
+    assert.equal(100, result)
+  end)
+
+  it("query-history returns empty list for unknown path", function()
+    local s, _ = make_state_with_history()
+    local c = eval.new_ctx(s, {}, "test")
+    local node = fn_call("query-history", { kind="path_expr", segments={"no", "such"} })
+    local result = eval.eval_expr(node, c)
+    assert.is_table(result)
+    assert.equal(0, #result)
+  end)
+end)
+
+-- ============================================================
 -- Collection mutations: add / remove / clear
 -- ============================================================
 

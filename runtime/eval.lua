@@ -1235,6 +1235,61 @@ local BUILTINS = {
     if type(path) ~= "string" then return false end
     return ctx.state:path_exists(path) == true
   end,
+  -- ── Historical log queries ───────────────────────────────────────────────
+  -- query-at path [time: value]  → value at given time bound (or current)
+  ["query-at"] = function(args, ctx)
+    if not ctx.state or not ctx.state._log then return nil end
+    local arg = args[1]
+    local path
+    if arg and (arg.kind == K.PATH_EXPR or arg.kind == K.INTERP_PATH) then
+      path = eval_path(arg, ctx)
+    else
+      path = eval_expr(arg, ctx)
+    end
+    if type(path) ~= "string" then return nil end
+    local time_val = nil
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "time" then
+        time_val = eval_expr(a.value, ctx)
+      end
+    end
+    return ctx.state._log:query_at(path, time_val)
+  end,
+  -- query-history path → [{time, old, new}, ...]  (all recorded changes)
+  ["query-history"] = function(args, ctx)
+    if not ctx.state or not ctx.state._log then return {} end
+    local arg = args[1]
+    local path
+    if arg and (arg.kind == K.PATH_EXPR or arg.kind == K.INTERP_PATH) then
+      path = eval_path(arg, ctx)
+    else
+      path = eval_expr(arg, ctx)
+    end
+    if type(path) ~= "string" then return {} end
+    return ctx.state._log:query_history(path, nil, nil)
+  end,
+  -- query-changes path [last-n: N] → [{time, old, new}, ...]  (most recent N)
+  ["query-changes"] = function(args, ctx)
+    if not ctx.state or not ctx.state._log then return {} end
+    local arg = args[1]
+    local path
+    if arg and (arg.kind == K.PATH_EXPR or arg.kind == K.INTERP_PATH) then
+      path = eval_path(arg, ctx)
+    else
+      path = eval_expr(arg, ctx)
+    end
+    if type(path) ~= "string" then return {} end
+    local last_n = nil
+    for i = 2, #args do
+      local a = args[i]
+      if a and a.kind == K.NAMED_ARG and a.name == "last-n" then
+        last_n = eval_expr(a.value, ctx)
+      end
+    end
+    return ctx.state._log:query_changes(path, last_n)
+  end,
+
   ["can-reach?"] = function(args, ctx)
     if not ctx.game then return false end
     if ctx._in_bfs then return true end   -- optimistic during outer BFS: allow exploration

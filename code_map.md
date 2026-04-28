@@ -233,6 +233,9 @@ ctx = {
 **Built-in functions (BUILTINS table, line ~524):**
 ```
 path-list        → list of live family keys
+query-at         path [time: value] → value at given time bound (or current if omitted)
+query-history    path → [{time, old, new}, ...] (all recorded changes)
+query-changes    path [last-n: N] → [{time, old, new}, ...] (most recent N changes)
 min, max
 count-where      → count items matching predicate
 any?, all?
