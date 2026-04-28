@@ -288,6 +288,48 @@ capital is always connected to at least one coastal city.
 
 ---
 
+## Bug Backlog (found during language review 2026-04-28)
+
+### High Priority
+
+- [x] **#1 RNG not logged** — Fixed: engine creates `_rng = random_mod.new(seed, log)` and
+  passes it to ctx via `make_ctx`; child_ctx propagates it. All 5 random builtins now use
+  `ctx.rng` with `math.random()` fallback only when no rng is present. 7 new logging/determinism
+  tests added.
+
+- [ ] **#2 `query-at`, `query-history`, `query-changes` not callable from `.sb`** — log.lua
+  implements all three but no BUILTIN entry exists in eval.lua. Any script author who tries gets
+  a mysterious "undefined function". Fix: add three BUILTIN entries that delegate to
+  `ctx.state._log`.
+
+- [x] **#3 `random-bool` crash with no argument** — Fixed: guard changed to
+  `(args[1] and eval_expr(args[1], ctx)) or 0.5`. Test added.
+
+### Medium Priority
+
+- [ ] **#4 `reversible` tag does nothing** — checker stores the tag but verifies nothing. Spec
+  §7.4 says compiler verifies all mutations in a `reversible`-tagged function are invertible.
+  Currently a silent no-op that misleads authors.
+
+- [ ] **#5 Dynamic `schedule!` invisible to BFS** — `search.lua` enumerates only statically
+  declared schedules from `game_table.schedules`. Schedules created at runtime via `schedule!`
+  are not included in future-state search, producing incorrect reachability results.
+
+### Low Priority
+
+- [ ] **#6 Path patterns in query context unimplemented** — spec §4.3 lists `player/*`,
+  `player/**/field`, `player/(health|mana)`, `player/!field` for `find`/`watch`/`verify`.
+  No pattern matching is implemented anywhere.
+
+- [ ] **#7 `within N hops` excludes source** — `query.lua:114` excludes the source node itself
+  (`if key == rf.src or not M.reachable(...)`). "Within 0 hops of village" finds nothing,
+  which may surprise authors.
+
+- [ ] **#8 `random-enum` O(N) type lookup** — `eval.lua` iterates `ctx.game.schema.types` list
+  on every call to find the enum. Should build a name-indexed map at game load time.
+
+---
+
 ## Deferred / Low Priority
 
 - [ ] Every public function in every module has at least one passing and one failing test.

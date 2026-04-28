@@ -18,6 +18,7 @@ local eval         = require("runtime.eval")
 local actors_mod   = require("runtime.actors")
 local sched_mod    = require("runtime.scheduler")
 local tilegrid_mod = require("runtime.tilegrid")
+local random_mod   = require("runtime.random")
 
 -- ============================================================
 -- Save / load helpers
@@ -108,11 +109,9 @@ function M.new(game_table, opts)
     or opts.max_stack
     or DEFAULT_MAX_STACK
 
-  -- Apply random seed if provided (enables reproducible runs)
-  if opts.seed then math.randomseed(opts.seed) end
-
   local log    = log_mod.new()
   local store  = state_mod.new(game_table.schema, log)
+  local rng    = random_mod.new(opts.seed, log)
   local actors = actors_mod.new(store, log)
   local sched  = sched_mod.new(store, log)
 
@@ -123,6 +122,7 @@ function M.new(game_table, opts)
     _max_stack        = max_stack,
     _log              = log,
     _state            = store,
+    _rng              = rng,
     _fns              = game_table.fns    or {},
     _scenes           = game_table.scenes or {},
     _actors           = actors,
@@ -207,6 +207,7 @@ function M.new(game_table, opts)
     local ctx          = eval.new_ctx(self._state, self._fns, fn_name, self._game)
     ctx.actors         = self._actors
     ctx.scheduler      = self._scheduler
+    ctx.rng            = self._rng     -- seeded, logged RNG (never use math.random directly)
     ctx.debug          = self._debug   -- may be nil (no debug server attached)
     ctx.grids          = self._grids   -- tile grid data (may be empty table)
     ctx.engine_ref     = self          -- for engine/ pseudo-path reads
@@ -640,8 +641,6 @@ end
 ---@return integer          Exit code
 function M.run(game_table, opts)
   opts = opts or {}
-  if opts.seed then math.randomseed(opts.seed) end
-
   local eng = M.new(game_table, opts)
 
   -- Start debug server when --debug or --serve flag was given (debug_port is set)

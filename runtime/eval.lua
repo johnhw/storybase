@@ -128,6 +128,7 @@ local function child_ctx(parent, fn_name)
     retval  = nil,
     actors    = parent.actors,     -- propagate actor registry for send!
     scheduler = parent.scheduler,  -- propagate scheduler for cancel-schedule!
+    rng        = parent.rng,        -- propagate seeded RNG
     game       = parent.game,       -- propagate compiled game table
     debug      = parent.debug,      -- propagate debug server for event emission
     engine_ref = parent.engine_ref, -- propagate engine reference for engine/ paths
@@ -756,85 +757,89 @@ local BUILTINS = {
   ["random-int"] = function(args, ctx)
     local lo = eval_expr(args[1], ctx) or 0
     local hi = eval_expr(args[2], ctx) or 0
-    -- Allow search engine to inject deterministic outcomes for branching
+    -- Search engine injection takes priority (BFS branching)
     if ctx.game and ctx.game._random_inject then
       local v = ctx.game._random_inject(lo, hi)
       if v ~= nil then return v end
     end
+    if ctx.rng then return ctx.rng:int(lo, hi) end
     return math.random(lo, hi)
   end,
   ["random-bool"] = function(args, ctx)
-    local p = eval_expr(args[1], ctx) or 0.5
+    local p = (args[1] and eval_expr(args[1], ctx)) or 0.5
     -- Search engine injection: treat as random-int 0 1 (0=false, 1=true)
     if ctx.game and ctx.game._random_inject then
       local v = ctx.game._random_inject(0, 1)
       if v ~= nil then return v == 1 end
     end
+    if ctx.rng then return ctx.rng:bool(p) end
     return math.random() < p
   end,
   ["random-enum"] = function(args, ctx)
     -- arg[1] is the enum type name (bare ident evaluates to its string name)
     local type_name = eval_expr(args[1], ctx)
-    -- Look up enum values from the compiled schema
+    -- Look up enum values from the compiled schema (use pre-built index when available)
     local values = nil
-    if ctx.game and ctx.game.schema and ctx.game.schema.types then
-      for _, t in ipairs(ctx.game.schema.types) do
-        if t.name == type_name and (t.kind == "enum" or t.kind == "alias") then
-          -- For enum: t.values; for alias: may be inline enum in type_desc
-          if t.values then values = t.values
-          elseif t.type_desc and t.type_desc.values then values = t.type_desc.values end
-          break
+    local schema = ctx.game and ctx.game.schema
+    if schema then
+      local idx_map = schema._type_index
+      if idx_map then
+        local t = idx_map[type_name]
+        if t then
+          values = t.values or (t.type_desc and t.type_desc.values)
+        end
+      elseif schema.types then
+        for _, t in ipairs(schema.types) do
+          if t.name == type_name and (t.kind == "enum" or t.kind == "alias") then
+            values = t.values or (t.type_desc and t.type_desc.values)
+            break
+          end
         end
       end
     end
     if not values or #values == 0 then return nil end
     -- Search engine injection: index 0..#values-1 maps to enum values
-    local idx
     if ctx.game and ctx.game._random_inject then
       local v = ctx.game._random_inject(0, #values - 1)
-      if v ~= nil then idx = v end
+      if v ~= nil then return values[v + 1] end
     end
-    if idx == nil then idx = math.random(0, #values - 1) end
-    return values[idx + 1]
+    if ctx.rng then return ctx.rng:enum(values) end
+    return values[math.random(1, #values)]
   end,
   ["random-choice"] = function(args, ctx)
     local list = eval_expr(args[1], ctx)
     if type(list) ~= "table" or #list == 0 then return nil end
-    local idx
     if ctx.game and ctx.game._random_inject then
       local v = ctx.game._random_inject(0, #list - 1)
-      if v ~= nil then idx = v end
+      if v ~= nil then return list[v + 1] end
     end
-    if idx == nil then idx = math.random(0, #list - 1) end
-    return list[idx + 1]
+    if ctx.rng then return ctx.rng:choice(list) end
+    return list[math.random(1, #list)]
   end,
   ["random-weighted"] = function(args, ctx)
     local weights = eval_expr(args[1], ctx)
     local list    = eval_expr(args[2], ctx)
     if type(list) ~= "table" or #list == 0 then return nil end
     -- Search engine injection: treat as uniform random-choice (weights ignored in BFS)
-    local idx
     if ctx.game and ctx.game._random_inject then
       local v = ctx.game._random_inject(0, #list - 1)
-      if v ~= nil then idx = v end
+      if v ~= nil then return list[v + 1] end
     end
-    if idx == nil then
-      -- Weighted selection at runtime
-      if type(weights) == "table" and #weights == #list then
-        local total = 0
-        for _, w in ipairs(weights) do total = total + (type(w) == "number" and w or 0) end
-        if total > 0 then
-          local r = math.random() * total
-          local cum = 0
-          for i, w in ipairs(weights) do
-            cum = cum + (type(w) == "number" and w or 0)
-            if r <= cum then idx = i - 1; break end
-          end
+    if ctx.rng then return ctx.rng:weighted(weights, list) end
+    -- Fallback: weighted selection without rng (no logging)
+    if type(weights) == "table" and #weights == #list then
+      local total = 0
+      for _, w in ipairs(weights) do total = total + (type(w) == "number" and w or 0) end
+      if total > 0 then
+        local r = math.random() * total
+        local cum = 0
+        for i, w in ipairs(weights) do
+          cum = cum + (type(w) == "number" and w or 0)
+          if r <= cum then return list[i] end
         end
       end
-      idx = idx or math.random(0, #list - 1)
     end
-    return list[idx + 1]
+    return list[math.random(1, #list)]
   end,
   ["tostring"] = function(args, ctx)
     return tostring(eval_expr(args[1], ctx))

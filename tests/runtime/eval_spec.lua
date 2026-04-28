@@ -1820,6 +1820,105 @@ describe("random-weighted builtin", function()
   end)
 end)
 
+-- ============================================================
+-- RNG logging tests
+-- ============================================================
+
+describe("random builtins: rng logging", function()
+  local random_mod = require("runtime.random")
+  local log_mod2   = require("runtime.log")
+
+  local function ctx_with_rng(seed)
+    local l   = log_mod2.new()
+    local rng = random_mod.new(seed, l)
+    local c   = ctx({})
+    c.rng = rng
+    c._log = l
+    return c, l
+  end
+
+  it("random-int logs a 'random' entry", function()
+    local c, l = ctx_with_rng(42)
+    local node = fn_call("random-int", { kind="int_lit", value=1 }, { kind="int_lit", value=6 })
+    eval.eval_expr(node, c)
+    local found = false
+    for _, e in ipairs(l:entries()) do
+      if e.kind == "random" and e.source == "random-int" then found = true; break end
+    end
+    assert.is_true(found, "expected a 'random' log entry for random-int")
+  end)
+
+  it("random-bool logs a 'random' entry", function()
+    local c, l = ctx_with_rng(1)
+    local node = fn_call("random-bool", { kind="float_lit", value=0.5 })
+    eval.eval_expr(node, c)
+    local found = false
+    for _, e in ipairs(l:entries()) do
+      if e.kind == "random" and e.source == "random-bool" then found = true; break end
+    end
+    assert.is_true(found, "expected a 'random' log entry for random-bool")
+  end)
+
+  it("random-bool with no arg defaults to 0.5 and does not crash", function()
+    local c, l = ctx_with_rng(1)
+    local node = fn_call("random-bool")
+    local ok, v = pcall(eval.eval_expr, node, c)
+    assert.is_true(ok, "random-bool with no arg should not crash")
+    assert.is_true(v == true or v == false)
+  end)
+
+  it("random-enum logs a 'random' entry", function()
+    local c, l = ctx_with_rng(7)
+    c.game = { schema = { types = { { kind="enum", name="Dir", values={"n","s","e","w"} } } } }
+    local node = fn_call("random-enum", { kind="fn_call", name="Dir", args={} })
+    eval.eval_expr(node, c)
+    local found = false
+    for _, e in ipairs(l:entries()) do
+      if e.kind == "random" and e.source == "random-enum" then found = true; break end
+    end
+    assert.is_true(found, "expected a 'random' log entry for random-enum")
+  end)
+
+  it("random-choice logs a 'random' entry", function()
+    local c, l = ctx_with_rng(3)
+    local node = fn_call("random-choice", {
+      kind="list_lit",
+      elements={ { kind="symbol_lit", name="x" }, { kind="symbol_lit", name="y" } }
+    })
+    eval.eval_expr(node, c)
+    local found = false
+    for _, e in ipairs(l:entries()) do
+      if e.kind == "random" and e.source == "random-choice" then found = true; break end
+    end
+    assert.is_true(found, "expected a 'random' log entry for random-choice")
+  end)
+
+  it("seeded random-int is deterministic across two runs", function()
+    local node = fn_call("random-int", { kind="int_lit", value=0 }, { kind="int_lit", value=1000 })
+    -- Run 1: seed 999, take first value
+    local c1, _ = ctx_with_rng(999)
+    local v1 = eval.eval_expr(node, c1)
+    -- Run 2: reseed to 999 (resets global state to same point), take first value
+    local c2, _ = ctx_with_rng(999)
+    local v2 = eval.eval_expr(node, c2)
+    assert.equal(v1, v2, "same seed should produce same random-int result")
+  end)
+
+  it("_random_inject takes priority over ctx.rng", function()
+    local c, l = ctx_with_rng(42)
+    c.game = { _random_inject = function() return 99 end }
+    local node = fn_call("random-int", { kind="int_lit", value=0 }, { kind="int_lit", value=100 })
+    local v = eval.eval_expr(node, c)
+    assert.equal(99, v, "_random_inject should override rng")
+    -- No log entry expected (inject short-circuits before rng)
+    local found = false
+    for _, e in ipairs(l:entries()) do
+      if e.kind == "random" then found = true; break end
+    end
+    assert.is_false(found, "inject path should not produce a log entry")
+  end)
+end)
+
 describe("str builtin", function()
   it("concatenates string args", function()
     local c = ctx({})
