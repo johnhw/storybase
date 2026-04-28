@@ -426,6 +426,15 @@ function M.new(game_table, opts)
     self._state:init_defaults()
     self:register_actors_schedules()
     self:init_grids()
+    -- Build name-indexed type map for O(1) random-enum lookups
+    local schema = self._game.schema
+    if schema and schema.types and not schema._type_index then
+      local idx = {}
+      for _, t in ipairs(schema.types) do
+        if t.name then idx[t.name] = t end
+      end
+      schema._type_index = idx
+    end
 
     local entry = self._game.schema
       and self._game.schema.engine_config
