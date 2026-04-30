@@ -690,3 +690,102 @@ scene main:
     end
   end)
 end)
+
+-- ============================================================
+-- Bug #2 regression: UMap state preserved in counterfactual copy
+-- ============================================================
+
+describe("counterfactual — UMap state preserved (bug #2)", function()
+  local umap_src = [[
+module cf-umap
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world:
+  scores: UMap(String, Int(0,999)) = {}
+fn add-score:
+  map-set! world/scores "alice" 42
+scene main:
+  * Go
+    -> main
+scene end-scene:
+  Done.
+]]
+
+  it("counterfactual copy preserves existing UMap hash keys", function()
+    local gt, errs = compile(umap_src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local l     = log_mod.new()
+    local store = state_mod.new(gt.schema, l)
+    store:init_defaults()
+    -- Pre-populate a UMap value in the live state
+    store._cache["world/scores"] = { alice = 42, bob = 7 }
+
+    local ctx = eval_mod.new_ctx(store, gt.fns, "test", gt)
+
+    -- Counterfactual with no transitions: should see the same UMap
+    local node = {
+      kind        = "counterfactual_expr",
+      transitions = {},
+      simulate    = false,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    assert.equals(42, gs:get("world/scores") and gs:get("world/scores")["alice"],
+      "UMap key 'alice' must survive the counterfactual copy")
+    assert.equals(7, gs:get("world/scores") and gs:get("world/scores")["bob"],
+      "UMap key 'bob' must survive the counterfactual copy")
+  end)
+
+  it("counterfactual is isolated: UMap mutations in branch do not affect live state", function()
+    local gt, errs = compile(umap_src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local l     = log_mod.new()
+    local store = state_mod.new(gt.schema, l)
+    store:init_defaults()
+    store._cache["world/scores"] = { alice = 1 }
+
+    local ctx = eval_mod.new_ctx(store, gt.fns, "test", gt)
+    -- Transition: call add-score (sets alice=42)
+    local add_call = { kind="fn_call", name="add-score", args={} }
+    local node = {
+      kind        = "counterfactual_expr",
+      transitions = { { kind="expr_stmt", expr=add_call } },
+      simulate    = false,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    -- Branch sees alice=42
+    assert.equals(42, gs:get("world/scores")["alice"])
+    -- Live state unchanged
+    assert.equals(1, store._cache["world/scores"]["alice"])
+  end)
+
+  it("from_tick replay preserves UMap values from log", function()
+    local gt, errs = compile(umap_src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local l     = log_mod.new()
+    local store = state_mod.new(gt.schema, l)
+    store:init_defaults()
+    -- Log a UMap write at tick 0
+    store._log:append({
+      path = "world/scores",
+      old  = {},
+      new  = { carol = 55 },
+      fn   = "test",
+      time = { tick = 0 },
+    })
+    store._cache["world/scores"] = { carol = 55 }
+    store._time.tick = 0
+
+    local ctx = eval_mod.new_ctx(store, gt.fns, "test", gt)
+    ctx.game = gt
+    local node = {
+      kind        = "counterfactual_expr",
+      from_tick   = { kind = "int_lit", value = 0 },
+      transitions = {},
+      simulate    = false,
+    }
+    local gs = eval_mod.eval_expr(node, ctx)
+    assert.equals(55, gs:get("world/scores") and gs:get("world/scores")["carol"],
+      "from_tick replay must preserve UMap hash keys from log entries")
+  end)
+end)

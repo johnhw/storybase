@@ -5,11 +5,13 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-04-28)
+## Current Status (2026-04-30)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–19 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
-Bounded Lua interop example complete. **1945 unit tests passing (busted tests/).**
+All bugs #1–#4 from the code review are verified/fixed with tests.
+Inelegances #5,#6,#8,#9,#10,#11 resolved; #7 deferred as not worth the risk.
+**1956 unit tests passing (busted tests/).**
 
 ---
 

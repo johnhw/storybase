@@ -124,6 +124,10 @@ local function make_capture_proxy(real_store, priority, actor_name, perceives, s
     captures[#captures+1] = { op="inc_time", axis=axis, amount=amount,
                                priority=priority, actor=actor_name }
   end
+  proxy.set_time = function(_, axis, value)
+    captures[#captures+1] = { op="set_time", axis=axis, value=value,
+                               priority=priority, actor=actor_name }
+  end
 
   return proxy, captures
 end
@@ -183,8 +187,17 @@ function M.new(state, log)
         local max_inbox = actor.inbox_type and actor.inbox_type.max
         for _, msg in ipairs(msgs) do
           if max_inbox and #current >= max_inbox then
-            error("INBOX_OVERFLOW: actor '" .. actor.name
-                  .. "' inbox is full (max " .. max_inbox .. ")")
+            -- Log overflow and skip remaining messages rather than aborting the turn
+            if self._log then
+              self._log:append({
+                kind       = "inbox_overflow",
+                fn         = "deliver",
+                actor      = actor.name,
+                inbox_path = inbox_path,
+                max        = max_inbox,
+              })
+            end
+            break
           end
           current[#current + 1] = msg
         end
@@ -317,6 +330,9 @@ function M.new(state, log)
 
       elseif c.op == "inc_time" then
         self._state:inc_time(c.axis, c.amount)
+
+      elseif c.op == "set_time" then
+        self._state:set_time(c.axis, c.value)
       end
     end
 

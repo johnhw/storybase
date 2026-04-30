@@ -5,6 +5,71 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## Demos 13–19 + Bug Backlog #1–#8 ✅ (2026-04-28)
+
+**1945 unit tests passing.**
+
+### Demos 13–19 Complete
+
+- **Demo 13 — "The Healer's Ward"** — `speaker`/`say`, `post:` with `@before`,
+  multi-line lambdas in `find` queries, entity family `patients/{k}: Patient max: 8`.
+  Bugs fixed: `call_lambda` multi-line retval, `before_snapshot` at call time,
+  `post:` EXPR_STMT unwrap, multi-line lambda parse, `@before` on INTERP_PATH,
+  `query.lua` lambda `where:` clause, `count family where: fn(k):` syntax.
+
+- **Demo 14 — "The Kingdom's Records"** — `schema-version: 4`, full 1→2→3→4
+  migration chain: `add`, `rename`+`drop`, `transform fn old: ...`, `rename-enum`.
+  `tests/runtime/migrate_demo14_spec.lua` exercises the full chain.
+
+- **Demo 15 — "The Spellwright's Workshop"** — two hygienic macros
+  (`with-mana-cost`, `craft-spell`), macro composition in three fns, `post:`+`@before`,
+  Set-literal state default.
+  Bugs fixed: `parse_default_value` Set literals, `emit_default` SET_LIT/LIST_LIT,
+  `resolve_default` set/list tags, checker SET_LIT default, NAMED_ARG in macro `subst`.
+
+- **Demo 16 — "The Cartographer's Web"** — `or-where`, `connected-to via`, 
+  `inverse-adjacent?`, `find` with `order-by`+`limit`+`or-where`, `can-reach?` with
+  `strategy: 'depth-first`, `find-path` with `strategy: 'breadth-first`, 
+  `counterfactual simulate: true`.
+  Bugs fixed: `counterfactual do:` parsed stmts not exprs, strategy symbol normalisation.
+
+- **Demo 17 — "The Scholar's Commonplace"** — `UList(String)` + `UMap(String, Int)`,
+  all 15 UList pure builtins, all UMap builtins, `for...else:` in scene body.
+  Bugs fixed: `serialise_snapshot` dropped UMap hash keys (fixed to use `pairs`),
+  `ser_val` hyphenated string keys (fixed to bracket notation).
+
+- **Demo 18 — "The Baker's Queue"** — `path[n]` INDEX_EXPR, `path[a:b]` SLICE_EXPR,
+  variable-bound slice `fn window s e: path[s:e]`, `for...else:` in scene body.
+  Bugs fixed: SLICE_EXPR in PATH/IDENT branches with NAMED_ARG recovery.
+
+- **Demo 19 — "The Signal Tower"** — debug server showcase: 10× `watch`, 5× `watch-when`,
+  `engine-config debug-port`, `verify-always` invariants (448 BFS states), `after (fn): @before`
+  verify blocks. `tests/runtime/debug_demo19_spec.lua` (26 tests).
+
+### Bug Backlog #1–#8 Fixed
+
+- **#1 RNG not logged** — `engine` creates `_rng = random_mod.new(seed, log)`; propagated via
+  `make_ctx` and `child_ctx`. 7 logging/determinism tests.
+- **#2 `query-at`/`query-history`/`query-changes` not callable from `.sb`** — 3 BUILTIN entries
+  added to `eval.lua`. `time:` and `last-n:` named args. 5 tests.
+- **#3 `random-bool` crash with no argument** — guard changed to
+  `(args[1] and eval_expr(args[1], ctx)) or 0.5`. Test added.
+- **#4 `[reversible]` tag does nothing** — `pass3c_check_reversible` added to `checker.lua`;
+  emits `IRREVERSIBLE_IN_REVERSIBLE` for `clear!`, `time-inc!`, `time-set!`, `send!`,
+  `cancel-schedule!`, `schedule!`. 4 tests.
+- **#5 Dynamic `schedule!` invisible to BFS** — `search.lua:clone_cache` encodes full scheduler
+  state into snapshots via `__sched/<name>/...` keys; `restore_engine` decodes.
+  `make_search_cache` helper wired into all 6 BFS builtins. Regression test added.
+- **#6 Path patterns in query context** — `**`, `(a|b)`, `!field` patterns in `watch`,
+  `query-history`, `query-changes`. `debug.lua:path_matches` handles `!field` negation.
+  9 new tests.
+- **#7 `within N hops` excludes source** — removed source-exclusion guard in `query.lua:114`.
+  4 new tests.
+- **#8 `random-enum` O(N) type lookup** — `engine:init()` builds `schema._type_index` once;
+  `random-enum` uses it for O(1) lookup.
+
+---
+
 ## Stale Task Cleanup ✅ (2026-04-26)
 
 The following items were listed as open in todo.md but had already been completed in Language Review passes 1 and 2. Moved to completed.

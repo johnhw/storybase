@@ -493,9 +493,11 @@ end)
 -- ============================================================
 
 describe("actors — inbox overflow", function()
-  it("errors when inbox exceeds max capacity", function()
+  it("logs overflow and stops delivering (does not abort the turn)", function()
+    local log_mod = require("runtime.log")
+    local log     = log_mod.new()
     local store, _ = make_store()
-    local registry = actors_mod.new(store, nil)
+    local registry = actors_mod.new(store, log)
 
     registry:register({
       name       = "guard",
@@ -511,11 +513,78 @@ describe("actors — inbox overflow", function()
     registry:deliver_messages()
     assert.equal(2, #store:get("npcs/guard/inbox"))
 
-    -- One more message — overflow on next deliver
-    registry:send("guard", { variant = "overflow" })
-    assert.has_error(function()
+    -- Three more messages — first overflows; no error raised; overflow logged once
+    registry:send("guard", { variant = "overflow1" })
+    registry:send("guard", { variant = "overflow2" })
+    registry:send("guard", { variant = "overflow3" })
+    assert.has_no_error(function()
       registry:deliver_messages()
-    end, nil)  -- any error is acceptable
+    end)
+
+    -- Inbox still at capacity (overflow messages discarded)
+    assert.equal(2, #store:get("npcs/guard/inbox"))
+
+    -- Log contains an inbox_overflow entry
+    local overflow_entries = {}
+    for _, e in ipairs(log:entries()) do
+      if e.kind == "inbox_overflow" then
+        overflow_entries[#overflow_entries + 1] = e
+      end
+    end
+    assert.equal(1, #overflow_entries)
+    assert.equal("guard",          overflow_entries[1].actor)
+    assert.equal(2,                overflow_entries[1].max)
+  end)
+end)
+
+-- ============================================================
+-- actors — set_time! captured and deferred (bug #3)
+-- ============================================================
+
+describe("actors — set_time captured and deferred (bug #3)", function()
+  it("time-set! in actor behavior is deferred, not applied immediately", function()
+    -- Build the store + registry directly with raw AST nodes to avoid
+    -- needing a full compile cycle.  time_set_mut node mirrors what codegen
+    -- emits for "time-set! day 99".
+    local store, log = make_store({
+      types  = {},
+      states = {},
+      relations = {},
+      time_model = { axes = { "day" }, wrap = {} },
+    })
+
+    local registry = actors_mod.new(store, log)
+
+    local fns = {
+      ["tick-clock"] = {
+        name   = "tick-clock",
+        params = {},
+        pre    = {},
+        post   = {},
+        body   = {
+          { kind = "time_set_mut",
+            axes = { { axis = "day", value = { kind = "int_lit", value = 99 } } } }
+        },
+      }
+    }
+
+    registry:register({
+      name       = "clock-actor",
+      state_path = "actors/clock-actor",
+      perceives  = {},
+      behavior   = "tick-clock",
+      priority   = 10,
+    })
+
+    -- run_behaviors captures the mutation but must NOT apply it yet
+    registry:run_behaviors(fns)
+    assert.equal(0, store:get_time().day,
+      "set_time! must not apply immediately during run_behaviors")
+
+    -- apply_deferred flushes captures to the real state
+    registry:apply_deferred()
+    assert.equal(99, store:get_time().day,
+      "set_time! must be applied after apply_deferred")
   end)
 end)
 
