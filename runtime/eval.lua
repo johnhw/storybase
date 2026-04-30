@@ -329,7 +329,7 @@ eval_expr = function(node, ctx)
             if etime <= target_tick then
               if type(e["new"]) == "table" then
                 local c = {}
-                for i, x in ipairs(e["new"]) do c[i] = x end
+                for tk, tv in pairs(e["new"]) do c[tk] = tv end
                 cf_state._cache[e.path] = c
               else
                 cf_state._cache[e.path] = e["new"]
@@ -344,7 +344,7 @@ eval_expr = function(node, ctx)
         -- from_tick evaluated to non-number or no log available: copy current state
         for path, val in pairs(ctx.state and ctx.state._cache or {}) do
           if type(val) == "table" then
-            local c = {}; for i, x in ipairs(val) do c[i] = x end
+            local c = {}; for tk, tv in pairs(val) do c[tk] = tv end
             cf_state._cache[path] = c
           else
             cf_state._cache[path] = val
@@ -358,7 +358,7 @@ eval_expr = function(node, ctx)
       -- No from_tick: deep-copy current cache
       for path, val in pairs(ctx.state and ctx.state._cache or {}) do
         if type(val) == "table" then
-          local c = {}; for i, x in ipairs(val) do c[i] = x end
+          local c = {}; for tk, tv in pairs(val) do c[tk] = tv end
           cf_state._cache[path] = c
         else
           cf_state._cache[path] = val
@@ -497,18 +497,17 @@ eval_expr = function(node, ctx)
   elseif k == K.IF_EXPR then
     local cond = eval_expr(node.condition, ctx)
     if cond then
-      -- Return the last expression value from then_body
-      local result
       local sub = child_ctx(ctx)
       eval_stmts(node.then_body, sub)
-      if sub.signal then ctx.signal = sub.signal end
-      return result
+      -- Don't propagate 'return': the value was captured as sub.retval by this expression.
+      -- Navigation signals (goto/enter/exit/break/continue) still propagate.
+      if sub.signal and sub.signal.type ~= "return" then ctx.signal = sub.signal end
+      return sub.retval
     elseif node.else_body then
-      local result
       local sub = child_ctx(ctx)
       eval_stmts(node.else_body, sub)
-      if sub.signal then ctx.signal = sub.signal end
-      return result
+      if sub.signal and sub.signal.type ~= "return" then ctx.signal = sub.signal end
+      return sub.retval
     end
     return nil
 
@@ -596,11 +595,6 @@ end
 -- ============================================================
 
 --- Evaluate a wildcard string or pattern check.
-local function match_pattern(pattern, value)
-  if pattern == "_" then return true end  -- wildcard
-  local pval = eval_expr(pattern, { state = { get = function() return nil end }, vars = {}, fns = {} })
-  return pval == value
-end
 
 eval_match = function(node, ctx)
   local subject = eval_expr(node.expr, ctx)
@@ -1096,6 +1090,7 @@ local BUILTINS = {
     if type(map) ~= "table" then return {} end
     local keys = {}
     for k in pairs(map) do keys[#keys + 1] = k end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
     return keys
   end,
   ["map-values"] = function(args, ctx)

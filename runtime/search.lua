@@ -12,6 +12,36 @@
 
 local M = {}
 
+-- ============================================================
+-- Binary min-heap (used by optimal_path)
+-- ============================================================
+
+local function heap_push(h, item)
+  local n = #h + 1
+  h[n] = item
+  local i = n
+  while i > 1 do
+    local p = math.floor(i / 2)
+    if h[p].cost > h[i].cost then h[p], h[i] = h[i], h[p]; i = p else break end
+  end
+end
+
+local function heap_pop(h)
+  local n = #h
+  if n == 0 then return nil end
+  local top = h[1]
+  h[1] = h[n]; h[n] = nil
+  local i, size = 1, n - 1
+  while true do
+    local l, r, s = 2*i, 2*i+1, i
+    if l <= size and h[l].cost < h[s].cost then s = l end
+    if r <= size and h[r].cost < h[s].cost then s = r end
+    if s == i then break end
+    h[i], h[s] = h[s], h[i]; i = s
+  end
+  return top
+end
+
 local DEFAULT_DEPTH      = 20
 local BUDGET_CHECK_N     = 50    -- check the clock every N BFS iterations
 local MAX_BOUNDED_OUTCOMES = 200
@@ -23,13 +53,13 @@ local MAX_RANDOM_TOTAL     = 200 -- max total random outcome combinations
 -- ============================================================
 
 --- Clone a flat cache table (key → value).
---- Table values are treated as arrays (shallow ipairs copy).
+--- Table values are shallow-copied with pairs so hash-keyed values (UMap) are preserved.
 local function clone_flat(cache)
   local snap = {}
   for k, v in pairs(cache) do
     if type(v) == "table" then
       local copy = {}
-      for i, item in ipairs(v) do copy[i] = item end
+      for tk, tv in pairs(v) do copy[tk] = tv end
       snap[k] = copy
     else
       snap[k] = v
@@ -172,7 +202,7 @@ local function restore_engine(eng, cache, stack)
         end
       elseif type(v) == "table" then
         local copy = {}
-        for i, x in ipairs(v) do copy[i] = x end
+        for tk, tv in pairs(v) do copy[tk] = tv end
         eng._state._cache[k] = copy
       else
         eng._state._cache[k] = v
@@ -326,7 +356,7 @@ local function trace_random_calls(game_table, engine_mod, io_sink, cache, stack,
   end
   local eng = engine_mod.new(game_table, { io_out = io_sink })
   eng:register_actors_schedules()
-  eng._in_bfs = true
+    eng._in_bfs = true
   restore_engine(eng, cache, stack)
   pcall(function() eng:do_choice(scene_name, choice_index) end)
   game_table._random_inject = saved
@@ -424,7 +454,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
-  eng._in_bfs = true
+    eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices_or_err = pcall(function()
@@ -471,7 +501,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
 
           local eng2 = engine_mod.new(game_table, { io_out = io_sink })
           eng2:register_actors_schedules()
-  eng2._in_bfs = true
+    eng2._in_bfs = true
           restore_engine(eng2, item.cache, item.stack)
 
           local ok2, sig = pcall(function()
@@ -610,7 +640,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
-  eng._in_bfs = true
+    eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices_or_err = pcall(function()
@@ -653,7 +683,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
 
           local eng2 = engine_mod.new(game_table, { io_out = io_sink })
           eng2:register_actors_schedules()
-  eng2._in_bfs = true
+    eng2._in_bfs = true
           restore_engine(eng2, item.cache, item.stack)
 
           local ok2, sig = pcall(function()
@@ -797,7 +827,7 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
-  eng._in_bfs = true
+    eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices = pcall(function()
@@ -814,7 +844,7 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn,
       if branch_prob >= threshold then
         local eng2 = engine_mod.new(game_table, { io_out = io_sink })
         eng2:register_actors_schedules()
-  eng2._in_bfs = true
+    eng2._in_bfs = true
         restore_engine(eng2, item.cache, item.stack)
 
         local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
@@ -873,17 +903,17 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
 
   if condition_fn(initial_cache) then return {} end
 
-  local open = { {
+  local open = {}
+  heap_push(open, {
     cache = clone_flat(initial_cache),
     stack = initial_stack,
     d     = 0,
     cost  = 0,
     path  = {},
-  } }
+  })
 
   while #open > 0 do
-    table.sort(open, function(a, b) return a.cost < b.cost end)
-    local item = table.remove(open, 1)
+    local item = heap_pop(open)
 
     iter_count = iter_count + 1
     if budget and iter_count % BUDGET_CHECK_N == 0 then
@@ -901,7 +931,7 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
 
     local eng = engine_mod.new(game_table, { io_out = io_sink })
     eng:register_actors_schedules()
-  eng._in_bfs = true
+    eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
     local ok, choices = pcall(function()
@@ -913,7 +943,7 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
     for _, ch in ipairs(choices) do
       local eng2 = engine_mod.new(game_table, { io_out = io_sink })
       eng2:register_actors_schedules()
-  eng2._in_bfs = true
+    eng2._in_bfs = true
       restore_engine(eng2, item.cache, item.stack)
 
       local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
@@ -944,13 +974,13 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
         if #new_stack > 0 then
           local step_cost = cost_fn(new_cache)
           if type(step_cost) ~= "number" then step_cost = 1 end
-          open[#open+1] = {
+          heap_push(open, {
             cache = new_cache,
             stack = new_stack,
             d     = item.d + 1,
             cost  = item.cost + step_cost,
             path  = new_path,
-          }
+          })
         end
       end
     end
@@ -1017,7 +1047,7 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
 
       local eng = engine_mod.new(game_table, { io_out = io_sink })
       eng:register_actors_schedules()
-  eng._in_bfs = true
+    eng._in_bfs = true
       restore_engine(eng, item.cache, item.stack)
 
       local ok, choices_or_err = pcall(function()
@@ -1030,7 +1060,7 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
       for _, ch in ipairs(choices) do
         local eng2 = engine_mod.new(game_table, { io_out = io_sink })
         eng2:register_actors_schedules()
-  eng2._in_bfs = true
+    eng2._in_bfs = true
         restore_engine(eng2, item.cache, item.stack)
 
         local ok2, sig = pcall(function()

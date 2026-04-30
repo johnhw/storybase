@@ -1263,3 +1263,77 @@ scene loop:
     assert.is_true(reached, "expected dynamic schedule to increment ticks to >=2")
   end)
 end)
+
+-- ============================================================
+-- Bug #2 regression: UMap state preserved in BFS clone/restore
+-- ============================================================
+
+describe("search — UMap state preserved in BFS (bug #2)", function()
+  local src = [[
+module umap-bfs
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: start
+state world:
+  scores: UMap(String, Int(0,999)) = {}
+fn record-score:
+  map-set! world/scores "alice" 99
+scene start:
+  * Record
+    record-score
+    -> check
+scene check:
+  * Done
+    -> check
+]]
+
+  it("can_reach detects a condition on a UMap value set by a fn", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do
+      if type(v) == "table" then
+        local copy = {}
+        for tk, tv in pairs(v) do copy[tk] = tv end
+        cache[k] = copy
+      else
+        cache[k] = v
+      end
+    end
+
+    -- The condition checks that alice's score was recorded in the UMap
+    local reached = search_mod.can_reach(
+      gt, cache, { "start" },
+      function(c)
+        local scores = c["world/scores"]
+        return type(scores) == "table" and scores["alice"] == 99
+      end,
+      5
+    )
+    assert.is_true(reached, "BFS should see UMap key 'alice' after record-score")
+  end)
+
+  it("find_path can find a path that leads to a non-empty UMap state", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do cache[k] = v end
+
+    local path = search_mod.find_path(
+      gt, cache, { "start" },
+      function(c)
+        local scores = c["world/scores"]
+        return type(scores) == "table" and scores["alice"] == 99
+      end,
+      5
+    )
+    assert.is_not_nil(path, "find_path should return a path to the UMap goal state")
+  end)
+end)

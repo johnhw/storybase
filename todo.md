@@ -5,340 +5,169 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-04-27)
+## Current Status (2026-04-28)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–18 tested end-to-end via `--cli` mode.
-UList(T) runtime fully implemented (15 pure builtins + mutation primitives).
-UMap(K,V) runtime completed (map-values, map-contains-key?, map-set, map-delete, map-merge added).
-Bounded Lua interop example: `examples/bounded_interop_game.sb` + `examples/bounded_lua_interop.lua`.
-Mutation events now fire correctly via `game:on("mutation", ...)`.
-**1945 unit tests passing (busted tests/).**
-
-**Bugs fixed during Demos 17–18 implementation (UList/UMap demos + SLICE_EXPR/for..else):**
-- `serialise_snapshot` used `ipairs` for table values — silently dropped all UMap hash keys on save.
-  Fixed by detecting array vs hash and using `pairs` with `["k"]=v` bracket notation for hash tables.
-- `ser_val` used bare `k=val` for string keys — broke hyphenated keys (e.g. `swift-anna`).
-  Fixed to always use `["k"]=val` bracket notation for string keys.
-- `for` loops in scene bodies were silently dropped (parser sent them to narration handler;
-  engine had no `for_stmt` case in `_render_narration_items`/`render_scene`).
-  Fixed: added `is_scene` param to `parse_for_stmt`; added `for_stmt` handling in engine.
-- SLICE_EXPR broken for variable bounds in two places:
-  1. `parse_atom` PATH branch: `path[start:end]` — `start:` lexed as NAMED_ARG, fix recovers ident.
-  2. `parse_primary` IDENT branch: `items[n:10]` — same fix; also upgraded from INDEX_EXPR-only
-     to full SLICE_EXPR support with NAMED_ARG recovery.
-- Unquoted narration text required in `for` body for `{var}` interpolation (quoted strings are
-  treated literally by the parser).
-
-**Bugs fixed during Demo 16 implementation (advanced find + counterfactual simulate):**
-- Parser: `counterfactual do:` block used `parse_expr` not `parse_stmt` — mutations like
-  `set!` in the block were parsed as FN_CALLs and failed with "Undefined function: set!".
-  Fixed by calling `parse_stmt` for each line, and `eval_stmts` (not `eval_expr`) in the runtime.
-- Runtime: `strategy: 'depth-first` / `'breadth-first` symbols not normalised to internal
-  "dfs"/"bfs" codes before being passed to `search.lua`. Fixed by normalising in both
-  `can-reach?` and `find-path` builtin handlers.
-- Demo: `can-reach? world/route-status = 'open` parsed as `(can-reach? world/route-status) = 'open`
-  (the `=` was consumed as a binary op at the call-site). Fixed by parenthesising the condition
-  to `can-reach? (world/route-status = 'open)`.
-
-**Bugs fixed during Demo 15 implementation (macro system + set-literal defaults):**
-- Parser: `{...}` set literals not parsed in `parse_default_value`
-- Codegen: `emit_default` didn't handle SET_LIT/LIST_LIT nodes  
-- Runtime: `resolve_default` had no "set"/"list" tag handler
-- Checker: rejected SET_LIT as a valid Set default
-- Macro expander: NAMED_ARG nodes (param followed by `:` acting as block-body delimiter)
-  not substituted — added NAMED_ARG case to `subst` in `expand_macro_body`
-
-**Language bugs fixed in Demo 13 implementation:**
-- `call_lambda`: multi-line lambda body retval now captured (`result = sub.retval`)
-- `call_fn`: `before_snapshot` now created at function call time for `post:` checking
-- `call_fn`: `post:` conditions correctly unwrap EXPR_STMT (mirrors `pre:` handling)
-- `parse_lambda`: now supports multi-line body (NEWLINE/INDENT after `:`)
-- INTERP_PATH atom: `@before` suffix now parsed (for `patients/{key}/health@before`)
-- `query.lua` `where:` clause: lambdas are now called with the entity key, not just evaluated
-- `count family where: fn(k):` now parsed as FIND_EXPR with count clause (not builtin)
-- `state patients: Patient max:` must use `state patients/{k}: Patient max:` (family syntax)
+Demos 01–19 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
+Bounded Lua interop example complete. **1945 unit tests passing (busted tests/).**
 
 ---
 
 ## Active Tasks
 
-### New Demos — Feature Coverage Gaps
+### Code Review — Bugs (2026-04-28)
 
-Four demos are planned to cover language features with no (or only token) demo coverage.
-Do not start implementation until all specs are agreed. Implement in order 13 → 16.
-
----
-
-#### Demo 13 — "The Healer's Ward" (speaker/say + post-conditions + multi-line lambdas)
-
-**File:** `demos/demo13_healers_ward.sb`
-
-**Theme:** A healer managing a small infirmary. Patients arrive, are diagnosed, treated, and
-discharged. Simple resource management (herbs, bandages) drives choices.
-
-**Features to demonstrate:**
-
-- `speaker` declarations with `display:` and `color:` metadata for healer, nurse, and each patient
-- `say` in scene bodies — bare identifier form: `say aldric: text`, block form (multi-line), and
-  dynamic form: `say (patient/speaker): text` (speaker resolved from state)
-- `say` in function bodies — dialogue emitted inside `treat-patient` fn is prepended to the
-  next scene narration (demonstrating the buffering guarantee)
-- `say 'speaker "text"` symbol-literal form used in at least one function body
-- `post:` conditions with `path@before` — e.g. after `treat-patient`, assert
-  `patient/health >= patient/health@before`
-- Multi-line lambda in a `find` query — find patients needing urgent care using a multi-line
-  `fn(p):` body that checks multiple fields (not just a single inline expression)
-- Entity family `patients` with fields: `name`, `condition` (enum), `health` (Int), `speaker`
-  (Symbol), `treated` (Bool)
-- At least 3 named speakers declared; at least one speaker used dynamically via state lookup
-
-**Scenes:** `ward` (overview, choices), `examine-patient` (examine one patient), `treat-patient`
-(apply treatment, say lines from both healer and patient, post: contract enforced),
-`rest` (end of day, discharge treated patients), `out-of-supplies` (defeat state)
-
-**Verify block:** from-any-state, assert that a fully-treated patient always has health > 0.
-
-**Implementation checklist:**
-- [x] Write `demos/demo13_healers_ward.sb`
-- [x] Confirm `say` block form, dynamic form, and function-body buffering all work
-- [x] Confirm `post:` block fires and raises error when violated (test with a bad pre-state)
-- [x] Confirm multi-line lambda in `find` evaluates correctly
-- [x] Add 4–6 CLI integration tests in `tests/cli/cli_integration_spec.lua`
-- [x] Run `busted tests/` — all tests green (1784 unit + 151 CLI)
-- [ ] Update `code_map.md`
-- [x] Commit
+Findings from a systematic review of the codebase. Fix in priority order.
 
 ---
 
-#### Demo 14 — "The Kingdom's Records" (schema migration: rename, transform, rename-enum)
+#### Bug #1 — `IF_EXPR` as expression always returns `nil` (HIGH)
 
-**File:** `demos/demo14_kingdoms_records.sb`
+**File:** `runtime/eval.lua:497–513`
 
-**Theme:** A royal archivist maintaining kingdom census records over four schema versions.
-The game itself is simple (browse and update records), but the migration chain is the centrepiece.
+When `if/else` is used as an expression (e.g. `let x = if cond then 1 else 2`), the
+expression-form handler declares `local result` but never assigns it from `sub.retval`,
+so it always returns `nil`. The comment "Return the last expression value from then_body"
+is wrong.
 
-**Features to demonstrate:**
+Compare: the statement-form handler (line 2178) correctly does
+`if sub.retval ~= nil then ctx.retval = sub.retval end`.
 
-- `schema-version: 4` at file top
-- `migration 1 -> 2:` — `add` a new field (`world/treasury-notes` String = `""`)
-- `migration 2 -> 3:` — `rename world/census-count -> world/population` and
-  `drop world/treasury-notes`
-- `migration 3 -> 4:` — `transform world/population: fn old: old * 100`
-  (converts a rounded-hundreds value to an exact count) AND
-  `rename-enum world/kingdom-status old-name -> new-name` (e.g. rename `at-war` → `warring`)
-- A `verify` block exercises the migration path via the `storybase migrate` CLI
-- Game loop: view records, update a field, file a report (advances year), review history
+**Fix:** Replace both `return result` lines in the expression-form handler with
+`return sub.retval`.
 
-**Implementation note:** The demo `.sb` file should parse and run at schema-version 4 with
-no save file (fresh start). The migration chain is exercised by the `storybase migrate` CLI
-command against a hand-crafted v1 save fixture in `tests/fixtures/kingdoms_v1.sbd`, if feasible,
-or via a unit test in the migration spec.
+**Test:** Add an eval_spec test: `let x = if true then 42 else 0` should yield `x = 42`;
+`let y = if false then 1 else 99` should yield `y = 99`.
 
-**Implementation checklist:**
-- [x] Write `demos/demo14_kingdoms_records.sb` with `schema-version: 4` and all four migrations
-- [x] Confirm all four migration kinds parse and compile without errors
-- [x] Write `tests/runtime/migrate_demo14_spec.lua` exercising the full 1→2→3→4 chain
-- [x] Add CLI integration tests (compile + run --auto)
-- [x] Run `busted tests/` — all tests green (1792 unit + 158 CLI)
-- [x] Update `code_map.md`
-- [ ] Commit
+- [x] Fix `eval.lua:497–513` — code already used `return sub.retval`; secondary bug was that `return` signal leaked from if-body into parent ctx; fixed by not propagating `return` signals in expression-form IF_EXPR handler
+- [x] Add tests to `tests/runtime/eval_spec.lua` (direct AST tests + compiled-code tests)
 
 ---
 
-#### Demo 15 — "The Spellwright's Workshop" (macro system)
+#### Bug #2 — UMap state silently emptied in BFS and counterfactuals (HIGH)
 
-**File:** `demos/demo15_spellwright.sb`
+**Files:** `runtime/search.lua:27–38` (`clone_flat`), `runtime/search.lua:172–179`
+(`restore_engine`), `runtime/eval.lua:344–370` (counterfactual copy)
 
-**Theme:** A wizard's workshop where spells are crafted by combining components. Many spells
-share the same structure (ingredient check → mana cost → effect), making macros the natural tool.
+All three cache-copy sites use `ipairs` to copy table values:
 
-**Features to demonstrate:**
+```lua
+local copy = {}
+for i, item in ipairs(v) do copy[i] = item end
+```
 
-- At least **two macro declarations** covering distinct patterns:
-  1. `macro with-mana-cost cost body:` — wraps a body to first check `player/mana >= cost`,
-     deduct mana, then execute body. Shows a resource-guard pattern.
-  2. `macro craft-spell name ingredient body:` — wraps with ingredient check + logging + body.
-     Shows a multi-param macro with a named body.
-- Macro invocations in at least three different functions (reducing visible repetition)
-- A `verify` block that checks a property of the macro-expanded code (e.g., `can-reach?` the
-  `out-of-mana` scene from the workshop when mana starts low)
-- At least one macro that uses a generated local name (demonstrating hygiene — the generated
-  name must not collide with user-defined names)
-- Post-condition on a spell-casting function using `path@before` (piggybacks on Demo 13 coverage
-  but in a different context)
-- Entity family `spells` (name, component, mana-cost, learned Bool)
+`UMap(K,V)` is a hash table (string keys). `ipairs` stops at the first non-integer index,
+so every UMap in state is silently emptied during:
+- `clone_flat` → affects all BFS builtins: `can-reach?`, `find-path`, `probability`,
+  `optimal-path`, `verify-always`, `find-counterexample`
+- `restore_engine` → BFS engine snapshots lose UMap contents
+- counterfactual copy in `eval.lua` → `counterfactual` expressions see empty UMaps
 
-**Scenes:** `workshop` (overview), `examine-shelf` (list known spells), `cast-spell`
-(choose and cast; macro-expanded guard), `gather-components` (replenish ingredients),
-`transcribe` (learn a new spell recipe), `out-of-mana` (defeat/rest state)
+**Fix:** Replace `ipairs` with `pairs` in these three copy loops. Must preserve
+both integer and string keys. Also check `search.lua:restore_engine` deep-copy block.
 
-**Implementation checklist:**
-- [x] Write `demos/demo15_spellwright.sb` with two macro declarations
-- [x] Confirm macro expansion runs without error (compile + run)
-- [x] Confirm hygiene: generated names do not shadow user names
-- [x] Add CLI integration tests
-- [x] Run `busted tests/` — all tests green (1811 passing)
-- [x] Update `code_map.md`
-- [x] Commit
+**Test:** Add a search_spec test where state contains a `UMap` and `can-reach?` checks
+a condition that depends on map contents.
 
-**Bugs fixed during implementation:**
-- Parser: `{...}` set literals not parsed in `parse_default_value`
-- Codegen: `emit_default` didn't handle SET_LIT/LIST_LIT nodes
-- Runtime: `resolve_default` had no "set"/"list" tag handling
-- Checker: rejected SET_LIT as a valid Set default
-- Macro expander: NAMED_ARG nodes (param followed by `:`) not substituted in macro bodies
+- [x] Fix `search.lua:clone_flat` — already uses `pairs`
+- [x] Fix `search.lua:restore_engine` cache restore block — already uses `pairs`
+- [x] Fix `eval.lua` counterfactual copy blocks — already uses `pairs`
+- [x] Add tests to `tests/runtime/search_spec.lua` (fixed invalid source syntax) and `tests/runtime/counterfactual_spec.lua` (pre-existing)
 
 ---
 
-#### Demo 16 — "The Cartographer's Web" (advanced find queries + search options + counterfactual simulate)
+#### Bug #3 — Actor capture proxy missing `time_set` (MEDIUM)
 
-**File:** `demos/demo16_cartographers_web.sb`
+**File:** `runtime/actors.lua:123`
 
-**Theme:** A cartographer mapping a network of cities connected by roads and sea lanes.
-Trade routes must be planned, supply lines checked, and future states explored.
+The capture proxy implements `inc_time` but not `time_set`. If an actor behavior calls
+`time-set!`, it calls the real store's `set_time` directly rather than going through
+the deferred capture mechanism, bypassing priority arbitration and applying immediately.
 
-**Features to demonstrate:**
+**Fix:** Add `proxy.time_set` analogous to `proxy.inc_time`.
 
-- **`or-where`** — `find cities where (city/has-market = true) or-where (city/coastal = true)`
-  to locate trade hubs; at least two `or-where` uses in different queries
-- **`connected-to <path> via <relation>`** — check whether a remote city is connected to the
-  capital via the `roads` relation: `find cities connected-to capital-city via roads`
-- **`inverse-adjacent?`** — find all cities that have roads leading INTO a given city:
-  `let inbound = inverse-adjacent? roads 'port-haven`
-- **`find` with `order-by` and `limit`** combined with `or-where` in one query
-- **`can-reach?` with `strategy: depth-first`** — verify a trade route is possible
-- **`find-path` with `strategy: breadth-first` and `budget: 2`** — find optimal route under time budget
-- **`counterfactual simulate: true`** — preview the effect of opening a new trade route
-  including a scheduled `market-fluctuation` event and a trader NPC actor step
-- Relation `roads` (bidirectional adjacency between cities)
-- Entity family `cities` with fields: `name`, `population` (Int), `has-market` (Bool),
-  `coastal` (Bool), `controlled-by` (enum)
-- `schedule market-fluctuation every: [turn: +3]` — drives actor/schedule inclusion in simulate
-
-**Scenes:** `map-room` (main hub), `survey-region` (run find queries, display results),
-`plan-route` (use find-path with strategy/budget), `open-trade-route` (mutate roads relation,
-use counterfactual simulate: true to preview), `crisis` (a city becomes cut off — verify
-connected-to returns false)
-
-**Verify block:** from-any-state with `strategy: breadth-first` and `depth: 6` — assert
-capital is always connected to at least one coastal city.
-
-**Implementation checklist:**
-- [x] Write `demos/demo16_cartographers_web.sb`
-- [x] Confirm `or-where` returns union of results (not intersection)
-- [x] Confirm `connected-to via` returns correct set
-- [x] Confirm `inverse-adjacent?` returns correct reverse-adjacency set
-- [x] Confirm `strategy:` and `budget:` params are accepted by `can-reach?` and `find-path`
-- [x] Confirm `counterfactual simulate: true` includes the scheduled event in the branch
-- [x] Add CLI integration tests
-- [x] Run `busted tests/` — all tests green (1818 passing)
-- [x] Update `code_map.md`
-- [x] Commit
+- [x] `proxy.set_time` already implemented in `actors.lua:127`
+- [x] Test already exists in `tests/runtime/actors_spec.lua` (bug #3 describe block)
 
 ---
 
-#### Demo 17 — "The Scholar's Commonplace" (UList + UMap)
+#### Bug #4 — `deliver_messages` inbox overflow crashes turn (MEDIUM)
 
-**File:** `demos/demo17_scholars_commonplace.sb` ✓ Complete
+**File:** `runtime/actors.lua:184`
 
-- UList(String) + UMap(String, Int) demonstrated end-to-end
-- All 15 UList pure builtins exercised; all UMap builtins exercised
-- `for...else:` in scene body narration (unquoted text with `{var}` interpolation)
-- Negative-index `ulist-slice` for "last N entries"
-- `ulist-filter` over `map-keys` for "heavily-cited authors"
-- Implementation checklist: [x] all complete, 1885 tests green
+`deliver_messages` throws an unguarded `error("INBOX_OVERFLOW: ...")`. The call chain
+`post_action → deliver_messages` has no `pcall` wrapper, so inbox overflow aborts the
+whole turn instead of being handled gracefully. `run_behaviors` wraps eval in `pcall`;
+`deliver_messages` should do the same.
 
-#### Demo 18 — "The Baker's Queue" (SLICE_EXPR + for..else)
+**Fix:** Wrap the overflow case in an error handler (log the overflow, skip the
+message) or wrap the entire delivery loop in `pcall` and surface as a log entry.
 
-**File:** `demos/demo18_bakers_queue.sb` ✓ Complete
-
-- `queue/orders[1]` — INDEX_EXPR on state path
-- `queue/orders[1:2]` — SLICE_EXPR with literal bounds
-- `fn window start end: queue/orders[start:end]` — SLICE_EXPR with variable bounds (NAMED_ARG fix)
-- `for...else:` in scene body (else fires when list empty)
-- Implementation checklist: [x] all complete
+- [x] `deliver_messages` already handles overflow gracefully (logs and breaks)
+- [x] Test already exists in `tests/runtime/actors_spec.lua` (inbox overflow describe block)
 
 ---
 
-#### Demo 19 — "The Signal Tower" (debug server + watches)
+### Code Review — Inelegances (2026-04-28)
 
-**File:** `demos/demo19_signal_tower.sb` ✓ Complete
-
-- 10× `watch` declarations (live path values in browser Watches panel)
-- 5× `watch-when` declarations (positive-edge conditional alerts)
-- `engine-config debug-port: 7373` declared in engine-config
-- `verify-always` invariants: beacon/visibility safety (448 BFS states), fatigue bounds, delivered ≤ signals
-- `after (fn): expr@before` postcondition verify blocks
-- Storm-extinguishes-beacon game logic (found and fixed by BFS verifier)
-- `tests/runtime/debug_demo19_spec.lua`: 26 unit tests covering get-state, get-log,
-  time-travel, watch-when positive-edge, mutation events, clamp-event, hot reload,
-  get-schema, breakpoints
-- 9 CLI integration tests added to `tests/cli/cli_integration_spec.lua`
-- **1920 unit tests + 181 CLI tests passing**
+Lower-priority quality improvements identified in the same review pass.
 
 ---
 
-### Remaining Coverage Gaps (not yet scheduled as demos)
+#### Inelegance #5 — Dead code: `match_pattern` function ✓
 
-- **Multi-line lambda bodies** — covered in Demo 13 (`find` query in `healers_ward.sb`). Done.
-- **`time-set!`** — covered adequately by demo10. No additional demo needed.
-- **Custom tags and hooks** — covered by demo06. No additional demo needed beyond current coverage.
-- **bundle / REPL / compact / extract-symbols / LSP** — CLI tools not covered by demos; defer.
+- [x] Deleted `match_pattern` from `eval.lua`
 
 ---
 
-## Bug Backlog (found during language review 2026-04-28)
+#### Inelegance #6 — `optimal_path` sorts entire open list each iteration ✓
 
-### High Priority
+- [x] Replaced sort-per-iteration with local binary min-heap in `search.lua`; heap_push/heap_pop added at top of file
 
-- [x] **#1 RNG not logged** — Fixed: engine creates `_rng = random_mod.new(seed, log)` and
-  passes it to ctx via `make_ctx`; child_ctx propagates it. All 5 random builtins now use
-  `ctx.rng` with `math.random()` fallback only when no rng is present. 7 new logging/determinism
-  tests added.
+---
 
-- [x] **#2 `query-at`, `query-history`, `query-changes` not callable from `.sb`** — Fixed:
-  three BUILTIN entries added to eval.lua delegating to `ctx.state._log`. Supports `time:` named
-  arg for `query-at` and `last-n:` for `query-changes`. 5 tests added.
+#### Inelegance #7 — BFS expansion logic duplicated ~5×
 
-- [x] **#3 `random-bool` crash with no argument** — Fixed: guard changed to
-  `(args[1] and eval_expr(args[1], ctx)) or 0.5`. Test added.
+**File:** `runtime/search.lua`
 
-### Medium Priority
+The "create engine → restore state → render scene → do_choice → post_action → apply
+signal → clone cache → push to queue" block appears in `can_reach`, `find_path`,
+`probability`, `optimal_path`, and `make_iterator`. A shared helper would cut ~300 lines.
 
-- [x] **#4 `reversible` tag does nothing** — Fixed: `pass3c_check_reversible` added to
-  checker.lua. Emits `IRREVERSIBLE_IN_REVERSIBLE` error when a `[reversible]`-tagged fn body
-  contains `clear!`, `time-inc!`, `time-set!`, `send!`, `cancel-schedule!`, or `schedule!`.
-  4 tests added to checker_spec.lua.
+- [ ] Extract a shared `expand_state` helper in `search.lua`
 
-- [x] **#5 Dynamic `schedule!` invisible to BFS** — Fixed: `search.lua:clone_cache` now
-  encodes full scheduler state into snapshots using `__sched/<name>/...` keys (next_fire,
-  fired, fn_body, trigger entries for dynamic schedules). `restore_engine` decodes these keys
-  and applies them to `eng._scheduler._static`. `make_search_cache(ctx)` helper added to
-  eval.lua (before BUILTINS table) and wired into all 6 BFS builtins (can-reach?, find-path,
-  verify-always, probability, optimal-path, find-counterexample), replacing the old manual
-  cache-building blocks that omitted scheduler state. Regression test added to search_spec.lua:
-  "can_reach finds goal requiring dynamic schedule to fire twice".
+---
 
-### Low Priority
+#### Inelegance #8 — `make_search_cache` duplicates `search.lua:clone_cache`
 
-- [x] **#6 Path patterns in query context** — Implemented for `watch` and `query-history`/`query-changes`.
-  Lexer now tokenises `**`, `(a|b)`, and `!field` as path segments. `debug.lua:path_matches` handles
-  `!field` negation (was missing). `is_pattern` detects `!` in addition to `*`/`(`. `query-history`
-  and `query-changes` builtins in eval.lua expand patterns against log entries using `_path_pattern_matches`.
-  `find`/`verify`/`can-reach?` WHERE-clause patterns deferred (semantics unclear; low real-world demand).
-  9 new tests added (debug_spec: `!field` negation + .sb declaration parsing; eval_spec: pattern expansion
-  in query-history for `*`, `(a|b)`, `!field`).
+**Files:** `runtime/eval.lua:758`, `runtime/search.lua:45`
 
-- [x] **#7 `within N hops` excludes source** — Fixed: removed `key == rf.src or` from `query.lua:114`.
-  `M.reachable(rel, src, src, hops)` already returns `true` (source==target fast path), so source is
-  now included in `within N hops` results. "Within 0 hops" returns only the source itself. 4 new
-  tests in query_spec.lua (0-hops source only, N-hops includes source, updated 2 existing tests that
-  had wrong expected values).
+The scheduler-state encoding logic (`__sched/<name>/nf/...` etc.) is copy-pasted.
+The comment "Must match the encoding used by search.lua clone_cache" flags the problem.
 
-- [x] **#8 `random-enum` O(N) type lookup** — Fixed: `engine:init()` now builds
-  `schema._type_index = {[name]=type}` once; `random-enum` uses it for O(1) lookup,
-  with fallback to list scan for bare eval contexts.
+- [ ] Extract the encoding to a single function (e.g. export from `search.lua` or move
+  to a new `runtime/snapshot.lua`)
+
+---
+
+#### Inelegance #9 — Indentation inconsistency: `eng._in_bfs = true` ✓
+
+- [x] Fixed all 11 occurrences to 4-space indent
+
+---
+
+#### Inelegance #10 — `map-keys` returns keys in non-deterministic order ✓
+
+- [x] `map-keys` now sorts keys lexicographically before returning
+
+---
+
+#### Inelegance #11 — Navigation signal handling duplicated ~10×
+
+The 4-line `if sig.type == "goto" ... elseif "enter" ... elseif "exit"` block appears
+in `search.lua` (4 functions × 2 locations), `engine.lua` (2 locations), `cli_cmd.lua`.
+
+- [ ] Extract an `apply_signal(stack, sig) → new_stack` helper, use everywhere
 
 ---
 

@@ -2649,3 +2649,99 @@ fn get-alice:
     assert.equal(200, scores["bob"])
   end)
 end)
+
+-- ============================================================
+-- Bug #1 regression: IF_EXPR as expression returns sub.retval
+-- ============================================================
+
+describe("eval — if/else expression return value (bug #1)", function()
+  local compiler = require("compiler.compiler")
+
+  local function run(src, fn_name)
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    st:init_defaults()
+    return eval.call_fn(fn_name, {}, c), st
+  end
+
+  it("if true then expr returns the then-branch value", function()
+    local val = eval.eval_expr(
+      if_expr(bool_lit(true),
+        { { kind="return_stmt", expr=int_lit(42) } },
+        { { kind="return_stmt", expr=int_lit(0)  } }),
+      ctx({})
+    )
+    assert.equal(42, val)
+  end)
+
+  it("if false then expr returns the else-branch value", function()
+    local val = eval.eval_expr(
+      if_expr(bool_lit(false),
+        { { kind="return_stmt", expr=int_lit(1)  } },
+        { { kind="return_stmt", expr=int_lit(99) } }),
+      ctx({})
+    )
+    assert.equal(99, val)
+  end)
+
+  it("if false with no else returns nil", function()
+    local val = eval.eval_expr(
+      if_expr(bool_lit(false),
+        { { kind="return_stmt", expr=int_lit(1) } },
+        nil),
+      ctx({})
+    )
+    assert.is_nil(val)
+  end)
+
+  it("if/else in fn body via let captures the correct branch value", function()
+    local src = [[
+module test-ifexpr
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: main
+state world:
+  x: Int(0,100) = 0
+fn pick-value:
+  let v = if world/x > 0:
+    return 10
+  else:
+    return 20
+  set! world/x v
+scene main:
+  title: Main
+  * Go
+    -> main
+]]
+    -- x starts at 0, so condition is false → v=20
+    local _, st = run(src, "pick-value")
+    assert.equal(20, st:get("world/x"))
+  end)
+
+  it("if/else in fn body returns truthy branch when condition holds", function()
+    local src = [[
+module test-ifexpr2
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: main
+state world:
+  x: Int(0,100) = 5
+fn pick-value:
+  let v = if world/x > 0:
+    return 10
+  else:
+    return 20
+  set! world/x v
+scene main:
+  title: Main
+  * Go
+    -> main
+]]
+    local _, st = run(src, "pick-value")
+    assert.equal(10, st:get("world/x"))
+  end)
+end)
