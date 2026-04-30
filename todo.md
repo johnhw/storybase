@@ -128,25 +128,17 @@ Lower-priority quality improvements identified in the same review pass.
 
 #### Inelegance #7 — BFS expansion logic duplicated ~5×
 
-**File:** `runtime/search.lua`
-
-The "create engine → restore state → render scene → do_choice → post_action → apply
-signal → clone cache → push to queue" block appears in `can_reach`, `find_path`,
-`probability`, `optimal_path`, and `make_iterator`. A shared helper would cut ~300 lines.
-
-- [ ] Extract a shared `expand_state` helper in `search.lua`
+Deferred: each BFS function has a different data payload (priority/path/prob/cost) and
+queue mechanism (FIFO/heap/yield). Extracting a shared helper would require a messy
+callback strategy and add more complexity than it removes.
 
 ---
 
-#### Inelegance #8 — `make_search_cache` duplicates `search.lua:clone_cache`
+#### Inelegance #8 — `make_search_cache` duplicates `search.lua:clone_cache` ✓
 
-**Files:** `runtime/eval.lua:758`, `runtime/search.lua:45`
-
-The scheduler-state encoding logic (`__sched/<name>/nf/...` etc.) is copy-pasted.
-The comment "Must match the encoding used by search.lua clone_cache" flags the problem.
-
-- [ ] Extract the encoding to a single function (e.g. export from `search.lua` or move
-  to a new `runtime/snapshot.lua`)
+- [x] `clone_cache` exported as `M.clone_cache` from search.lua
+- [x] `make_search_cache` in eval.lua replaced with a 3-line wrapper calling `search_mod.clone_cache`
+- [x] Also fixed the latent Bug #2 in eval.lua: inline copy used `ipairs` (dropped UMap hash keys); now uses `clone_cache` which uses `pairs`
 
 ---
 
@@ -162,12 +154,11 @@ The comment "Must match the encoding used by search.lua clone_cache" flags the p
 
 ---
 
-#### Inelegance #11 — Navigation signal handling duplicated ~10×
+#### Inelegance #11 — Navigation signal handling duplicated ~10× ✓
 
-The 4-line `if sig.type == "goto" ... elseif "enter" ... elseif "exit"` block appears
-in `search.lua` (4 functions × 2 locations), `engine.lua` (2 locations), `cli_cmd.lua`.
-
-- [ ] Extract an `apply_signal(stack, sig) → new_stack` helper, use everywhere
+- [x] Added `apply_signal(stack, sig)` local helper at top of search.lua
+- [x] Replaced all 5 duplicated signal-handling blocks in search.lua with `apply_signal(new_stack, sig)`
+- Note: engine.lua and cli_cmd.lua use a different pattern (calling eng methods directly) — not unified as those operate on engine objects, not raw stacks
 
 ---
 

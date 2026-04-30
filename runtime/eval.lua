@@ -750,57 +750,8 @@ end
 -- time axes (__time/<axis>), and scheduler state (__sched/<name>/...).
 -- Must match the encoding used by search.lua clone_cache.
 local function make_search_cache(ctx)
-  local cache = {}
-  for k, v in pairs(ctx.state._cache) do
-    if type(v) == "table" then
-      local copy = {}
-      for i, x in ipairs(v) do copy[i] = x end
-      cache[k] = copy
-    else
-      cache[k] = v
-    end
-  end
-  for axis, val in pairs(ctx.state._time or {}) do
-    cache["__time/" .. axis] = val
-  end
-  -- Capture scheduler state (mirrors search.lua clone_cache encoding)
-  local sched = ctx.scheduler
-  local gt    = ctx.game
-  if sched then
-    local static_sched = (gt and gt.schedules) or {}
-    local all_names = {}
-    for name in pairs(static_sched) do all_names[name] = true end
-    for name in pairs(sched._static or {}) do all_names[name] = true end
-    for name in pairs(all_names) do
-      local ss = sched._static and sched._static[name]
-      local prefix = "__sched/" .. name
-      cache[prefix .. "/x"] = ss and 1 or 0
-      if ss then
-        for axis, val in pairs(ss.next_fire or {}) do
-          cache[prefix .. "/nf/" .. axis] = val
-        end
-        for axis in pairs(ss.fired or {}) do
-          cache[prefix .. "/fired/" .. axis] = 1
-        end
-        if not static_sched[name] and ss.fn_body then
-          cache[prefix .. "/fn"] = ss.fn_body
-          local e_i = 0
-          for _, entry in ipairs((ss.trigger or {}).every or {}) do
-            e_i = e_i + 1
-            cache[prefix .. "/trig/ev/" .. e_i .. "/ax"] = entry.axis
-            cache[prefix .. "/trig/ev/" .. e_i .. "/v"]  = entry.value
-          end
-          local a_i = 0
-          for _, entry in ipairs((ss.trigger or {}).at or {}) do
-            a_i = a_i + 1
-            cache[prefix .. "/trig/at/" .. a_i .. "/ax"] = entry.axis
-            cache[prefix .. "/trig/at/" .. a_i .. "/v"]  = entry.value
-          end
-        end
-      end
-    end
-  end
-  return cache
+  local search_mod = require("runtime.search")
+  return search_mod.clone_cache(ctx.state, ctx.scheduler, ctx.game)
 end
 
 --- Built-in functions.

@@ -52,6 +52,18 @@ local MAX_RANDOM_TOTAL     = 200 -- max total random outcome combinations
 -- Helpers (shared across all search operations)
 -- ============================================================
 
+--- Apply a navigation signal to a mutable scene stack.
+local function apply_signal(stack, sig)
+  if not sig then return end
+  if sig.type == "goto" and sig.target then
+    if #stack > 0 then stack[#stack] = sig.target else stack[1] = sig.target end
+  elseif sig.type == "enter" and sig.target then
+    stack[#stack + 1] = sig.target
+  elseif sig.type == "exit" then
+    stack[#stack] = nil
+  end
+end
+
 --- Clone a flat cache table (key → value).
 --- Table values are shallow-copied with pairs so hash-keyed values (UMap) are preserved.
 local function clone_flat(cache)
@@ -517,17 +529,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
             local new_stack = {}
             for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
 
-            -- Apply navigation signal
-            if sig then
-              if sig.type == "goto" and sig.target then
-                if #new_stack > 0 then new_stack[#new_stack] = sig.target
-                else new_stack[1] = sig.target end
-              elseif sig.type == "enter" and sig.target then
-                new_stack[#new_stack + 1] = sig.target
-              elseif sig.type == "exit" then
-                new_stack[#new_stack] = nil
-              end
-            end
+            apply_signal(new_stack, sig)
 
             if condition_fn(new_cache) then
               game_table._bounded_handlers = saved_b
@@ -698,16 +700,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
             local new_stack = {}
             for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
 
-            if sig then
-              if sig.type == "goto" and sig.target then
-                if #new_stack > 0 then new_stack[#new_stack] = sig.target
-                else new_stack[1] = sig.target end
-              elseif sig.type == "enter" and sig.target then
-                new_stack[#new_stack + 1] = sig.target
-              elseif sig.type == "exit" then
-                new_stack[#new_stack] = nil
-              end
-            end
+            apply_signal(new_stack, sig)
 
             local new_path = {}
             for _, step in ipairs(item.path) do new_path[#new_path + 1] = step end
@@ -855,16 +848,7 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn,
           local new_stack = {}
           for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack+1] = s end
 
-          if sig then
-            if sig.type == "goto" and sig.target then
-              if #new_stack > 0 then new_stack[#new_stack] = sig.target
-              else new_stack[1] = sig.target end
-            elseif sig.type == "enter" and sig.target then
-              new_stack[#new_stack+1] = sig.target
-            elseif sig.type == "exit" then
-              new_stack[#new_stack] = nil
-            end
-          end
+          apply_signal(new_stack, sig)
 
           if #new_stack > 0 then
             queue[#queue+1] = { cache = new_cache, stack = new_stack,
@@ -954,16 +938,7 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
         local new_stack = {}
         for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack+1] = s end
 
-        if sig then
-          if sig.type == "goto" and sig.target then
-            if #new_stack > 0 then new_stack[#new_stack] = sig.target
-            else new_stack[1] = sig.target end
-          elseif sig.type == "enter" and sig.target then
-            new_stack[#new_stack+1] = sig.target
-          elseif sig.type == "exit" then
-            new_stack[#new_stack] = nil
-          end
-        end
+        apply_signal(new_stack, sig)
 
         local new_path = {}
         for _, step in ipairs(item.path) do new_path[#new_path+1] = step end
@@ -1074,16 +1049,7 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
           local new_stack = {}
           for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
 
-          if sig then
-            if sig.type == "goto" and sig.target then
-              if #new_stack > 0 then new_stack[#new_stack] = sig.target
-              else new_stack[1] = sig.target end
-            elseif sig.type == "enter" and sig.target then
-              new_stack[#new_stack + 1] = sig.target
-            elseif sig.type == "exit" then
-              new_stack[#new_stack] = nil
-            end
-          end
+          apply_signal(new_stack, sig)
 
           local new_path = {}
           for _, step in ipairs(item.path) do new_path[#new_path + 1] = step end
@@ -1133,5 +1099,9 @@ function M.new(state, game, opts)
 
   return eng
 end
+
+--- Exported for use by eval.lua builtins (counterfactual, can-reach?, etc.)
+--- Equivalent to clone_cache but accessible outside this module.
+M.clone_cache = clone_cache
 
 return M
