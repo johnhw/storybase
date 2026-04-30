@@ -427,3 +427,100 @@ scene main:
   end)
 
 end)
+
+-- ── Bug #3 regression: grid-set! persisted in state cache ────────────────────
+
+describe("defgrid — Bug #3 regression: grid-set! logged, saved, BFS-visible", function()
+  local engine_mod    = require("runtime.engine")
+  local eval_mod      = require("runtime.eval")
+  local log_mod       = require("runtime.log")
+  local state_mod     = require("runtime.state")
+
+  local GRID_SRC = [[
+module grid-persist-test
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: main
+type Tile = floor | wall
+defgrid arena:
+  dimensions: 5 x 4
+  cell-type: Tile
+  default: floor
+fn place-wall:
+  grid-set! arena 2 1 'wall
+fn remove-wall:
+  grid-set! arena 2 1 'floor
+scene main:
+  * Go
+    -> main
+]]
+
+  local function make_eng(src)
+    local gt, _ = compiler_mod.compile(src or GRID_SRC, "test.sb")
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    return eng, gt
+  end
+
+  it("grid-set! writes a log entry into the state cache", function()
+    local eng = make_eng()
+    local ctx = eng:make_ctx("place-wall")
+    eval_mod.call_fn("place-wall", {}, ctx)
+    -- __grid/arena/2,1 must appear in the cache
+    assert.equal("wall", eng._state._cache["__grid/arena/2,1"])
+  end)
+
+  it("grid-get reads from cache override (not just cells)", function()
+    local eng = make_eng()
+    local ctx = eng:make_ctx("test")
+    -- Directly write override into cache (bypassing cells array)
+    eng._state._cache["__grid/arena/2,1"] = "wall"
+    -- grid-get builtin should see the override
+    local get_node = { kind="fn_call", name="grid-get", args={
+      { kind="fn_call", name="arena", args={} },
+      { kind="int_lit", value=2 },
+      { kind="int_lit", value=1 },
+    }}
+    assert.equal("wall", eval_mod.eval_expr(get_node, ctx))
+  end)
+
+  it("grid-set! value survives save/load round-trip", function()
+    local tmp = os.tmpname()
+    -- First session: set a wall and save
+    local eng1, gt1 = make_eng()
+    eval_mod.call_fn("place-wall", {}, eng1:make_ctx("place-wall"))
+    -- Verify cell changed
+    assert.equal("wall", eng1._state._cache["__grid/arena/2,1"])
+    -- Write save file
+    local log_mod2 = require("runtime.log")
+    local f = io.open(tmp, "w")
+    f:write("local save={}\n")
+    f:write("save.version=1\n")
+    f:write("save.scene_stack={'main'}\n")
+    f:write("save.entries=\n")
+    f:write(log_mod2.serialise_entries(eng1._log:entries()))
+    f:write("\nreturn save\n")
+    f:close()
+    -- Second session: load save and verify grid state is restored
+    local eng2 = engine_mod.new(gt1, { io_out = { write = function() end } })
+    eng2._state:init_defaults()
+    local fn2 = assert(load(assert(io.open(tmp, "r")):read("*a")))
+    local save_data = fn2()
+    local state_mod2 = require("runtime.state")
+    state_mod2.replay(eng2._state, save_data.entries or {})
+    eng2:register_actors_schedules()
+    eng2:init_grids()
+    eng2:apply_grid_cache()
+    eng2._scene_stack = { "main" }
+    -- Check cache override present
+    assert.equal("wall", eng2._state._cache["__grid/arena/2,1"])
+    -- Check cells array updated by apply_grid_cache
+    local g2 = eng2._grids["arena"]
+    local tg  = require("runtime.tilegrid")
+    assert.equal("wall", tg.get(g2.cells, g2.width, g2.height, 2, 1))
+    -- Check default cell unchanged
+    assert.equal("floor", tg.get(g2.cells, g2.width, g2.height, 0, 0))
+    os.remove(tmp)
+  end)
+end)

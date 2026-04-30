@@ -186,9 +186,9 @@ function M.new(state, log)
 
   -- ── Imperative schedule API (Phase 5) ─────────────────────
 
-  --- Create a named schedule dynamically (schedule! mutation).
+  --- Stub: dynamic scheduling goes through sched:register() directly (called by SCHEDULE_MUT in eval.lua).
   function sched:schedule(_name, _opts, _fn)
-    -- Not yet implemented (Phase 5)
+    error("sched:schedule() is a dead stub — use sched:register() directly")
   end
 
   --- Replay schedule-related log entries to reconstruct dynamic schedule state.

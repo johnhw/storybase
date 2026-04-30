@@ -568,3 +568,92 @@ describe("state store: _spawn_hook / _despawn_hook", function()
     assert.equal("hero",  key_s)
   end)
 end)
+
+-- ============================================================
+-- Bug #1 regression: deep_copy_cache / undo preserve UMap (hash-keyed) values
+-- ============================================================
+
+describe("state store: undo preserves UMap values (Bug #1 regression)", function()
+  it("checkpoint + undo restores a UMap (hash-keyed table) intact", function()
+    local l = log_mod.new()
+    local s = state_mod.new({}, l)
+    -- Store a UMap-style value (string keys → string values)
+    s:set("notes/map", { alpha = "a", beta = "b", gamma = "c" }, "init")
+    s:push_checkpoint("before_mutate")
+    -- Overwrite with a different table
+    s:set("notes/map", { delta = "d" }, "mutate")
+    assert.equal("d", s:get("notes/map").delta)
+    assert.is_true(s:undo())
+    -- After undo the original UMap must be intact, not emptied
+    local restored = s:get("notes/map")
+    assert.equal("a", restored.alpha)
+    assert.equal("b", restored.beta)
+    assert.equal("c", restored.gamma)
+  end)
+end)
+
+-- ============================================================
+-- Bug #5 regression: set_time ignores undeclared axes
+-- ============================================================
+
+describe("state store: set_time ignores undeclared axes (Bug #5 regression)", function()
+  it("set_time on a declared axis updates it", function()
+    local schema = { time_model = { axes = { "day", "hour" }, wrap = {} } }
+    local l = log_mod.new()
+    local s = state_mod.new(schema, l)
+    s:inc_time("hour", 10)
+    s:set_time("hour", 8)
+    assert.equal(8, s:get_time().hour)
+  end)
+
+  it("set_time on an undeclared axis is silently ignored", function()
+    local schema = { time_model = { axes = { "day", "hour" }, wrap = {} } }
+    local l = log_mod.new()
+    local s = state_mod.new(schema, l)
+    -- 'tick' is not declared; calling set_time on it must not install a new key
+    s:set_time("tick", 99)
+    local t = s:get_time()
+    assert.is_nil(t.tick, "undeclared axis must not be added to _time")
+  end)
+end)
+
+-- ============================================================
+-- Bug #7 regression: path_list returns sorted keys
+-- ============================================================
+
+describe("state store: path_list returns deterministic sorted order (Bug #7 regression)", function()
+  it("path_list is sorted lexicographically regardless of insertion order", function()
+    local l = log_mod.new()
+    local s = state_mod.new({}, l)
+    -- Insert in deliberately non-alphabetical order
+    s:set("crew/zara/hp", 10, "f")
+    s:set("crew/alice/hp", 20, "f")
+    s:set("crew/mike/hp", 30, "f")
+    local keys = s:path_list("crew")
+    assert.same({ "alice", "mike", "zara" }, keys)
+  end)
+end)
+
+-- ============================================================
+-- Design #1 regression: spawn O(1) uniqueness check still errors on duplicate
+-- ============================================================
+
+describe("state store: spawn rejects duplicate key (Design #1 regression)", function()
+  it("spawning the same key twice raises SPAWN_EXISTS", function()
+    local l = log_mod.new()
+    local s = state_mod.new({}, l)
+    s:spawn("crew", "alice", { hp = 50 }, "f")
+    assert.error_matches(function()
+      s:spawn("crew", "alice", { hp = 50 }, "g")
+    end, "SPAWN_EXISTS")
+  end)
+
+  it("spawning different keys does not error", function()
+    local l = log_mod.new()
+    local s = state_mod.new({}, l)
+    s:spawn("crew", "alice", { hp = 50 }, "f")
+    assert.has_no_error(function()
+      s:spawn("crew", "bob", { hp = 40 }, "g")
+    end)
+  end)
+end)

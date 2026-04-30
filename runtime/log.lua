@@ -10,8 +10,6 @@
 -- The log is the single source of truth.  Current state is always a
 -- projection of all log entries in order.
 --
--- Phase 3 deliverable. Not yet implemented.
-
 local M = {}
 
 --- Create a new, empty transaction log.
@@ -232,6 +230,12 @@ end
 --- To get a self-contained chunk, prefix with "return ".
 ---@param entries table  list of log entry tables
 ---@return string
+-- Fields that are always serialised with explicit handling (not the generic fallback).
+local KNOWN_ENTRY_FIELDS = {
+  seq=true, fn=true, kind=true, path=true, old=true, ["new"]=true,
+  time=true, schedule_name=true, next_fire=true, fired_axes=true,
+}
+
 function M.serialise_entries(entries)
   local lines = { "{" }
   for _, e in ipairs(entries) do
@@ -244,7 +248,7 @@ function M.serialise_entries(entries)
     end
     parts[#parts + 1] = "path=" .. ser_val(e.path)
     parts[#parts + 1] = "old="  .. ser_val(e.old)
-    parts[#parts + 1] = '["new"]=' .. ser_val(e.new)  -- 'new' is a keyword in older Lua
+    parts[#parts + 1] = '["new"]=' .. ser_val(e["new"])  -- 'new' is a keyword in older Lua
     if e.time ~= nil then
       parts[#parts + 1] = "time=" .. ser_val(e.time)
     end
@@ -262,6 +266,14 @@ function M.serialise_entries(entries)
       local fa_parts = {}
       for i, axis in ipairs(e.fired_axes) do fa_parts[i] = string.format("%q", axis) end
       parts[#parts + 1] = "fired_axes={" .. table.concat(fa_parts, ",") .. "}"
+    end
+    -- Preserve any extra fields (e.g. random draw result, counterfactual transitions)
+    -- so audit/debug information survives save/load round-trips.
+    for k, v in pairs(e) do
+      if not KNOWN_ENTRY_FIELDS[k] then
+        local key_str = type(k) == "string" and ("[" .. string.format("%q", k) .. "]") or ("[" .. tostring(k) .. "]")
+        parts[#parts + 1] = key_str .. "=" .. ser_val(v)
+      end
     end
     lines[#lines + 1] = "  {" .. table.concat(parts, ", ") .. "},"
   end

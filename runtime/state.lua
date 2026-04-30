@@ -189,12 +189,12 @@ function M.new(schema, log)
 
   -- ── Checkpoint stack (for undo!) ───────────────────────────
 
-  --- Deep-copy the cache (table values get a shallow array copy).
+  --- Deep-copy the cache (table values get a shallow copy via pairs, preserving hash-keyed UMap values).
   local function deep_copy_cache(src)
     local dst = {}
     for k, v in pairs(src) do
       if type(v) == "table" then
-        local c = {}; for i, x in ipairs(v) do c[i] = x end
+        local c = {}; for tk, tv in pairs(v) do c[tk] = tv end
         dst[k] = c
       else
         dst[k] = v
@@ -228,11 +228,11 @@ function M.new(schema, log)
     local idx = n - steps + 1
     if idx < 1 then idx = 1 end
     local snap = self._checkpoints[idx]
-    -- Restore cache
+    -- Restore cache (use pairs so hash-keyed UMap values are preserved)
     for k in pairs(self._cache) do self._cache[k] = nil end
     for k, v in pairs(snap.cache) do
       if type(v) == "table" then
-        local c = {}; for i, x in ipairs(v) do c[i] = x end
+        local c = {}; for tk, tv in pairs(v) do c[tk] = tv end
         self._cache[k] = c
       else
         self._cache[k] = v
@@ -256,8 +256,9 @@ function M.new(schema, log)
     return true
   end
 
-  --- Return a list of all instantiated keys in a family.
+  --- Return a sorted list of all instantiated keys in a family.
   --- e.g. path_list("npcs") → {"blacksmith", "guard"}
+  --- Sorted lexicographically so iteration order is deterministic.
   ---@param family string  e.g. "npcs"
   ---@return table
   function store:path_list(family)
@@ -274,6 +275,7 @@ function M.new(schema, log)
         end
       end
     end
+    table.sort(keys)
     return keys
   end
 
@@ -312,14 +314,15 @@ function M.new(schema, log)
   end
 
   --- Set the named time axis to an absolute value.
+  --- Only updates declared axes; silently ignores undeclared axes to avoid
+  --- corrupting the scheduler's comparisons with phantom keys.
   ---@param axis  string  e.g. "tick"
   ---@param value number
   function store:set_time(axis, value)
     if self._time[axis] ~= nil then
       self._time[axis] = value
-    else
-      self._time[axis] = value
     end
+    -- else: axis not declared in time-model → silently ignore
   end
 
   --- Advance the named time axis by amount, applying wrap if configured.
@@ -483,12 +486,10 @@ function M.new(schema, log)
   ---@param fn     string?
   function store:spawn(family, key, record, fn)
     local key_str = tostring(key)
-    -- Check uniqueness: look for any path with this family/key prefix
+    -- O(1) uniqueness check: a sentinel is always written at family/key on first spawn.
     local prefix = family .. "/" .. key_str
-    for p in pairs(self._cache) do
-      if p == prefix or p:sub(1, #prefix + 1) == prefix .. "/" then
-        error("SPAWN_EXISTS: Family member " .. prefix .. " already exists")
-      end
+    if self._cache[prefix] ~= nil then
+      error("SPAWN_EXISTS: Family member " .. prefix .. " already exists")
     end
     -- Write each field from the record (or just mark the key as existing)
     local rec = type(record) == "table" and record or {}

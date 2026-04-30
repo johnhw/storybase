@@ -191,6 +191,46 @@ end
 local eval_expr, eval_stmt, eval_stmts, call_fn, eval_match, eval_cond
 
 -- ============================================================
+-- Dynamic relation helper
+-- ============================================================
+
+--- Return a relation view that merges the static compiled edges with any dynamic
+--- edges stored in the state cache under "__rel/<name>/<src>" keys.
+--- Cache entries are tables {target=true/false}: true=added, false=removed.
+--- Returns the original relation unchanged when no dynamic overrides exist.
+---@param rel      table?  game_table.relations[name]
+---@param rel_name string  relation name
+---@param cache    table?  state._cache
+---@return table  merged relation object with .data
+local function effective_rel(rel, rel_name, cache)
+  if not cache or not rel_name then return rel end
+  local prefix = "__rel/" .. rel_name .. "/"
+  local plen   = #prefix
+  local has_dyn = false
+  for k in pairs(cache) do
+    if k:sub(1, plen) == prefix then has_dyn = true; break end
+  end
+  if not has_dyn then return rel end
+  -- Build merged data: start from static, apply dynamic overrides
+  local static  = rel and rel.data or {}
+  local merged  = {}
+  for src, tgts in pairs(static) do
+    local m = {}; for t in pairs(tgts) do m[t] = true end
+    merged[src] = m
+  end
+  for k, dyn in pairs(cache) do
+    if k:sub(1, plen) == prefix and type(dyn) == "table" then
+      local src = k:sub(plen + 1)
+      merged[src] = merged[src] or {}
+      for t, v in pairs(dyn) do
+        if v then merged[src][t] = true else merged[src][t] = nil end
+      end
+    end
+  end
+  return { data = merged }
+end
+
+-- ============================================================
 -- Expression evaluator
 -- ============================================================
 
@@ -214,9 +254,13 @@ eval_expr = function(node, ctx)
   elseif k == K.PATH_EXPR then
     local path = eval_path(node, ctx)
     local segs = node.segments or {}
-    -- Check local vars first (single-segment paths can be loop/let vars)
-    if #segs == 1 and ctx.vars[segs[1]] ~= nil then
-      return ctx.vars[segs[1]]
+    -- Check local vars first (single-segment paths can be loop/let vars).
+    -- Must check nil_vars before falling through: a var explicitly bound to nil
+    -- is absent from ctx.vars but must not read from the state store.
+    if #segs == 1 then
+      local n = segs[1]
+      if ctx.vars[n] ~= nil then return ctx.vars[n] end
+      if ctx.nil_vars and ctx.nil_vars[n] then return nil end
     end
     -- Multi-segment path where first segment is a local table var (record field access)
     if #segs > 1 and ctx.vars[segs[1]] ~= nil then
@@ -1047,8 +1091,12 @@ local BUILTINS = {
   ["map-values"] = function(args, ctx)
     local map = eval_expr(args[1], ctx)
     if type(map) ~= "table" then return {} end
+    -- Sort by key so values align with map-keys output index-for-index.
+    local keys = {}
+    for k in pairs(map) do keys[#keys + 1] = k end
+    table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
     local vals = {}
-    for _, v in pairs(map) do vals[#vals + 1] = v end
+    for _, k in ipairs(keys) do vals[#vals + 1] = map[k] end
     return vals
   end,
   ["map-contains-key?"] = function(args, ctx)
@@ -1217,7 +1265,7 @@ local BUILTINS = {
     local source    = eval_expr(args[2], ctx)
     if type(rel_name) ~= "string" or not ctx.game then return {} end
     local rel = ctx.game.relations and ctx.game.relations[rel_name]
-    return query_mod.adjacent(rel, source)
+    return query_mod.adjacent(effective_rel(rel, rel_name, ctx.state and ctx.state._cache), source)
   end,
 
   ["reachable?"] = function(args, ctx)
@@ -1234,7 +1282,7 @@ local BUILTINS = {
     end
     if type(rel_name) ~= "string" or not ctx.game then return false end
     local rel = ctx.game.relations and ctx.game.relations[rel_name]
-    return query_mod.reachable(rel, source, target, max_hops)
+    return query_mod.reachable(effective_rel(rel, rel_name, ctx.state and ctx.state._cache), source, target, max_hops)
   end,
 
   ["shortest-path"] = function(args, ctx)
@@ -1244,7 +1292,7 @@ local BUILTINS = {
     local target    = eval_expr(args[3], ctx)
     if type(rel_name) ~= "string" or not ctx.game then return nil end
     local rel = ctx.game.relations and ctx.game.relations[rel_name]
-    return query_mod.shortest_path(rel, source, target)
+    return query_mod.shortest_path(effective_rel(rel, rel_name, ctx.state and ctx.state._cache), source, target)
   end,
 
   ["reachable-set"] = function(args, ctx)
@@ -1260,7 +1308,7 @@ local BUILTINS = {
     end
     if type(rel_name) ~= "string" or not ctx.game then return {} end
     local rel = ctx.game.relations and ctx.game.relations[rel_name]
-    return query_mod.reachable_set(rel, source, max_hops)
+    return query_mod.reachable_set(effective_rel(rel, rel_name, ctx.state and ctx.state._cache), source, max_hops)
   end,
 
   ["inverse-adjacent?"] = function(args, ctx)
@@ -1269,7 +1317,7 @@ local BUILTINS = {
     local source    = eval_expr(args[2], ctx)
     if type(rel_name) ~= "string" or not ctx.game then return {} end
     local rel = ctx.game.relations and ctx.game.relations[rel_name]
-    return query_mod.inverse_adjacent(rel, source)
+    return query_mod.inverse_adjacent(effective_rel(rel, rel_name, ctx.state and ctx.state._cache), source)
   end,
 
   ["path-exists?"] = function(args, ctx)
@@ -1674,6 +1722,8 @@ local BUILTINS = {
   -- returns the name as a string — same pattern as relation query builtins).
 
   --- grid-get grid-name x y → cell value (or nil if OOB)
+  --- Checks the state cache for grid overrides (written by grid-set!) first,
+  --- so save/load and BFS correctly see mutated cell values.
   ["grid-get"] = function(args, ctx)
     local tg = require("runtime.tilegrid")
     local name = eval_expr(args[1], ctx)
@@ -1681,10 +1731,18 @@ local BUILTINS = {
     local y    = eval_expr(args[3], ctx)
     local g = ctx.grids and ctx.grids[name]
     if not g then return nil end
+    -- Cache override takes precedence over the default cells array.
+    if ctx.state then
+      local cache_key = string.format("__grid/%s/%d,%d", tostring(name), x, y)
+      local cv = ctx.state._cache[cache_key]
+      if cv ~= nil then return cv end
+    end
     return tg.get(g.cells, g.width, g.height, x, y)
   end,
 
-  --- grid-set! grid-name x y value → nil (mutates grid in place)
+  --- grid-set! grid-name x y value → nil
+  --- Writes to both the cells array (for immediate in-session access by tilegrid
+  --- algorithms) and to the state cache (for logging, save/load, and BFS).
   ["grid-set!"] = function(args, ctx)
     local tg = require("runtime.tilegrid")
     local name  = eval_expr(args[1], ctx)
@@ -1693,7 +1751,13 @@ local BUILTINS = {
     local value = eval_expr(args[4], ctx)
     local g = ctx.grids and ctx.grids[name]
     if not g then return nil end
+    -- Update cells array immediately (used by visible-from?, path-to, etc.).
     tg.set(g.cells, g.width, g.height, x, y, value)
+    -- Persist to state cache so the change is logged, saved, and BFS-visible.
+    if ctx.state and tg.in_bounds(g.width, g.height, x, y) then
+      local cache_key = string.format("__grid/%s/%d,%d", tostring(name), x, y)
+      ctx.state:set(cache_key, value, ctx.fn_name)
+    end
     return nil
   end,
 
@@ -1855,8 +1919,11 @@ call_fn = function(name, args, ctx)
   -- User-defined function
   local fn = ctx.fns and ctx.fns[name]
   if not fn then
-    -- If this is a 0-arg call and the name isn't any known entity, return the name
-    -- as a string (used for bare family/path names passed to path-list, spawn!, etc.)
+    -- 0-arg call to an unknown name: return the name as a string.
+    -- Required for bare identifiers (relation-name, family-name, enum-value) passed
+    -- as arguments to builtins.  Known limitation: a typo in a 0-arg user function
+    -- call silently returns a string instead of erroring; this trade-off is accepted
+    -- because there is no reliable way to distinguish the two cases at eval time.
     if #(args or {}) == 0 then
       return name
     end
@@ -2089,26 +2156,31 @@ eval_stmt = function(node, ctx)
 
   elseif k == K.RELATE_MUT then
     local rel_name = node.rel  -- string
-    local source   = eval_expr(node.a, ctx)
-    local target   = eval_expr(node.b, ctx)
-    if ctx.game and ctx.game.relations and rel_name then
-      local rel = ctx.game.relations[rel_name]
-      if rel then
-        rel.data = rel.data or {}
-        rel.data[source] = rel.data[source] or {}
-        rel.data[source][target] = true
-      end
+    local source   = tostring(eval_expr(node.a, ctx))
+    local target   = tostring(eval_expr(node.b, ctx))
+    -- Write through state store so the edge is logged, saved, undoable, and BFS-visible.
+    -- Dynamic edges are stored at "__rel/<name>/<src>" → {tgt=true/false} in the cache.
+    if ctx.state and rel_name then
+      local cache_key = "__rel/" .. rel_name .. "/" .. source
+      local old_dyn = ctx.state._cache[cache_key] or {}
+      local new_dyn = {}
+      for t, v in pairs(old_dyn) do new_dyn[t] = v end
+      new_dyn[target] = true
+      ctx.state:set(cache_key, new_dyn, ctx.fn_name)
     end
 
   elseif k == K.UNRELATE_MUT then
     local rel_name = node.rel  -- string
-    local source   = eval_expr(node.a, ctx)
-    local target   = eval_expr(node.b, ctx)
-    if ctx.game and ctx.game.relations and rel_name then
-      local rel = ctx.game.relations[rel_name]
-      if rel and rel.data and rel.data[source] then
-        rel.data[source][target] = nil
-      end
+    local source   = tostring(eval_expr(node.a, ctx))
+    local target   = tostring(eval_expr(node.b, ctx))
+    -- Write through state store (false = "remove this edge even if it was static").
+    if ctx.state and rel_name then
+      local cache_key = "__rel/" .. rel_name .. "/" .. source
+      local old_dyn = ctx.state._cache[cache_key] or {}
+      local new_dyn = {}
+      for t, v in pairs(old_dyn) do new_dyn[t] = v end
+      new_dyn[target] = false
+      ctx.state:set(cache_key, new_dyn, ctx.fn_name)
     end
 
   -- Control flow

@@ -5,6 +5,57 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## Code Review Round 2 — All Bugs, Design Flaws, and False Impls ✅ (2026-04-30)
+
+**~1973 unit tests passing (excluding flaky debug_http network tests). 17 new regression tests added.**
+
+### Bugs Fixed
+
+- **Bug #1 — `deep_copy_cache` / `undo` use `ipairs`** — Changed to `pairs` in both copy loops so UMap (hash-keyed table) values survive `push_checkpoint` and `undo`. Files: `runtime/state.lua:197,235`. Regression test in `tests/runtime/state_spec.lua`.
+- **Bug #2 — `relate!/unrelate!` bypass log** — Rewrote to write through state store at `__rel/<name>/<src>` cache keys. `eval.lua` has a local `effective_rel()` helper that merges static+dynamic edges; all relation query builtins and `query.lua:M.find` use it. Edges are now logged, auditable, undoable, counterfactual-safe, and BFS-visible. Files: `runtime/eval.lua`, `runtime/query.lua`. Regression tests in `tests/runtime/eval_spec.lua`.
+- **Bug #3 — `grid-set!` not logged** — Now writes to both `g.cells` (for immediate tilegrid access) AND `ctx.state._cache["__grid/<name>/<x>,<y>"]` (for persistence and BFS). `grid-get` checks cache override first. `engine:apply_grid_cache()` added; called after load. BFS `restore_engine` reinits cells from defaults then applies `__grid/*` overrides. Files: `runtime/eval.lua`, `runtime/engine.lua`, `runtime/search.lua`. Regression tests in `tests/compiler/defgrid_spec.lua`.
+- **Bug #4 — `PATH_EXPR` single-segment skips `nil_vars`** — Added `nil_vars` check before state-store fallthrough so `let x = nil` reads correctly. File: `runtime/eval.lua:~218`. Regression test in `tests/runtime/eval_spec.lua`.
+- **Bug #5 — `set_time` dead else-branch** — Else-branch changed to silent no-op for undeclared axes. File: `runtime/state.lua:~317`. Regression test in `tests/runtime/state_spec.lua`.
+- **Bug #6 — `map-values` non-deterministic order** — Now sorts by key before collecting values, matching `map-keys` output order index-for-index. File: `runtime/eval.lua`. Regression test in `tests/runtime/eval_spec.lua`.
+- **Bug #7 — `path_list` non-deterministic order** — Added `table.sort(keys)` before returning. File: `runtime/state.lua`. Regression test in `tests/runtime/state_spec.lua`.
+
+### False Implementations Removed
+
+- **False Impl #1 — `counterfactual.lua` dead code** — Replaced stub with one-line redirect comment.
+- **False Impl #2 — `sched:schedule()` unreachable stub** — Replaced with `error()`.
+- **False Impl #3 — Stale "not implemented" comments** — Removed from `runtime/log.lua` and corrected `runtime/engine.lua` header.
+
+### Design Flaws Fixed
+
+- **Design #1 — `spawn` O(N) uniqueness check** — Replaced full-cache scan with O(1) sentinel check `_cache[prefix] ~= nil`. File: `runtime/state.lua`. Regression test in `tests/runtime/state_spec.lua`.
+- **Design #2 — Log serialiser drops extra fields** — `serialise_entries` now iterates all entry keys and serialises unknown fields generically. File: `runtime/log.lua`. Regression tests in `tests/runtime/log_spec.lua`.
+- **Design #3 — 0-arg bare-string fallback** — Added comment explaining the trade-off (bare idents needed by builtins, but typos silently return strings). File: `runtime/eval.lua`.
+
+---
+
+## Code Review — Bugs #1–#4 and Inelegances #5–#11 ✅ (2026-04-30)
+
+**1956 unit tests passing.**
+
+### Bugs Fixed
+
+- **Bug #1 — `IF_EXPR` as expression returned `nil`** — `return` signal leaked from if-body into parent ctx; fixed by not propagating `return` signals in expression-form `IF_EXPR` handler. Tests in `tests/runtime/eval_spec.lua`.
+- **Bug #2 — UMap silently emptied in BFS/counterfactuals** — all three copy sites (`clone_flat`, `restore_engine`, counterfactual copy in `eval.lua`) already use `pairs`; confirmed and tested. Tests in `tests/runtime/search_spec.lua` and `tests/runtime/counterfactual_spec.lua`.
+- **Bug #3 — Actor capture proxy missing `time_set`** — `proxy.set_time` already implemented in `actors.lua:127`; confirmed and tested. Tests in `tests/runtime/actors_spec.lua`.
+- **Bug #4 — `deliver_messages` inbox overflow crashed turn** — overflow already handled gracefully (logs and breaks); confirmed and tested. Tests in `tests/runtime/actors_spec.lua`.
+
+### Inelegances Resolved
+
+- **#5** — Deleted dead `match_pattern` function from `eval.lua`.
+- **#6** — Replaced sort-per-iteration in `optimal_path` with local binary min-heap (`heap_push`/`heap_pop`) in `search.lua`.
+- **#7** — Deferred (BFS expansion logic duplicated ~5×): each BFS function has a different data payload and queue mechanism; shared helper would add more complexity than it removes.
+- **#8** — `clone_cache` exported as `M.clone_cache` from `search.lua`; `make_search_cache` in `eval.lua` replaced with 3-line wrapper; also fixed latent `ipairs`→`pairs` bug.
+- **#9** — Fixed all 11 `eng._in_bfs = true` occurrences to 4-space indent.
+- **#10** — `map-keys` now sorts keys lexicographically before returning.
+- **#11** — Added `apply_signal(stack, sig)` local helper in `search.lua`; replaced 5 duplicated signal-handling blocks.
+
+---
+
 ## Demos 13–19 + Bug Backlog #1–#8 ✅ (2026-04-28)
 
 **1945 unit tests passing.**

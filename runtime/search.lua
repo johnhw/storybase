@@ -269,6 +269,22 @@ local function restore_engine(eng, cache, stack)
   -- Restore the scene stack
   eng._scene_stack = {}
   for _, s in ipairs(stack) do eng._scene_stack[#eng._scene_stack + 1] = s end
+
+  -- Restore grid cells: reset to defaults then apply __grid/* cache overrides so that
+  -- tilegrid algorithms (visible-from?, path-to) see the correct mutated cell values.
+  if next(eng._grids or {}) ~= nil then
+    local tg_mod = require("runtime.tilegrid")
+    for name, g in pairs(eng._grids) do
+      eng._grids[name].cells = tg_mod.new(g.width, g.height, g.default_val)
+    end
+    for k, v in pairs(cache) do
+      local gname, sx, sy = k:match("^__grid/([^/]+)/(-?%d+),(-?%d+)$")
+      if gname and eng._grids[gname] then
+        local g = eng._grids[gname]
+        tg_mod.set(g.cells, g.width, g.height, tonumber(sx), tonumber(sy), v)
+      end
+    end
+  end
 end
 
 -- ============================================================

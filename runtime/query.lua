@@ -8,6 +8,42 @@
 local M = {}
 
 -- ============================================================
+-- Dynamic relation helper (mirrors eval.lua:effective_rel)
+-- ============================================================
+
+--- Merge static relation data with dynamic cache overrides stored at
+--- "__rel/<rel_name>/<src>" in the state cache.
+---@param rel      table?  game_table.relations[name]
+---@param rel_name string
+---@param cache    table?  state._cache (may be nil)
+---@return table  relation object with .data
+local function effective_rel(rel, rel_name, cache)
+  if not cache or not rel_name then return rel end
+  local prefix = "__rel/" .. rel_name .. "/"
+  local plen   = #prefix
+  local has_dyn = false
+  for k in pairs(cache) do
+    if k:sub(1, plen) == prefix then has_dyn = true; break end
+  end
+  if not has_dyn then return rel end
+  local static = rel and rel.data or {}
+  local merged = {}
+  for src, tgts in pairs(static) do
+    local m = {}; for t in pairs(tgts) do m[t] = true end; merged[src] = m
+  end
+  for k, dyn in pairs(cache) do
+    if k:sub(1, plen) == prefix and type(dyn) == "table" then
+      local src = k:sub(plen + 1)
+      merged[src] = merged[src] or {}
+      for t, v in pairs(dyn) do
+        if v then merged[src][t] = true else merged[src][t] = nil end
+      end
+    end
+  end
+  return { data = merged }
+end
+
+-- ============================================================
 -- find query
 -- ============================================================
 
@@ -51,10 +87,13 @@ function M.find(ctx, family, clauses)
 
   -- Pre-evaluate relation filters (src values don't change per-key)
   -- Each entry: {kind, relation, hops?, src_val?, path_val?}
+  -- Relations are merged with dynamic cache overrides so relate!/unrelate! are visible.
   local compiled_rel_filters = {}
+  local state_cache = ctx.state and ctx.state._cache
   for _, rf in ipairs(relation_filters) do
-    local rel = (ctx.game and ctx.game.relations and rf.relation_name)
-                and ctx.game.relations[rf.relation_name] or nil
+    local raw_rel = (ctx.game and ctx.game.relations and rf.relation_name)
+                    and ctx.game.relations[rf.relation_name] or nil
+    local rel = effective_rel(raw_rel, rf.relation_name, state_cache)
     if rf.kind == "within" then
       local ok_src, src_val = pcall(eval_mod.eval_expr, rf.from, ctx)
       compiled_rel_filters[#compiled_rel_filters+1] = {

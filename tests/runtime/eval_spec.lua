@@ -1728,30 +1728,40 @@ scene s:
     return c, gt
   end
 
-  it("relate! adds an edge to the relation", function()
+  it("relate! adds an edge to the relation via cache (visible through effective_rel)", function()
     local c, gt = make_relate_eng()
     eval.call_fn("do-relate", {}, c)
-    local rel = gt.relations and gt.relations["edges"]
-    local adj = query_mod.adjacent(rel, "a")
-    assert.is_truthy(adj["b"])
+    -- Edge is stored in cache, not in static rel.data; check via adjacent? builtin
+    local adj_node = { kind="fn_call", name="adjacent?", args={
+      { kind="fn_call", name="edges", args={} },
+      { kind="symbol_lit", name="a" },
+    }}
+    local result = eval.eval_expr(adj_node, c)
+    assert.is_truthy(result and result["b"])
   end)
 
   it("relate! is idempotent (adding same edge twice is fine)", function()
     local c, gt = make_relate_eng()
     eval.call_fn("do-relate", {}, c)
     eval.call_fn("do-relate", {}, c)
-    local rel = gt.relations and gt.relations["edges"]
-    local adj = query_mod.adjacent(rel, "a")
-    assert.is_truthy(adj["b"])
+    local adj_node = { kind="fn_call", name="adjacent?", args={
+      { kind="fn_call", name="edges", args={} },
+      { kind="symbol_lit", name="a" },
+    }}
+    local result = eval.eval_expr(adj_node, c)
+    assert.is_truthy(result and result["b"])
   end)
 
   it("unrelate! removes an edge that was added", function()
     local c, gt = make_relate_eng()
     eval.call_fn("do-relate", {}, c)
     eval.call_fn("do-unrelate", {}, c)
-    local rel = gt.relations and gt.relations["edges"]
-    local adj = query_mod.adjacent(rel, "a")
-    assert.is_falsy(adj["b"])
+    local adj_node = { kind="fn_call", name="adjacent?", args={
+      { kind="fn_call", name="edges", args={} },
+      { kind="symbol_lit", name="a" },
+    }}
+    local result = eval.eval_expr(adj_node, c)
+    assert.is_falsy(result and result["b"])
   end)
 
   it("unrelate! is a no-op when edge does not exist", function()
@@ -1760,12 +1770,19 @@ scene s:
     assert.has_no_error(function() eval.call_fn("do-unrelate", {}, c) end)
   end)
 
-  it("reachable? reflects relate! changes", function()
+  it("reachable? reflects relate! changes (static rel unchanged; dynamic via cache)", function()
     local c, gt = make_relate_eng()
     local rel = gt.relations and gt.relations["edges"]
+    -- Static relation has no a→b edge
     assert.is_false(query_mod.reachable(rel, "a", "b"))
     eval.call_fn("do-relate", {}, c)
-    assert.is_true(query_mod.reachable(rel, "a", "b"))
+    -- After relate!, reachable? through eval (which merges cache) sees the edge
+    local reach_node = { kind="fn_call", name="reachable?", args={
+      { kind="fn_call", name="edges", args={} },
+      { kind="symbol_lit", name="a" },
+      { kind="symbol_lit", name="b" },
+    }}
+    assert.is_true(eval.eval_expr(reach_node, c))
   end)
 end)
 
@@ -2743,5 +2760,138 @@ scene main:
 ]]
     local _, st = run(src, "pick-value")
     assert.equal(10, st:get("world/x"))
+  end)
+end)
+
+-- ============================================================
+-- Bug #4 regression: PATH_EXPR single-segment reads nil_vars
+-- ============================================================
+
+describe("eval: PATH_EXPR nil_vars check (Bug #4 regression)", function()
+  it("let x = nil then reading x returns nil, not a state value", function()
+    local c = ctx({ x = 99 })  -- state has a path "x" = 99
+    -- Simulate a let binding of x to nil via nil_vars
+    c.nil_vars = { x = true }
+    local node = path("x")
+    -- Should return nil (from nil_vars), not 99 (from state)
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+
+  it("without nil_vars, path falls through to state", function()
+    local c = ctx({ x = 99 })
+    local node = path("x")
+    assert.equal(99, eval.eval_expr(node, c))
+  end)
+end)
+
+-- ============================================================
+-- Bug #6 regression: map-values and map-keys agree in index order
+-- ============================================================
+
+describe("eval: map-values sorted to match map-keys (Bug #6 regression)", function()
+  it("map-values and map-keys return values/keys in the same index order", function()
+    local c = ctx({})
+    c.state:set("m/v", { alpha = 1, gamma = 3, beta = 2 }, "init")
+    local keys_node = fn_call("map-keys", path("m", "v"))
+    local vals_node = fn_call("map-values", path("m", "v"))
+    local keys = eval.eval_expr(keys_node, c)
+    local vals = eval.eval_expr(vals_node, c)
+    assert.equal(#keys, #vals)
+    -- keys must be sorted: alpha, beta, gamma
+    assert.equal("alpha", keys[1])
+    assert.equal("beta",  keys[2])
+    assert.equal("gamma", keys[3])
+    -- values must match the sorted key order: 1, 2, 3
+    assert.equal(1, vals[1])
+    assert.equal(2, vals[2])
+    assert.equal(3, vals[3])
+  end)
+end)
+
+-- ============================================================
+-- Bug #2 regression: relate!/unrelate! logged, undoable, counterfactual-safe
+-- ============================================================
+
+describe("eval: relate!/unrelate! logged and undoable (Bug #2 regression)", function()
+  local compiler_mod = require("compiler.compiler")
+  local engine_mod   = require("runtime.engine")
+  local state_mod2   = require("runtime.state")
+  local log_mod2     = require("runtime.log")
+
+  local SRC = [[
+module relate-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+relation edges: Symbol -> Set(Symbol, 10)
+state world/x : Int(0,10) = 0
+fn do-relate:
+  relate! edges 'a 'b
+fn do-unrelate:
+  unrelate! edges 'a 'b
+scene main:
+  * Go
+    -> main
+]]
+
+  local function make_relate_ctx()
+    local gt = assert(compiler_mod.compile(SRC, "test.sb"), "compilation failed")
+    local l = log_mod2.new()
+    local st = state_mod2.new(gt.schema, l)
+    local c = eval.new_ctx(st, gt.fns, "test", gt)
+    return c, gt, l
+  end
+
+  it("relate! writes a log entry so the edge is persisted", function()
+    local c, _, l = make_relate_ctx()
+    eval.call_fn("do-relate", {}, c)
+    local found = false
+    for _, e in ipairs(l:entries()) do
+      if e.path and e.path:match("^__rel/edges/") then found = true; break end
+    end
+    assert.is_true(found, "relate! must produce a log entry under __rel/edges/")
+  end)
+
+  it("undo! reverts a relate! edge", function()
+    local c, _ = make_relate_ctx()
+    c.state:push_checkpoint("before")
+    eval.call_fn("do-relate", {}, c)
+    -- Edge is now visible
+    local adj_after = { kind="fn_call", name="adjacent?", args={
+      { kind="fn_call", name="edges", args={} },
+      { kind="symbol_lit", name="a" },
+    }}
+    assert.is_truthy(eval.eval_expr(adj_after, c) and eval.eval_expr(adj_after, c)["b"])
+    -- Undo
+    c.state:undo()
+    -- Edge must be gone
+    assert.is_nil(eval.eval_expr(adj_after, c) and eval.eval_expr(adj_after, c)["b"])
+  end)
+
+  it("relate! inside a counterfactual does not contaminate live state", function()
+    local gt = assert(compiler_mod.compile(SRC, "test.sb"))
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local ctx_live = eng:make_ctx("live")
+    -- Verify no dynamic edge in live state before
+    local adj_node = { kind="fn_call", name="adjacent?", args={
+      { kind="fn_call", name="edges", args={} },
+      { kind="symbol_lit", name="a" },
+    }}
+    assert.is_nil(eval.eval_expr(adj_node, ctx_live) and eval.eval_expr(adj_node, ctx_live)["b"])
+    -- Call relate! in a separate context (simulating counterfactual isolation by cloned cache)
+    local clone_cache = {}
+    for k, v in pairs(eng._state._cache) do
+      clone_cache[k] = type(v) == "table" and (function(t) local c2={}; for k2,v2 in pairs(t) do c2[k2]=v2 end; return c2 end)(v) or v
+    end
+    local log2 = log_mod2.new()
+    local st2  = state_mod2.new(gt.schema, log2)
+    st2._cache = clone_cache
+    local ctx2 = eval.new_ctx(st2, gt.fns, "cf", gt)
+    eval.call_fn("do-relate", {}, ctx2)
+    -- Edge visible in counterfactual context
+    assert.is_truthy(eval.eval_expr(adj_node, ctx2) and eval.eval_expr(adj_node, ctx2)["b"])
+    -- Live state must be unchanged (cache-based storage prevents contamination)
+    assert.is_nil(eval.eval_expr(adj_node, ctx_live) and eval.eval_expr(adj_node, ctx_live)["b"])
   end)
 end)

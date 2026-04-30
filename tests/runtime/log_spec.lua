@@ -404,3 +404,54 @@ describe("transaction log: entries_up_to", function()
     assert.equal("x", up[1].path)
   end)
 end)
+
+-- ============================================================
+-- Design #2 regression: serialise/deserialise preserves extra fields
+-- ============================================================
+
+describe("log: serialise_entries preserves extra fields (Design #2 regression)", function()
+  local log_mod2 = require("runtime.log")
+
+  it("random draw entry survives round-trip with result field intact", function()
+    local l = log_mod2.new()
+    l:append({
+      path    = "player/choice",
+      old     = nil,
+      ["new"] = "sword",
+      fn      = "pick-weapon",
+      result  = "sword",
+      source  = "random",
+      reads   = { "player/class" },
+    })
+    local entries = l:entries()
+    local ser  = log_mod2.serialise_entries(entries)
+    local fn   = assert(load("return " .. ser))
+    local back = fn()
+    assert.equal(1, #back)
+    assert.equal("sword",  back[1].result)
+    assert.equal("random", back[1].source)
+    assert.is_table(back[1].reads)
+    assert.equal("player/class", back[1].reads[1])
+  end)
+
+  it("counterfactual entry preserves transitions and simulate fields", function()
+    local l = log_mod2.new()
+    l:append({
+      path        = nil,
+      old         = nil,
+      ["new"]     = nil,
+      fn          = "what-if",
+      kind        = "counterfactual",
+      transitions = { "buy", "sell" },
+      simulate    = true,
+    })
+    local entries = l:entries()
+    local ser  = log_mod2.serialise_entries(entries)
+    local fn   = assert(load("return " .. ser))
+    local back = fn()
+    assert.equal(1, #back)
+    assert.equal(true, back[1].simulate)
+    assert.is_table(back[1].transitions)
+    assert.equal(2, #back[1].transitions)
+  end)
+end)

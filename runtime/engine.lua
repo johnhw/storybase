@@ -3,14 +3,12 @@
 --
 -- Turn lifecycle (six steps):
 --   1. Player action (optional — skipped for autonomous turns)
---   2. Message delivery (pending → actor inboxes)  [Phase 5]
---   3. Actor behaviors dispatched in priority order [Phase 5]
---   4. Deferred mutations applied in priority order [Phase 5]
---   5. Scheduled events fired                       [Phase 4]
---   6. Inbox clearing; time-inc! tick if not yet advanced this turn
---
--- Phase 3: steps 1 and 6 (player action + time tick) are implemented.
--- Steps 2-5 are deferred to later phases.
+--   2. Message delivery (pending → actor inboxes)
+--   3. Actor behaviors dispatched in priority order
+--   4. Deferred mutations applied in priority order
+--   5. Scheduled events fired
+--   6. Inbox clearing
+-- Note: time-inc! tick is NOT auto-advanced; game code must call it explicitly.
 
 local state_mod    = require("runtime.state")
 local log_mod      = require("runtime.log")
@@ -464,6 +462,19 @@ function M.new(game_table, opts)
     end
   end
 
+  --- Apply any grid cell overrides stored in the state cache (written by grid-set!)
+  --- back into the cells arrays.  Call after loading/replaying saved state so that
+  --- tilegrid algorithms (visible-from?, path-to) see the correct cell values.
+  function eng:apply_grid_cache()
+    for k, v in pairs(self._state._cache) do
+      local name, sx, sy = k:match("^__grid/([^/]+)/(-?%d+),(-?%d+)$")
+      if name and self._grids[name] then
+        local g = self._grids[name]
+        tilegrid_mod.set(g.cells, g.width, g.height, tonumber(sx), tonumber(sy), v)
+      end
+    end
+  end
+
   --- Attach a debug server to the engine, wiring mutation and scene hooks.
   ---@param srv table  debug server instance (from runtime.debug)
   function eng:set_debug_server(srv)
@@ -699,6 +710,9 @@ function M.run(game_table, opts)
     eng:register_actors_schedules()
     -- Replay schedule events so dynamic schedules and threshold advances are restored
     eng._scheduler:replay_log(save_data.entries or {}, eng._game.fns)
+    -- Initialise grids from defaults, then apply any saved grid-set! overrides.
+    eng:init_grids()
+    eng:apply_grid_cache()
     -- Restore scene stack
     if type(save_data.scene_stack) == "table" and #save_data.scene_stack > 0 then
       eng._scene_stack = save_data.scene_stack
