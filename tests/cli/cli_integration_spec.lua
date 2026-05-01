@@ -1691,3 +1691,208 @@ describe("CLI demo19_signal_tower: debug server + watches", function()
     assert.is_truthy(narr:find("[Ww]atch complete"), narr)
   end)
 end)
+
+-- ── demo20: Harrow House (Lovecraftian mystery) ────────────────────────────
+
+-- Helper: build rapport to 7 + get study-key + uneasy phase. Returns the game.
+local function harrow_setup()
+  local sb   = require("lib.storybase")
+  local game = sb.load("demos/demo20_harrow_house.sb")
+  game:init()
+  game:choose(1)                                       -- enter house
+  game:pick("ground-floor library")
+  -- family history ×2 + research → uneasy; locked-study → key; her-work → rapport 7
+  game:pick("Speak with Meredith") ; game:pick("grandfather")
+  game:pick("Speak with Meredith") ; game:pick("like as a man")
+  game:pick("Speak with Meredith") ; game:pick("actually working on")
+  game:pick("Speak with Meredith") ; game:pick("locked room")
+  game:pick("Speak with Meredith") ; game:pick("actually does")
+  return game
+end
+
+-- Helper: collect items and read notebooks 1 & 2, ending in the attic.
+local function harrow_collect_notebooks(game)
+  game:pick("Return to the foyer")
+  game:pick("upper landing") ; game:pick("Professor's study")
+  game:pick("attic key") ; game:pick("basement key") ; game:pick("first notebook")
+  game:pick("Read the first")
+  game:pick("upper landing") ; game:pick("attic")
+  game:pick("second notebook") ; game:pick("oil lamp") ; game:pick("Read the second")
+end
+
+-- Helper: wait on the landing until Meredith appears (up to 8 periods).
+local function harrow_wait_for_meredith(game)
+  game:pick("landing")
+  for _ = 1, 8 do
+    if game:scene() == "landing" then
+      for _, c in ipairs(game:choices()) do
+        if c.label:find("Speak with Meredith") then return true end
+      end
+    end
+    if not game:pick("Wait") then break end
+    if game:scene() ~= "landing" then
+      if not game:pick("landing") then game:pick("Climb") end
+    end
+  end
+  return false
+end
+
+describe("CLI demo20_harrow_house: Lovecraftian mystery", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo20_harrow_house.sb"})
+    assert.equal(0, rc, "demo20 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo20_harrow_house.sb"})
+    assert.equal(0, rc, "demo20 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto run 25 steps completes without error", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "25",
+                                   "demos/demo20_harrow_house.sb"})
+    assert.equal(0, rc, "demo20 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("HARROW"), out)
+  end)
+
+  it("rapport increments correctly: family×2 + research gives rapport 6, phase=uneasy", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo20_harrow_house.sb")
+    game:init() ; game:choose(1) ; game:pick("ground-floor library")
+    assert.equal(3, game:get("player/rapport"))
+    game:pick("Speak with Meredith") ; game:pick("grandfather")
+    assert.equal(4, game:get("player/rapport"))
+    game:pick("Speak with Meredith") ; game:pick("like as a man")
+    assert.equal(5, game:get("player/rapport"))
+    game:pick("Speak with Meredith") ; game:pick("actually working on")
+    assert.equal(6, game:get("player/rapport"))
+    assert.equal("uneasy", game:get("world/phase"))
+  end)
+
+  it("ask-locked-study in uneasy+rapport>=6 gives study-key", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo20_harrow_house.sb")
+    game:init() ; game:choose(1) ; game:pick("ground-floor library")
+    -- family×2 → rapport 5; research → rapport 6 + uneasy
+    game:pick("Speak with Meredith") ; game:pick("grandfather")
+    game:pick("Speak with Meredith") ; game:pick("like as a man")
+    game:pick("Speak with Meredith") ; game:pick("actually working on")
+    assert.equal("uneasy", game:get("world/phase"))
+    assert.equal(6, game:get("player/rapport"))
+    game:pick("Speak with Meredith") ; game:pick("locked room")
+    local inv = game:get("player/inventory")
+    local has_key = false
+    for _, item in ipairs(inv) do if item == "study-key" then has_key = true end end
+    assert.is_true(has_key, "study-key not in inventory after asking in uneasy with rapport>=6")
+  end)
+
+  it("lock-out fix: locked-study asked in prosaic, re-ask in uneasy still gives key", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo20_harrow_house.sb")
+    game:init() ; game:choose(1) ; game:pick("ground-floor library")
+    -- Ask in prosaic → wariness only, no key
+    game:pick("Speak with Meredith") ; game:pick("locked room")
+    assert.equal("prosaic", game:get("world/phase"))
+    local inv0 = game:get("player/inventory")
+    local key0 = false
+    for _, item in ipairs(inv0) do if item == "study-key" then key0 = true end end
+    assert.is_false(key0, "study-key should NOT be given in prosaic phase")
+    -- Build rapport (family×2 → 5, research → 6 + uneasy)
+    game:pick("Speak with Meredith") ; game:pick("grandfather")
+    game:pick("Speak with Meredith") ; game:pick("like as a man")
+    game:pick("Speak with Meredith") ; game:pick("actually working on")
+    assert.equal("uneasy", game:get("world/phase"))
+    -- Re-ask option must appear
+    game:pick("Speak with Meredith")
+    local found = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:lower():find("study", 1, true) then found = true end
+    end
+    assert.is_true(found, "re-ask option not present in uneasy after prosaic ask")
+    game:pick("study")
+    local inv = game:get("player/inventory")
+    local has_key = false
+    for _, item in ipairs(inv) do if item == "study-key" then has_key = true end end
+    assert.is_true(has_key, "study-key not given on re-ask in uneasy with rapport>=6")
+  end)
+
+  it("read notebook-1 option disappears after reading", function()
+    local game = harrow_setup()
+    game:pick("Return to the foyer") ; game:pick("upper landing") ; game:pick("Professor's study")
+    game:pick("first notebook")
+    -- Option must be present before reading
+    local before = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:lower():find("read the first", 1, true) then before = true end
+    end
+    assert.is_true(before, "Read nb1 option should appear before reading")
+    game:pick("Read the first")
+    -- Option must be gone after reading (knows-family-strain gated)
+    local after = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:lower():find("read the first", 1, true) then after = true end
+    end
+    assert.is_false(after, "Read nb1 option should disappear after reading")
+  end)
+
+  it("hook grants knows-occult-geometry on attic entry and knows-basement-exists on basement entry", function()
+    local game = harrow_setup()
+    game:pick("Return to the foyer") ; game:pick("upper landing") ; game:pick("Professor's study")
+    game:pick("attic key")
+    game:pick("upper landing") ; game:pick("attic")
+    local know = game:get("player/knowledge") or {}
+    local has_occ = false
+    for _, k in ipairs(know) do if k == "knows-occult-geometry" then has_occ = true end end
+    assert.is_true(has_occ, "hook should grant knows-occult-geometry on attic entry")
+    -- Now unlock basement
+    game:pick("landing") ; game:pick("Professor's study") ; game:pick("basement key")
+    game:pick("landing") ; game:pick("Descend") ; game:pick("dining") ; game:pick("kitchen")
+    game:pick("basement")
+    local know2 = game:get("player/knowledge") or {}
+    local has_bas = false
+    for _, k in ipairs(know2) do if k == "knows-basement-exists" then has_bas = true end end
+    assert.is_true(has_bas, "hook should grant knows-basement-exists on basement entry")
+  end)
+
+  it("all three endings reachable at rapport=9 with all notebooks", function()
+    local game = harrow_setup()
+    harrow_collect_notebooks(game)
+    harrow_wait_for_meredith(game)
+    game:pick("Speak with Meredith") ; game:pick("vigil")
+    assert.equal("revelation", game:get("world/phase"))
+    assert.equal(9, game:get("player/rapport"))
+    -- Basement path
+    game:pick("Descend") ; game:pick("dining") ; game:pick("kitchen") ; game:pick("basement")
+    game:pick("mechanism-token") ; game:pick("Light") ; game:pick("Activate")
+    game:pick("sub-basement")
+    -- Take nb3 but don't read: ending-mechanism-fails must be available
+    game:pick("third notebook")
+    local has_mfail = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:find("Activate the mechanism%-token") then has_mfail = true end
+    end
+    assert.is_true(has_mfail, "ending-mechanism-fails not available before reading nb3")
+    -- Read nb3 → knows-the-truth; mechanism-fails choice must disappear
+    game:pick("Read the third")
+    local mfail_gone = true
+    for _, c in ipairs(game:choices()) do
+      if c.label:find("Activate the mechanism%-token") then mfail_gone = false end
+    end
+    assert.is_true(mfail_gone, "ending-mechanism-fails should vanish after knowing the truth")
+    -- ending-vigil-continues (rapport >= 8)
+    local has_vigil = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:find("Leave without") then has_vigil = true end
+    end
+    assert.is_true(has_vigil, "ending-vigil-continues not available at rapport=9")
+    -- ending-offered-hand (rapport >= 9, all notebooks)
+    local has_offer = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:find("Accept Meredith") then has_offer = true end
+    end
+    assert.is_true(has_offer, "ending-offered-hand not available at rapport=9 with all notebooks")
+  end)
+end)

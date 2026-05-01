@@ -1,0 +1,1000 @@
+# demo20_harrow_house.sb
+# The Harrow House -- a three-phase Lovecraftian mystery.
+#
+# Features demonstrated:
+#   time-model        -- period axis (8 periods/day, wrap: [8])
+#   actor             -- meredith-actor processes rapport/depart messages
+#   schedule          -- period-cycle drives Meredith's daily movement via spawn!/despawn!
+#   relation          -- house-exits room graph; room-items; dynamic edges via relate!
+#   bounded           -- classify-approach: dialog-intent classifier with ?? fallback
+#   rapport/wariness  -- Int guard conditions on dialog choices
+#   Set(KnowledgeFlag)-- knowledge accumulation drives phase transitions
+#   spawn!/despawn!   -- Meredith's conditional NPC presence per period
+#   hook after: move-to: -- room-discovery knowledge flags by phase
+#   verify            -- invariants: phase monotone, rapport bounds, ending prereqs
+#   Three-phase arc   -- Phase enum: prosaic -> uneasy -> revelation
+#
+# Run: lua5.4 cli/main.lua run demos/demo20_harrow_house.sb
+# Auto: lua5.4 cli/main.lua run --auto --steps 25 demos/demo20_harrow_house.sb
+
+module harrow-house
+  version: 1.0
+
+time-model:
+  axes: [period]
+  wrap: [8]
+
+engine-config:
+  entry-scene: prologue
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+"Three tonal phases of the investigation."
+type Phase = prosaic | uneasy | revelation
+
+"Eight periods in Meredith's daily schedule."
+type Period = dawn | morning | mid-morning | noon | afternoon | late-afternoon | evening | night
+
+"Rooms of Harrow House and its grounds."
+type Room = foyer | parlour | dining | kitchen | library | garden | landing | study | bedroom | attic | basement | chamber
+
+"Meredith's social disposition toward the player."
+type Disposition = welcoming | cautious | withdrawn | absent
+
+"Accumulated player knowledge flags."
+type KnowledgeFlag = knows-harrow-history | knows-family-strain | knows-basement-exists | knows-strange-sounds | knows-locked-study | knows-harrow-research | knows-occult-geometry | knows-ritual-purpose | knows-the-vigil | knows-the-mechanism | knows-the-truth
+
+"Items that can be found in the house."
+type ItemKind = study-key | attic-key | basement-key | oil-lamp | harrow-notebook-1 | harrow-notebook-2 | harrow-notebook-3 | mechanism-token
+
+"Spawnable NPC presence record."
+type NpcRecord:
+  location:    Room
+  disposition: Disposition
+
+"Messages sent to Meredith's behavior actor."
+type MeredithMsg:
+  | rapport-gain: amount: Int(0, 3)
+  | force-depart:
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+"World state: phase, period, day counter, ambient light."
+state world:
+  phase:         Phase      = 'prosaic
+  period:        Period     = 'morning
+  period-index:  Int(0, 7)  = 1
+  day:           Int(0, 30) = 0
+  ambient-light: Bool       = true
+
+"Player state: location, inventory, knowledge, rapport, wariness."
+state player:
+  location:  Room                   = 'foyer
+  inventory: Set(ItemKind, 8)       = (set)
+  knowledge: Set(KnowledgeFlag, 15) = (set)
+  rapport:   Int(0, 10)             = 3
+  wariness:  Int(0, 5)              = 0
+
+"Meredith's spawnable NPC entity. Despawned at night and when she excuses herself."
+state npcs/{name}: NpcRecord  max: 1
+
+"Topics the player has raised with Meredith -- prevent repetition, gate follow-ups."
+state asked:
+  family-history:  Bool = false
+  harrow-research: Bool = false
+  locked-study:    Bool = false
+  sounds:          Bool = false
+  basement:        Bool = false
+  her-work:        Bool = false
+  the-vigil:       Bool = false
+
+# ─────────────────────────────────────────────────────────
+# Relations
+# ─────────────────────────────────────────────────────────
+
+"Room exits: static initial edges; dynamic edges added when keys unlock them."
+relation house-exits: Room -> Set(Room, 4):
+  'foyer:    {'parlour, 'dining, 'landing, 'library}
+  'parlour:  {'foyer, 'dining}
+  'dining:   {'foyer, 'parlour, 'kitchen}
+  'kitchen:  {'dining, 'garden}
+  'garden:   {'kitchen}
+  'library:  {'foyer}
+  'landing:  {'foyer}
+  'study:    {}
+  'attic:    {}
+  'basement: {}
+  'chamber:  {}
+  'bedroom:  {}
+
+"Items present in rooms. Cleared with unrelate! when picked up."
+relation room-items: Room -> Set(ItemKind, 4):
+  'study:    {'attic-key, 'basement-key, 'harrow-notebook-1}
+  'attic:    {'harrow-notebook-2, 'oil-lamp}
+  'basement: {'mechanism-token}
+  'chamber:  {'harrow-notebook-3}
+
+# ─────────────────────────────────────────────────────────
+# Bounded
+# ─────────────────────────────────────────────────────────
+
+"Classify the conversational approach given rapport, wariness, and phase. Falls back to welcoming."
+bounded classify-approach:
+  returns:      Disposition
+  distribution: uniform
+  reads:        [player/rapport, player/wariness, world/phase]
+  lua:          "harrow.classify_approach"
+
+# ─────────────────────────────────────────────────────────
+# Actor
+# ─────────────────────────────────────────────────────────
+
+"Meredith's behavior actor: processes rapport adjustments and forced departures."
+actor meredith-actor:
+  perceives: [world/phase, world/period, world/period-index, player/rapport, player/wariness, player/location, npcs/meredith, meredith-actor/inbox]
+  inbox:     List(MeredithMsg, 8)
+  behavior:  meredith-behavior
+  priority:  5
+
+# ─────────────────────────────────────────────────────────
+# Schedule
+# ─────────────────────────────────────────────────────────
+
+"Each period transition: move Meredith to her scheduled room or despawn her at night."
+schedule period-cycle:
+  every:  [period: +1]
+  offset: [period: 0]
+  fn:
+    when world/period-index = 7:
+      when path-exists? npcs/meredith:
+        despawn! npcs 'meredith
+    when world/period-index != 7:
+      when path-exists? npcs/meredith:
+        set! npcs/meredith/location (meredith-room-for world/period-index)
+        set! npcs/meredith/disposition 'welcoming
+      when not (path-exists? npcs/meredith):
+        spawn! npcs 'meredith NpcRecord(location: (meredith-room-for world/period-index), disposition: 'welcoming)
+    send! meredith-actor (MeredithMsg/rapport-gain amount: 0)
+
+# ─────────────────────────────────────────────────────────
+# Hook
+# ─────────────────────────────────────────────────────────
+
+"After every move-to, grant room-discovery knowledge flags on first entry."
+hook after: move-to:
+  when player/location = 'study:
+    when not ('knows-harrow-research in player/knowledge):
+      add! player/knowledge 'knows-harrow-research
+  when player/location = 'attic:
+    when not ('knows-occult-geometry in player/knowledge):
+      add! player/knowledge 'knows-occult-geometry
+  when player/location = 'basement:
+    when not ('knows-strange-sounds in player/knowledge):
+      add! player/knowledge 'knows-strange-sounds
+    when not ('knows-basement-exists in player/knowledge):
+      add! player/knowledge 'knows-basement-exists
+  when player/location = 'chamber:
+    when not ('knows-the-mechanism in player/knowledge):
+      add! player/knowledge 'knows-the-mechanism
+
+# ─────────────────────────────────────────────────────────
+# Watches
+# ─────────────────────────────────────────────────────────
+
+watch world/phase         "Phase"
+watch world/period        "Period"
+watch world/day           "Day"
+watch player/rapport      "Rapport"
+watch player/wariness     "Wariness"
+watch player/location     "Location"
+watch-when world/phase = 'uneasy      "The house feels different now."
+watch-when world/phase = 'revelation  "The truth of Harrow House is laid bare."
+watch-when 'knows-the-truth in player/knowledge  "You know what the vigil truly guards."
+
+# ─────────────────────────────────────────────────────────
+# Verify
+# ─────────────────────────────────────────────────────────
+
+verify "rapport always in bounds":
+  verify-always player/rapport >= 0 and player/rapport <= 10
+
+verify "wariness always in bounds":
+  verify-always player/wariness >= 0 and player/wariness <= 5
+
+verify "phase transitions are monotone":
+  verify-always not (world/phase = 'revelation and not ('knows-the-vigil in player/knowledge))
+
+verify "uneasy requires knows-harrow-research":
+  verify-always (world/phase = 'prosaic) or ('knows-harrow-research in player/knowledge)
+
+verify "day count non-negative":
+  verify-always world/day >= 0
+
+# ─────────────────────────────────────────────────────────
+# Pure functions
+# ─────────────────────────────────────────────────────────
+
+"Room where Meredith should be at the given period index."
+fn meredith-room-for idx:
+  match idx:
+    0: 'kitchen
+    1: 'library
+    2: 'parlour
+    3: 'dining
+    4: 'garden
+    5: 'landing
+    6: 'kitchen
+    7: 'bedroom
+    _: 'library
+
+"Period enum corresponding to a 0-7 period index."
+fn period-for-index idx:
+  match idx:
+    0: 'dawn
+    1: 'morning
+    2: 'mid-morning
+    3: 'noon
+    4: 'afternoon
+    5: 'late-afternoon
+    6: 'evening
+    7: 'night
+    _: 'morning
+
+"True if Meredith is spawned and shares the player's current location."
+fn meredith-here?:
+  path-exists? npcs/meredith  and  npcs/meredith/location = player/location
+
+"True if Meredith is here and willing to converse."
+fn meredith-receptive?:
+  meredith-here?  and  npcs/meredith/disposition != 'absent  and  npcs/meredith/disposition != 'withdrawn
+
+"True if the player carries the given item."
+fn has-item? item:
+  item in player/inventory
+
+"True if the player has the given knowledge flag."
+fn knows? flag:
+  flag in player/knowledge
+
+"True if the exit to the given room is currently open."
+fn can-go? room:
+  room in (adjacent? house-exits player/location)
+
+"True if the given room has uncollected items."
+fn room-has-items? room:
+  not (empty? (adjacent? room-items room))
+
+"True if ready to transition from prosaic to uneasy."
+fn can-enter-uneasy?:
+  world/phase = 'prosaic  and  knows? 'knows-harrow-research
+
+"True if ready to transition from uneasy to revelation."
+fn can-enter-revelation?:
+  world/phase = 'uneasy  and  knows? 'knows-the-vigil
+
+"True if the player has both early notebooks (prerequisite for asking about the vigil)."
+fn has-early-notebooks?:
+  ('harrow-notebook-1 in player/inventory)  and  ('harrow-notebook-2 in player/inventory)
+
+"True if the player has all three notebooks (prerequisite for the offered-hand ending)."
+fn has-all-notebooks?:
+  ('harrow-notebook-1 in player/inventory)  and  ('harrow-notebook-2 in player/inventory)  and  ('harrow-notebook-3 in player/inventory)
+
+"True if the player can ask Meredith about the strange sounds."
+fn can-ask-sounds?:
+  meredith-receptive?  and  world/phase != 'prosaic  and  not asked/sounds
+
+"True if the player can ask Meredith about the vigil."
+fn can-ask-vigil?:
+  meredith-receptive?  and  world/phase = 'uneasy  and  player/rapport >= 7  and  has-early-notebooks?  and  not asked/the-vigil
+
+"True if the player can ask about the basement."
+fn can-ask-basement?:
+  meredith-receptive?  and  world/phase != 'prosaic  and  player/rapport >= 5  and  not asked/basement
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+"Spawn Meredith in the library for the opening morning."
+fn init-game:
+  spawn! npcs 'meredith NpcRecord(location: 'library, disposition: 'welcoming)
+
+"Move to an adjacent accessible room."
+fn move-to room:
+  pre: can-go? room
+  set! player/location room
+
+"Advance to the next time period and handle the daily reset."
+fn advance-period:
+  pre: world/day < 30
+  let new-index = world/period-index + 1
+  when new-index >= 8:
+    set! world/period-index 0
+    set! world/period 'dawn
+    inc! world/day 1
+    when player/wariness > 0:
+      dec! player/wariness 1
+  when new-index < 8:
+    set! world/period-index new-index
+    set! world/period (period-for-index new-index)
+  time-inc! period: 1
+
+"Pick up an item from the current room. Unlocks door edges when keys are collected."
+fn pick-up item:
+  pre: item in (adjacent? room-items player/location)
+  pre: not (item in player/inventory)
+  add! player/inventory item
+  unrelate! room-items player/location item
+  when item = 'attic-key:
+    relate! house-exits 'landing 'attic
+    relate! house-exits 'attic 'landing
+  when item = 'basement-key:
+    relate! house-exits 'kitchen 'basement
+    relate! house-exits 'basement 'kitchen
+
+"Read a Harrow notebook to gain knowledge."
+fn read-notebook notebook:
+  pre: notebook in player/inventory
+  match notebook:
+    'harrow-notebook-1:
+      add! player/knowledge 'knows-harrow-research
+      add! player/knowledge 'knows-family-strain
+      when can-enter-uneasy?:
+        enter-uneasy
+    'harrow-notebook-2:
+      add! player/knowledge 'knows-occult-geometry
+      add! player/knowledge 'knows-ritual-purpose
+    'harrow-notebook-3:
+      add! player/knowledge 'knows-the-truth
+    _: pass
+
+"Illuminate the oil lamp."
+fn light-lamp:
+  pre: has-item? 'oil-lamp
+  pre: world/ambient-light
+  set! world/ambient-light false
+
+"Activate the mechanism in the basement to open the sub-basement passage."
+fn activate-mechanism:
+  pre: player/location = 'basement
+  pre: has-item? 'mechanism-token
+  pre: has-item? 'oil-lamp
+  pre: not world/ambient-light
+  add! player/knowledge 'knows-the-mechanism
+  relate! house-exits 'basement 'chamber
+  relate! house-exits 'chamber 'basement
+
+"Transition to phase 2: uneasy."
+fn enter-uneasy:
+  pre: world/phase = 'prosaic
+  pre: knows? 'knows-harrow-research
+  set! world/phase 'uneasy
+
+"Transition to phase 3: revelation."
+fn enter-revelation:
+  pre: world/phase = 'uneasy
+  pre: knows? 'knows-the-vigil
+  set! world/phase 'revelation
+
+"Process Meredith's actor inbox."
+fn meredith-behavior:
+  for msg in meredith-actor/inbox:
+    match msg:
+      rapport-gain {amount}:
+        when amount > 0:
+          inc! player/rapport amount
+          when player/rapport > 10:
+            set! player/rapport 10
+      force-depart:
+        when path-exists? npcs/meredith:
+          set! npcs/meredith/disposition 'absent
+          despawn! npcs 'meredith
+
+# ─────────────────────────────────────────────────────────
+# Dialog functions
+# ─────────────────────────────────────────────────────────
+
+"Ask about the Harrow family history."
+fn ask-about-family-history:
+  pre: meredith-receptive?
+  set! asked/family-history true
+  add! player/knowledge 'knows-harrow-history
+  send! meredith-actor (MeredithMsg/rapport-gain amount: 1)
+
+"Ask what the Professor was actually working on. Requires rapport >= 4."
+fn ask-about-harrow-research:
+  pre: meredith-receptive?
+  pre: player/rapport >= 4
+  set! asked/harrow-research true
+  add! player/knowledge 'knows-harrow-research
+  send! meredith-actor (MeredithMsg/rapport-gain amount: 1)
+  when can-enter-uneasy?:
+    enter-uneasy
+
+"Ask about the locked study. Gives key in phase 2+ at rapport >= 6."
+fn ask-about-locked-study:
+  pre: meredith-receptive?
+  set! asked/locked-study true
+  when world/phase = 'prosaic:
+    inc! player/wariness 1
+  when world/phase != 'prosaic and player/rapport >= 6:
+    add! player/inventory 'study-key
+    relate! house-exits 'landing 'study
+    relate! house-exits 'study 'landing
+  when world/phase != 'prosaic and player/rapport < 6:
+    inc! player/wariness 1
+
+"Ask about the sounds from below. Uses classify-approach to shade the response."
+fn ask-about-sounds:
+  pre: can-ask-sounds?
+  set! asked/sounds true
+  let approach = (classify-approach ?? 'welcoming)
+  when approach != 'withdrawn:
+    add! player/knowledge 'knows-strange-sounds
+  inc! player/wariness 1
+  when player/wariness >= 5:
+    send! meredith-actor (MeredithMsg/force-depart)
+
+"Ask directly about the basement. Raises wariness sharply."
+fn ask-about-basement:
+  pre: can-ask-basement?
+  set! asked/basement true
+  add! player/knowledge 'knows-basement-exists
+  inc! player/wariness 2
+  when player/wariness > 5:
+    set! player/wariness 5
+  when player/wariness >= 5:
+    send! meredith-actor (MeredithMsg/force-depart)
+
+"Ask what Meredith actually does in the house."
+fn ask-about-her-work:
+  pre: meredith-receptive?
+  set! asked/her-work true
+  when player/rapport >= 5:
+    send! meredith-actor (MeredithMsg/rapport-gain amount: 1)
+  when player/rapport < 5:
+    inc! player/wariness 1
+  when world/phase = 'revelation:
+    add! player/knowledge 'knows-ritual-purpose
+
+"Ask about the vigil. Only in uneasy at rapport >= 7 with two notebooks."
+fn ask-about-the-vigil:
+  pre: can-ask-vigil?
+  set! asked/the-vigil true
+  add! player/knowledge 'knows-the-vigil
+  send! meredith-actor (MeredithMsg/rapport-gain amount: 2)
+  when can-enter-revelation?:
+    enter-revelation
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene prologue:
+  HARROW HOUSE
+
+  Southern Ohio, late autumn. The Harrow estate sits at the end of a gravel road --
+  three storeys of Victorian brick behind a rusted iron gate. You have been invited in.
+  The exact reason has been left deliberately vague by both parties.
+
+  The woman who answered your letter is named Meredith Harrow. She is the last of her
+  family. The house has not been significantly altered since the nineteen-twenties.
+
+  * Enter the house
+    init-game
+    -> foyer
+
+# ── Rooms ─────────────────────────────────────────────────────────────────────
+
+scene foyer:
+  THE ENTRANCE FOYER
+
+  if world/phase = 'prosaic:
+    The hallway smells of cedar and old paper. Afternoon light filters through
+    the transom above the door. Portraits of Harrow ancestors line the panelled walls.
+  else:
+    if world/phase = 'uneasy:
+      The portraits seem to watch you differently today. You cannot say exactly how.
+      The light through the transom is the same light -- and yet.
+    else:
+      Something below the house is patient. You understand now why she does not sleep.
+      The foyer feels like the mouth of something that has not yet decided to close.
+
+  Period: {world/period}. Day {world/day}. Rapport: {player/rapport}. Wariness: {player/wariness}.
+
+  [meredith-here?] Meredith stands near the door, politely watchful.
+
+  * [can-go? 'parlour] Go to the parlour
+    move-to 'parlour
+    -> parlour
+
+  * [can-go? 'dining] Go to the dining room
+    move-to 'dining
+    -> dining
+
+  * [can-go? 'landing] Climb the stairs to the upper landing
+    move-to 'landing
+    -> landing
+
+  * [can-go? 'library] Enter the ground-floor library
+    move-to 'library
+    -> library
+
+  * [meredith-here?] Speak with Meredith
+    => talk-meredith
+
+  * Wait until the next period
+    advance-period
+    -> foyer
+
+scene parlour:
+  THE PARLOUR
+
+  if world/phase = 'prosaic:
+    A faded room. Heavy drapes, a cold fireplace, furniture arranged as if for guests
+    who stopped arriving decades ago. Everything is clean and nothing is comfortable.
+  else:
+    if world/phase = 'uneasy:
+      The chairs face inward at angles that seem slightly wrong since your last visit.
+      The fireplace has been lit but the smoke does not rise the way smoke should.
+    else:
+      You avoid the corner where the wallpaper pattern refuses to resolve into anything
+      your eye can hold. You stopped trying to look at it directly two days ago.
+
+  [meredith-here?] Meredith is seated at the escritoire, not writing.
+
+  * [can-go? 'foyer] Return to the foyer
+    move-to 'foyer
+    -> foyer
+
+  * [can-go? 'dining] Go to the dining room
+    move-to 'dining
+    -> dining
+
+  * [meredith-here?] Speak with Meredith
+    => talk-meredith
+
+  * Wait until the next period
+    advance-period
+    -> parlour
+
+scene dining:
+  THE DINING ROOM
+
+  if world/phase = 'prosaic:
+    A long table, eight chairs, one place set. A sideboard holds crystal decanters
+    not refilled in years. Everything is kept in readiness for an occasion that has
+    stopped coming.
+  else:
+    if world/phase = 'uneasy:
+      The table has been cleared since morning. A faint smell of something not quite
+      food drifts from the direction of the kitchen. Meredith does not comment.
+    else:
+      Seven of the eight chairs have been turned to face the wall. You did not do that.
+      You are certain you did not do that.
+
+  [meredith-here?] Meredith is eating, or appearing to eat. She invites you to sit.
+
+  * [can-go? 'foyer] Go back to the foyer
+    move-to 'foyer
+    -> foyer
+
+  * [can-go? 'parlour] Go to the parlour
+    move-to 'parlour
+    -> parlour
+
+  * [can-go? 'kitchen] Go to the kitchen
+    move-to 'kitchen
+    -> kitchen
+
+  * [meredith-here?] Speak with Meredith
+    => talk-meredith
+
+  * Wait until the next period
+    advance-period
+    -> dining
+
+scene kitchen:
+  THE KITCHEN
+
+  if world/phase = 'prosaic:
+    A kettle on the range. Everything ordered and exactly where it should be. The kitchen
+    is the most lived-in room in the house -- the only one that feels inhabited.
+  else:
+    if world/phase = 'uneasy:
+      The kettle has been moved to a burner that is not connected to the gas. Meredith
+      does not appear to notice when you mention it.
+    else:
+      There is a door in the kitchen wall that you did not see on the first day.
+      It leads down. Of course it does.
+
+  [meredith-here?] Meredith is here -- either preparing something or cleaning up from it.
+
+  * [can-go? 'dining] Go to the dining room
+    move-to 'dining
+    -> dining
+
+  * [can-go? 'garden] Go out to the rear garden
+    move-to 'garden
+    -> garden
+
+  * [can-go? 'basement] Descend to the basement
+    move-to 'basement
+    -> basement
+
+  * [meredith-here?] Speak with Meredith
+    => talk-meredith
+
+  * Wait until the next period
+    advance-period
+    -> kitchen
+
+scene garden:
+  THE REAR GARDEN
+
+  if world/phase = 'prosaic:
+    Overgrown but not wild. Someone tends this space with care if not with artistry.
+    A stone bench. Bare rose canes. The smell of turned earth even in late autumn.
+  else:
+    if world/phase = 'uneasy:
+      The geometry of the garden paths is subtly off -- the angles at the corner hedges
+      do not add up. You pace it out and the measurements do not agree with each other.
+    else:
+      You have stopped walking the perimeter. Whatever is at the north end of the garden
+      is not something you need to confirm with your eyes.
+
+  [meredith-here?] Meredith kneels at a flower bed, doing something with her hands.
+
+  * [can-go? 'kitchen] Go back inside through the kitchen
+    move-to 'kitchen
+    -> kitchen
+
+  * [meredith-here?] Speak with Meredith
+    => talk-meredith
+
+  * Wait until the next period
+    advance-period
+    -> garden
+
+scene library:
+  THE GROUND-FLOOR LIBRARY
+
+  if world/phase = 'prosaic:
+    Floor-to-ceiling shelves. Architecture, history, natural philosophy -- the library
+    of a Victorian gentleman with catholic tastes. Everything is dusty except a small
+    section on the east wall, which has been read recently.
+  else:
+    if world/phase = 'uneasy:
+      You have been through the recently-read section twice. The titles are ordinary.
+      The marginalia in the professor's hand are not. You try not to read them too carefully.
+    else:
+      Three of the books on the east shelf have no titles. Their spines are blank.
+      You have not opened them. You do not intend to open them.
+
+  [meredith-here?] Meredith is here, standing before the recently-read section.
+
+  * [can-go? 'foyer] Return to the foyer
+    move-to 'foyer
+    -> foyer
+
+  * [meredith-here?] Speak with Meredith
+    => talk-meredith
+
+  * Wait until the next period
+    advance-period
+    -> library
+
+scene landing:
+  THE UPPER LANDING
+
+  if world/phase = 'prosaic:
+    A wide landing with three doors. One stands open -- a linen closet, nothing more.
+    The door at the end is Meredith's room. A third door, beside the stairs, is locked.
+  else:
+    if world/phase = 'uneasy:
+      You can see, in the gap under Meredith's door, that her light burns at hours
+      that are not sleeping hours. You do not knock. She does not invite you to.
+    else:
+      The locked study door is open now. Meredith watches which way you walk when
+      you reach the top of the stairs.
+
+  [meredith-here?] Meredith is at the writing desk at the far end of the landing.
+
+  * [can-go? 'foyer] Descend to the foyer
+    move-to 'foyer
+    -> foyer
+
+  * [can-go? 'study] Enter the Professor's study
+    move-to 'study
+    -> study
+
+  * [can-go? 'attic] Climb to the attic
+    move-to 'attic
+    -> attic
+
+  * [meredith-here?] Speak with Meredith
+    => talk-meredith
+
+  * Wait until the next period
+    advance-period
+    -> landing
+
+scene study:
+  THE PROFESSOR'S STUDY
+
+  if world/phase = 'uneasy:
+    Books that do not resemble the books downstairs. Diagrams on loose paper.
+    A desk covered in correspondence in a cramped, urgent hand. The room smells
+    of tobacco and something else -- metallic, faintly wrong.
+  else:
+    The diagrams show the sub-basement. The thing in the sub-basement. The relationship
+    between the two. You understand now why the professor never published.
+
+  [room-has-items? 'study] Items on the desk: {adjacent? room-items 'study}.
+
+  * [can-go? 'landing] Return to the upper landing
+    move-to 'landing
+    -> landing
+
+  * ['attic-key in (adjacent? room-items 'study)] Take the attic key
+    pick-up 'attic-key
+    -> study
+
+  * ['basement-key in (adjacent? room-items 'study)] Take the basement key
+    pick-up 'basement-key
+    -> study
+
+  * ['harrow-notebook-1 in (adjacent? room-items 'study)] Take the Professor's first notebook
+    pick-up 'harrow-notebook-1
+    -> study
+
+  * ['harrow-notebook-1 in player/inventory and not (knows? 'knows-family-strain)] Read the first notebook
+    read-notebook 'harrow-notebook-1
+    -> study
+
+  * [can-enter-uneasy?] The books here change everything you thought you understood.
+    enter-uneasy
+    -> study
+
+  * Wait until the next period
+    advance-period
+    -> study
+
+scene attic:
+  THE ATTIC
+
+  if world/phase = 'uneasy:
+    Low rafters. Dust undisturbed except in a cleared space near the east chimney.
+    Someone has been working up here -- the work involves chalk, string, and something
+    that has left a brown stain on the floor that you do not examine closely.
+  else:
+    The cleared space is larger than you remember. The chalk diagrams have been extended.
+    They are the same diagrams as in the professor's study, but as if seen from above.
+
+  [room-has-items? 'attic] Items here.
+
+  * [can-go? 'landing] Climb back down to the landing
+    move-to 'landing
+    -> landing
+
+  * ['harrow-notebook-2 in (adjacent? room-items 'attic)] Take the second notebook
+    pick-up 'harrow-notebook-2
+    -> attic
+
+  * ['oil-lamp in (adjacent? room-items 'attic)] Take the oil lamp
+    pick-up 'oil-lamp
+    -> attic
+
+  * ['harrow-notebook-2 in player/inventory and not (knows? 'knows-ritual-purpose)] Read the second notebook
+    read-notebook 'harrow-notebook-2
+    -> attic
+
+  * Wait until the next period
+    advance-period
+    -> attic
+
+scene basement:
+  THE BASEMENT
+
+  if world/phase = 'uneasy:
+    The air is wrong down here. Not cold -- simply wrong, in a way your body registers
+    before your mind does. Stone walls. Old oak shelving. And a mechanism set into the
+    far wall: brass and iron, shaped like nothing you have a name for.
+  else:
+    You have come back three times now. Each time the mechanism has moved slightly
+    from where you left it. It is not motorised. There is no motor. It moves.
+
+  [room-has-items? 'basement] The mechanism-token glints on the shelf near the device.
+  [has-item? 'mechanism-token and has-item? 'oil-lamp and not world/ambient-light] The lamp and token are ready.
+
+  * [can-go? 'kitchen] Return to the kitchen
+    move-to 'kitchen
+    -> kitchen
+
+  * [can-go? 'chamber] Descend to the sub-basement
+    move-to 'chamber
+    -> chamber
+
+  * ['mechanism-token in (adjacent? room-items 'basement)] Take the mechanism-token
+    pick-up 'mechanism-token
+    -> basement
+
+  * [has-item? 'oil-lamp and world/ambient-light] Light the oil lamp
+    light-lamp
+    -> basement
+
+  * [has-item? 'mechanism-token and has-item? 'oil-lamp and not world/ambient-light] Activate the mechanism
+    activate-mechanism
+    -> basement
+
+  * Wait until the next period
+    advance-period
+    -> basement
+
+scene chamber:
+  THE SUB-BASEMENT
+
+  The angles of this room do not add up. You have measured them. They do not add up.
+
+  if world/phase = 'uneasy:
+    Something is present here in the same way that a word is present on the tip of
+    your tongue. You feel it without seeing it. You understand that this is by design.
+  else:
+    You understand now. The Professor understood. Meredith understands. The thing at
+    the centre of the house understands you in return, and has been waiting with the
+    patience of something that does not experience time the way you do.
+
+  [room-has-items? 'chamber] The third notebook lies on a stone ledge.
+
+  * [can-go? 'basement] Return to the basement
+    move-to 'basement
+    -> basement
+
+  * ['harrow-notebook-3 in (adjacent? room-items 'chamber)] Take the third notebook
+    pick-up 'harrow-notebook-3
+    -> chamber
+
+  * ['harrow-notebook-3 in player/inventory and not (knows? 'knows-the-truth)] Read the third notebook
+    read-notebook 'harrow-notebook-3
+    -> chamber
+
+  * [knows? 'knows-the-truth and player/rapport >= 8] Leave without disturbing anything.
+    -> ending-vigil-continues
+
+  * [has-item? 'mechanism-token and not (knows? 'knows-the-truth)] Activate the mechanism-token.
+    -> ending-mechanism-fails
+
+  * [knows? 'knows-the-truth and player/rapport >= 9 and has-all-notebooks?] Accept Meredith's offer.
+    -> ending-offered-hand
+
+# ── Meredith Dialog Sub-Scene ─────────────────────────────────────────────────
+
+scene talk-meredith:
+  Meredith Harrow -- {world/period}.
+
+  if world/phase = 'prosaic:
+    She meets your questions with the precise, unhurried manner of someone who has
+    rehearsed being pleasant for a long time.
+  else:
+    if world/phase = 'uneasy:
+      Something has shifted in how she looks at you. As if she is deciding something.
+    else:
+      She is tired. Not frightened -- she has not been frightened for years. But tired.
+
+  Rapport: {player/rapport}. Wariness: {player/wariness}.
+
+  [player/wariness >= 3] She is giving brief answers. You have pressed too hard on something.
+  [not meredith-receptive?] Meredith is not available to speak right now.
+
+  * [meredith-receptive? and not asked/family-history] Ask about her grandfather and the family history.
+    ask-about-family-history
+    <-
+
+  * [meredith-receptive? and asked/family-history and world/phase = 'prosaic] Ask what he was like as a man.
+    ask-about-family-history
+    <-
+
+  * [meredith-receptive? and player/rapport >= 4 and not asked/harrow-research] Ask what the Professor was actually working on.
+    ask-about-harrow-research
+    <-
+
+  * [meredith-receptive? and not asked/locked-study] Ask about the locked room upstairs.
+    ask-about-locked-study
+    <-
+
+  * [meredith-receptive? and asked/locked-study and world/phase != 'prosaic and not ('study-key in player/inventory) and player/rapport >= 6] Ask again -- you need to see the study.
+    ask-about-locked-study
+    <-
+
+  * [can-ask-sounds?] Ask about the sounds from beneath the house.
+    ask-about-sounds
+    <-
+
+  * [can-ask-basement?] Press her directly about the basement.
+    ask-about-basement
+    <-
+
+  * [meredith-receptive? and not asked/her-work] Ask what she actually does here in the house.
+    ask-about-her-work
+    <-
+
+  * [can-ask-vigil?] Ask about the vigil -- you have read both notebooks and you need to understand.
+    ask-about-the-vigil
+    <-
+
+  * End the conversation.
+    <-
+
+# ── Endings ──────────────────────────────────────────────────────────────────
+
+scene ending-vigil-continues:
+  You leave the sub-basement without touching anything.
+
+  You find Meredith in the foyer, as if she knew you were coming.
+  She does not ask what you found. She hands you your coat.
+
+  You understand, she says. Not a question.
+
+  You say that you do.
+
+  Then you understand why no one can know.
+
+  You nod. She opens the front door. The gravel drive, the rusted gate, the ordinary
+  road beyond it -- they have never looked so much like safety.
+
+  She watches you leave from the doorstep. At the gate you look back.
+  She is already closing the door.
+
+  The vigil continues. Day {world/day}. Rapport {player/rapport}.
+
+  * Reflect.
+    -> ending-vigil-continues
+
+scene ending-mechanism-fails:
+  You press the mechanism-token into the device.
+
+  Something below the house wakes up.
+
+  Not in the way things usually wake -- not gradually, not with confusion. It wakes
+  the way a patient animal wakes when a door it has been pressing against is finally
+  opened from the other side.
+
+  You run. This is the correct response.
+
+  What happens to Meredith Harrow is not shown. This is also correct.
+
+  Day {world/day}. The vigil is ended. What follows is not your story.
+
+  * Accept the outcome.
+    -> ending-mechanism-fails
+
+scene ending-offered-hand:
+  Meredith finds you in the sub-basement. She does not seem surprised.
+
+  You have read all three notebooks, she says. You confirm it.
+
+  Then you understand what I am asking.
+
+  She looks at the thing at the centre of the room -- the thing that must not be named,
+  must not be left untended, must not be permitted to finish what the Professor began
+  by accident in 1887.
+
+  She extends her hand. Stay. Learn the intervals. Learn what it responds to.
+
+  You look at her hand. You look at the door.
+
+  The choice is yours. The story does not tell you what you chose.
+  That is the only mercy the house has left to offer.
+
+  Day {world/day}. Rapport {player/rapport}. All three notebooks in hand.
+
+  * Accept.
+    -> ending-offered-hand
+
+  * Decline.
+    -> ending-offered-hand

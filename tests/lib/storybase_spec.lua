@@ -63,6 +63,11 @@ describe("game object", function()
     assert.equal("main", g:current_scene())
   end)
 
+  it("scene() is an alias for current_scene()", function()
+    local g = make()
+    assert.equal(g:current_scene(), g:scene())
+  end)
+
   it("render returns narration and choices", function()
     local g = make()
     local narr, choices = g:render()
@@ -71,6 +76,27 @@ describe("game object", function()
     assert.equal(2, #choices)
     assert.equal("Earn",   choices[1].label)
     assert.equal("Finish", choices[2].label)
+  end)
+
+  it("choices() returns only the choice list", function()
+    local g = make()
+    local choices = g:choices()
+    assert.is_table(choices)
+    assert.equal(2, #choices)
+    assert.equal("Earn",   choices[1].label)
+    assert.equal("Finish", choices[2].label)
+  end)
+
+  it("pick() selects first choice matching a substring", function()
+    local g = make()
+    assert.is_true(g:pick("Earn"))
+    assert.equal(10, g:get("world/gold"))
+  end)
+
+  it("pick() returns false when no matching choice exists", function()
+    local g = make()
+    assert.is_false(g:pick("nonexistent-choice-xyz"))
+    assert.equal(0, g:get("world/gold"))  -- no side effect
   end)
 
   -- ── get ──────────────────────────────────────────────────────────

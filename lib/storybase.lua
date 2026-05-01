@@ -151,6 +151,33 @@ function M._make_game(game_table)
     return self._eng:current_scene()
   end
 
+  --- Alias for current_scene().
+  ---@return string?
+  function self:scene()
+    return self:current_scene()
+  end
+
+  --- Return only the choices for the current scene (no narration).
+  ---@return table  list of {index, label}
+  function self:choices()
+    local _, choices = self:render()
+    return choices
+  end
+
+  --- Choose the first visible choice whose label contains `substr` (case-insensitive).
+  --- Returns true on success, false if no matching choice exists.
+  ---@param substr string
+  ---@return boolean
+  function self:pick(substr)
+    local lsub = substr:lower()
+    for _, c in ipairs(self:choices()) do
+      if c.label:lower():find(lsub, 1, true) then
+        return self:choose(c.index)
+      end
+    end
+    return false
+  end
+
   -- ── Player input ──────────────────────────────────────────
 
   --- Dispatch a player choice by 1-based visible index.
