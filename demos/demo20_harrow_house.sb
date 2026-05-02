@@ -893,38 +893,65 @@ scene talk-meredith:
 
   * [meredith-receptive? and not asked/family-history] Ask about her grandfather and the family history.
     ask-about-family-history
+    say Meredith: He built this house in 1871 and resigned his position at Oberlin in 1882. He never explained why to anyone's satisfaction. After that he was here. The house was his work, and the work was everything.
     <-
 
   * [meredith-receptive? and asked/family-history and world/phase = 'prosaic] Ask what he was like as a man.
     ask-about-family-history
+    say Meredith: Precise. He kept records of everything -- correspondence, measurements, observations going back forty years. I have read all of it. He was not a man given to sentiment, which I think made what happened to him harder than it needed to be.
     <-
 
   * [meredith-receptive? and player/rapport >= 4 and not asked/harrow-research] Ask what the Professor was actually working on.
     ask-about-harrow-research
+    say Meredith: He called it resonance study. Not acoustics -- something more fundamental. He believed certain geometric configurations could function as receivers. I have been unable to determine precisely what he thought he was receiving, but I have some theories.
     <-
 
   * [meredith-receptive? and not asked/locked-study] Ask about the locked room upstairs.
     ask-about-locked-study
+    if world/phase = 'prosaic:
+      say Meredith: That was his study. It has been locked since the nineteen-twenties. I find it is easier not to open it without good reason. There is a great deal in there that requires careful handling.
+    else:
+      if player/rapport >= 6:
+        say Meredith: Yes. You should see it -- you are asking the right questions. I left the key on the library desk for you.
+      else:
+        say Meredith: Not yet. There are things in that room that are easier to understand if you already know what to look for. Give it a little more time.
     <-
 
   * [meredith-receptive? and asked/locked-study and world/phase != 'prosaic and not ('study-key in player/inventory) and player/rapport >= 6] Ask again -- you need to see the study.
     ask-about-locked-study
+    say Meredith: I understand. The key is on the library desk. Go when you are ready. There is no particular hurry -- the room has been locked for a hundred years.
     <-
 
   * [can-ask-sounds?] Ask about the sounds from beneath the house.
     ask-about-sounds
+    if player/wariness >= 4:
+      say Meredith: I think we should talk about something else.
+    else:
+      say Meredith: The house settles. It is an old building on a limestone foundation -- limestone moves, especially in cold weather. That is what I tell myself, and it is not entirely untrue.
     <-
 
   * [can-ask-basement?] Press her directly about the basement.
     ask-about-basement
+    if player/wariness >= 4:
+      say Meredith: I think this conversation is finished for today.
+    else:
+      say Meredith: The basement is a basement. Stone walls, old shelving, some equipment my grandfather left. I would prefer you did not go down there without speaking to me first.
     <-
 
   * [meredith-receptive? and not asked/her-work] Ask what she actually does here in the house.
     ask-about-her-work
+    if world/phase = 'revelation:
+      say Meredith: I keep watch. I have been keeping watch for eleven years. Before me it was my mother. Before her, her father. The work does not stop because we would prefer it to.
+    else:
+      if player/rapport >= 5:
+        say Meredith: I maintain the house and manage my grandfather's correspondence -- he left a great deal of it that still requires attention. And I continue certain of his observations. The records must be kept current.
+      else:
+        say Meredith: I look after the house. There is more to it than it appears. A house like this requires a great deal of sustained attention.
     <-
 
   * [can-ask-vigil?] Ask about the vigil -- you have read both notebooks and you need to understand.
     ask-about-the-vigil
+    say Meredith: He called it the vigil. What is in the sub-basement is not dangerous while the intervals are maintained and the observations recorded. My grandfather created the problem. My family has been managing it since 1891. Now you know. I am sorry you had to.
     <-
 
   * End the conversation.
