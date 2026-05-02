@@ -561,6 +561,53 @@ describe("debug: fn-call event", function()
 end)
 
 -- ============================================================
+-- message-sent debug event
+-- ============================================================
+
+describe("debug: message-sent event", function()
+  local SRC = [[
+module msg-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  tick: Int(0,9999) = 0
+
+actor npc:
+  inbox: String
+
+fn alert-npc:
+  send! npc "hello"
+
+scene main:
+  * Go -> main
+]]
+
+  it("message-sent event fires with correct actor name when send! is called", function()
+    local gt, errs = compile(SRC)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local msgs = {}
+    srv:on("message-sent", function(p) msgs[#msgs+1] = p end)
+
+    local ctx = eng:make_ctx("test")
+    local eval_mod = require("runtime.eval")
+    eval_mod.call_fn("alert-npc", {}, ctx)
+
+    assert.equal(1, #msgs, "message-sent should fire once")
+    assert.equal("npc", msgs[1].actor)
+    assert.equal("hello", msgs[1].msg)
+  end)
+end)
+
+-- ============================================================
 -- Hot reload
 -- ============================================================
 

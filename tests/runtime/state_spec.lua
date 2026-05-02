@@ -212,6 +212,22 @@ describe("state store: push / pop (List)", function()
     local s = new_store()
     assert.has_error(function() s:pop("history") end)
   end)
+
+  it("push on full bounded list raises LIST_OVERFLOW", function()
+    local schema = {
+      types  = {},
+      states = {
+        { kind = "scalar", path = "history",
+          type_desc = { tag = "list", max = 2, inner = { tag = "string" } } },
+      },
+    }
+    local s = new_store(schema)
+    s:push("history", "a")
+    s:push("history", "b")
+    local ok, err = pcall(function() s:push("history", "c") end)
+    assert.is_false(ok, "push beyond max should error")
+    assert.is_truthy(tostring(err):find("LIST_OVERFLOW"), "error should mention LIST_OVERFLOW")
+  end)
 end)
 
 -- ============================================================

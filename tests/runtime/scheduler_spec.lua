@@ -289,3 +289,202 @@ scene start:
   end)
 
 end)
+
+-- ── cancel-schedule! inside a schedule body ──────────────────────────────────
+
+describe("scheduler: cancel-schedule! fired from within a schedule body", function()
+
+  it("cancel-schedule! in body cancels another schedule; ctx.scheduler is wired", function()
+    -- Regression for bug: ctx.scheduler was nil in sched:tick(), so
+    -- cancel-schedule! inside a schedule body was a silent no-op.
+    local compiler = require("compiler.compiler")
+    local engine   = require("runtime.engine")
+
+    local src = [[
+module test
+  version: 1
+
+engine-config:
+  entry-scene: start
+
+time-model:
+  tick max: 9999
+
+state world:
+  flag: Bool  = false
+  count: Int(0, 99) = 0
+
+# fires at tick=2; sets flag=false and cancels counter
+schedule stopper:
+  at: [tick: +2]
+  fn:
+    set! world/flag false
+    cancel-schedule! counter
+
+# fires every tick; increments count and sets flag=true
+schedule counter:
+  every: [tick: +1]
+  fn:
+    inc! world/count 1
+    set! world/flag true
+
+scene start:
+  * Tick
+    time-inc! tick: 1
+    -> start
+]]
+    local gt, diags = compiler.compile(src, "test.sb")
+    assert.is_falsy(diags:has_errors(), "compilation should succeed")
+
+    local io_out = { write = function() end }
+    local io_in  = { read  = function() return "1" end }
+    local eng = engine.new(gt, { io_out = io_out, io_in = io_in })
+    eng:init()
+
+    -- tick=1: counter fires (count=1, flag=true); stopper not yet due
+    eng:step()
+    assert.equal(1,   eng._state:get("world/count"), "count=1 after tick 1")
+    assert.is_true(   eng._state:get("world/flag"),  "flag=true after tick 1")
+
+    -- tick=2: stopper fires and calls cancel-schedule! counter.
+    -- With ctx.scheduler now wired, the cancel takes effect and counter
+    -- is removed from _static inside this same sched:tick() call.
+    -- The names list was snapshot before iteration so counter's body
+    -- is nil-guarded; stopper must dominate the final state.
+    eng:step()
+    assert.is_false(  eng._state:get("world/flag"),  "flag=false after stopper fires")
+    assert.is_nil(eng._scheduler._static["counter"], "counter deregistered by cancel")
+
+    -- tick=3: both schedules gone; state frozen
+    local count_at_2 = eng._state:get("world/count")
+    eng:step()
+    assert.equal(count_at_2, eng._state:get("world/count"), "count frozen after cancel")
+    assert.is_false(  eng._state:get("world/flag"),  "flag stays false")
+  end)
+
+end)
+
+-- ── Imperative schedule! end-to-end ──────────────────────────────────────────
+
+describe("scheduler: imperative schedule! creates and fires a dynamic schedule", function()
+
+  it("schedule! fires inc-count every tick and counter reaches 3 after 3 turns", function()
+    local compiler = require("compiler.compiler")
+    local engine   = require("runtime.engine")
+
+    -- setup fn creates a dynamic schedule; each step advances tick by 1.
+    -- The scene body calls time-inc! and -> itself to run autonomously.
+    local src = [[
+module dynamic-sched-test
+  version: 1
+engine-config:
+  entry-scene: main
+
+state world:
+  count: Int(0, 9999) = 0
+  tick: Int(0, 9999) = 0
+
+fn inc-count:
+  inc! world/count 1
+
+fn setup-schedule:
+  schedule! 'counter every: [tick: 1] fn: inc-count
+
+scene main:
+  * Tick
+    time-inc! tick: 1
+    -> main
+]]
+    local gt, diags = compiler.compile(src, "test.sb")
+    assert.is_falsy(diags:has_errors(), "compilation should succeed")
+
+    local io_out = { write = function() end }
+    local io_in  = { read  = function() return "1" end }
+    local eng = engine.new(gt, { io_out = io_out, io_in = io_in })
+    eng:init()
+
+    -- Create the dynamic schedule by calling setup-schedule via make_ctx
+    local eval_mod = require("runtime.eval")
+    local ctx = eng:make_ctx("test")
+    eval_mod.call_fn("setup-schedule", {}, ctx)
+
+    -- Verify schedule was registered
+    assert.is_not_nil(eng._scheduler._static["counter"], "counter schedule must be registered")
+
+    -- Three turns: each step advances tick by 1 via choice body, then sched:tick fires
+    eng:step()  -- tick=1: counter fires → count=1
+    assert.equal(1, eng._state:get("world/count"), "count=1 after tick 1")
+
+    eng:step()  -- tick=2: counter fires → count=2
+    assert.equal(2, eng._state:get("world/count"), "count=2 after tick 2")
+
+    eng:step()  -- tick=3: counter fires → count=3
+    assert.equal(3, eng._state:get("world/count"), "count=3 after tick 3")
+  end)
+
+  it("dynamic schedule survives log replay (simulating save/load)", function()
+    local compiler  = require("compiler.compiler")
+    local engine    = require("runtime.engine")
+    local state_mod = require("runtime.state")
+
+    local src = [[
+module dynamic-saveload-test
+  version: 1
+engine-config:
+  entry-scene: main
+
+state world:
+  count: Int(0, 9999) = 0
+  tick: Int(0, 9999) = 0
+
+fn inc-count:
+  inc! world/count 1
+
+fn setup-schedule:
+  schedule! 'counter every: [tick: 1] fn: inc-count
+
+scene main:
+  * Tick
+    time-inc! tick: 1
+    -> main
+]]
+    local gt, diags = compiler.compile(src, "test.sb")
+    assert.is_falsy(diags:has_errors(), "compilation should succeed")
+
+    local io_out = { write = function() end }
+    local io_in  = { read  = function() return "1" end }
+    local eng = engine.new(gt, { io_out = io_out, io_in = io_in })
+    eng:init()
+
+    local eval_mod = require("runtime.eval")
+    local ctx = eng:make_ctx("test")
+    eval_mod.call_fn("setup-schedule", {}, ctx)
+
+    -- One turn before "save"
+    eng:step()  -- tick=1 → count=1
+    assert.equal(1, eng._state:get("world/count"), "count=1 before save")
+
+    -- Simulate save/load by extracting log entries and replaying them in a new engine.
+    local saved_entries = {}
+    for _, e in ipairs(eng._log:entries()) do saved_entries[#saved_entries+1] = e end
+    local saved_stack = { table.unpack(eng._scene_stack) }
+
+    -- Fresh engine: init_defaults restores initial state, then replay the log
+    local eng2 = engine.new(gt, { io_out = io_out, io_in = io_in })
+    eng2._state:init_defaults()
+    state_mod.replay(eng2._state, saved_entries)
+    eng2:register_actors_schedules()
+    eng2._scheduler:replay_log(saved_entries, gt.fns)
+    eng2._scene_stack = saved_stack
+
+    -- State preserved
+    assert.equal(1, eng2._state:get("world/count"), "count=1 after replay")
+    assert.is_not_nil(eng2._scheduler._static["counter"],
+      "counter schedule must survive log replay")
+
+    -- One more step: tick=2 → count=2
+    eng2:step()
+    assert.equal(2, eng2._state:get("world/count"), "count=2 after replay+step")
+  end)
+
+end)

@@ -1508,6 +1508,62 @@ scene main:
     assert.equal(1, rc)
     assert.is_truthy(err:find("no input file"), err)
   end)
+
+  it("--write rewrites file in-place and creates .bak backup with original content", function()
+    local original = [[module bak-test
+  version: 1
+engine-config:
+  entry-scene: main
+state world:
+  x: Int(0,10) = 0
+scene main:
+  Hello.
+  * Go
+    -> main
+]]
+    local p = tmpfile(".sb", original)
+    local bak = p .. ".bak"
+    local rc, out, err = run_cli({"format", "--write", p})
+    -- Read back the rewritten file and the backup
+    local f_new = io.open(p, "r"); local new_content = f_new and f_new:read("*a"); if f_new then f_new:close() end
+    local f_bak = io.open(bak, "r"); local bak_content = f_bak and f_bak:read("*a"); if f_bak then f_bak:close() end
+    os.remove(p); os.remove(bak)
+    assert.equal(0, rc, "--write should succeed: " .. (err or ""))
+    assert.is_not_nil(bak_content, ".bak file must exist")
+    assert.equal(original, bak_content, ".bak must contain the original source")
+    assert.is_truthy(out:find("formatted"), "stdout should mention formatted file")
+  end)
+
+  -- Regression tests for Bug #2: format --write silently corrupting node kinds.
+  -- Each test verifies (a) no placeholder comments in output, (b) idempotent.
+
+  local function check_no_placeholders(src_path, label)
+    local rc, out, err = run_cli({"format", src_path})
+    assert.equal(0, rc, label .. " format should succeed: " .. err)
+    assert.is_falsy(out:find("%(stmt:"), label .. ": unexpected (stmt:X) placeholder in output")
+    assert.is_falsy(out:find("%(decl:"), label .. ": unexpected (decl:X) placeholder in output")
+    -- Write the formatted output to a temp file and format it again; must be identical.
+    local p2 = tmpfile(".sb", out)
+    local _, out2, err2 = run_cli({"format", p2})
+    os.remove(p2)
+    assert.equal(out, out2, label .. ": formatter not idempotent: " .. err2)
+  end
+
+  it("demo13 (speaker/say/return): no placeholder comments, idempotent", function()
+    check_no_placeholders("demos/demo13_healers_ward.sb", "demo13")
+  end)
+
+  it("demo17 (map-set!/map-delete!): no placeholder comments, idempotent", function()
+    check_no_placeholders("demos/demo17_scholars_commonplace.sb", "demo17")
+  end)
+
+  it("demo08 (engine/emit, engine/checkpoint!): no placeholder comments, idempotent", function()
+    check_no_placeholders("demos/demo08_probability_engine.sb", "demo08")
+  end)
+
+  it("demo19 (engine/emit, watch): no placeholder comments, idempotent", function()
+    check_no_placeholders("demos/demo19_signal_tower.sb", "demo19")
+  end)
 end)
 
 -- ── Source-context lines in error output ──────────────────────────────────────

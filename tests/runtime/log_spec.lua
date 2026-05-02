@@ -120,6 +120,78 @@ describe("transaction log: serialise / deserialise", function()
     assert.equal("sword",  new_val[1])
     assert.equal("shield", new_val[2])
   end)
+
+  -- Special entry kinds: verify round-trip preserves kind + relevant extra fields
+
+  it("checkpoint entry round-trips with kind and fn", function()
+    local l = log_mod.new()
+    l:checkpoint("save-game")
+    local l2 = log_mod.deserialise(l:serialise())
+    local e = l2:entries()[1]
+    assert.equal("checkpoint", e.kind)
+    assert.equal("save-game",  e.fn)
+  end)
+
+  it("schedule_fired entry round-trips with schedule_name, next_fire, fired_axes", function()
+    local l = log_mod.new()
+    l:append({
+      kind          = "schedule_fired",
+      fn            = "schedule:daily-news",
+      schedule_name = "daily-news",
+      path          = nil, old = nil, ["new"] = nil,
+      time          = { tick = 10, day = 1 },
+      next_fire     = { tick = 20, day = 2 },
+      fired_axes    = { "tick" },
+    })
+    local l2 = log_mod.deserialise(l:serialise())
+    local e = l2:entries()[1]
+    assert.equal("schedule_fired",  e.kind)
+    assert.equal("daily-news",      e.schedule_name)
+    assert.equal(20,                e.next_fire and e.next_fire.tick)
+    assert.equal("tick",            e.fired_axes and e.fired_axes[1])
+  end)
+
+  it("schedule_created entry round-trips with schedule_name", function()
+    local l = log_mod.new()
+    l:append({
+      kind          = "schedule_created",
+      fn            = "setup",
+      schedule_name = "weekly-event",
+      path          = nil, old = nil, ["new"] = nil,
+      next_fire     = { tick = 7 },
+    })
+    local l2 = log_mod.deserialise(l:serialise())
+    local e = l2:entries()[1]
+    assert.equal("schedule_created", e.kind)
+    assert.equal("weekly-event",     e.schedule_name)
+    assert.equal(7,                  e.next_fire and e.next_fire.tick)
+  end)
+
+  it("conflict entry round-trips with kind preserved", function()
+    local l = log_mod.new()
+    l:append({
+      kind  = "conflict",
+      fn    = "actor-a",
+      path  = "world/count",
+      old   = 5, ["new"] = 5,
+    })
+    local l2 = log_mod.deserialise(l:serialise())
+    local e = l2:entries()[1]
+    assert.equal("conflict", e.kind)
+    assert.equal("world/count", e.path)
+  end)
+
+  it("inbox_overflow entry round-trips with kind preserved", function()
+    local l = log_mod.new()
+    l:append({
+      kind  = "inbox_overflow",
+      fn    = "actor-b",
+      path  = nil, old = nil, ["new"] = nil,
+    })
+    local l2 = log_mod.deserialise(l:serialise())
+    local e = l2:entries()[1]
+    assert.equal("inbox_overflow", e.kind)
+  end)
 end)
 
 -- ============================================================
