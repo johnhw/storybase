@@ -1,0 +1,120 @@
+module haunted-house
+  version: 1.0
+
+engine-config:
+  entry-scene: hall
+
+type ItemKind = gramophone | electrical-apparatus | dusty-tome | pocket-watch | tapestry
+
+state player:
+  inventory: Set(ItemKind, 5) = (set)
+
+fn take-item item:
+  add! player/inventory item
+
+fn collected-all?:
+  count player/inventory = 5
+
+fn has-item? item:
+  contains? player/inventory item
+
+# ─── Rooms ───────────────────────────────────────────────────────────────────
+
+scene hall:
+  The entrance hall of Ashworth Manor. Dusty portraits stare down from the walls.
+  Hallways lead east to the parlour, west to the library, and north to the kitchen.
+
+  [collected-all?] You have gathered all five strange artefacts. A faint light beckons from the front door.
+
+  * [collected-all?] Leave the manor in triumph
+    -> ending
+
+  * Go east to the parlour
+    -> parlour
+
+  * Go west to the library
+    -> library
+
+  * Go north to the kitchen
+    -> kitchen
+
+scene parlour:
+  The parlour is draped in faded red velvet. A cold hearth dominates one wall.
+  A locked iron door leads down to what must be the cellar.
+
+  [not (has-item? 'gramophone)] In the corner sits an ancient gramophone, its brass horn tarnished green.
+
+  * [not (has-item? 'gramophone)] Take the ancient gramophone
+    take-item 'gramophone
+    -> parlour
+
+  * [not (has-item? 'gramophone)] Ignore it and go back to the hall
+    -> hall
+
+  * [has-item? 'gramophone] Return to the hall
+    -> hall
+
+  * Descend to the cellar
+    -> cellar
+
+scene library:
+  Floor-to-ceiling shelves sag under the weight of neglected books.
+  A narrow stair at the back climbs to the attic.
+
+  [not (has-item? 'dusty-tome)] One book lies open on the reading table: its pages are blank except for a strange symbol on the cover.
+
+  * [not (has-item? 'dusty-tome)] Take the dusty tome
+    take-item 'dusty-tome
+    -> library
+
+  * Return to the hall
+    -> hall
+
+  * Climb to the attic
+    -> attic
+
+scene kitchen:
+  The kitchen smells of rust and damp. Pots hang from hooks overhead.
+
+  [not (has-item? 'pocket-watch)] On the windowsill you notice a cracked pocket watch, its hands frozen at midnight.
+
+  * [not (has-item? 'pocket-watch)] Take the cracked pocket watch
+    take-item 'pocket-watch
+    -> kitchen
+
+  * Return to the hall
+    -> hall
+
+scene cellar:
+  Cold stone walls, dripping pipes. The air hums faintly.
+
+  [not (has-item? 'electrical-apparatus)] Against the far wall stands a mysterious electrical apparatus — coils of copper wire wound around an iron frame, purpose unknown.
+
+  * [not (has-item? 'electrical-apparatus)] Take the mysterious electrical apparatus
+    take-item 'electrical-apparatus
+    -> cellar
+
+  * Return to the parlour
+    -> parlour
+
+scene attic:
+  Low rafters, cobwebs, and the faint smell of cedar.
+
+  [not (has-item? 'tapestry)] A moth-eaten tapestry hangs from the rafters. Strange figures are woven into it.
+
+  * [not (has-item? 'tapestry)] Take the moth-eaten tapestry
+    take-item 'tapestry
+    -> attic
+
+  * Climb back down to the library
+    -> library
+
+scene ending:
+  You step out of Ashworth Manor into the cold night air, arms full of inexplicable treasures.
+  Behind you the front door swings shut — and locks.
+  Whatever the artefacts mean, they are yours now.
+
+  Items collected: {count player/inventory} / 5.
+
+  * The End
+    -> ending

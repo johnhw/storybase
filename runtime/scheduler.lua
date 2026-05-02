@@ -157,7 +157,11 @@ function M.new(state, log)
             self._debug_server:emit("schedule-fired", { name = name, tick = tick })
           end)
         end
-        local ctx    = eval.new_ctx(self._state, fns, "schedule:" .. name)
+        local ctx    = eval.new_ctx(self._state, fns, "schedule:" .. name, self._game)
+        ctx.scheduler = self
+        ctx.debug     = self._debug_server
+        ctx.actors    = self._actors
+        ctx.rng       = self._rng
         local ok, _err = pcall(eval.eval_stmts, ss.body, ctx)
         local _ = ok  -- result unused; errors are silent
 

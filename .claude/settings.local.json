@@ -32,7 +32,18 @@
       "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase status --short)",
       "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase commit -m ':*)",
       "Bash(grep -n \"spawn\\\\|despawn\\\\|path-list\\\\|path-exists\\\\|family\\\\|for.*in\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/*.sb)",
-      "Bash(ls /mnt/c/Users/John/Dropbox/devel/storybase/*.sb)"
+      "Bash(ls /mnt/c/Users/John/Dropbox/devel/storybase/*.sb)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase stash)",
+      "Bash(git -C /mnt/c/Users/John/Dropbox/devel/storybase stash pop)",
+      "Bash(grep -B1 -A10 \"set!.*$\" /mnt/c/Users/John/Dropbox/devel/storybase/demos/demo02_merchant.sb)",
+      "Bash(grep -B1 -A8 \"set!.*$\" /mnt/c/Users/John/Dropbox/devel/storybase/demos/demo01_wanderer.sb)",
+      "Bash(grep -B1 -A6 \"^fn.*:$\\\\|^ set!.*\\\\n.*match\" /mnt/c/Users/John/Dropbox/devel/storybase/demos/demo15_spellwright.sb)",
+      "Bash(grep -n \"local cache = {}\\\\|__time.*= val\\\\|for k, v in pairs\\(ctx.state._cache\\)\" /mnt/c/Users/John/Dropbox/devel/storybase/runtime/eval.lua)",
+      "Bash(busted tests/compiler/lexer_spec.lua tests/runtime/debug_http_spec.lua)",
+      "Read(//tmp/**)",
+      "Bash(echo \"Exit: $?\")"
     ]
   }
 }

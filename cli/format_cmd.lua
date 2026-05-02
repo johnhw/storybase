@@ -66,6 +66,14 @@ local function new_buf()
 end
 
 -- ============================================================
+-- Expression / type / statement formatters (forward declarations)
+-- ============================================================
+
+local fmt_expr   -- forward declaration (defined below)
+local fmt_type   -- forward declaration (defined below)
+local fmt_stmts  -- forward declaration (defined below)
+
+-- ============================================================
 -- Helpers
 -- ============================================================
 
@@ -94,10 +102,6 @@ end
 -- Expression / type formatters (recursive)
 -- ============================================================
 
-local fmt_expr   -- forward declaration
-local fmt_type   -- forward declaration
-local fmt_stmts  -- forward declaration
-
 --- Format a type expression to a compact string.
 ---@param node table  type-expr AST node
 ---@return string
@@ -107,10 +111,11 @@ fmt_type = function(node)
   local k = node.kind
   if k == K.TYPE_BOOL   then return "Bool" end
   if k == K.TYPE_INT    then
-    if node.lo ~= nil or node.hi ~= nil then
-      local lo = node.lo ~= nil and tostring(node.lo) or ""
-      local hi = node.hi ~= nil and tostring(node.hi) or ""
-      return string.format("Int(%s, %s)", lo, hi)
+    local lo = node.min ~= nil and node.min or node.lo
+    local hi = node.max ~= nil and node.max or node.hi
+    if lo ~= nil or hi ~= nil then
+      return string.format("Int(%s, %s)", lo ~= nil and tostring(lo) or "",
+                                          hi ~= nil and tostring(hi) or "")
     end
     return "Int"
   end
@@ -121,13 +126,19 @@ fmt_type = function(node)
     return string.format("SymbolOf(%s)", node.family or "?")
   end
   if k == K.TYPE_NAMED  then return node.name or "?" end
-  if k == K.TYPE_OPTION then return fmt_type(node.inner) .. "?" end
-  if k == K.TYPE_SET    then return "Set " .. fmt_type(node.inner) end
-  if k == K.TYPE_LIST   then return "List " .. fmt_type(node.inner) end
-  if k == K.TYPE_ULIST  then return "UList " .. fmt_type(node.inner) end
+  if k == K.TYPE_OPTION then return "Option(" .. fmt_type(node.inner) .. ")" end
+  if k == K.TYPE_SET    then
+    local mx = node.max ~= nil and (", " .. tostring(node.max)) or ""
+    return "Set(" .. fmt_type(node.inner) .. mx .. ")"
+  end
+  if k == K.TYPE_LIST   then
+    local mx = node.max ~= nil and (", " .. tostring(node.max)) or ""
+    return "List(" .. fmt_type(node.inner) .. mx .. ")"
+  end
+  if k == K.TYPE_ULIST  then return "UList(" .. fmt_type(node.inner) .. ")" end
   if k == K.TYPE_UMAP then
-    return string.format("UMap %s %s",
-      fmt_type(node.key_type), fmt_type(node.val_type))
+    return string.format("UMap(%s, %s)",
+      fmt_type(node.key or node.key_type), fmt_type(node.val or node.val_type))
   end
   if k == K.TYPE_ENUM_INLINE then
     local vals = {}
@@ -147,6 +158,8 @@ end
 ---@return string
 fmt_expr = function(node)
   if not node then return "?" end
+  -- Bare string values (e.g. match wildcard "_", or family/param names)
+  if type(node) == "string" then return node end
   local K = ast.K
   local k = node.kind
 
@@ -164,7 +177,7 @@ fmt_expr = function(node)
   if k == K.MULTILINE_STRING then
     return '"""' .. (node.value or "") .. '"""'
   end
-  if k == K.SYMBOL_LIT then return "'" .. (node.value or "?") end
+  if k == K.SYMBOL_LIT then return "'" .. (node.name or "?") end
 
   if k == K.PATH_EXPR then
     local segs = {}
@@ -183,6 +196,8 @@ fmt_expr = function(node)
     for _, s in ipairs(node.segments or {}) do
       if type(s) == "string" then
         segs[#segs + 1] = s
+      elseif type(s) == "table" and s.interp then
+        segs[#segs + 1] = "{" .. s.interp .. "}"
       elseif type(s) == "table" then
         segs[#segs + 1] = "{" .. fmt_expr(s) .. "}"
       end
@@ -228,7 +243,7 @@ fmt_expr = function(node)
     for _, arm in ipairs(node.arms or {}) do
       arms[#arms + 1] = fmt_expr(arm.pattern) .. " -> " .. fmt_expr(arm.body)
     end
-    return "match " .. fmt_expr(node.subject) .. " { "
+    return "match " .. fmt_expr(node.expr or node.subject) .. " { "
            .. table.concat(arms, " | ") .. " }"
   end
 
@@ -238,31 +253,60 @@ fmt_expr = function(node)
 
   if k == K.SET_LIT then
     local items = {}
-    for _, v in ipairs(node.items or {}) do items[#items + 1] = fmt_expr(v) end
+    for _, v in ipairs(node.elements or {}) do items[#items + 1] = fmt_expr(v) end
     return "{" .. table.concat(items, ", ") .. "}"
   end
 
   if k == K.LIST_LIT then
     local items = {}
-    for _, v in ipairs(node.items or {}) do items[#items + 1] = fmt_expr(v) end
+    for _, v in ipairs(node.elements or {}) do items[#items + 1] = fmt_expr(v) end
     return "[" .. table.concat(items, ", ") .. "]"
   end
 
   if k == K.MAP_LIT then
     local items = {}
-    for _, p in ipairs(node.pairs or {}) do
-      items[#items + 1] = fmt_expr(p.key) .. " => " .. fmt_expr(p.value)
+    for _, e in ipairs(node.entries or {}) do
+      items[#items + 1] = fmt_expr(e)
     end
     return "{" .. table.concat(items, ", ") .. "}"
   end
 
-  if k == K.EMPTY_SET  then return "{}" end
+  if k == K.EMPTY_SET  then return "(set)" end
   if k == K.EMPTY_LIST then return "[]" end
-  if k == K.EMPTY_MAP  then return "{=>}" end
+  if k == K.EMPTY_MAP  then return "{}" end
 
   if k == K.LAMBDA_EXPR then
-    local params = table.concat(node.params or {}, " ")
-    return "fn " .. params .. ": " .. fmt_expr(node.body)
+    local params = "(" .. table.concat(node.params or {}, ", ") .. ")"
+    -- body is a single expr node for single-line form, or a stmt list for multi-line
+    if type(node.body) == "table" and node.body.kind then
+      return "fn" .. params .. ": " .. fmt_expr(node.body)
+    elseif type(node.body) == "table" and #node.body > 0 then
+      -- Multi-line lambda: inline first return value if available
+      for _, s in ipairs(node.body) do
+        if s.kind == "return_stmt" and s.expr then
+          return "fn" .. params .. ": " .. fmt_expr(s.expr)
+        end
+      end
+      return "fn" .. params .. ": true"
+    end
+    return "fn" .. params .. ": " .. fmt_expr(node.body)
+  end
+
+  if k == K.FIND_EXPR then
+    local fam = node.family or "?"
+    local parts = { "find " .. fam }
+    for _, cl in ipairs(node.clauses or {}) do
+      if cl.kind == "where" then
+        parts[#parts + 1] = "where: " .. fmt_expr(cl.condition)
+      elseif cl.kind == "order_by" then
+        parts[#parts + 1] = "order-by: " .. fmt_expr(cl.expr)
+      elseif cl.kind == "limit" then
+        parts[#parts + 1] = "limit: " .. fmt_expr(cl.expr)
+      elseif cl.kind == "count" then
+        parts[1] = "count " .. fam
+      end
+    end
+    return table.concat(parts, " ")
   end
 
   if k == K.RECORD_CONSTRUCTOR then
@@ -274,7 +318,21 @@ fmt_expr = function(node)
   end
 
   if k == K.PATH_AT_BEFORE then
-    return fmt_expr(node.path) .. "@@before"
+    return fmt_expr(node.path) .. "@before"
+  end
+
+  if k == K.IN_STATE_EXPR then
+    return "(in-state " .. fmt_expr(node.state_expr) .. ") " .. fmt_expr(node.inner_expr)
+  end
+
+  if k == K.EXPR_STMT then
+    return fmt_expr(node.expr)
+  end
+
+  if k == K.SLICE_EXPR then
+    local lo = node.lo ~= nil and fmt_expr(node.lo) or ""
+    local hi = node.hi ~= nil and fmt_expr(node.hi) or ""
+    return fmt_expr(node.table_expr) .. "[" .. lo .. ":" .. hi .. "]"
   end
 
   return "?"
@@ -284,7 +342,8 @@ end
 -- Statement / body formatters
 -- ============================================================
 
-local function fmt_stmt(buf, node)
+-- is_fn: true when inside a fn body (affects say speaker format)
+local function fmt_stmt(buf, node, is_fn)
   if not node then return end
   local K = ast.K
   local k = node.kind
@@ -309,11 +368,13 @@ local function fmt_stmt(buf, node)
 
   -- Entity mutations
   elseif k == K.SPAWN_MUT then
-    local s = "spawn! " .. fmt_expr(node.family) .. " " .. fmt_expr(node.key)
+    local fam = type(node.family) == "string" and node.family or fmt_expr(node.family)
+    local s = "spawn! " .. fam .. " " .. fmt_expr(node.key)
     if node.record then s = s .. " " .. fmt_expr(node.record) end
     buf.line(s)
   elseif k == K.DESPAWN_MUT then
-    buf.line("despawn! " .. fmt_expr(node.family) .. " " .. fmt_expr(node.key))
+    local fam = type(node.family) == "string" and node.family or fmt_expr(node.family)
+    buf.line("despawn! " .. fam .. " " .. fmt_expr(node.key))
 
   -- Actor messaging
   elseif k == K.SEND_MUT then
@@ -390,7 +451,7 @@ local function fmt_stmt(buf, node)
       elseif type(t) == "string" then
         buf.line(t)
       else
-        fmt_stmt(buf, t)
+        fmt_stmt(buf, t, is_fn)
       end
     end
     buf.pop()
@@ -408,7 +469,7 @@ local function fmt_stmt(buf, node)
         elseif type(t) == "string" then
           buf.line(t)
         else
-          fmt_stmt(buf, t)
+          fmt_stmt(buf, t, is_fn)
         end
       end
       buf.pop()
@@ -426,29 +487,41 @@ local function fmt_stmt(buf, node)
         buf.line("let " .. b.name .. " = " .. fmt_expr(b.expr))
       end
     end
-    fmt_stmts(buf, node.body)
+    fmt_stmts(buf, node.body, is_fn)
   elseif k == K.FOR_STMT then
+    -- Wrap iter in () when it's a fn-call with args to prevent NAMED_ARG ':' ambiguity
+    local iter_s = fmt_expr(node.iter)
+    local iter = node.iter
+    if iter and iter.kind == K.FN_CALL and iter.args and #iter.args > 0 then
+      iter_s = "(" .. iter_s .. ")"
+    end
     buf.ind()
-    buf.emit("for " .. (node.var or "?") .. " in " .. fmt_expr(node.iter) .. ":")
+    buf.emit("for " .. (node.var or "?") .. " in " .. iter_s .. ":")
     buf.nl()
     buf.push()
-    fmt_stmts(buf, node.body)
+    fmt_stmts(buf, node.body, is_fn)
+    if node.else_body and #node.else_body > 0 then
+      buf.pop()
+      buf.line("else:")
+      buf.push()
+      fmt_stmts(buf, node.else_body, is_fn)
+    end
     buf.pop()
   elseif k == K.WHILE_STMT then
     buf.ind(); buf.emit("while " .. fmt_expr(node.cond) .. ":"); buf.nl()
     buf.push()
-    fmt_stmts(buf, node.body)
+    fmt_stmts(buf, node.body, is_fn)
     buf.pop()
   elseif k == K.WHEN_STMT then
     local cond = node.condition or node.cond
     buf.ind(); buf.emit("when " .. fmt_expr(cond) .. ":"); buf.nl()
     buf.push()
-    fmt_stmts(buf, node.body)
+    fmt_stmts(buf, node.body, is_fn)
     buf.pop()
     if node.else_body and #node.else_body > 0 then
       buf.line("else:")
       buf.push()
-      fmt_stmts(buf, node.else_body)
+      fmt_stmts(buf, node.else_body, is_fn)
       buf.pop()
     end
   elseif k == K.IF_EXPR then
@@ -456,7 +529,7 @@ local function fmt_stmt(buf, node)
     buf.ind(); buf.emit("if " .. fmt_expr(node.cond) .. ":"); buf.nl()
     buf.push()
     if node.then_body then
-      fmt_stmts(buf, node.then_body)
+      fmt_stmts(buf, node.then_body, is_fn)
     elseif node.then_expr then
       buf.line(fmt_expr(node.then_expr))
     end
@@ -464,7 +537,7 @@ local function fmt_stmt(buf, node)
     if node.else_body and #node.else_body > 0 then
       buf.line("else:")
       buf.push()
-      fmt_stmts(buf, node.else_body)
+      fmt_stmts(buf, node.else_body, is_fn)
       buf.pop()
     elseif node.else_expr then
       buf.line("else:")
@@ -477,7 +550,7 @@ local function fmt_stmt(buf, node)
     buf.ind(); buf.emit("match " .. fmt_expr(node.subject or node.expr) .. ":"); buf.nl()
     buf.push()
     for _, arm in ipairs(node.arms or {}) do
-      fmt_stmt(buf, arm)
+      fmt_stmt(buf, arm, is_fn)
     end
     buf.pop()
   elseif k == K.COND_EXPR then
@@ -485,33 +558,121 @@ local function fmt_stmt(buf, node)
     buf.ind(); buf.emit("cond:"); buf.nl()
     buf.push()
     for _, arm in ipairs(node.arms or {}) do
-      fmt_stmt(buf, arm)
+      fmt_stmt(buf, arm, is_fn)
     end
     buf.pop()
   elseif k == K.EXPR_STMT then
     buf.line(fmt_expr(node.expr))
   elseif k == K.PASS_STMT then
     buf.line("pass")
+  elseif k == K.RETURN_STMT then
+    if node.expr then
+      local e = node.expr
+      if e.kind == K.MATCH_EXPR then
+        buf.ind(); buf.emit("return match " .. fmt_expr(e.expr or e.subject) .. ":"); buf.nl()
+        buf.push()
+        for _, arm in ipairs(e.arms or {}) do fmt_stmt(buf, arm, is_fn) end
+        buf.pop()
+      else
+        buf.line("return " .. fmt_expr(node.expr))
+      end
+    else
+      buf.line("return")
+    end
+  elseif k == K.MAP_SET_MUT then
+    buf.line("map-set! " .. fmt_expr(node.path)
+             .. " " .. fmt_expr(node.key)
+             .. " " .. fmt_expr(node.value))
+  elseif k == K.MAP_DELETE_MUT then
+    buf.line("map-delete! " .. fmt_expr(node.path) .. " " .. fmt_expr(node.key))
+  elseif k == K.CHECKPOINT_MUT then
+    if node.fn_name then
+      buf.line("engine/checkpoint! " .. fmt_expr(node.fn_name))
+    else
+      buf.line("engine/checkpoint!")
+    end
+  elseif k == K.EMIT_MUT then
+    local s = "engine/emit " .. fmt_expr(node.event)
+    if node.args then s = s .. " " .. fmt_expr(node.args) end
+    buf.line(s)
+  elseif k == K.NARRATION_LINE then
+    buf.line(render_text_segments(node.text or ""))
+  elseif k == K.SAY_STMT then
+    local is_sym = node.speaker and node.speaker.kind == K.SYMBOL_LIT
+    local spk_name = is_sym and node.speaker.name or nil
+    local spk_expr = not is_sym and node.speaker and ("(" .. fmt_expr(node.speaker) .. ")") or nil
+    local lines = node.lines or {}
+    if is_sym then
+      -- NAMED_ARG form works in both fn-body and scene-body: say name: text
+      local spk = spk_name
+      if #lines == 0 then
+        buf.line("say " .. spk .. ":")
+      elseif #lines == 1 then
+        buf.line("say " .. spk .. ": " .. render_text_segments(lines[1]))
+      else
+        buf.line("say " .. spk .. ":")
+        buf.push()
+        for _, ln in ipairs(lines) do buf.line(render_text_segments(ln)) end
+        buf.pop()
+      end
+    else
+      local spk = spk_expr or "?"
+      if is_fn then
+        -- fn-body form: say (expr) "text"  — quoted to preserve special chars;
+        -- fn-body parser does not consume ':' so unquoted form would include it.
+        if #lines == 0 then
+          buf.line("say " .. spk)
+        else
+          for _, ln in ipairs(lines) do
+            local txt = render_text_segments(ln)
+            -- Use quoted form to survive the lexer (handles em-dash etc.)
+            buf.line("say " .. spk .. " " .. string.format("%q", txt):gsub("\\\n", "\\n"))
+          end
+        end
+      else
+        -- scene-body form: say (expr): text
+        if #lines == 0 then
+          buf.line("say " .. spk .. ":")
+        elseif #lines == 1 then
+          buf.line("say " .. spk .. ": " .. render_text_segments(lines[1]))
+        else
+          buf.line("say " .. spk .. ":")
+          buf.push()
+          for _, ln in ipairs(lines) do buf.line(render_text_segments(ln)) end
+          buf.pop()
+        end
+      end
+    end
   elseif k == K.MATCH_ARM then
-    buf.ind(); buf.emit(fmt_expr(node.pattern) .. ":"); buf.nl()
-    buf.push()
-    fmt_stmts(buf, node.body)
-    buf.pop()
+    local pat_s = fmt_expr(node.pattern)
+    if type(node.body) == "table" and node.body.kind then
+      -- Single expression body: emit inline
+      buf.line(pat_s .. ": " .. fmt_expr(node.body))
+    else
+      buf.ind(); buf.emit(pat_s .. ":"); buf.nl()
+      buf.push()
+      fmt_stmts(buf, node.body)
+      buf.pop()
+    end
   elseif k == K.COND_ARM then
     local cond = node.condition or node.cond
-    buf.ind(); buf.emit("[" .. fmt_expr(cond) .. "]:"); buf.nl()
-    buf.push()
-    fmt_stmts(buf, node.body)
-    buf.pop()
+    if type(node.body) == "table" and node.body.kind then
+      buf.line("[" .. fmt_expr(cond) .. "]: " .. fmt_expr(node.body))
+    else
+      buf.ind(); buf.emit("[" .. fmt_expr(cond) .. "]:"); buf.nl()
+      buf.push()
+      fmt_stmts(buf, node.body)
+      buf.pop()
+    end
   else
     -- Fallback: emit a comment placeholder
     buf.line("-- (stmt:" .. tostring(k) .. ")")
   end
 end
 
-fmt_stmts = function(buf, stmts)
+fmt_stmts = function(buf, stmts, is_fn)
   for _, s in ipairs(stmts or {}) do
-    fmt_stmt(buf, s)
+    fmt_stmt(buf, s, is_fn)
   end
 end
 
@@ -542,14 +703,27 @@ local function fmt_decl(buf, decl)
     if decl.alias then s = s .. " as " .. decl.alias end
     buf.line(s)
 
+  elseif k == K.SPEAKER_DECL then
+    buf.ind(); buf.emit("speaker " .. (decl.name or "?") .. ":"); buf.nl()
+    if decl.display or decl.color then
+      buf.push()
+      if decl.display then
+        buf.line("display: " .. string.format("%q", decl.display):gsub("\\\n", "\\n"))
+      end
+      if decl.color then
+        buf.line("color: " .. string.format("%q", decl.color):gsub("\\\n", "\\n"))
+      end
+      buf.pop()
+    end
+
   elseif k == K.SCHEMA_VERSION then
     buf.line("schema-version: " .. tostring(decl.version or "?"))
 
   elseif k == K.ENGINE_CONFIG then
     buf.line("engine-config:")
     buf.push()
-    for k_name, v in pairs(decl.entries or {}) do
-      buf.line(k_name .. ": " .. tostring(v))
+    for _, entry in ipairs(decl.keys or {}) do
+      buf.line(entry.key .. ": " .. tostring(entry.value))
     end
     buf.pop()
 
@@ -568,14 +742,14 @@ local function fmt_decl(buf, decl)
 
   elseif k == K.TYPE_ENUM then
     local vals = {}
-    for _, v in ipairs(decl.values or {}) do vals[#vals + 1] = "'" .. v end
+    for _, v in ipairs(decl.values or {}) do vals[#vals + 1] = v end
     buf.line("type " .. (decl.name or "?") .. " = " .. table.concat(vals, " | "))
 
   elseif k == K.TYPE_ALIAS then
     buf.line("type " .. (decl.name or "?") .. " = " .. fmt_type(decl.type_expr))
 
   elseif k == K.TYPE_RECORD then
-    buf.ind(); buf.emit("type " .. (decl.name or "?")); buf.nl()
+    buf.ind(); buf.emit("type " .. (decl.name or "?") .. ":"); buf.nl()
     buf.push()
     -- with mixins
     for _, w in ipairs(decl.withs or {}) do
@@ -620,14 +794,11 @@ local function fmt_decl(buf, decl)
     buf.pop()
 
   elseif k == K.STATE_FAMILY then
-    local path_s = fmt_expr(decl.path)
+    local path_s = (decl.family or "?") .. "/{" .. (decl.var or "k") .. "}"
     buf.ind()
-    buf.emit("state " .. path_s .. ":")
+    buf.emit("state " .. path_s .. ": " .. fmt_type(decl.type_expr))
+    if decl.max ~= nil then buf.emit("  max: " .. tostring(decl.max)) end
     buf.nl()
-    buf.push()
-    buf.line("type: " .. fmt_type(decl.type_expr))
-    if decl.max ~= nil then buf.line("max: " .. tostring(decl.max)) end
-    buf.pop()
 
   elseif k == K.RELATION_DECL then
     local s = "relation " .. (decl.name or "?")
@@ -635,29 +806,46 @@ local function fmt_decl(buf, decl)
     buf.line(s)
 
   elseif k == K.FN_DECL then
-    buf.ind(); buf.emit("fn " .. (decl.name or "?") .. ":"); buf.nl()
+    -- Params are plain strings (param names), emitted on the fn header line.
+    local param_str = ""
+    if decl.params and #decl.params > 0 then
+      local ps = {}
+      for _, p in ipairs(decl.params) do
+        ps[#ps + 1] = type(p) == "string" and p or (p.name or "?")
+      end
+      param_str = " " .. table.concat(ps, " ")
+    end
+    buf.ind(); buf.emit("fn " .. (decl.name or "?") .. param_str .. ":"); buf.nl()
     buf.push()
+    -- pre: conditions (may be EXPR_STMT wrappers from block form)
+    local function fmt_condition(node)
+      if node.kind == K.EXPR_STMT then return fmt_expr(node.expr) end
+      return fmt_expr(node)
+    end
     if decl.pre and #decl.pre > 0 then
-      for _, p in ipairs(decl.pre) do
-        buf.line("pre: " .. fmt_expr(p))
+      if #decl.pre == 1 then
+        buf.line("pre: " .. fmt_condition(decl.pre[1]))
+      else
+        buf.line("pre:")
+        buf.push()
+        for _, p in ipairs(decl.pre) do buf.line(fmt_condition(p)) end
+        buf.pop()
       end
     end
     if decl.post and #decl.post > 0 then
-      for _, p in ipairs(decl.post) do
-        buf.line("post: " .. fmt_expr(p))
+      if #decl.post == 1 then
+        buf.line("post: " .. fmt_condition(decl.post[1]))
+      else
+        buf.line("post:")
+        buf.push()
+        for _, p in ipairs(decl.post) do buf.line(fmt_condition(p)) end
+        buf.pop()
       end
     end
     if decl.tags and #decl.tags > 0 then
       buf.line("tags: [" .. table.concat(decl.tags, ", ") .. "]")
     end
-    if decl.params and #decl.params > 0 then
-      local params = {}
-      for _, p in ipairs(decl.params) do
-        params[#params + 1] = (p.name or "?") .. ": " .. fmt_type(p.type_expr)
-      end
-      buf.line("params: " .. table.concat(params, ", "))
-    end
-    fmt_stmts(buf, decl.body)
+    fmt_stmts(buf, decl.body, true)  -- is_fn=true for fn body
     buf.pop()
 
   elseif k == K.SCENE_DECL then
@@ -717,7 +905,7 @@ local function fmt_decl(buf, decl)
           fmt_stmts(buf, item.body)
           buf.pop()
         elseif ik == K.WHEN_STMT then
-          buf.ind(); buf.emit("when " .. fmt_expr(item.cond) .. ":"); buf.nl()
+          buf.ind(); buf.emit("when " .. fmt_expr(item.condition or item.cond) .. ":"); buf.nl()
           buf.push()
           for _, t in ipairs(item.body or {}) do
             if type(t) == "table" and t.kind == "narration_line" then
@@ -782,26 +970,32 @@ local function fmt_decl(buf, decl)
     buf.pop()
 
   elseif k == K.VERIFY_DECL then
-    buf.ind(); buf.emit("verify " .. (decl.name or "?") .. ":"); buf.nl()
+    local lbl = decl.label and string.format("%q", decl.label):gsub("\\\n", "\\n") or "?"
+    buf.ind(); buf.emit("verify " .. lbl .. ":"); buf.nl()
     buf.push()
     for _, clause in ipairs(decl.clauses or {}) do
-      local ck = clause.kind
+      local ck = clause.clause_kind or clause.kind
       if ck == "always" then
-        buf.line("always: " .. fmt_expr(clause.condition))
-      elseif ck == "after" then
-        buf.ind()
-        buf.emit("after " .. (clause.fn or "?"))
-        if clause.args and #clause.args > 0 then
-          local aa = {}
-          for _, a in ipairs(clause.args) do aa[#aa + 1] = fmt_expr(a) end
-          buf.emit(" " .. table.concat(aa, " "))
-        end
-        buf.emit(":"); buf.nl()
+        buf.line("verify-always " .. fmt_expr(clause.condition))
+      elseif ck == "from_any_state" then
+        buf.line("from-any-state:")
         buf.push()
         fmt_stmts(buf, clause.body)
         buf.pop()
+      elseif ck == "after" then
+        buf.ind()
+        buf.emit("after (" .. fmt_expr(clause.condition) .. "):")
+        buf.nl()
+        buf.push()
+        for _, ae in ipairs(clause.body or {}) do
+          local expr = (ae.kind == K.EXPR_STMT) and ae.expr or ae
+          buf.line(fmt_expr(expr))
+        end
+        buf.pop()
       elseif ck == "requires" then
         buf.line("requires: " .. fmt_expr(clause.condition))
+      elseif ck == "when" then
+        buf.line("when " .. fmt_expr(clause.condition) .. ":")
       else
         buf.line("-- (clause:" .. tostring(ck) .. ")")
       end
@@ -812,7 +1006,8 @@ local function fmt_decl(buf, decl)
     buf.line("watch " .. fmt_expr(decl.path) .. " \"" .. (decl.label or "") .. "\"")
 
   elseif k == K.WATCH_WHEN_DECL then
-    buf.line("watch-when " .. fmt_expr(decl.cond) .. " \"" .. (decl.label or "") .. "\"")
+    buf.line("watch-when " .. fmt_expr(decl.condition or decl.cond)
+             .. " \"" .. (decl.label or "") .. "\"")
 
   elseif k == K.BOUNDED_DECL then
     buf.ind(); buf.emit("bounded " .. (decl.name or "?") .. ":"); buf.nl()
