@@ -290,10 +290,10 @@ occupied-by      grid-name family-name x y → key | nil
 
 ---
 
-### `runtime/engine.lua` (509 lines)
+### `runtime/engine.lua` (~530 lines)
 Game loop coordinator.
 
-- `M.new(game_table, opts)` → eng  (opts: `io_out`, `io_in`, `seed`, `debug_server`)
+- `M.new(game_table, opts)` → eng  (opts: `io_out`, `io_in`, `seed`, `debug_server`, `driver`)
 - `M.run(game_table, opts)` — blocking REPL loop
 
 **eng methods:**
@@ -306,11 +306,12 @@ eng:push_scene(name)
 eng:pop_scene()
 eng:enter_scene(name)
 eng:exit_scene()
-eng:render_scene(name)        → (text, choices[])
+eng:render_scene(name)        → (narration, choices[])
 eng:do_choice(scene_name, idx) → nav_signal
 eng:post_action()             -- run actors + scheduler after player choice
 eng:autonomous_turn()         -- actors + scheduler only (no player input)
-eng:step()                    -- render + read input + do_choice
+eng:step()                    -- render + (driver or stdin) prompt + do_choice
+eng:_render_plain(narration)  -- built-in plain-text rendering (no driver)
 eng:set_debug_server(srv)     -- wire debug server + clamp_hook
 eng:make_ctx(fn_name)         → eval ctx
 eng:render_text(text, ctx)    → string
@@ -318,7 +319,13 @@ eng:out(s)                    -- write to io_out
 eng:inp()                     → string  -- read from io_in
 ```
 
-**Internal fields:** `eng._state`, `eng._log`, `eng._fns`, `eng._scenes`, `eng._scene_stack`, `eng._actors`, `eng._scheduler`, `eng._grids`
+**Narration item structure** (returned by `render_scene`):
+- `{kind="narration", text=string}` — plain scene narration line
+- `{kind="say", speaker, display, color, text}` — speaker dialogue; `color` is hex string or nil
+
+**Driver interface** (`opts.driver`): if set, `step()` delegates to `driver:render(scene_output)` and `driver:prompt(choices)` instead of built-in I/O. `scene_output = {narration=[...], choices=[...]}`.
+
+**Internal fields:** `eng._state`, `eng._log`, `eng._fns`, `eng._scenes`, `eng._scene_stack`, `eng._actors`, `eng._scheduler`, `eng._grids`, `eng._driver`
 **Grid initialisation:** `eng:init_grids()` — creates flat cell arrays from `game_table.grids`; called by `eng:init()`.
 **ctx.grids:** populated in `make_ctx()`; points to `eng._grids` (name → `{cells,width,height,cell_type,default_val}`)
 
@@ -513,16 +520,23 @@ rng:weighted(weights, list) → value
 
 ## cli/
 
-### `cli/main.lua` (~550 lines)
+### `cli/main.lua` (~570 lines)
 - `M.main(argv)` — top-level dispatcher
 - Subcommands: `check`, `compile`, `run`, `format`, `repl`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
-- Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` / `--serve` for `run`; `--production` for `compile`/`run`
+- Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` / `--serve` / `--ui <name>` for `run`; `--production` for `compile`/`run`
 - `BOOL_FLAGS` set prevents boolean flags from eating the following positional arg
 - `--auto` / `--steps N`: non-interactive run mode; fake `io_in` always returns "1"; `--steps N` limits turns
 - `--debug`: starts debug TCP server (port 7373) + HTTP UI server (port 7374); game runs via stdin; browser panels read-only
 - `--serve`: starts HTTP UI server only (port 7374); no stdin loop; browser drives game via `do-choice`; `_serve_mode=true`
+- `--ui <name>`: load `cli/drivers/<name>.lua` and pass as `driver` in engine opts (default: `plain`)
 - `print_diags(diags, source_map?)` prints errors with source-context lines + caret indicator
 - Per-subcommand help: `storybase help <subcommand>` shows detailed usage
+
+### `cli/drivers/plain.lua`
+Plain-text UI driver (default). Renders narration as `"Speaker: text"` or bare text; numbered choice prompt; reads from stdin. Implements `{render, prompt, notify}`.
+
+### `cli/drivers/ansi.lua`
+ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true-color (`\27[38;2;R;G;Bm`) to speaker labels using their `color:` hex field; bold choice indices; dim prompt text.
 
 ### `cli/check_cmd.lua` (~115 lines)
 - `M.run(args)` — run lexer → parser → checker (no codegen); print errors/warnings with source context
@@ -643,6 +657,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/cli_integration_spec.lua` | Full CLI integration tests: all subcommands (check/compile/run/format/repl/verify/migrate) against all test*.sb + demo*.sb files; also import alias, exports:, source-context error output tests |
 | `tests/cli/lsp_spec.lua` | LSP server unit tests: build_syms (types/states/fns/actors/docs), word_at (word extraction, paths, hyphens), make_lsp_diags (severity, positions), integration with real parse+check (43 tests) |
 | `tests/cli/cli_cmd_spec.lua` | `--cli` single-step mode: fresh start, state persistence, reset, quit, error handling, game completion, checkpoint+undo (demo08), state fields, subprocess integration (35 tests) |
+| `tests/cli/drivers_spec.lua` | UI drivers: plain render/prompt/notify, ansi color escapes, --ui driver injection via engine.new (18 tests) |
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, end-to-end pipeline |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |

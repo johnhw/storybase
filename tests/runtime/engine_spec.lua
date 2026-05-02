@@ -20,6 +20,15 @@ local function compile(src)
   return result, errors
 end
 
+--- Flatten a structured narration list to a single space-joined text string.
+local function narr_text(narr)
+  local parts = {}
+  for _, item in ipairs(narr) do
+    parts[#parts + 1] = (type(item) == "table" and item.text) or tostring(item)
+  end
+  return table.concat(parts, " ")
+end
+
 --- Build a capture output stream that records lines.
 local function make_output()
   local lines = {}
@@ -235,7 +244,7 @@ describe("engine: test02_choices.sb end-to-end", function()
     eng:do_choice("room", 1)  -- pick up key
 
     local narration, _ = eng:render_scene("north-room")
-    local text = table.concat(narration, " ")
+    local text = narr_text(narration)
     assert.is_truthy(text:find("padlock") or text:find("chest") or text:find("springs") or text:find("nothing"))
   end)
 end)
@@ -854,7 +863,7 @@ scene room:
   it("renders else branch when flag is false", function()
     local eng = make_eng()
     local narr = eng:render_scene("room")
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("not set"))
   end)
 
@@ -862,7 +871,7 @@ scene room:
     local eng = make_eng()
     eng:do_choice("room", 1)  -- Toggle sets flag=true
     local narr = eng:render_scene("room")
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_falsy(text:find("not set"))
     assert.is_truthy(text:find("Flag is set"))
   end)
@@ -954,7 +963,7 @@ scene done:
   it("renders else branch when list is empty", function()
     local eng = make_eng()
     local narr = eng:render_scene("main")
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("no items"), "expected '(no items)' in: " .. text)
     assert.is_falsy(text:find("Item:"))
   end)
@@ -964,7 +973,7 @@ scene done:
     eng:do_choice("main", 1)  -- add apple
     eng:do_choice("main", 2)  -- add banana
     local narr = eng:render_scene("main")
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("Item: apple"),  "expected 'Item: apple' in: "  .. text)
     assert.is_truthy(text:find("Item: banana"), "expected 'Item: banana' in: " .. text)
     assert.is_falsy(text:find("no items"))
@@ -974,7 +983,7 @@ scene done:
     local eng = make_eng()
     eng:do_choice("main", 1)  -- add apple
     local narr = eng:render_scene("main")
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_falsy(text:find("no items"))
   end)
 

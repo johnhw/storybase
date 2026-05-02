@@ -10,6 +10,15 @@
 
 local cli = require("cli.main")
 
+--- Flatten a structured narration list to a single space-joined text string.
+local function narr_text(narr)
+  local parts = {}
+  for _, item in ipairs(narr or {}) do
+    parts[#parts + 1] = (type(item) == "table" and item.text) or tostring(item)
+  end
+  return table.concat(parts, " ")
+end
+
 -- ── I/O capture helpers ───────────────────────────────────────────────────────
 
 --- Capture stdout + stderr during fn().  Returns out_str, err_str.
@@ -515,7 +524,7 @@ describe("CLI demo07_oracle: import / bounded / counterfactual", function()
     game:choose(orb_idx)
     local orb_narr = game:render()
     -- Counterfactual preview values should appear in narration (meditate: 50+12=62)
-    local text = table.concat(orb_narr, " ")
+    local text = narr_text(orb_narr)
     assert.is_truthy(text:find("62") or text:find("meditate"), text)
   end)
 
@@ -561,7 +570,7 @@ describe("CLI demo08_probability_engine: BFS builtins + oracle + verify", functi
     game:choose(1)  -- Open the shop
     game:choose(1)  -- Consult the supply captain (engine/checkpoint! then => consult-supply)
     local narr = game:render()
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("Delivery possible"), text)
     assert.is_truthy(text:find("Odds"), text)
     assert.is_truthy(text:find("Shortest route"), text)
@@ -573,7 +582,7 @@ describe("CLI demo08_probability_engine: BFS builtins + oracle + verify", functi
     game:init()
     game:choose(1)  -- Open the shop (shop narration shows premium count)
     local narr = game:render()
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("2"), text)
   end)
 
@@ -620,7 +629,7 @@ describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verif
     game:init()
     game:choose(1)  -- Stand watch (calls init-dungeon)
     local narr = game:render()
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("floor"), text)  -- grid-get returns 'floor default
     assert.is_truthy(text:find("Guard Alpha"), text)
   end)
@@ -632,7 +641,7 @@ describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verif
     game:choose(1)  -- Stand watch
     game:choose(1)  -- Station Alpha at west gap
     local narr = game:render()
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("Guards with sight%-line to intruder: 1"), text)
     assert.equal(1,  game:get("guards/alpha/x"))
     assert.equal(2,  game:get("guards/alpha/y"))
@@ -649,7 +658,7 @@ describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verif
     game:choose(4)  -- Advance simulation
     assert.equal(true, game:get("intruder/caught"))
     assert.equal(false, game:get("vault/breached"))
-    local text = table.concat(game:render(), " ")
+    local text = narr_text(game:render())
     assert.is_truthy(text:find("contained") or text:find("secure"), text)
   end)
 
@@ -659,7 +668,7 @@ describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verif
     game:init()
     game:choose(1)  -- Stand watch
     game:choose(5)  -- Advance simulation (no guards)
-    local text = table.concat(game:render(), " ")
+    local text = narr_text(game:render())
     assert.is_truthy(text:find("breached") or text:find("crystal"), text)
     assert.equal(true, game:get("vault/breached"))
   end)
@@ -673,7 +682,7 @@ describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verif
     -- Place west trap first
     game:choose(4)  -- Set west trap
     local narr = game:render()
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     -- After trap, route should be longer (trap forces east route)
     assert.is_truthy(text:find("Steps to vault:"), text)
     assert.is_truthy(game:get("world/alert") ~= nil, "alert should be set")
@@ -783,7 +792,7 @@ describe("CLI demo11_expedition_guild: type aliases + Option(T) + find + compute
     game:init()
     game:choose(1)  -- Begin (calls init-guild)
     local narr = game:render()
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("zhen"), text)  -- highest skill member visible
     assert.is_truthy(text:find("aldric"), text)
     assert.is_truthy(text:find("1 adventurer"), text)  -- lyra is injured
@@ -843,7 +852,7 @@ describe("CLI demo11_expedition_guild: type aliases + Option(T) + find + compute
     game:init()
     game:choose(1)  -- Begin
     local narr = game:render()
-    local text = table.concat(narr, " ")
+    local text = narr_text(narr)
     assert.is_truthy(text:find("none"), text)  -- player/companion ?? 'none
   end)
 end)
@@ -968,7 +977,7 @@ describe("CLI demo13_healers_ward: speaker/say + post: + multi-line lambdas", fu
     local narration = game:render()
     local found = false
     for _, n in ipairs(narration) do
-      if type(n) == "string" and n:find("3 patient") then found = true end
+      if n.text and n.text:find("3 patient") then found = true end
     end
     assert.is_true(found, "expected '3 patient(s)' in narration")
   end)
@@ -997,7 +1006,7 @@ describe("CLI demo13_healers_ward: speaker/say + post: + multi-line lambdas", fu
     local narration = game:render()
     local found = false
     for _, n in ipairs(narration) do
-      if type(n) == "string" and n:find("2 patient") then found = true end
+      if n.text and n.text:find("2 patient") then found = true end
     end
     assert.is_true(found, "expected '2 patient(s)' after treating one")
   end)
@@ -1743,7 +1752,7 @@ describe("CLI demo19_signal_tower: debug server + watches", function()
     for _ = 1, 9 do game:choose(7) end  -- advance days 1→10
     assert.equal(10, game:get("tower/day"))
     game:choose(7)  -- File final report (replaces Advance when day >= 10)
-    local narr = table.concat(game:render(), " ")
+    local narr = narr_text(game:render())
     assert.is_truthy(narr:find("[Ww]atch complete"), narr)
   end)
 end)

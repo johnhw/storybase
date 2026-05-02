@@ -2438,7 +2438,7 @@ eval_stmt = function(node, ctx)
     for _, line in ipairs(node.lines or {}) do
       local text = M.render_text(line, ctx)
       if text ~= "" then
-        local obj = { speaker = spk_name, display = display, color = color, text = text }
+        local obj = { kind = "say", speaker = spk_name, display = display, color = color, text = text }
         if buf then
           buf[#buf + 1] = obj
         end

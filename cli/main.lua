@@ -61,6 +61,7 @@ Options (run):
   --debug                     Start TCP debug server + browser UI (ports 7373/7374)
   --serve                     Like --debug, but browser drives the game (no stdin)
   --http-port N               Override the HTTP UI port (default: debug-port + 1)
+  --ui <name>                 UI driver: plain (default) or ansi (ANSI colour)
   --cli <save.sbd>            Single-step scripting mode: read one choice from stdin,
                               output JSON to stdout, save full state, then exit
   --reset                     (--cli only) Wipe save file and start fresh
@@ -302,6 +303,16 @@ local function cmd_run(args)
     return cli_cmd.run(game_table, cli_path, cli_opts) or 0
   end
 
+  -- --ui <name>: select UI driver (default: plain)
+  local ui_name = flags["ui"] or "plain"
+  local ok_drv, drv_mod = pcall(require, "cli.drivers." .. ui_name)
+  if not ok_drv then
+    io.stderr:write("error: unknown UI driver '" .. ui_name
+                    .. "' (available: plain, ansi)\n")
+    return 1
+  end
+  local driver = drv_mod.new({ io_out = io.stdout, io_in = io_in })
+
   local opts = {
     seed        = flags["seed"] and tonumber(flags["seed"]),
     production  = flags["production"] == true,
@@ -311,6 +322,7 @@ local function cmd_run(args)
     debug_port  = debug_port,
     http_port   = http_port,
     serve       = is_serve,
+    driver      = driver,
   }
 
   return engine.run(game_table, opts) or 0
@@ -442,6 +454,7 @@ storybase run [options] <file>
     --load <path>  Load a saved game log from <path> before starting
     --auto         Auto-play: always select choice 1 until game ends
     --steps N      Auto-play for at most N turns (implies --auto)
+    --ui <name>    UI driver: plain (default) or ansi (ANSI colour)
 ]],
   ["verify"] = [[
 storybase verify <file>

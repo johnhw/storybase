@@ -127,6 +127,7 @@ function M.new(game_table, opts)
     _scheduler        = sched,
     _io_out           = opts.io_out or io.stdout,
     _io_in            = opts.io_in  or io.stdin,
+    _driver           = opts.driver,  -- optional UI driver ({render,prompt,notify})
     _grids            = {},  -- name → {cells, width, height, cell_type, default_val}
     _pending_narration = {},  -- dialogue objects emitted by say in fn bodies
   }
@@ -234,10 +235,10 @@ function M.new(game_table, opts)
     for _, sub in ipairs(items or {}) do
       if not sub then
       elseif sub.kind == "narration_line" then
-        narration[#narration + 1] = self:render_text(sub.text, ctx)
+        narration[#narration + 1] = { kind = "narration", text = self:render_text(sub.text, ctx) }
       elseif sub.kind == "cond_narration" then
         if eval.eval_expr(sub.condition, ctx) then
-          narration[#narration + 1] = self:render_text(sub.text, ctx)
+          narration[#narration + 1] = { kind = "narration", text = self:render_text(sub.text, ctx) }
         end
       elseif sub.kind == "when_stmt" then
         if eval.eval_expr(sub.condition, ctx) then
@@ -302,12 +303,12 @@ function M.new(game_table, opts)
         -- skip nil items
 
       elseif item.kind == "narration_line" then
-        narration[#narration + 1] = self:render_text(item.text, ctx)
+        narration[#narration + 1] = { kind = "narration", text = self:render_text(item.text, ctx) }
 
       elseif item.kind == "cond_narration" then
         local cond = eval.eval_expr(item.condition, ctx)
         if cond then
-          narration[#narration + 1] = self:render_text(item.text, ctx)
+          narration[#narration + 1] = { kind = "narration", text = self:render_text(item.text, ctx) }
         end
 
       elseif item.kind == "say_stmt" then
@@ -424,6 +425,11 @@ function M.new(game_table, opts)
     self._state:init_defaults()
     self:register_actors_schedules()
     self:init_grids()
+    -- Wire engine-level context into scheduler so schedule bodies can call
+    -- cancel-schedule!, engine/emit, send!, random-int, etc.
+    self._scheduler._game   = self._game
+    self._scheduler._actors = self._actors
+    self._scheduler._rng    = self._rng
     -- Build name-indexed type map for O(1) random-enum lookups
     local schema = self._game.schema
     if schema and schema.types and not schema._type_index then
@@ -557,6 +563,21 @@ function M.new(game_table, opts)
     return self._io_in:read("*l")
   end
 
+  --- Render narration items to the built-in output stream (plain-text fallback).
+  ---@param narration table  list of {kind,text,...} items
+  function eng:_render_plain(narration)
+    self:out("")
+    for _, item in ipairs(narration) do
+      if item.kind == "say" then
+        local label = item.display or item.speaker or "?"
+        self:out(label .. ": " .. tostring(item.text or ""))
+      elseif item.text and item.text ~= "" then
+        self:out(item.text)
+      end
+    end
+    self:out("")
+  end
+
   --- Run one turn: display scene, get player input, execute choice.
   --- Returns false if the game should exit.
   ---@return boolean  true to continue, false to exit
@@ -569,17 +590,12 @@ function M.new(game_table, opts)
 
     -- Render scene
     local narration, choices, nav_signal = self:render_scene(scene_name)
-    self:out("")
-    for _, line in ipairs(narration) do
-      if type(line) == "table" then
-        -- Dialogue object: display as "Speaker: text"
-        local label = line.display or line.speaker or "?"
-        self:out(label .. ": " .. tostring(line.text or ""))
-      elseif line ~= "" then
-        self:out(line)
-      end
+
+    if self._driver then
+      self._driver:render({ narration = narration, choices = choices })
+    else
+      self:_render_plain(narration)
     end
-    self:out("")
 
     -- Follow unconditional scene navigation (e.g. computed -> in scene body)
     if nav_signal then
@@ -594,28 +610,34 @@ function M.new(game_table, opts)
     end
 
     if #choices == 0 then
-      self:out("[No choices available — exiting]")
+      if not self._driver then
+        self:out("[No choices available — exiting]")
+      end
       return false
     end
 
-    for i, c in ipairs(choices) do
-      self:out(i .. ". " .. c.label)
-    end
-    self:out("")
-    self:out("Choice (1-" .. #choices .. ", q to quit): ")
-
-    -- Get player input
-    local line = self:inp()
-    if not line then return false end
-    line = line:match("^%s*(.-)%s*$")  -- trim
-    if line == "q" or line == "quit" or line == "exit" then
-      return false
-    end
-
-    local idx = tonumber(line)
-    if not idx or idx < 1 or idx > #choices then
-      self:out("Invalid choice.")
-      return true
+    -- Get player choice via driver or built-in stdin prompt
+    local idx
+    if self._driver then
+      idx = self._driver:prompt(choices)
+      if not idx then return false end
+    else
+      for i, c in ipairs(choices) do
+        self:out(i .. ". " .. c.label)
+      end
+      self:out("")
+      self:out("Choice (1-" .. #choices .. ", q to quit): ")
+      local line = self:inp()
+      if not line then return false end
+      line = line:match("^%s*(.-)%s*$")  -- trim
+      if line == "q" or line == "quit" or line == "exit" then
+        return false
+      end
+      idx = tonumber(line)
+      if not idx or idx < 1 or idx > #choices then
+        self:out("Invalid choice.")
+        return true
+      end
     end
 
     -- Execute choice

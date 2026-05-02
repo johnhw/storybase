@@ -419,10 +419,10 @@ function M.run(game_table, save_path, opts)
     narration, choices, nav_signal = eng:render_scene(scene_name)
   end
 
-  -- Filter empty narration lines (keep non-empty for JSON)
+  -- Filter empty narration items (keep non-empty for JSON)
   local narr_lines = {}
-  for _, line in ipairs(narration or {}) do
-    if line ~= "" then narr_lines[#narr_lines + 1] = line end
+  for _, item in ipairs(narration or {}) do
+    if item.text and item.text ~= "" then narr_lines[#narr_lines + 1] = item end
   end
 
   -- ── Execute choice (if input provided) ───────────────────────
@@ -481,8 +481,8 @@ function M.run(game_table, save_path, opts)
         narration, choices, nav_signal = eng:render_scene(scene_name)
       end
       narr_lines = {}
-      for _, line in ipairs(narration or {}) do
-        if line ~= "" then narr_lines[#narr_lines + 1] = line end
+      for _, item in ipairs(narration or {}) do
+        if item.text and item.text ~= "" then narr_lines[#narr_lines + 1] = item end
       end
     else
       narr_lines = {}

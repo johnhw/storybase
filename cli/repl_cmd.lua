@@ -167,8 +167,13 @@ function M.run(args)
         else
           -- Show new narration after the choice
           local narr = game:render()
-          for _, txt in ipairs(narr or {}) do
-            if txt ~= "" then io.stdout:write(txt .. "\n") end
+          for _, item in ipairs(narr or {}) do
+            if item.kind == "say" then
+              local label = item.display or item.speaker or "?"
+              io.stdout:write(label .. ": " .. tostring(item.text or "") .. "\n")
+            elseif item.text and item.text ~= "" then
+              io.stdout:write(item.text .. "\n")
+            end
           end
         end
       end

@@ -5,6 +5,107 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## UI Driver Layer ✅ (2026-05-02)
+
+**2025 tests passing, 0 failing.**
+
+Decoupled all terminal rendering from the game engine via a pluggable driver interface.
+
+### Changes made
+
+- **`runtime/eval.lua`** — Added `kind="say"` to every say object emitted by SAY_STMT.
+- **`runtime/engine.lua`** — All narration items are now structured tables:
+  - `narration_line` / `cond_narration` → `{kind="narration", text=...}`
+  - say items were already tables; now carry `kind="say"` too.
+  - Added `eng._driver = opts.driver`; `step()` delegates render/prompt to driver when set, else falls back to built-in plain rendering via `eng:_render_plain()`.
+- **`cli/drivers/plain.lua`** (new) — Default driver. Renders `"Speaker: text"` / bare text; numbered choice prompt; reads from stdin.
+- **`cli/drivers/ansi.lua`** (new) — ANSI-color driver (`--ui ansi`). Speaker labels colored with ANSI true-color from their `color:` hex field; bold choice indices; dim prompt.
+- **`cli/main.lua`** — Added `--ui <name>` flag to `storybase run`; loads `cli/drivers/<name>.lua` and passes it as `opts.driver`.
+- **`cli/cli_cmd.lua`** — Updated narration filter to handle structured `{kind, text}` items.
+- **`cli/repl_cmd.lua`** — Updated `:choose` narration display for structured items.
+- **`lib/storybase.lua`** — Updated `render()` doc comment.
+- **Tests updated** — Added `narr_text()` helper to engine_spec, integration tests, cli_cmd_spec; fixed `type(n)=="string"` guards; updated "mixed narration" eval_spec test to expect `kind` fields.
+- **`tests/cli/drivers_spec.lua`** (new) — 18 tests covering plain/ansi render, prompt, notify, color escapes, and driver injection via engine opts.
+
+---
+
+## Bug-fix Pass: Bug #1 + Bug #2 (partial) ✅ (2026-05-02)
+
+**~1972 tests passing. ~19 failures: 1 remaining format bug (demo19), 18 pre-existing flaky debug_http port-conflict failures (pass when run in isolation).**
+
+### Bug #1 — `cancel-schedule!` inside a schedule body silently ignored — FIXED
+
+**Root cause:** `sched:tick()` in `runtime/scheduler.lua` created an eval context with
+`eval.new_ctx()` but never set `ctx.scheduler = self`, so the `CANCEL_SCHEDULE_MUT` handler
+in `eval.lua` silently no-oped.
+
+**Fix:**
+- `runtime/scheduler.lua` `sched:tick()`: set `ctx.scheduler`, `ctx.debug`, `ctx.actors`,
+  `ctx.rng` after `eval.new_ctx()`.
+- `runtime/engine.lua` `eng:init()`: set `self._scheduler._game`, `_actors`, `_rng` so
+  schedule bodies can call `engine/emit`, `send!`, `random-int`, etc.
+
+**Regression test:** `tests/runtime/scheduler_spec.lua` — "cancel-schedule! in body cancels
+another schedule; ctx.scheduler is wired". Verifies that an `at:` schedule firing `cancel-schedule!`
+on a co-firing `every:` schedule actually removes it from `_static` during the same tick.
+
+### Bug #2 — `format --write` silently corrupts source files — MOSTLY FIXED
+
+**Root cause:** `cli/format_cmd.lua` had 8 missing node-kind handlers (emitting
+`-- (stmt:X)` / `-- (decl:X)` placeholders) plus ~20 additional pre-existing field-name
+mismatches throughout `fmt_expr`, `fmt_type`, and `fmt_decl`.
+
+**All 8 placeholder gaps fixed:**
+- `SPEAKER_DECL` in `fmt_decl` — now emits `speaker name:\n  display: "..."\n  color: "..."`
+- `SAY_STMT` in `fmt_stmt` — context-aware: NAMED_ARG form for symbol speakers, colon form
+  in scene bodies, space-separated quoted-string form in fn bodies
+- `RETURN_STMT` in `fmt_stmt` — `return expr`; MATCH_EXPR handled as multi-line block
+- `MAP_SET_MUT` in `fmt_stmt` — `map-set! path key value`
+- `MAP_DELETE_MUT` in `fmt_stmt` — `map-delete! path key`
+- `CHECKPOINT_MUT` in `fmt_stmt` — `engine/checkpoint!` (with optional fn-name)
+- `EMIT_MUT` in `fmt_stmt` — `engine/emit event [args]`
+- `NARRATION_LINE` in `fmt_stmt` — plain text rendering
+
+**Additional pre-existing fmt_expr / fmt_decl bugs also fixed:**
+- `symbol_lit` uses `node.name` not `node.value`
+- `match_expr` uses `node.expr` not `node.subject`
+- `type_int` uses `min`/`max` not `lo`/`hi`
+- `state_family` has `family`/`var` not a `path` expression
+- `engine_config` has `keys` list not `entries` table
+- `type_record`, `verify_decl`, `watch_when_decl` wrong field names
+- `fn_decl` params are plain strings, not `{name, type_expr}`; params go on header line
+- `fn_decl` pre/post: unwrap `EXPR_STMT` wrappers; support multi-condition block form
+- Forward declaration of `fmt_expr` was after `render_text_segments`, breaking inline `{expr}`
+- `EMPTY_MAP` was `{=>}` (caused parser infinite loop); now `{}`
+- `EMPTY_LIST` was `(list)` (not handled by `parse_default_value`); now `[]`
+- `{=>}` was `"EMPTY_MAP"` literal; actually parser uses `map_lit({})` for `{}`
+- `set_lit`, `list_lit`, `map_lit` used wrong field names (`items`/`pairs` vs `elements`/`entries`)
+- `SPAWN_MUT`/`DESPAWN_MUT` family is a plain string, not an expression node
+- `TYPE_OPTION`, `TYPE_SET`, `TYPE_LIST`, `TYPE_ULIST`, `TYPE_UMAP` use parenthesised
+  syntax (`Option(T)`, `Set(T,N)`, etc.) not space-separated
+- `TYPE_ENUM` values should not have `'` prefix
+- `INTERP_PATH` segments: `{interp="key"}` tables, not expression nodes
+- `PATH_AT_BEFORE` was `@@before` (double `@`); now `@before`
+- `LAMBDA_EXPR` params format: `fn(k):` not `fn k:`
+- `MATCH_ARM` body: single-expression arms emit inline `pattern: expr`
+- `IN_STATE_EXPR` handler added: `(in-state state) expr`
+- `FOR_STMT` wraps fn-call iterators in `()` to prevent NAMED_ARG colon ambiguity
+- `VERIFY_DECL` uses `label` (string) not `name`; clause discriminator is `clause_kind`
+- Verify clause handlers: `from_any_state`, `always`, `after`, `requires`, `when`
+- `WATCH_WHEN_DECL` uses `condition` not `cond`
+
+**New format regression tests added** (`tests/cli/cli_integration_spec.lua`):
+- demo13 (speaker/say/return): no placeholders, idempotent ✅
+- demo17 (map-set!/map-delete!): no placeholders, idempotent ✅
+- demo08 (engine/emit, engine/checkpoint!): no placeholders, idempotent ✅
+- demo19 (engine/emit, watch): no placeholders, idempotent ❌ (watch-when trailing `""` bug)
+
+**Remaining issue:** `watch-when fn-call "label"` — `parse_expr` greedily absorbs the STRING
+label as a fn argument when the condition is a bare fn-call. Fix: wrap condition in `()`
+in the formatter. See todo.md for details.
+
+---
+
 ## Code Review Round 2 — All Bugs, Design Flaws, and False Impls ✅ (2026-04-30)
 
 **~1973 unit tests passing (excluding flaky debug_http network tests). 17 new regression tests added.**

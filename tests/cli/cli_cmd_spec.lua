@@ -618,7 +618,11 @@ describe("CLI cmd: BFS can-reach? uses live scene_stack", function()
     assert.equal("sub", r1.scene)
     -- Narration should contain "Reachable: true" because can-reach? from sub
     -- sees choice "Do it" which calls set-reached
-    local narr = table.concat(r1.narration or {}, " ")
+    local parts = {}
+    for _, item in ipairs(r1.narration or {}) do
+      parts[#parts + 1] = (type(item) == "table" and item.text) or tostring(item)
+    end
+    local narr = table.concat(parts, " ")
     assert.truthy(narr:find("true"), "expected 'true' in narration, got: " .. narr)
   end)
 end)

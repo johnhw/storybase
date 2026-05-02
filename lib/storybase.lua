@@ -134,7 +134,7 @@ function M._make_game(game_table)
   -- ── Presentation ──────────────────────────────────────────
 
   --- Render the current scene.
-  --- Returns narration (list of strings) and choices (list of {index, label}).
+  --- Returns narration (list of {kind,text,...} items) and choices (list of {index, label}).
   ---@return table, table
   function self:render()
     assert(self._eng, "call game:init() first")
