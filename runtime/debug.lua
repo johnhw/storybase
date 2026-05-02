@@ -527,6 +527,17 @@ function M.new(engine, opts)
         w._last = cur
       end
     end
+
+    -- Evaluate breakpoints (positive-edge detection like watch-when)
+    for id, bp in pairs(self._breakpoints) do
+      local bctx = eval_mod.new_ctx(eng._state, eng._fns, "breakpoint")
+      local ok = pcall(eval_mod.eval_stmts, bp.body, bctx)
+      local cur = ok and bctx.retval == true or false
+      if cur and not bp._last then
+        self:emit("breakpoint-hit", { id = id, condition = bp.cond, tick = tick_val })
+      end
+      bp._last = cur
+    end
   end
 
   -- ── Command handlers ───────────────────────────────────────
@@ -646,9 +657,22 @@ function M.new(engine, opts)
     elseif cmd == "set-breakpoint" then
       local cond = payload.condition
       if not cond then return { error = "missing 'condition'" } end
+      -- Compile the condition string into an evaluable fn body now so
+      -- check_watches() can eval it cheaply each turn.
+      local compiler_mod = require("compiler.compiler")
+      local bp_src = "module _bp\n  version: 1\n"
+                   .. "engine-config:\n  entry-scene: _s\n"
+                   .. "scene _s:\n  * Go\n    -> _s\n"
+                   .. "fn _cond:\n  return " .. cond
+      local ok_c, gt_c = pcall(compiler_mod.compile, bp_src)
+      if not ok_c or not gt_c then
+        return { error = "compile error: " .. tostring(gt_c) }
+      end
+      local fn_def = gt_c.fns and gt_c.fns["_cond"]
+      if not fn_def then return { error = "condition failed to compile" } end
       self._bp_counter = self._bp_counter + 1
       local id = self._bp_counter
-      self._breakpoints[id] = cond
+      self._breakpoints[id] = { cond = cond, body = fn_def.body, _last = false }
       return { id = id }
 
     elseif cmd == "clear-breakpoint" then

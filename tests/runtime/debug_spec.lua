@@ -471,6 +471,93 @@ describe("debug: breakpoints", function()
     srv:handle_command("clear-breakpoint", { id = id })
     assert.is_nil(srv._breakpoints[id])
   end)
+
+  it("breakpoint-hit fires on positive edge when condition becomes true", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+
+    local hits = {}
+    srv:on("breakpoint-hit", function(p) hits[#hits+1] = p end)
+
+    -- Set a breakpoint: fires when player/gold >= 90 (starts at 50)
+    local resp = srv:handle_command("set-breakpoint", { condition = "player/gold >= 90" })
+    assert.is_not_nil(resp.id)
+
+    -- Initial check: gold=50, condition false → no hit
+    srv:check_watches()
+    assert.equal(0, #hits)
+
+    -- Raise gold to 95 → condition becomes true → fires
+    eng._state:set("player/gold", 95, "test")
+    srv:check_watches()
+    assert.equal(1, #hits)
+    assert.equal(resp.id, hits[1].id)
+    assert.equal("player/gold >= 90", hits[1].condition)
+
+    -- Still true → no re-fire (positive-edge)
+    srv:check_watches()
+    assert.equal(1, #hits)
+
+    -- Drop below threshold and rise again → fires again
+    eng._state:set("player/gold", 50, "test")
+    srv:check_watches()
+    eng._state:set("player/gold", 95, "test")
+    srv:check_watches()
+    assert.equal(2, #hits)
+  end)
+
+  it("cleared breakpoint no longer fires", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+
+    local hits = {}
+    srv:on("breakpoint-hit", function(p) hits[#hits+1] = p end)
+
+    local resp = srv:handle_command("set-breakpoint", { condition = "player/gold >= 90" })
+    srv:handle_command("clear-breakpoint", { id = resp.id })
+
+    eng._state:set("player/gold", 95, "test")
+    srv:check_watches()
+    assert.equal(0, #hits)
+  end)
+end)
+
+-- ============================================================
+-- fn-call debug event
+-- ============================================================
+
+describe("debug: fn-call event", function()
+  local gt, errs = compile(MINIMAL_SRC)
+
+  it("fn-call event fires with correct name and args when a named fn is called", function()
+    if not gt then pending("compile failed"); return end
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+
+    local srv = debug_mod.new(eng)
+    srv:start()
+    eng:set_debug_server(srv)
+
+    local calls = {}
+    srv:on("fn-call", function(p) calls[#calls+1] = p end)
+
+    local eval_mod = require("runtime.eval")
+    -- Use eng:make_ctx so ctx.debug is wired to the debug server
+    local ctx = eng:make_ctx("test")
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)
+
+    assert.equal(1, #calls, "fn-call event should fire once")
+    assert.equal("earn", calls[1].name)
+    assert.same({10}, calls[1].args)
+  end)
 end)
 
 -- ============================================================

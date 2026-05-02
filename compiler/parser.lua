@@ -3119,7 +3119,20 @@ local function parse_watch_decl(p, doc)
     return ast.watch_decl(path_node, label, tpos)
   else  -- watch-when
     local cond = parse_expr(p)
-    local label = consume_label()
+    local label
+    -- parse_expr may greedily absorb a trailing STRING label as the last
+    -- function-call argument: `watch-when name "label"` becomes
+    -- fn_call(name, [string_lit("label")]).  Detect and recover it.
+    local K = ast.K
+    if cond and cond.kind == K.FN_CALL then
+      local args = cond.args or {}
+      local last = args[#args]
+      if last and last.kind == K.STRING_LIT then
+        label = last.value
+        args[#args] = nil
+      end
+    end
+    if not label then label = consume_label() end
     return ast.watch_when_decl(cond, label, tpos)
   end
 end

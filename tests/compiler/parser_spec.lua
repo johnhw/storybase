@@ -1702,6 +1702,39 @@ describe("parser — watch declaration", function()
   it("parses watch-when declaration with condition", function()
     local d = decl([[watch-when world/hp <= 0  "player died"]])
     assert.equal("watch_when_decl", d.kind)
+    assert.equal("player died", d.label)
+  end)
+
+  -- Regression: parse_expr used to absorb the trailing STRING label as a fn-call
+  -- arg when the condition is a bare IDENT (0-arg predicate).
+  it("watch-when with 0-arg predicate: label not absorbed as fn-call arg", function()
+    local d = decl([[watch-when exhausted? "Operator exhausted"]])
+    assert.equal("watch_when_decl", d.kind)
+    assert.equal("Operator exhausted", d.label, "label must be separate from condition")
+    local cond = d.condition or d.cond
+    assert.equal("fn_call", cond.kind)
+    assert.equal("exhausted?", cond.name)
+    assert.equal(0, #(cond.args or {}), "condition fn-call must have no args")
+  end)
+
+  it("watch-when with binary-op condition: label correctly parsed", function()
+    local d = decl([[watch-when world/hp < 50 "Low HP"]])
+    assert.equal("watch_when_decl", d.kind)
+    assert.equal("Low HP", d.label)
+    local cond = d.condition or d.cond
+    assert.equal("binary_op", cond.kind)
+    assert.equal("<", cond.op)
+  end)
+
+  it("watch-when with fn-call taking int arg: label not confused with arg", function()
+    local d = decl([[watch-when count-enemies 3 "Many enemies"]])
+    assert.equal("watch_when_decl", d.kind)
+    assert.equal("Many enemies", d.label)
+    local cond = d.condition or d.cond
+    assert.equal("fn_call", cond.kind)
+    assert.equal("count-enemies", cond.name)
+    assert.equal(1, #(cond.args or {}))
+    assert.equal(3, cond.args[1].value)
   end)
 end)
 
