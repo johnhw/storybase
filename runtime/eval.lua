@@ -515,8 +515,8 @@ eval_expr = function(node, ctx)
       for _, v in ipairs(r) do
         if v == l then return true end
       end
-      -- Map-style check (relation adjacency {key=true,...})
-      if r[l] then return true end
+      -- Map-style check (relation adjacency or UMap membership)
+      if r[l] ~= nil then return true end
       return false
     end
     return nil

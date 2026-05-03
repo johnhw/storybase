@@ -234,6 +234,24 @@ describe("eval_expr: binary operators", function()
     local node = binop("in", {kind="string_lit", value="x"}, int_lit(5))
     assert.is_false(eval.eval_expr(node, c))
   end)
+
+  it("in: UMap key with value false is still found (falsy value bug regression)", function()
+    local c = ctx({})
+    c.vars["m"] = {keyname = false}
+    local node = binop("in",
+      {kind="string_lit", value="keyname"},
+      {kind="fn_call", name="m", args={}})
+    assert.is_true(eval.eval_expr(node, c))
+  end)
+
+  it("in: UMap key with value 0 is still found (zero value bug regression)", function()
+    local c = ctx({})
+    c.vars["m"] = {keyname = 0}
+    local node = binop("in",
+      {kind="string_lit", value="keyname"},
+      {kind="fn_call", name="m", args={}})
+    assert.is_true(eval.eval_expr(node, c))
+  end)
 end)
 
 describe("eval_expr: unary not", function()

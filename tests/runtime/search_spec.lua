@@ -1337,3 +1337,77 @@ scene check:
     assert.is_not_nil(path, "find_path should return a path to the UMap goal state")
   end)
 end)
+
+-- Bug 1 regression: hash_state must distinguish distinct UMap states
+-- ============================================================
+-- The bug: ipairs on a hash-keyed table (UMap) yields nothing, so two states
+-- with different UMap contents produce the same BFS hash and the second is
+-- treated as a duplicate and never expanded.
+--
+-- Test design: two choices both go to the same "waypoint" scene but write
+-- different UMap entries.  The goal condition requires the "bob" entry AND a
+-- scalar flag that is only set at the later "result" scene.  Without the fix,
+-- the bob-branch state at waypoint collides with the alice-branch hash and is
+-- skipped; can_reach never reaches result via the bob branch and returns false.
+
+describe("search — hash_state distinguishes distinct UMap states (Bug 1 regression)", function()
+  local src = [[
+module umap-hash-distinct
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: start
+state world:
+  scores: UMap(String, Int(0,999)) = {}
+  at_result: Int(0, 1) = 0
+fn tag-alice:
+  map-set! world/scores "alice" 99
+fn tag-bob:
+  map-set! world/scores "bob" 99
+fn mark-result:
+  set! world/at_result 1
+scene start:
+  * Tag Alice
+    tag-alice
+    -> waypoint
+  * Tag Bob
+    tag-bob
+    -> waypoint
+scene waypoint:
+  * Finish
+    mark-result
+    -> result
+scene result:
+  * Loop
+    -> result
+]]
+
+  it("can_reach finds goal only reachable through the bob branch (hash cycle detection)", function()
+    local gt, errs = compile(src)
+    assert.equal(0, #errs, errs[1] and errs[1].message)
+
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = {}
+    for k, v in pairs(eng._state._cache) do
+      if type(v) == "table" then
+        local copy = {}
+        for tk, tv in pairs(v) do copy[tk] = tv end
+        cache[k] = copy
+      else
+        cache[k] = v
+      end
+    end
+
+    local reached = search_mod.can_reach(
+      gt, cache, { "start" },
+      function(c)
+        return c["world/at_result"] == 1 and
+               type(c["world/scores"]) == "table" and
+               c["world/scores"]["bob"] == 99
+      end,
+      5
+    )
+    assert.is_true(reached, "BFS must not collapse distinct UMap states; bob goal must be reachable")
+  end)
+end)

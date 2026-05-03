@@ -143,10 +143,20 @@ local function hash_state(cache, stack)
   for _, k in ipairs(keys) do
     local v = cache[k]
     if type(v) == "table" then
-      -- Treat as array (list values in entity families, etc.)
-      local items = {}
-      for _, item in ipairs(v) do items[#items + 1] = tostring(item) end
-      parts[#parts + 1] = k .. "=[" .. table.concat(items, ",") .. "]"
+      if #v > 0 then
+        -- Array-like (Set, UList): iterate in order
+        local items = {}
+        for _, item in ipairs(v) do items[#items + 1] = tostring(item) end
+        parts[#parts + 1] = k .. "=[" .. table.concat(items, ",") .. "]"
+      else
+        -- Hash-keyed (UMap): sort keys for determinism
+        local subkeys = {}
+        for sk in pairs(v) do subkeys[#subkeys + 1] = sk end
+        table.sort(subkeys)
+        local items = {}
+        for _, sk in ipairs(subkeys) do items[#items + 1] = tostring(sk) .. ":" .. tostring(v[sk]) end
+        parts[#parts + 1] = k .. "={" .. table.concat(items, ",") .. "}"
+      end
     else
       parts[#parts + 1] = k .. "=" .. tostring(v)
     end

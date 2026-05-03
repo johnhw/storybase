@@ -60,16 +60,42 @@ M.match_path_pattern = match_path_pattern
 -- State helpers
 -- ============================================================
 
+--- Deep-copy a single cache value (table = Set/UList or UMap).
+local function copy_cache_val(v)
+  if #v > 0 then
+    local copy = {}
+    for i, item in ipairs(v) do copy[i] = item end
+    return copy
+  else
+    local copy = {}
+    for tk, tv in pairs(v) do copy[tk] = tv end
+    return copy
+  end
+end
+
+--- Serialise a single cache key/value pair to a stable string (for hashing/display).
+local function ser_cache_val(k, v)
+  if #v > 0 then
+    local items = {}
+    for _, item in ipairs(v) do items[#items+1] = tostring(item) end
+    return k .. "=[" .. table.concat(items, ",") .. "]"
+  else
+    local subkeys = {}
+    for sk in pairs(v) do subkeys[#subkeys+1] = sk end
+    table.sort(subkeys)
+    local items = {}
+    for _, sk in ipairs(subkeys) do items[#items+1] = tostring(sk) .. ":" .. tostring(v[sk]) end
+    return k .. "={" .. table.concat(items, ",") .. "}"
+  end
+end
+
 --- Shallow-clone the flat state cache (all values are scalars/tables by ref).
 --- For path@before snapshots this is sufficient since we only read the snapshot.
 local function clone_cache(store)
   local snap = {}
   for k, v in pairs(store._cache) do
-    -- Deep-copy table values (sets/lists) so the snapshot is independent
     if type(v) == "table" then
-      local copy = {}
-      for i, item in ipairs(v) do copy[i] = item end
-      snap[k] = copy
+      snap[k] = copy_cache_val(v)
     else
       snap[k] = v
     end
@@ -96,9 +122,7 @@ local function hash_cache(cache, stack)
   for _, k in ipairs(keys) do
     local v = cache[k]
     if type(v) == "table" then
-      local items = {}
-      for _, item in ipairs(v) do items[#items+1] = tostring(item) end
-      parts[#parts+1] = k .. "=[" .. table.concat(items, ",") .. "]"
+      parts[#parts+1] = ser_cache_val(k, v)
     else
       parts[#parts+1] = k .. "=" .. tostring(v)
     end
@@ -153,13 +177,7 @@ local function bfs_states(game_table, max_depth)
         -- Restore state directly (internal access, consistent with test approach)
         for k in pairs(eng._state._cache) do eng._state._cache[k] = nil end
         for k, v in pairs(item.cache) do
-          if type(v) == "table" then
-            local copy = {}
-            for i, x in ipairs(v) do copy[i] = x end
-            eng._state._cache[k] = copy
-          else
-            eng._state._cache[k] = v
-          end
+          eng._state._cache[k] = type(v) == "table" and copy_cache_val(v) or v
         end
         eng._scene_stack = {}
         for _, s in ipairs(item.stack) do
@@ -174,10 +192,7 @@ local function bfs_states(game_table, max_depth)
           eng2._in_bfs = true  -- prevent recursive BFS when rendering narration
           for k in pairs(eng2._state._cache) do eng2._state._cache[k] = nil end
           for k, v in pairs(item.cache) do
-            if type(v) == "table" then
-              local copy = {}; for i, x in ipairs(v) do copy[i] = x end
-              eng2._state._cache[k] = copy
-            else eng2._state._cache[k] = v end
+            eng2._state._cache[k] = type(v) == "table" and copy_cache_val(v) or v
           end
           eng2._scene_stack = {}
           for _, s in ipairs(item.stack) do eng2._scene_stack[#eng2._scene_stack+1] = s end
@@ -267,9 +282,7 @@ local function run_always_check(verify_entry, game_table)
       for _, k in ipairs(keys) do
         local v = cache_snap[k]
         if type(v) == "table" then
-          local items = {}
-          for _, item in ipairs(v) do items[#items+1] = tostring(item) end
-          snap_parts[#snap_parts+1] = k .. "=[" .. table.concat(items, ",") .. "]"
+          snap_parts[#snap_parts+1] = ser_cache_val(k, v)
         else
           snap_parts[#snap_parts+1] = k .. "=" .. tostring(v)
         end
@@ -424,9 +437,7 @@ local function run_can_reach_check(verify_entry, game_table)
         for _, k in ipairs(keys) do
           local v = snap[k]
           if type(v) == "table" then
-            local items = {}
-            for _, item in ipairs(v) do items[#items+1] = tostring(item) end
-            snap_parts[#snap_parts+1] = k .. "=[" .. table.concat(items, ",") .. "]"
+            snap_parts[#snap_parts+1] = ser_cache_val(k, v)
           else
             snap_parts[#snap_parts+1] = k .. "=" .. tostring(v)
           end

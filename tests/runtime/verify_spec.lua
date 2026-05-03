@@ -402,3 +402,49 @@ describe("verify: match_path_pattern", function()
     assert.is_false(mpp("world/(a|b|c)", "world/d"))
   end)
 end)
+
+-- ============================================================
+-- Bug 2/3 regression: verify-always must see UMap mutations
+-- ============================================================
+-- Bug 3: clone_cache used ipairs on hash-keyed tables (UMap), so every BFS
+-- snapshot had an empty UMap regardless of mutations.  Bug 2: hash_cache had
+-- the same problem, collapsing all states with the same scene into one.
+-- Together, verify-always would never detect invariant violations caused by
+-- UMap mutations and would falsely report pass.
+
+describe("verify-always — detects UMap invariant violation (Bug 2/3 regression)", function()
+  it("fails when a choice mutates a UMap in a way that violates the invariant", function()
+    local src = [[
+module umap-verify-regression
+  version: 1.0
+engine-config:
+  entry-scene: start
+state world:
+  scores: UMap(String, Int(0,999)) = {}
+fn add-bob:
+  map-set! world/scores "bob" 99
+scene start:
+  * Add Bob
+    add-bob
+    -> done
+scene done:
+  * Loop
+    -> done
+verify "bob never in scores":
+  verify-always not ("bob" in world/scores)
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.equals(1, #results)
+    -- The invariant is violated once "Add Bob" executes: "bob" is now in the map.
+    -- With the clone/hash bugs the UMap was always cloned as empty, so verify
+    -- never saw the mutation and falsely reported pass.  With the fix the
+    -- violation is correctly detected and the counterexample shows {bob:99}.
+    assert.is_false(results[1].pass,
+      "verify-always must detect the UMap mutation that violates the invariant")
+    assert.is_truthy(results[1].fail_msg and
+      results[1].fail_msg:find("bob:99"),
+      "counterexample message should show the UMap contents")
+  end)
+end)

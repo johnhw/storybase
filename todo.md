@@ -8,18 +8,19 @@ Completed work has been moved to [completed.md](completed.md).
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–20 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
-Code review rounds 1 and 2 fully resolved.
+Code review rounds 1, 2, and 3 fully resolved.
 UI driver layer complete: `--ui plain` (default) and `--ui ansi` implemented.
 
-All previously-identified bugs and gaps are now resolved.
+Code review round 3 identified a cluster of UMap-related bugs in BFS machinery
+(`ipairs` vs `pairs`) — all fixed (2026-05-02).  Regression tests added.
 
-**2025 tests passing, 0 failing.**
+**2029 tests passing, 0 failing.**
 
 ---
 
 ## Next Up
 
-No critical bugs or gaps remain. Remaining work is low-priority polish (see below).
+No known bugs. See Remaining Polish below.
 
 ---
 
