@@ -14,17 +14,19 @@ UI driver layer complete: `--ui plain` (default) and `--ui ansi` implemented.
 Code review round 3 identified a cluster of UMap-related bugs in BFS machinery
 (`ipairs` vs `pairs`) — all fixed (2026-05-02).  Regression tests added.
 
-**2029 tests passing, 0 failing.**
+**2032 tests passing, 0 failing.**
 
 ---
 
 ## Next Up
 
-No known bugs. See Remaining Polish below.
+No known bugs. Remaining Polish items below are optional quality work.
 
 ---
 
 ## Remaining Polish
 
-- [ ] Every public function in every module has at least one passing and one failing test.
+- [x] Every public function in every module has at least one passing and one failing test.
+  - Verified across all runtime and compiler modules (2026-05-03).
+  - Added: scheduler dead-stub error test; lexer bare-tick and unclosed-interpolation error tests.
 - [ ] Inelegance #7 — BFS expansion logic duplicated ~5×. Deferred: each BFS function has a different data payload (priority/path/prob/cost) and queue mechanism (FIFO/heap/yield). Extracting a shared helper would require a messy callback strategy and add more complexity than it removes.

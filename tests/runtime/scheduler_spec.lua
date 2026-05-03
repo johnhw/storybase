@@ -185,6 +185,16 @@ end)
 
 -- ── cancel ────────────────────────────────────────────────────────────────────
 
+describe("scheduler: schedule() dead stub", function()
+  it("sched:schedule raises an error (it is a dead stub)", function()
+    local store, log = make_state()
+    local sched = sched_mod.new(store, log)
+    assert.has_error(function()
+      sched:schedule("x", {}, function() end)
+    end)
+  end)
+end)
+
 describe("scheduler: cancel", function()
 
   it("prevents future fires after cancel", function()

@@ -605,6 +605,20 @@ describe("lexer — error: illegal character", function()
     end
     assert.is_true(found)
   end)
+
+  it("reports ILLEGAL_CHAR for bare tick not followed by identifier", function()
+    local d = first_diag("' ")
+    assert.is_not_nil(d)
+    assert.equal("ILLEGAL_CHAR", d.code)
+    assert.matches("identifier", d.message)
+  end)
+
+  it("reports ILLEGAL_CHAR for unclosed path interpolation", function()
+    local d = first_diag("world/{name")
+    assert.is_not_nil(d)
+    assert.equal("ILLEGAL_CHAR", d.code)
+    assert.matches("}", d.message)
+  end)
 end)
 
 describe("lexer — error: mixed indentation", function()
