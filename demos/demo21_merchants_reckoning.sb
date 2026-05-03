@@ -1,0 +1,279 @@
+# demo21_merchants_reckoning.sb
+# The Merchant's Reckoning -- temporal query builtins as gameplay.
+#
+# Features demonstrated:
+#   query-history path          — full ledger: every gold change recorded
+#   query-changes path last-n:N — recent road: last N location changes
+#   query-at path time:{axis:v} — opening fortune: gold at a named day
+#   query-history path*         — broad audit: every player-state change
+#   for…else: over query results in scene bodies
+#   time-model (single axis: day), time-inc! day: 1
+#   @before references in verify post-conditions
+#
+# Run with:  storybase run demos/demo21_merchants_reckoning.sb
+#
+# The player travels between six locations, earning and spending gold, before
+# entering "the reckoning" — a ritual audit that consults the transaction log
+# to reconstruct what happened.  The guard [world/day > 1] ensures at least
+# one day has elapsed before reckoning is available, giving the log real content.
+
+module merchants-reckoning
+  version: 1.0
+
+schema-version: 1
+
+time-model:
+  axes: [day]
+  wrap: [none]
+
+engine-config:
+  entry-scene: crossroads
+
+# ── Types ──────────────────────────────────────────────────────────────────────
+
+type Location = crossroads | town | market | forest | inn | ruins
+
+type Gold = Int(0, 500)
+
+# ── State ─────────────────────────────────────────────────────────────────────
+
+state player:
+  gold:     Gold     = 100
+  location: Location = 'crossroads
+
+state world:
+  day: Int(0, 30) = 1
+
+# ── Functions ─────────────────────────────────────────────────────────────────
+
+fn travel dest:
+  set! player/location dest
+
+fn earn-gold amount:
+  tags: [checkpoint]
+  inc!  player/gold amount
+
+fn spend-gold amount:
+  pre:  player/gold >= amount
+  tags: [checkpoint]
+  dec!  player/gold amount
+
+fn advance-day:
+  tags: [checkpoint]
+  inc!  world/day 1
+  time-inc! day: 1
+
+# query-at helper: gold value at a specific engine-day bound.
+fn gold-on-day d:
+  query-at player/gold time: {day: d}
+
+# ── Scenes ────────────────────────────────────────────────────────────────────
+
+scene crossroads:
+  The crossroads.  Day {world/day}.  You carry {player/gold} gold.
+
+  Four roads branch before you: town to the east, market to the west,
+  forest to the north, and the inn a short walk south.
+
+  * Travel to town
+    travel 'town
+    -> town
+
+  * Travel to market
+    travel 'market
+    -> market
+
+  * Venture into the forest
+    travel 'forest
+    -> forest
+
+  * Rest at the inn
+    travel 'inn
+    -> inn
+
+  * [world/day > 1] Take the reckoning
+    -> reckoning
+
+scene town:
+  The town square.  Day {world/day}.  You carry {player/gold} gold.
+
+  A merchant pays a fair price for any goods you bring from the wilds.
+  The town inn offers a free night's rest after a profitable trade.
+
+  * Sell found goods (+30 gold)
+    earn-gold 30
+    -> town
+
+  * Rest in the common room (advance day, back to crossroads)
+    advance-day
+    travel 'crossroads
+    -> crossroads
+
+  * Return to the crossroads
+    travel 'crossroads
+    -> crossroads
+
+scene market:
+  The open market.  Day {world/day}.  You carry {player/gold} gold.
+
+  Traders hawk provisions, curios, and road supplies.
+
+  * [player/gold >= 20] Buy provisions (-20 gold)
+    spend-gold 20
+    -> market
+
+  * [player/gold >= 50] Buy fine goods (-50 gold)
+    spend-gold 50
+    -> market
+
+  * Sell surplus provisions (+25 gold)
+    earn-gold 25
+    -> market
+
+  * Return to the crossroads
+    travel 'crossroads
+    -> crossroads
+
+scene forest:
+  The old-growth forest.  Day {world/day}.  You carry {player/gold} gold.
+
+  Tall oaks muffle every sound.  A deer-track leads deeper in, toward
+  a crumbling structure half-swallowed by the undergrowth.
+
+  * Search for herbs (+15 gold, sold on the way back)
+    earn-gold 15
+    -> forest
+
+  * Follow the deer-track to the ruins
+    travel 'ruins
+    -> ruins
+
+  * Return to the crossroads
+    travel 'crossroads
+    -> crossroads
+
+scene ruins:
+  The old ruins.  Day {world/day}.  You carry {player/gold} gold.
+
+  Stone arches rise from a carpet of moss.  Whatever stood here is long
+  forgotten, but scavengers have left behind a useful cache.
+
+  * Salvage the cache (+40 gold)
+    earn-gold 40
+    -> ruins
+
+  * Return to the crossroads through the forest
+    travel 'crossroads
+    -> crossroads
+
+scene inn:
+  The wayfarer inn.  Day {world/day}.  You carry {player/gold} gold.
+
+  A fire crackles.  The innkeeper quotes a modest rate.
+
+  * [player/gold >= 10] Pay for a room (-10 gold, advance day)
+    spend-gold 10
+    advance-day
+    travel 'crossroads
+    -> crossroads
+
+  * Return to the crossroads
+    travel 'crossroads
+    -> crossroads
+
+# ── The Reckoning ─────────────────────────────────────────────────────────────
+
+scene reckoning:
+  You spread your ledgers on the table and prepare to take the reckoning.
+  Day {world/day}.  Gold in hand: {player/gold}.
+
+  The Chronicle holds every coin gained and spent, every road taken.
+  Three forms of inquiry are available to you.
+
+  * Consult the ledger (all gold changes)
+    -> reckoning-ledger
+
+  * Trace the road (last 3 locations visited)
+    -> reckoning-route
+
+  * Recall the opening fortune (gold at day 1)
+    -> reckoning-fortune
+
+  * Scan the full chronicle (all player-state changes)
+    -> reckoning-audit
+
+  * Close the reckoning
+    -> crossroads
+
+scene reckoning-ledger:
+  Chronicle of Gold: every gain and loss since the journey began.
+
+  for entry in (query-history player/gold):
+    Day {entry/time/day}: {entry/old} gold to {entry/new} gold.
+  else:
+    (The ledger is blank. No gold has changed hands yet.)
+
+  * Return to the reckoning
+    -> reckoning
+
+scene reckoning-route:
+  Road Chronicle: the last three locations visited.
+
+  for entry in (query-changes player/location last-n: 3):
+    {entry/new}  (day {entry/time/day}, was {entry/old})
+  else:
+    (No travel recorded. You have not moved from your starting place.)
+
+  * Return to the reckoning
+    -> reckoning
+
+scene reckoning-fortune:
+  Opening Fortune: gold at day 1, as recorded in the Chronicle.
+
+  if gold-on-day 1:
+    The Chronicle records {gold-on-day 1} gold at day 1.
+    if player/gold > (gold-on-day 1):
+      You carry more gold now than the Chronicle shows for day 1.
+    else:
+      if player/gold < (gold-on-day 1):
+        You carry less gold now than the Chronicle shows for day 1.
+      else:
+        Your gold today matches the Chronicle record for day 1.
+  else:
+    (No gold record survives from day 1. Earn or spend gold first,
+     then advance a day, before consulting the opening fortune.)
+
+  * Return to the reckoning
+    -> reckoning
+
+scene reckoning-audit:
+  Full Chronicle: every player-state change, in order.
+
+  for entry in (query-history player/*):
+    {entry/path}  day {entry/time/day}: {entry/old} to {entry/new}
+  else:
+    (The full chronicle is empty. Nothing has been recorded yet.)
+
+  * Return to the reckoning
+    -> reckoning
+
+# ── Watches ───────────────────────────────────────────────────────────────────
+
+watch player/gold     "Gold"
+watch world/day       "Day"
+watch player/location "Location"
+watch-when player/gold <= 15  "Funds low, consider trading soon"
+
+# ── Verification ──────────────────────────────────────────────────────────────
+
+verify "gold never goes negative":
+  verify-always player/gold >= 0
+
+verify "spend-gold reduces gold by exactly the amount":
+  requires player/gold >= 30
+  after (spend-gold 30):
+    player/gold = player/gold@before - 30
+
+verify "earn-gold is logged: query-at reflects the new value at time of trade":
+  after (earn-gold 30):
+    gold-on-day 0 = 130

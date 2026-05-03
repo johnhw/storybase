@@ -1961,3 +1961,144 @@ describe("CLI demo20_harrow_house: Lovecraftian mystery", function()
     assert.is_true(has_offer, "ending-offered-hand not available at rapport=9 with all notebooks")
   end)
 end)
+
+-- ── demo21: Merchant's Reckoning (temporal query builtins) ────────────────────
+
+-- Helper: reach Day 2 with two gold changes (earn x2) recorded on day 0.
+-- Returns a game object positioned at the crossroads reckoning choice.
+local function reckoning_setup()
+  local sb   = require("lib.storybase")
+  local game = sb.load("demos/demo21_merchants_reckoning.sb")
+  game:init()
+  game:pick("Travel to town")   ; game:pick("Sell found goods")   -- +30 gold
+  game:pick("Sell found goods")                                   -- +30 gold (day 0)
+  game:pick("Rest in the common room")                            -- advance-day; back to crossroads
+  return game
+end
+
+describe("CLI demo21_merchants_reckoning: temporal query builtins", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo21_merchants_reckoning.sb"})
+    assert.equal(0, rc, "demo21 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo21_merchants_reckoning.sb"})
+    assert.equal(0, rc, "demo21 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto run 10 steps completes without error", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "10",
+                                   "demos/demo21_merchants_reckoning.sb"})
+    assert.equal(0, rc, "demo21 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("crossroads") or out:find("town"), out)
+  end)
+
+  it("Take the reckoning choice only appears after day > 1", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo21_merchants_reckoning.sb")
+    game:init()
+    -- Day 1: reckoning not available
+    local found_day1 = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:find("reckoning") then found_day1 = true end
+    end
+    assert.is_false(found_day1, "reckoning should not be available on day 1")
+    -- Advance to day 2
+    game:pick("Travel to town") ; game:pick("Rest in the common room")
+    local found_day2 = false
+    for _, c in ipairs(game:choices()) do
+      if c.label:find("reckoning") then found_day2 = true end
+    end
+    assert.is_true(found_day2, "reckoning should appear after day > 1")
+  end)
+
+  it("reckoning-ledger shows gold changes from query-history", function()
+    local game = reckoning_setup()
+    assert.equal(160, game:get("player/gold"), "expected 160 gold after two sells")
+    game:pick("Take the reckoning")
+    game:pick("Consult the ledger")
+    local text = narr_text(game:render())
+    -- Should mention two gold entries recorded at day 0
+    assert.is_truthy(text:find("100") and text:find("130") and text:find("160"),
+      "ledger should show 100->130->160 gold entries; got: " .. text)
+    assert.is_truthy(text:find("Day 0"), "ledger entries should be at day 0; got: " .. text)
+  end)
+
+  it("reckoning-route shows last 3 location changes from query-changes", function()
+    local game = reckoning_setup()
+    game:pick("Take the reckoning")
+    game:pick("Trace the road")
+    local text = narr_text(game:render())
+    -- Locations visited: crossroads->town, rest back to crossroads; last 3 changes
+    assert.is_truthy(text:find("town") or text:find("crossroads"),
+      "route should mention visited locations; got: " .. text)
+  end)
+
+  it("reckoning-fortune shows query-at result for gold at day 1", function()
+    local game = reckoning_setup()
+    game:pick("Take the reckoning")
+    game:pick("Recall the opening fortune")
+    local text = narr_text(game:render())
+    -- After earning 30+30 at day 0, gold-on-day 1 = 160 (last entry <= day 1)
+    assert.is_truthy(text:find("160"),
+      "fortune should show 160 gold recorded at day 1; got: " .. text)
+  end)
+
+  it("reckoning-audit shows wildcard query-history player/* entries", function()
+    local game = reckoning_setup()
+    game:pick("Take the reckoning")
+    game:pick("Scan the full chronicle")
+    local text = narr_text(game:render())
+    -- Should show both gold and location entries
+    assert.is_truthy(text:find("player/gold") or text:find("player/location"),
+      "audit should show player paths; got: " .. text)
+  end)
+
+  it("CLI step-mode: query-history survives save/restore across steps", function()
+    -- Regression test for the bug where restore_engine didn't repopulate eng._log._entries.
+    -- Without the fix, reckoning-ledger would say "ledger is blank" after a reload.
+    local cli_cmd = require("cli.cli_cmd")
+    local compiler = require("compiler.compiler")
+    local game_table = compiler.compile_file("demos/demo21_merchants_reckoning.sb")
+    assert.is_table(game_table, "demo21 failed to compile")
+
+    local save_path = os.tmpname() .. ".sbd"
+    local out_parts = {}
+    local function make_dest()
+      return setmetatable({}, { __index = {
+        write = function(_, s) out_parts[#out_parts+1] = s end,
+        flush = function() end,
+      }})
+    end
+
+    -- Step 1: fresh start
+    cli_cmd.run(game_table, save_path, { reset = true, input = "", output = make_dest() })
+    -- Step 2: travel to town
+    cli_cmd.run(game_table, save_path, { input = "1", output = make_dest() })
+    -- Step 3: earn gold (+30)
+    cli_cmd.run(game_table, save_path, { input = "1", output = make_dest() })
+    -- Step 4: earn gold again (+30)
+    cli_cmd.run(game_table, save_path, { input = "1", output = make_dest() })
+    -- Step 5: advance-day (back to crossroads, day 2)
+    cli_cmd.run(game_table, save_path, { input = "2", output = make_dest() })
+    -- Step 6: take reckoning (choice 5)
+    cli_cmd.run(game_table, save_path, { input = "5", output = make_dest() })
+    -- Step 7: consult ledger (choice 1)
+    out_parts = {}
+    local dest = make_dest()
+    cli_cmd.run(game_table, save_path, { input = "1", output = dest })
+    local result = table.concat(out_parts)
+    -- Log must have survived the save/restore: ledger should NOT be blank
+    assert.is_falsy(result:find("blank"), "ledger should not be blank after log restore; got: " .. result)
+    -- Should show gold entries
+    assert.is_truthy(result:find("130") and result:find("160"),
+      "ledger should show 130 and 160 gold after log restore; got: " .. result)
+
+    os.remove(save_path)
+    os.remove(save_path .. ".snap")
+  end)
+end)

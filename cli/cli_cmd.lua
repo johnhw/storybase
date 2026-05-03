@@ -242,6 +242,17 @@ local function restore_engine(eng, save_data)
     state_mod.replay(eng._state, save_data.entries or {})
   end
 
+  -- Restore log entries so historical queries (query-history, query-at, query-changes)
+  -- work correctly after a CLI reload.  The replay above reconstructs the state cache
+  -- but leaves eng._log empty; we need to repopulate it from the saved entries.
+  eng._log._entries = {}
+  local max_seq = 0
+  for _, e in ipairs(save_data.entries or {}) do
+    eng._log._entries[#eng._log._entries + 1] = e
+    if (e.seq or 0) > max_seq then max_seq = e.seq end
+  end
+  eng._log._seq = max_seq
+
   -- Replay schedule state
   eng._scheduler:replay_log(save_data.entries or {}, eng._game.fns)
 
