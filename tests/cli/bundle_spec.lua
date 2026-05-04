@@ -64,7 +64,7 @@ describe("storybase bundle: basic", function()
 
     assert.equal(0, code, "bundle should exit 0:\n" .. result)
     assert.is_true(result:find("Bundle written") ~= nil,
-      "expected 'Bundle written' in output:\n" .. result)
+      "expected `Bundle written' in output:\n" .. result)
     assert.is_true(result:find(out, 1, true) ~= nil,
       "output path should appear in result:\n" .. result)
 
@@ -363,11 +363,11 @@ engine-config:
   entry-scene: s
 type Color = red | green | blue
 state world:
-  color: Color = 'red
+  color: Color = `red
 scene s:
   Color is {world/color} .
   * Make green
-    set! world/color 'green
+    set! world/color `green
     -> s
 ]]
     local sb  = write_tmp_sb(src)

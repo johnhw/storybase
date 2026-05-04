@@ -42,16 +42,16 @@ scene parlour:
   The parlour is draped in faded red velvet. A cold hearth dominates one wall.
   A locked iron door leads down to what must be the cellar.
 
-  [not (has-item? 'gramophone)] In the corner sits an ancient gramophone, its brass horn tarnished green.
+  [not (has-item? `gramophone)] In the corner sits an ancient gramophone, its brass horn tarnished green.
 
-  * [not (has-item? 'gramophone)] Take the ancient gramophone
-    take-item 'gramophone
+  * [not (has-item? `gramophone)] Take the ancient gramophone
+    take-item `gramophone
     -> parlour
 
-  * [not (has-item? 'gramophone)] Ignore it and go back to the hall
+  * [not (has-item? `gramophone)] Ignore it and go back to the hall
     -> hall
 
-  * [has-item? 'gramophone] Return to the hall
+  * [has-item? `gramophone] Return to the hall
     -> hall
 
   * Descend to the cellar
@@ -61,10 +61,10 @@ scene library:
   Floor-to-ceiling shelves sag under the weight of neglected books.
   A narrow stair at the back climbs to the attic.
 
-  [not (has-item? 'dusty-tome)] One book lies open on the reading table: its pages are blank except for a strange symbol on the cover.
+  [not (has-item? `dusty-tome)] One book lies open on the reading table: its pages are blank except for a strange symbol on the cover.
 
-  * [not (has-item? 'dusty-tome)] Take the dusty tome
-    take-item 'dusty-tome
+  * [not (has-item? `dusty-tome)] Take the dusty tome
+    take-item `dusty-tome
     -> library
 
   * Return to the hall
@@ -76,10 +76,10 @@ scene library:
 scene kitchen:
   The kitchen smells of rust and damp. Pots hang from hooks overhead.
 
-  [not (has-item? 'pocket-watch)] On the windowsill you notice a cracked pocket watch, its hands frozen at midnight.
+  [not (has-item? `pocket-watch)] On the windowsill you notice a cracked pocket watch, its hands frozen at midnight.
 
-  * [not (has-item? 'pocket-watch)] Take the cracked pocket watch
-    take-item 'pocket-watch
+  * [not (has-item? `pocket-watch)] Take the cracked pocket watch
+    take-item `pocket-watch
     -> kitchen
 
   * Return to the hall
@@ -88,10 +88,10 @@ scene kitchen:
 scene cellar:
   Cold stone walls, dripping pipes. The air hums faintly.
 
-  [not (has-item? 'electrical-apparatus)] Against the far wall stands a mysterious electrical apparatus — coils of copper wire wound around an iron frame, purpose unknown.
+  [not (has-item? `electrical-apparatus)] Against the far wall stands a mysterious electrical apparatus — coils of copper wire wound around an iron frame, purpose unknown.
 
-  * [not (has-item? 'electrical-apparatus)] Take the mysterious electrical apparatus
-    take-item 'electrical-apparatus
+  * [not (has-item? `electrical-apparatus)] Take the mysterious electrical apparatus
+    take-item `electrical-apparatus
     -> cellar
 
   * Return to the parlour
@@ -100,10 +100,10 @@ scene cellar:
 scene attic:
   Low rafters, cobwebs, and the faint smell of cedar.
 
-  [not (has-item? 'tapestry)] A moth-eaten tapestry hangs from the rafters. Strange figures are woven into it.
+  [not (has-item? `tapestry)] A moth-eaten tapestry hangs from the rafters. Strange figures are woven into it.
 
-  * [not (has-item? 'tapestry)] Take the moth-eaten tapestry
-    take-item 'tapestry
+  * [not (has-item? `tapestry)] Take the moth-eaten tapestry
+    take-item `tapestry
     -> attic
 
   * Climb back down to the library

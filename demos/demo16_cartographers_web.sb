@@ -8,8 +8,8 @@ module demo16-cartographers-web
 #   • connected-to via in find queries (cities reachable from capital)
 #   • inverse-adjacent? (inbound roads to port-city)
 #   • find with or-where + order-by + limit combined
-#   • can-reach? with strategy: 'depth-first
-#   • find-path with strategy: 'breadth-first and budget: N
+#   • can-reach? with strategy: `depth-first
+#   • find-path with strategy: `breadth-first and budget: N
 #   • counterfactual simulate: true (route-bonus fires in counterfactual branch)
 #   • relate!/unrelate! for dynamic road modifications
 #   • Entity family cities/{city} with typed fields
@@ -34,15 +34,15 @@ type CityRecord:
   population:    Int(0, 100) = 10
   has-market:    Bool        = false
   coastal:       Bool        = false
-  controlled-by: Region      = 'northern
+  controlled-by: Region      = `northern
 
 # ── State ──────────────────────────────────────────────────────────────────────
 
 state player/gold:        Int(0, 9999) = 500
-state player/location:    CityId       = 'capital-city
+state player/location:    CityId       = `capital-city
 state world/turn:         Int(0, 999)  = 0
 state world/initialized:  Bool         = false
-state world/route-status: RouteStatus  = 'closed
+state world/route-status: RouteStatus  = `closed
 state world/crisis-active: Bool        = false
 
 "City records — keyed by CityId symbols, maximum 8 concurrent."
@@ -52,11 +52,11 @@ state cities/{city}: CityRecord  max: 8
 
 "Road network between cities (bidirectional adjacency)."
 relation roads: CityId -> Set(CityId, 6):
-  'capital-city: {'market-town, 'fortress}
-  'market-town:  {'capital-city, 'port-city, 'fortress}
-  'port-city:    {'market-town, 'village}
-  'fortress:     {'capital-city, 'market-town}
-  'village:      {'port-city}
+  `capital-city: {`market-town, `fortress}
+  `market-town:  {`capital-city, `port-city, `fortress}
+  `port-city:    {`market-town, `village}
+  `fortress:     {`capital-city, `market-town}
+  `village:      {`port-city}
 
 # ── Scheduling ─────────────────────────────────────────────────────────────────
 
@@ -64,14 +64,14 @@ relation roads: CityId -> Set(CityId, 6):
 schedule route-bonus:
   at: [turn: 0]
   fn:
-    when world/route-status = 'open:
+    when world/route-status = `open:
       inc! player/gold 50
 
 "Prices fluctuate every 3 turns once a trade route is open."
 schedule market-fluctuation:
   every: [turn: +3]
   fn:
-    when world/route-status = 'open:
+    when world/route-status = `open:
       inc! player/gold 25
 
 # ── Pure functions ─────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ fn trade-hubs:
 "Cities reachable from the capital via any road path (connected-to via)."
 fn capital-connected-cities:
   find cities
-    connected-to 'capital-city via roads
+    connected-to `capital-city via roads
 
 "Top 3 accessible cities (coastal or market) ranked by population (or-where + order-by + limit)."
 fn top-accessible:
@@ -97,22 +97,22 @@ fn top-accessible:
 
 "Inbound road count to port-city (inverse-adjacent?)."
 fn inbound-to-port-count:
-  let inbound = (inverse-adjacent? roads 'port-city)
+  let inbound = (inverse-adjacent? roads `port-city)
   count inbound
 
 "Can the player open a trade route? Verified via depth-first search."
 fn route-reachable?:
-  can-reach? (world/route-status = 'open)  strategy: 'depth-first  depth: 8
+  can-reach? (world/route-status = `open)  strategy: `depth-first  depth: 8
 
 "Number of choice-steps on the shortest path to opening a route (find-path breadth-first)."
 fn steps-to-open-route:
-  let path = find-path (world/route-status = 'open)  strategy: 'breadth-first  depth: 10
+  let path = find-path (world/route-status = `open)  strategy: `breadth-first  depth: 10
   list-size (path ?? [])
 
 "Preview gold if route were opened now — counterfactual simulate: true fires route-bonus."
 fn preview-open-route:
   let alt = counterfactual simulate: true do:
-    set! world/route-status 'open
+    set! world/route-status `open
   (in-state alt) player/gold
 
 "Count of trade hubs (markets or coastal cities)."
@@ -133,19 +133,19 @@ fn coastal-count:
 fn init-map:
   when not world/initialized:
     set! world/initialized true
-    spawn! cities 'capital-city CityRecord(name: "Crown's Reach",  population: 80, has-market: true,  coastal: false, controlled-by: 'central)
-    spawn! cities 'market-town  CityRecord(name: "Trader's Rest",  population: 50, has-market: true,  coastal: false, controlled-by: 'northern)
-    spawn! cities 'port-city    CityRecord(name: "Port Haven",     population: 40, has-market: false, coastal: true,  controlled-by: 'eastern)
-    spawn! cities 'fortress     CityRecord(name: "Iron Keep",      population: 30, has-market: false, coastal: false, controlled-by: 'western)
-    spawn! cities 'village      CityRecord(name: "Saltmarsh",      population: 15, has-market: false, coastal: true,  controlled-by: 'eastern)
+    spawn! cities `capital-city CityRecord(name: "Crown's Reach",  population: 80, has-market: true,  coastal: false, controlled-by: `central)
+    spawn! cities `market-town  CityRecord(name: "Trader's Rest",  population: 50, has-market: true,  coastal: false, controlled-by: `northern)
+    spawn! cities `port-city    CityRecord(name: "Port Haven",     population: 40, has-market: false, coastal: true,  controlled-by: `eastern)
+    spawn! cities `fortress     CityRecord(name: "Iron Keep",      population: 30, has-market: false, coastal: false, controlled-by: `western)
+    spawn! cities `village      CityRecord(name: "Saltmarsh",      population: 15, has-market: false, coastal: true,  controlled-by: `eastern)
 
 "Open a direct road between the fortress and the village."
 fn open-village-road:
-  pre:  world/route-status != 'open
-  post: world/route-status = 'open
-  relate!  roads 'fortress 'village
-  relate!  roads 'village  'fortress
-  set!  world/route-status 'open
+  pre:  world/route-status != `open
+  post: world/route-status = `open
+  relate!  roads `fortress `village
+  relate!  roads `village  `fortress
+  set!  world/route-status `open
   inc!  world/turn 1
   time-inc! turn: 1
 
@@ -153,8 +153,8 @@ fn open-village-road:
 fn trigger-crisis:
   pre:  not world/crisis-active
   post: world/crisis-active = true
-  unrelate! roads 'port-city  'market-town
-  unrelate! roads 'market-town 'port-city
+  unrelate! roads `port-city  `market-town
+  unrelate! roads `market-town `port-city
   set!  world/crisis-active true
   inc!  world/turn 1
   time-inc! turn: 1
@@ -224,7 +224,7 @@ scene open-trade-route:
   Route status: {world/route-status}.
   Preview gold if route opens now: {preview-open-route}.
 
-  * [world/route-status != 'open] Open the fortress-village road
+  * [world/route-status != `open] Open the fortress-village road
     open-village-road
     -> open-trade-route
   * Return to map room
@@ -251,9 +251,9 @@ verify "there are always at least two trade hubs (market or coastal)":
     hub-count >= 2
 
 verify "opening the village road sets route status to open":
-  requires world/route-status != 'open
+  requires world/route-status != `open
   after (open-village-road):
-    world/route-status = 'open
+    world/route-status = `open
 
 verify "gold is always non-negative":
   from-any-state:

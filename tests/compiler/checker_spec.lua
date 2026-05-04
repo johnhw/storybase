@@ -286,19 +286,19 @@ describe("checker pass 2 — default value type-checking", function()
   end)
 
   it("accepts valid enum default", function()
-    check_ok("type S = alive | dead\nstate status: S = 'alive")
+    check_ok("type S = alive | dead\nstate status: S = `alive")
   end)
 
   it("rejects out-of-range enum default", function()
-    check_err("type S = alive | dead\nstate status: S = 'unknown", ast.E.BAD_DEFAULT)
+    check_err("type S = alive | dead\nstate status: S = `unknown", ast.E.BAD_DEFAULT)
   end)
 
   it("accepts valid inline-enum default", function()
-    check_ok("state mode: Enum(fast, slow) = 'fast")
+    check_ok("state mode: Enum(fast, slow) = `fast")
   end)
 
   it("rejects out-of-range inline-enum default", function()
-    check_err("state mode: Enum(fast, slow) = 'medium", ast.E.BAD_DEFAULT)
+    check_err("state mode: Enum(fast, slow) = `medium", ast.E.BAD_DEFAULT)
   end)
 
   it("accepts empty_set default for Set", function()
@@ -306,7 +306,7 @@ describe("checker pass 2 — default value type-checking", function()
   end)
 
   it("rejects non-set default for Set", function()
-    check_err("type T = a | b\nstate flags: Set(T, 5) = 'a", ast.E.BAD_DEFAULT)
+    check_err("type T = a | b\nstate flags: Set(T, 5) = `a", ast.E.BAD_DEFAULT)
   end)
 
   it("accepts empty_list default for List", function()
@@ -314,7 +314,7 @@ describe("checker pass 2 — default value type-checking", function()
   end)
 
   it("rejects non-list default for List", function()
-    check_err("type T = a | b\nstate items: List(T, 5) = 'a", ast.E.BAD_DEFAULT)
+    check_err("type T = a | b\nstate items: List(T, 5) = `a", ast.E.BAD_DEFAULT)
   end)
 
   it("checks defaults on record type fields", function()
@@ -359,7 +359,7 @@ type C:
   end)
 
   it("allows default override from same record after mixin", function()
-    -- 'x' from Base is overridden in Child — this is legal
+    -- `x' from Base is overridden in Child — this is legal
     check_ok([[
 type Base:
   x: Int(0, 100) = 10
@@ -454,8 +454,8 @@ type Gold      = Int(0, 9999)
 
 type Entity:
   health:   Health   = 50
-  status:   Status   = 'alive
-  location: Location = 'village
+  status:   Status   = `alive
+  location: Location = `village
 
 type Player:
   with Entity
@@ -465,7 +465,7 @@ state player: Player
 
 state world:
   turn:    Int(0, 9999) = 0
-  chapter: Location     = 'village
+  chapter: Location     = `village
 
 state npcs/{npc}: Entity  max: 20
 
@@ -527,7 +527,7 @@ describe("checker pass 3 — purity inference", function()
     local fn = first_fn([[
 fn update:
   when player/health <= 0:
-    set! player/status 'dead]])
+    set! player/status `dead]])
     assert.is_true(fn.is_transaction)
   end)
 
@@ -880,7 +880,7 @@ fn tick:
     local fn = get_fn([[
 state npcs/{npc}: Int(0, 100)  max: 8
 fn do-spawn:
-  spawn! npcs 'bob 42
+  spawn! npcs `bob 42
 ]], "do-spawn")
     assert.is_not_nil(fn)
     assert.is_true(fn.write_set["npcs/*"] == true)
@@ -890,7 +890,7 @@ fn do-spawn:
     local fn = get_fn([[
 state npcs/{npc}: Int(0, 100)  max: 8
 fn do-despawn:
-  despawn! npcs 'bob
+  despawn! npcs `bob
 ]], "do-despawn")
     assert.is_not_nil(fn)
     assert.is_true(fn.write_set["npcs/*"] == true)
@@ -1086,7 +1086,7 @@ family npcs:
 fn heal k:
   set! npcs/{k}/health 100
 fn bad-find:
-  find npcs where: (heal 'a)
+  find npcs where: (heal `a)
 ]], ast.E.TRANSACTION_IN_FIND)
   end)
 
@@ -1097,7 +1097,7 @@ family npcs:
 fn alive? k:
   npcs/{k}/health > 0
 fn list-alive:
-  find npcs where: (alive? 'a)
+  find npcs where: (alive? `a)
 ]])
   end)
 
@@ -1158,7 +1158,7 @@ bounded roll-die:
 fn use-die:
   roll-die
 ]], "use-die")
-    assert.is_not_nil(fn, "fn 'use-die' not found")
+    assert.is_not_nil(fn, "fn `use-die' not found")
     assert.is_true(fn.uses_bounded == true, "expected uses_bounded=true")
   end)
 
@@ -1171,7 +1171,7 @@ bounded roll-die:
 fn pure-fn:
   42
 ]], "pure-fn")
-    assert.is_not_nil(fn, "fn 'pure-fn' not found")
+    assert.is_not_nil(fn, "fn `pure-fn' not found")
     assert.is_falsy(fn.uses_bounded, "expected uses_bounded to be falsy")
   end)
 
@@ -1243,7 +1243,7 @@ fn act:
   it("warns POST_NOT_BOOL when post: is a symbol literal", function()
     local _, diags = compile([[
 fn bad:
-  post: 'foo
+  post: `foo
   pass
 ]])
     local found
@@ -1549,7 +1549,7 @@ speaker aldric:
 engine-config:
   entry-scene: s
 fn speak:
-  say 'aldric "Hello."
+  say `aldric "Hello."
 scene s:
   * Done -> s
 ]])

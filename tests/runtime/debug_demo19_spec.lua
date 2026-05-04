@@ -591,7 +591,7 @@ describe("debug demo19: hot reload", function()
     assert.equal(7, eng._state:get("operator/focus"))   -- 9-2=7
   end)
 
-  it("reload outcome is 'migrated' when new fields are added", function()
+  it("reload outcome is `migrated' when new fields are added", function()
     local gt1, errs1 = compile(SRC_V1)
     assert.equal(0, #errs1)
     if not gt1 then pending("compile failed") return end
@@ -608,7 +608,7 @@ describe("debug demo19: hot reload", function()
     assert.truthy(resp.outcome == "migrated" or resp.outcome == "ok")
   end)
 
-  it("reload emits a 'reload' event", function()
+  it("reload emits a `reload' event", function()
     local gt1, errs1 = compile(SRC_V1)
     assert.equal(0, #errs1)
     if not gt1 then pending("compile failed") return end

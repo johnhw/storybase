@@ -763,7 +763,7 @@ scene hub:
     return g
   end
 
-  it("tracks mutations via on('mutation') event", function()
+  it("tracks mutations via on(`mutation') event", function()
     local g = make_game()
     local paths_changed = {}
     g:on("mutation", function(ev)

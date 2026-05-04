@@ -1233,7 +1233,7 @@ fn inc-ticks:
 
 scene setup:
   * Arm
-    schedule! 'dyn-ticker every: [turn: 1] fn: inc-ticks
+    schedule! `dyn-ticker every: [turn: 1] fn: inc-ticks
     time-inc! turn: 1
     -> loop
 
@@ -1314,7 +1314,7 @@ scene check:
       end,
       5
     )
-    assert.is_true(reached, "BFS should see UMap key 'alice' after record-score")
+    assert.is_true(reached, "BFS should see UMap key `alice' after record-score")
   end)
 
   it("find_path can find a path that leads to a non-empty UMap state", function()

@@ -2,14 +2,14 @@
 #
 # Features demonstrated:
 #   grid-get / grid-set!         — toggle torch cells (floor↔torch) and set traps
-#   visible-from?                — guard sight-line check (solid: {'wall})
+#   visible-from?                — guard sight-line check (solid: {`wall})
 #   path-to                      — shortest intruder route to vault, respects traps
 #   occupied-by                  — prevent placing two guards on the same cell
 #   while loop                   — simulate intruder advancing step by step
 #   cond expression              — multi-branch danger level based on route length
 #   Enum(quiet, tense, critical) — inline enum type for alert state
 #   lambda in count-where        — fn(g): visible-from? ... counts guards with LOS
-#   engine/emit                  — fire 'intruder-spotted event on capture
+#   engine/emit                  — fire `intruder-spotted event on capture
 #   verify from-any-state:       — model-check a state invariant across all BFS states
 #
 # Dungeon layout (8x5, 0-based):
@@ -51,7 +51,7 @@ type Guard:
 defgrid dungeon:
   dimensions: 8 x 5
   cell-type:  CellKind
-  default:    'floor
+  default:    `floor
 
 # ─── State ───────────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ state vault/breached: Bool = false
 
 "Round counter and alert level (inline Enum demonstrates the Enum(a,b,c) type)."
 state world/round: Int(0, 10)                    = 0
-state world/alert: Enum(quiet, tense, critical)  = 'quiet
+state world/alert: Enum(quiet, tense, critical)  = `quiet
 state world/ready: Bool                          = false
 
 # ─── Watches ─────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ watch-when vault/breached "The vault has been breached!"
 
 "Steps on shortest intruder path to vault (traps and walls blocked). 99 = blocked."
 fn route-length:
-  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {'wall, 'trap}
+  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {`wall, `trap}
   if path = nil:
     99
   else:
@@ -94,16 +94,16 @@ fn route-length:
 "Multi-branch danger label from cond expression."
 fn danger-level:
   cond:
-    vault/breached:      'breached
-    intruder/caught:     'contained
-    route-length = 0:    'at-vault
-    route-length <= 2:   'critical
-    route-length <= 4:   'high
-    _:                   'moderate
+    vault/breached:      `breached
+    intruder/caught:     `contained
+    route-length = 0:    `at-vault
+    route-length <= 2:   `critical
+    route-length <= 4:   `high
+    _:                   `moderate
 
 "True if the given guard is active and has line of sight to the intruder."
 fn guard-sees-intruder g:
-  guards/{g}/active and (visible-from? dungeon guards/{g}/x guards/{g}/y intruder/x intruder/y solid: {'wall})
+  guards/{g}/active and (visible-from? dungeon guards/{g}/x guards/{g}/y intruder/x intruder/y solid: {`wall})
 
 "Count of active guards with unobstructed sight-line to the intruder."
 fn visible-guard-count:
@@ -111,7 +111,7 @@ fn visible-guard-count:
 
 "X coordinate of the intruder's next step (stays put if blocked or already at vault)."
 fn next-ix:
-  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {'wall, 'trap}
+  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {`wall, `trap}
   if path = nil:
     intruder/x
   else:
@@ -119,11 +119,11 @@ fn next-ix:
     if step = nil:
       intruder/x
     else:
-      step['x]
+      step[`x]
 
 "Y coordinate of the intruder's next step."
 fn next-iy:
-  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {'wall, 'trap}
+  let path = path-to dungeon intruder/x intruder/y 2 1 blocked: {`wall, `trap}
   if path = nil:
     intruder/y
   else:
@@ -131,24 +131,24 @@ fn next-iy:
     if step = nil:
       intruder/y
     else:
-      step['y]
+      step[`y]
 
 # ─── Setup ────────────────────────────────────────────────────────────────────
 
 "Build the dungeon: border walls, interior barrier, spawn guard slots."
 fn init-dungeon:
   for x in [0, 1, 2, 3, 4, 5, 6, 7]:
-    grid-set! dungeon x 0 'wall
-    grid-set! dungeon x 4 'wall
+    grid-set! dungeon x 0 `wall
+    grid-set! dungeon x 4 `wall
   for y in [1, 2, 3]:
-    grid-set! dungeon 0 y 'wall
-    grid-set! dungeon 7 y 'wall
-  grid-set! dungeon 2 2 'wall
-  grid-set! dungeon 3 2 'wall
-  grid-set! dungeon 4 2 'wall
-  grid-set! dungeon 5 2 'wall
-  spawn! guards 'alpha Guard(x: 1, y: 3, active: false)
-  spawn! guards 'beta  Guard(x: 6, y: 3, active: false)
+    grid-set! dungeon 0 y `wall
+    grid-set! dungeon 7 y `wall
+  grid-set! dungeon 2 2 `wall
+  grid-set! dungeon 3 2 `wall
+  grid-set! dungeon 4 2 `wall
+  grid-set! dungeon 5 2 `wall
+  spawn! guards `alpha Guard(x: 1, y: 3, active: false)
+  spawn! guards `beta  Guard(x: 6, y: 3, active: false)
   set! world/ready true
 
 # ─── Guard placement ───────────────────────────────────────────────────────────
@@ -181,20 +181,20 @@ fn recall-alpha:
 "Toggle the corridor torch at (3,3) between floor and torch."
 fn toggle-torch:
   let current = (grid-get dungeon 3 3)
-  if current = 'torch:
-    grid-set! dungeon 3 3 'floor
+  if current = `torch:
+    grid-set! dungeon 3 3 `floor
   else:
-    grid-set! dungeon 3 3 'torch
+    grid-set! dungeon 3 3 `torch
 
 "Set a trap at the west approach (1,3) — forces intruder onto the longer east route."
 fn set-west-trap:
-  pre: (grid-get dungeon 1 3) = 'floor
-  grid-set! dungeon 1 3 'trap
+  pre: (grid-get dungeon 1 3) = `floor
+  grid-set! dungeon 1 3 `trap
 
 "Clear the trap at (1,3)."
 fn clear-west-trap:
-  pre: (grid-get dungeon 1 3) = 'trap
-  grid-set! dungeon 1 3 'floor
+  pre: (grid-get dungeon 1 3) = `trap
+  grid-set! dungeon 1 3 `floor
 
 # ─── Simulation ─────────────────────────────────────────────────────────────────
 
@@ -207,7 +207,7 @@ fn advance-round:
     let visible = visible-guard-count
     when visible > 0:
       set! intruder/caught true
-      engine/emit 'intruder-spotted {x: intruder/x, y: intruder/y, round: world/round}
+      engine/emit `intruder-spotted {x: intruder/x, y: intruder/y, round: world/round}
     when not intruder/caught:
       let nx = next-ix
       let ny = next-iy
@@ -218,12 +218,12 @@ fn advance-round:
     inc! world/round 1
   let dist = route-length
   if dist <= 2:
-    set! world/alert 'critical
+    set! world/alert `critical
   else:
     if dist <= 5:
-      set! world/alert 'tense
+      set! world/alert `tense
     else:
-      set! world/alert 'quiet
+      set! world/alert `quiet
 
 "Reset — a new intruder approaches from (3,3)."
 fn reset-intruder:
@@ -233,7 +233,7 @@ fn reset-intruder:
   set! intruder/caught false
   set! vault/breached false
   set! world/round 0
-  set! world/alert 'quiet
+  set! world/alert `quiet
 
 # ─── Verify ─────────────────────────────────────────────────────────────────────
 
@@ -242,7 +242,7 @@ verify "round counter stays in bounds":
 
 verify "alert level is always one of three valid symbols":
   from-any-state:
-    world/alert = 'quiet or world/alert = 'tense or world/alert = 'critical
+    world/alert = `quiet or world/alert = `tense or world/alert = `critical
 
 # ─── Scenes ─────────────────────────────────────────────────────────────────────
 
@@ -294,11 +294,11 @@ scene warden-view:
     toggle-torch
     -> warden-view
 
-  * [(grid-get dungeon 1 3) = 'floor] Set west trap — diverts intruder east
+  * [(grid-get dungeon 1 3) = `floor] Set west trap — diverts intruder east
     set-west-trap
     -> warden-view
 
-  * [(grid-get dungeon 1 3) = 'trap] Clear west trap
+  * [(grid-get dungeon 1 3) = `trap] Clear west trap
     clear-west-trap
     -> warden-view
 

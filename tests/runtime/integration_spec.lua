@@ -17,21 +17,21 @@ engine-config:
   entry-scene: village
 
 state player:
-  location: Symbol = 'village
+  location: Symbol = `village
 
 scene village:
   You are in the village.
   * Go to forest
-    set! player/location 'forest
+    set! player/location `forest
     -> forest
 
 scene forest:
   You are in the forest.
   * Go to dungeon
-    set! player/location 'dungeon
+    set! player/location `dungeon
     -> dungeon
   * Return to village
-    set! player/location 'village
+    set! player/location `village
     -> village
 
 scene dungeon:
@@ -365,7 +365,7 @@ end)
 -- ============================================================
 
 describe("Integration scenario 6: scheduled event fires", function()
-  -- The schedule fires every time the 'turn' axis advances by 1.
+  -- The schedule fires every time the `turn' axis advances by 1.
   -- The player action explicitly increments the turn axis.
   local SRC = [[
 module sched-test
@@ -437,7 +437,7 @@ state guard:
   alert: Bool = false
 
 state player:
-  action: Symbol = 'idle
+  action: Symbol = `idle
 
 fn guard-behavior:
   pass
@@ -450,8 +450,8 @@ actor guard-actor:
 
 scene main:
   * Trigger alert
-    set! player/action 'alert
-    send! guard-actor 'intruder
+    set! player/action `alert
+    send! guard-actor `intruder
     -> main
   * Reset
     set! guard/alert false
@@ -599,7 +599,7 @@ end)
 
 -- ============================================================
 -- Scenario: macro NAMED_ARG parameter substitution
--- Regression test for the bug where 'param:' at end of a condition
+-- Regression test for the bug where `param:' at end of a condition
 -- line was parsed as a NAMED_ARG token and not substituted by
 -- the macro expander, causing guards to always see nil instead of
 -- the actual argument value.
@@ -614,7 +614,7 @@ engine-config:
 
 type ItemKind = apple | banana | cherry
 
-state player/bag:   Set(ItemKind, 5) = {'apple, 'banana}
+state player/bag:   Set(ItemKind, 5) = {`apple, `banana}
 state player/used:  Int(0, 10) = 0
 
 macro use-item kind body:
@@ -626,11 +626,11 @@ macro use-item kind body:
     pass
 
 fn use-apple:
-  use-item kind: 'apple:
+  use-item kind: `apple:
     pass
 
 fn use-cherry:
-  use-item kind: 'cherry:
+  use-item kind: `cherry:
     pass
 
 scene main:
@@ -665,7 +665,7 @@ end)
 -- ============================================================
 -- Scenario: set-literal state defaults
 -- Regression test for the bug where Set/List state defaults given
--- as literals (e.g. {'a, 'b}) were silently ignored — the parser,
+-- as literals (e.g. {`a, `b}) were silently ignored — the parser,
 -- codegen, runtime, and checker all needed fixing.
 -- ============================================================
 
@@ -678,7 +678,7 @@ engine-config:
 
 type Color = red | green | blue
 
-state player/colors: Set(Color, 5) = {'red, 'green}
+state player/colors: Set(Color, 5) = {`red, `green}
 state player/score:  Int(0, 100)   = 0
 
 scene main:
@@ -690,7 +690,7 @@ scene main:
     local g, err = sb.from_source(SRC, "set-default-test.sb")
     assert.is_nil(err, tostring(err))
     g:init()
-    -- The set should contain 'red' and 'green'
+    -- The set should contain `red' and `green'
     local colors = g:get("player/colors")
     assert.is_not_nil(colors)
     local found_red, found_green = false, false
@@ -698,8 +698,8 @@ scene main:
       if v == "red"   then found_red   = true end
       if v == "green" then found_green = true end
     end
-    assert.is_true(found_red,   "set default should contain 'red")
-    assert.is_true(found_green, "set default should contain 'green")
+    assert.is_true(found_red,   "set default should contain `red")
+    assert.is_true(found_green, "set default should contain `green")
   end)
 
   it("set default has correct size", function()

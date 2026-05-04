@@ -34,7 +34,7 @@ type Status = alive | dead
 
 type Character:
   name:   String = "Hero"
-  status: Status = 'alive
+  status: Status = `alive
 
 # ── State ──────────────────────────────────────────────────────────────────
 

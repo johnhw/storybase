@@ -1,0 +1,950 @@
+-- compiler/ast.lua
+-- AST node constructors, kind constants, predicates, and diagnostic constructors.
+--
+-- Every AST node is a plain Lua table with at minimum:
+--   { kind = K.SOME_KIND, pos = {file="...", line=N, col=N} }
+-- Additional fields vary by kind and are documented below.
+--
+-- The diagnostic accumulator (M.new_accum) is also defined here so every
+-- compiler pass can produce errors and warnings without a separate import.
+
+local M = {}
+
+-- ============================================================
+-- Source position
+-- ============================================================
+
+--- Construct a source position table.
+---@param file string
+---@param line integer
+---@param col  integer
+---@return table
+function M.pos(file, line, col)
+  return { file = file, line = line or 0, col = col or 0 }
+end
+
+local NO_POS = M.pos("?", 0, 0)
+
+-- ============================================================
+-- Diagnostic constructors
+-- ============================================================
+-- All diagnostics follow this structure:
+--   @field code    string   UPPER_SNAKE error/warning code
+--   @field message string   Human-readable description
+--   @field file    string   Source file name
+--   @field line    integer  1-based line number
+--   @field col     integer  1-based column number
+--   @field note    string?  Optional additional context
+--   @field level   string   "error" or "warning"
+
+local function _diag(level, code, message, pos, note)
+  pos = pos or NO_POS
+  return {
+    level   = level,
+    code    = code,
+    message = message,
+    file    = pos.file,
+    line    = pos.line,
+    col     = pos.col,
+    note    = note,
+  }
+end
+
+--- Construct an error diagnostic.
+function M.error(code, message, pos, note)
+  return _diag("error", code, message, pos, note)
+end
+
+--- Construct a warning diagnostic.
+function M.warning(code, message, pos, note)
+  return _diag("warning", code, message, pos, note)
+end
+
+-- ============================================================
+-- Error codes
+-- ============================================================
+
+M.E = {
+  -- Lexer errors
+  UNTERMINATED_STRING      = "UNTERMINATED_STRING",
+  ILLEGAL_CHAR             = "ILLEGAL_CHAR",
+  MIXED_INDENT             = "MIXED_INDENT",
+  -- Parser errors
+  UNEXPECTED_TOKEN         = "UNEXPECTED_TOKEN",
+  EXPECTED_TOKEN           = "EXPECTED_TOKEN",
+  IMPORT_CYCLE             = "IMPORT_CYCLE",
+  BAD_DECLARATION          = "BAD_DECLARATION",
+  BAD_EXPRESSION           = "BAD_EXPRESSION",
+  BAD_TYPE_EXPR            = "BAD_TYPE_EXPR",
+  -- Schema / checker pass 1
+  DUPLICATE_NAME           = "DUPLICATE_NAME",
+  UNDEFINED_TYPE           = "UNDEFINED_TYPE",
+  UNDEFINED_PATH           = "UNDEFINED_PATH",
+  UNDEFINED_SCENE          = "UNDEFINED_SCENE",
+  UNDEFINED_RELATION       = "UNDEFINED_RELATION",
+  UNDEFINED_ACTOR          = "UNDEFINED_ACTOR",
+  UNDEFINED_FAMILY         = "UNDEFINED_FAMILY",
+  UNDEFINED_FN             = "UNDEFINED_FN",
+  -- Checker pass 2 (type check)
+  TYPE_MISMATCH            = "TYPE_MISMATCH",
+  FIELD_TYPE_OVERRIDE      = "FIELD_TYPE_OVERRIDE",
+  CONFLICTING_WITH         = "CONFLICTING_WITH",
+  BAD_INT_BOUNDS           = "BAD_INT_BOUNDS",
+  BAD_DEFAULT              = "BAD_DEFAULT",
+  NOT_DISCRETE             = "NOT_DISCRETE",
+  SYMBOL_OF_BAD_FAMILY     = "SYMBOL_OF_BAD_FAMILY",
+  -- Checker pass 3 (pure/transaction inference)
+  PURE_CALLS_MUT           = "PURE_CALLS_MUT",
+  TRANSACTION_IN_PURE      = "TRANSACTION_IN_PURE",
+  TRANSACTION_IN_FIND      = "TRANSACTION_IN_FIND",
+  TRANSACTION_IN_VERIFY    = "TRANSACTION_IN_VERIFY",
+  LAMBDA_CALLS_MUT         = "LAMBDA_CALLS_MUT",
+  -- Checker pass 4 (write-set analysis)
+  WRITE_UNTYPED_VAR        = "WRITE_UNTYPED_VAR",
+  WRITE_DYNAMIC_PATH       = "WRITE_DYNAMIC_PATH",
+  -- Compiler boundary (discrete/superficial)
+  SUPERFICIAL_IN_COND      = "SUPERFICIAL_IN_COND",
+  SUPERFICIAL_PARAM        = "SUPERFICIAL_PARAM",
+  RANDOM_SUPERFICIAL       = "RANDOM_SUPERFICIAL",
+  -- Perceives enforcement
+  PERCEIVES_VIOLATION      = "PERCEIVES_VIOLATION",
+  -- Pre/post conditions
+  PRE_NOT_BOOL             = "PRE_NOT_BOOL",
+  POST_NOT_BOOL            = "POST_NOT_BOOL",
+  PATH_BEFORE_INVALID      = "PATH_BEFORE_INVALID",
+  -- Runtime / engine (structured runtime errors)
+  INBOX_OVERFLOW           = "INBOX_OVERFLOW",
+  SPAWN_EXISTS             = "SPAWN_EXISTS",
+  STACK_OVERFLOW           = "STACK_OVERFLOW",
+  NO_CHECKPOINT            = "NO_CHECKPOINT",
+  SET_OVERFLOW             = "SET_OVERFLOW",
+  LIST_OVERFLOW            = "LIST_OVERFLOW",
+  LIST_EMPTY               = "LIST_EMPTY",
+  NIL_WRITE                = "NIL_WRITE",
+  -- Migration
+  MIGRATION_MISSING        = "MIGRATION_MISSING",
+  SCHEMA_VERSION_AHEAD     = "SCHEMA_VERSION_AHEAD",
+  -- Macro system
+  MACRO_RECURSIVE          = "MACRO_RECURSIVE",
+  MACRO_CROSS_UNIT         = "MACRO_CROSS_UNIT",
+  -- File I/O
+  FILE_NOT_FOUND           = "FILE_NOT_FOUND",
+  FILE_READ_ERROR          = "FILE_READ_ERROR",
+  -- Feature availability
+  UNSUPPORTED_FEATURE      = "UNSUPPORTED_FEATURE",
+}
+
+-- ============================================================
+-- Warning codes
+-- ============================================================
+
+M.W = {
+  UNTYPED_SYMBOL           = "WARN_UNTYPED_SYMBOL",
+  RECURSIVE_SCENE          = "WARN_RECURSIVE_SCENE",
+  UNUSED_IMPORT            = "WARN_UNUSED_IMPORT",
+  IMPRECISE_SEARCH         = "WARN_IMPRECISE_SEARCH",
+  APPROXIMATE_RESULT       = "WARN_APPROXIMATE_RESULT",
+  EXPORTS_NOT_ENFORCED     = "WARN_EXPORTS_NOT_ENFORCED",
+}
+
+-- ============================================================
+-- AST node kind constants
+-- ============================================================
+
+M.K = {}
+
+-- ── Program root ─────────────────────────────────────────────
+M.K.PROGRAM             = "program"
+
+-- ── Top-level declarations ────────────────────────────────────
+M.K.MODULE_DECL         = "module_decl"
+M.K.IMPORT_DECL         = "import_decl"
+M.K.SCHEMA_VERSION      = "schema_version"
+M.K.ENGINE_CONFIG       = "engine_config"
+M.K.TIME_MODEL          = "time_model"
+
+-- Type declarations
+M.K.TYPE_ENUM           = "type_enum"        -- type Foo = a | b | c
+M.K.TYPE_ALIAS          = "type_alias"       -- type Foo = TypeExpr
+M.K.TYPE_RECORD         = "type_record"      -- type Foo: fields...
+M.K.TYPE_VARIANT        = "type_variant"     -- type Foo: | branch: fields
+
+-- State declarations
+M.K.STATE_SCALAR        = "state_scalar"     -- state path: Type [= default]
+M.K.STATE_RECORD        = "state_record"     -- state path: inline block
+M.K.STATE_FAMILY        = "state_family"     -- state family/{var}: Type max: N
+
+-- Other top-level declarations
+M.K.RELATION_DECL       = "relation_decl"
+M.K.FN_DECL             = "fn_decl"
+M.K.ACTOR_DECL          = "actor_decl"
+M.K.SCHEDULE_DECL       = "schedule_decl"
+M.K.BOUNDED_DECL        = "bounded_decl"
+M.K.VERIFY_DECL         = "verify_decl"
+M.K.WATCH_DECL          = "watch_decl"
+M.K.WATCH_WHEN_DECL     = "watch_when_decl"
+M.K.SCENE_DECL          = "scene_decl"
+M.K.MACRO_DECL          = "macro_decl"
+M.K.MACRO_CALL_STMT     = "macro_call_stmt"
+M.K.MIGRATION_DECL      = "migration_decl"
+M.K.DEFGRID_DECL        = "defgrid_decl"
+M.K.TAG_DECL            = "tag_decl"   -- tag name
+M.K.HOOK_DECL           = "hook_decl"  -- hook tag_name: pre:/post: body
+
+-- ── Type expressions ──────────────────────────────────────────
+M.K.TYPE_BOOL           = "type_bool"
+M.K.TYPE_INT            = "type_int"
+M.K.TYPE_ENUM_INLINE    = "type_enum_inline"
+M.K.TYPE_OPTION         = "type_option"
+M.K.TYPE_SET            = "type_set"
+M.K.TYPE_LIST           = "type_list"
+M.K.TYPE_SYMBOL         = "type_symbol"
+M.K.TYPE_SYMBOL_OF      = "type_symbol_of"
+M.K.TYPE_STRING         = "type_string"
+M.K.TYPE_FLOAT          = "type_float"
+M.K.TYPE_ULIST          = "type_ulist"
+M.K.TYPE_UMAP           = "type_umap"
+M.K.TYPE_NAMED          = "type_named"
+M.K.TYPE_FN             = "type_fn"
+
+-- ── Literals ──────────────────────────────────────────────────
+M.K.INT_LIT             = "int_lit"
+M.K.FLOAT_LIT           = "float_lit"
+M.K.BOOL_LIT            = "bool_lit"
+M.K.STRING_LIT          = "string_lit"
+M.K.MULTILINE_STRING    = "multiline_string"
+M.K.SYMBOL_LIT          = "symbol_lit"
+
+-- ── Path expressions ──────────────────────────────────────────
+M.K.PATH_EXPR           = "path_expr"        -- static path: player/health
+M.K.INTERP_PATH         = "interp_path"      -- path with {var}: npcs/{npc}/hp
+M.K.PATH_AT_BEFORE      = "path_at_before"   -- path@before in post: blocks
+M.K.INDEX_EXPR          = "index_expr"       -- path[n]
+M.K.SLICE_EXPR          = "slice_expr"       -- path[a:b]
+
+-- ── Operators / compounds ─────────────────────────────────────
+M.K.BINARY_OP           = "binary_op"        -- left op right
+M.K.UNARY_OP            = "unary_op"         -- op expr  (not)
+M.K.NIL_COALESCE        = "nil_coalesce"     -- left ?? right
+M.K.FN_CALL             = "fn_call"          -- name arg1 arg2 ...
+M.K.NAMED_ARG           = "named_arg"        -- name: value
+
+-- ── Control flow (expressions and statements) ─────────────────
+M.K.IF_EXPR             = "if_expr"          -- if cond: then [else: else_body]
+M.K.WHEN_STMT           = "when_stmt"        -- when cond: body  (no else)
+M.K.MATCH_EXPR          = "match_expr"       -- match expr: arms...
+M.K.COND_EXPR           = "cond_expr"        -- cond: arms...
+M.K.FOR_STMT            = "for_stmt"         -- for var in expr: body
+M.K.WHILE_STMT          = "while_stmt"       -- while cond: body
+M.K.LET_STMT            = "let_stmt"         -- let bindings: body
+M.K.LAMBDA_EXPR         = "lambda_expr"      -- fn(params): body
+M.K.PASS_STMT           = "pass_stmt"        -- pass (no-op)
+M.K.EXPR_STMT           = "expr_stmt"        -- expression used as statement
+
+-- ── Collection literals ───────────────────────────────────────
+M.K.SET_LIT             = "set_lit"          -- {'a, 'b, ...}
+M.K.LIST_LIT            = "list_lit"         -- ['a, 'b, ...]
+M.K.MAP_LIT             = "map_lit"          -- {k: v, ...}
+M.K.EMPTY_SET           = "empty_set"        -- (set)
+M.K.EMPTY_LIST          = "empty_list"       -- []
+M.K.EMPTY_MAP           = "empty_map"        -- {}
+
+-- ── Mutation primitives ───────────────────────────────────────
+M.K.SET_MUT             = "set_mut"          -- set! path value
+M.K.INC_MUT             = "inc_mut"          -- inc! path amount
+M.K.DEC_MUT             = "dec_mut"          -- dec! path amount
+M.K.ADD_MUT             = "add_mut"          -- add! path value
+M.K.REMOVE_MUT          = "remove_mut"       -- remove! path value
+M.K.CLEAR_MUT           = "clear_mut"        -- clear! path
+M.K.PUSH_MUT            = "push_mut"         -- push! path value
+M.K.POP_MUT             = "pop_mut"          -- pop! path
+M.K.RELATE_MUT          = "relate_mut"       -- relate! rel a b
+M.K.UNRELATE_MUT        = "unrelate_mut"     -- unrelate! rel a b
+M.K.SPAWN_MUT           = "spawn_mut"        -- spawn! family key record
+M.K.DESPAWN_MUT         = "despawn_mut"      -- despawn! family key
+M.K.SEND_MUT            = "send_mut"         -- send! actor msg
+M.K.TIME_INC_MUT        = "time_inc_mut"     -- time-inc! axis: value ...
+M.K.TIME_SET_MUT        = "time_set_mut"     -- time-set! axis: value ... (absolute)
+M.K.UNDO_MUT            = "undo_mut"         -- undo! [steps: N]
+M.K.GOTO_SCENE_MUT      = "goto_scene_mut"   -- goto-scene! name
+M.K.ENTER_SCENE_MUT     = "enter_scene_mut"  -- enter-scene! name
+M.K.EXIT_SCENE_MUT      = "exit_scene_mut"   -- exit-scene!
+M.K.SCHEDULE_MUT        = "schedule_mut"     -- schedule! name opts fn
+M.K.CANCEL_SCHEDULE_MUT = "cancel_schedule_mut" -- cancel-schedule! name
+M.K.CHECKPOINT_MUT      = "checkpoint_mut"      -- engine/checkpoint! [fn-name]
+M.K.EMIT_MUT            = "emit_mut"            -- engine/emit event [args]
+
+-- ── Scene-specific nodes ──────────────────────────────────────
+M.K.NARRATION_LINE      = "narration_line"   -- plain text
+M.K.COND_NARRATION      = "cond_narration"   -- [cond] text
+M.K.CHOICE              = "choice"           -- * [cond] label body
+M.K.SCENE_GOTO          = "scene_goto"       -- -> name / -> (expr)
+M.K.SCENE_ENTER         = "scene_enter"      -- => name
+M.K.SCENE_EXIT          = "scene_exit"       -- <-
+M.K.INLINE_EXPR         = "inline_expr"      -- {expr} inside narration
+
+-- ── Query / search forms ──────────────────────────────────────
+M.K.FIND_EXPR           = "find_expr"          -- find family where...
+M.K.QUERY_AT_EXPR       = "query_at_expr"      -- query-at path time: ...
+M.K.QUERY_HISTORY_EXPR  = "query_history_expr" -- query-history path from: to:
+M.K.QUERY_CHANGES_EXPR  = "query_changes_expr" -- query-changes path last-n: N
+M.K.COUNTERFACTUAL_EXPR = "counterfactual_expr" -- counterfactual from: T do: ...
+M.K.IN_STATE_EXPR       = "in_state_expr"      -- (in-state gs) expr
+
+-- ── Record construction ───────────────────────────────────────
+M.K.RECORD_CONSTRUCTOR  = "record_constructor" -- TypeName(field: val, ...)
+
+-- ── Sub-structure helpers ─────────────────────────────────────
+M.K.WITH_MIXIN          = "with_mixin"      -- with OtherRecord inside type_record
+M.K.RECORD_FIELD        = "record_field"    -- field: Type = default
+M.K.VARIANT_BRANCH      = "variant_branch"  -- | branch: fields
+M.K.MATCH_ARM           = "match_arm"       -- arm: val / arm {fields}: body
+M.K.COND_ARM            = "cond_arm"        -- condition: body
+M.K.LET_BINDING         = "let_binding"     -- name = expr inside let
+M.K.VERIFY_CLAUSE       = "verify_clause"   -- from-any-state:, when:, requires:, after:
+M.K.TAG_LIST            = "tag_list"        -- tags: [name, ...]
+
+-- ============================================================
+-- Sets of kinds for predicate helpers
+-- ============================================================
+
+local DECL_KINDS = {
+  [M.K.MODULE_DECL]    = true, [M.K.IMPORT_DECL]    = true,
+  [M.K.SCHEMA_VERSION] = true, [M.K.ENGINE_CONFIG]   = true,
+  [M.K.TIME_MODEL]     = true,
+  [M.K.TYPE_ENUM]      = true, [M.K.TYPE_ALIAS]      = true,
+  [M.K.TYPE_RECORD]    = true, [M.K.TYPE_VARIANT]    = true,
+  [M.K.STATE_SCALAR]   = true, [M.K.STATE_RECORD]    = true,
+  [M.K.STATE_FAMILY]   = true,
+  [M.K.RELATION_DECL]  = true, [M.K.FN_DECL]         = true,
+  [M.K.ACTOR_DECL]     = true, [M.K.SCHEDULE_DECL]   = true,
+  [M.K.BOUNDED_DECL]   = true, [M.K.VERIFY_DECL]     = true,
+  [M.K.WATCH_DECL]     = true, [M.K.WATCH_WHEN_DECL] = true,
+  [M.K.SCENE_DECL]     = true, [M.K.MACRO_DECL]      = true,
+  [M.K.MIGRATION_DECL] = true, [M.K.DEFGRID_DECL]    = true,
+  [M.K.TAG_DECL]       = true, [M.K.HOOK_DECL]       = true,
+}
+
+local MUT_KINDS = {
+  [M.K.SET_MUT]             = true, [M.K.INC_MUT]      = true,
+  [M.K.DEC_MUT]             = true, [M.K.ADD_MUT]      = true,
+  [M.K.REMOVE_MUT]          = true, [M.K.CLEAR_MUT]    = true,
+  [M.K.PUSH_MUT]            = true, [M.K.POP_MUT]      = true,
+  [M.K.RELATE_MUT]          = true, [M.K.UNRELATE_MUT] = true,
+  [M.K.SPAWN_MUT]           = true, [M.K.DESPAWN_MUT]  = true,
+  [M.K.SEND_MUT]            = true, [M.K.TIME_INC_MUT] = true,
+  [M.K.TIME_SET_MUT]        = true,
+  [M.K.UNDO_MUT]            = true,
+  [M.K.GOTO_SCENE_MUT]      = true, [M.K.ENTER_SCENE_MUT] = true,
+  [M.K.EXIT_SCENE_MUT]      = true,
+  [M.K.SCHEDULE_MUT]        = true, [M.K.CANCEL_SCHEDULE_MUT] = true,
+  [M.K.CHECKPOINT_MUT]      = true, [M.K.EMIT_MUT]            = true,
+}
+
+local TYPE_EXPR_KINDS = {
+  [M.K.TYPE_BOOL]        = true, [M.K.TYPE_INT]         = true,
+  [M.K.TYPE_ENUM_INLINE] = true, [M.K.TYPE_OPTION]      = true,
+  [M.K.TYPE_SET]         = true, [M.K.TYPE_LIST]        = true,
+  [M.K.TYPE_SYMBOL]      = true, [M.K.TYPE_SYMBOL_OF]   = true,
+  [M.K.TYPE_STRING]      = true, [M.K.TYPE_FLOAT]       = true,
+  [M.K.TYPE_ULIST]       = true, [M.K.TYPE_UMAP]        = true,
+  [M.K.TYPE_NAMED]       = true, [M.K.TYPE_FN]          = true,
+}
+
+-- ============================================================
+-- Predicates
+-- ============================================================
+
+--- Return true if node is a top-level declaration.
+function M.is_decl(node)
+  return node ~= nil and DECL_KINDS[node.kind] == true
+end
+
+--- Return true if node is a mutation primitive.
+function M.is_mut(node)
+  return node ~= nil and MUT_KINDS[node.kind] == true
+end
+
+--- Return true if node is a type expression.
+function M.is_type_expr(node)
+  return node ~= nil and TYPE_EXPR_KINDS[node.kind] == true
+end
+
+-- ============================================================
+-- Base node constructor
+-- ============================================================
+
+--- Construct an AST node.
+---@param kind   string  One of M.K.*
+---@param fields table   Node-specific fields
+---@param pos    table?  Source position {file, line, col}
+---@return table
+function M.node(kind, fields, pos)
+  local n = { kind = kind, pos = pos or NO_POS }
+  for k, v in pairs(fields or {}) do
+    n[k] = v
+  end
+  return n
+end
+
+-- ============================================================
+-- Specific node constructors
+-- ============================================================
+
+-- Program root
+function M.program(decls, pos)
+  return M.node(M.K.PROGRAM, { decls = decls or {} }, pos)
+end
+
+-- ── Declarations ─────────────────────────────────────────────
+
+function M.module_decl(name, version, exports, pos)
+  return M.node(M.K.MODULE_DECL, { name = name, version = version, exports = exports }, pos)
+end
+
+--- flat import (alias=nil) or namespaced import (alias=string)
+function M.import_decl(path, alias, pos)
+  return M.node(M.K.IMPORT_DECL, { path = path, alias = alias }, pos)
+end
+
+function M.schema_version(version, pos)
+  return M.node(M.K.SCHEMA_VERSION, { version = version }, pos)
+end
+
+--- keys is a table of {key, value} pairs for engine-config options
+function M.engine_config(keys, pos)
+  return M.node(M.K.ENGINE_CONFIG, { keys = keys or {} }, pos)
+end
+
+--- axes is list of axis name strings; wrap is list of wrap settings
+function M.time_model(axes, wrap, pos)
+  return M.node(M.K.TIME_MODEL, { axes = axes or {}, wrap = wrap or {} }, pos)
+end
+
+--- values is list of strings (enum member names)
+function M.type_enum(name, values, doc, pos)
+  return M.node(M.K.TYPE_ENUM, { name = name, values = values or {}, doc = doc }, pos)
+end
+
+--- type_expr is a type expression node (e.g. type_int, type_named)
+function M.type_alias(name, type_expr, doc, pos)
+  return M.node(M.K.TYPE_ALIAS, { name = name, type_expr = type_expr, doc = doc }, pos)
+end
+
+--- fields is list of record_field or with_mixin nodes
+function M.type_record(name, fields, doc, pos)
+  return M.node(M.K.TYPE_RECORD, { name = name, fields = fields or {}, doc = doc }, pos)
+end
+
+--- branches is list of variant_branch nodes
+function M.type_variant(name, branches, doc, pos)
+  return M.node(M.K.TYPE_VARIANT, { name = name, branches = branches or {}, doc = doc }, pos)
+end
+
+function M.record_field(name, type_expr, default, doc, pos)
+  return M.node(M.K.RECORD_FIELD,
+    { name = name, type_expr = type_expr, default = default, doc = doc }, pos)
+end
+
+function M.with_mixin(type_name, pos)
+  return M.node(M.K.WITH_MIXIN, { type_name = type_name }, pos)
+end
+
+function M.variant_branch(name, fields, pos)
+  return M.node(M.K.VARIANT_BRANCH, { name = name, fields = fields or {} }, pos)
+end
+
+function M.state_scalar(path, type_expr, default, doc, pos)
+  return M.node(M.K.STATE_SCALAR,
+    { path = path, type_expr = type_expr, default = default, doc = doc }, pos)
+end
+
+function M.state_record(path, fields, doc, pos)
+  return M.node(M.K.STATE_RECORD, { path = path, fields = fields or {}, doc = doc }, pos)
+end
+
+--- family is the family name string; var is the variable name string
+function M.state_family(family, var, type_expr, max, doc, pos)
+  return M.node(M.K.STATE_FAMILY,
+    { family = family, var = var, type_expr = type_expr, max = max, doc = doc }, pos)
+end
+
+--- initial_data is list of {key, values} pairs for static data block
+function M.relation_decl(name, from_type, to_type_expr, initial_data, doc, pos)
+  return M.node(M.K.RELATION_DECL, {
+    name = name, from_type = from_type,
+    to_type_expr = to_type_expr,
+    initial_data = initial_data or {},
+    doc = doc,
+  }, pos)
+end
+
+--- params is list of {name, type_expr} tables
+function M.fn_decl(name, params, pre, post, tags, body, doc, pos)
+  return M.node(M.K.FN_DECL, {
+    name = name, params = params or {},
+    pre = pre or {}, post = post or {},
+    tags = tags or {}, body = body or {},
+    doc = doc,
+  }, pos)
+end
+
+function M.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, pos)
+  return M.node(M.K.ACTOR_DECL, {
+    name = name, state_path = state_path,
+    perceives = perceives or {},
+    inbox_type = inbox_type,
+    behavior = behavior,
+    priority = priority or 0,
+    doc = doc,
+  }, pos)
+end
+
+--- trigger is a table with optional keys: every, at, offset (all are time literals)
+function M.schedule_decl(name, trigger, body, doc, pos)
+  return M.node(M.K.SCHEDULE_DECL,
+    { name = name, trigger = trigger or {}, body = body or {}, doc = doc }, pos)
+end
+
+function M.bounded_decl(name, params, returns_type, distribution, reads, lua_name, doc, pos)
+  return M.node(M.K.BOUNDED_DECL, {
+    name = name, params = params or {},
+    returns_type = returns_type,
+    distribution = distribution,
+    reads = reads or {},
+    lua_name = lua_name,
+    doc = doc,
+  }, pos)
+end
+
+function M.verify_decl(label, clauses, pos)
+  return M.node(M.K.VERIFY_DECL, { label = label, clauses = clauses or {} }, pos)
+end
+
+--- clause_kind is "from_any_state", "when", "requires", or "after"
+function M.verify_clause(clause_kind, condition, body, pos)
+  return M.node(M.K.VERIFY_CLAUSE,
+    { clause_kind = clause_kind, condition = condition, body = body }, pos)
+end
+
+function M.watch_decl(path, label, pos)
+  return M.node(M.K.WATCH_DECL, { path = path, label = label }, pos)
+end
+
+function M.watch_when_decl(condition, label, pos)
+  return M.node(M.K.WATCH_WHEN_DECL, { condition = condition, label = label }, pos)
+end
+
+function M.scene_decl(name, body, doc, pos)
+  return M.node(M.K.SCENE_DECL, { name = name, body = body or {}, doc = doc }, pos)
+end
+
+function M.macro_decl(name, params, body, doc, pos)
+  return M.node(M.K.MACRO_DECL,
+    { name = name, params = params or {}, body = body, doc = doc }, pos)
+end
+
+function M.macro_call_stmt(name, args, body, pos)
+  return M.node(M.K.MACRO_CALL_STMT,
+    { name = name, args = args or {}, body = body or {} }, pos)
+end
+
+function M.migration_decl(from_ver, to_ver, ops, pos)
+  return M.node(M.K.MIGRATION_DECL,
+    { from_ver = from_ver, to_ver = to_ver, ops = ops or {} }, pos)
+end
+
+--- defgrid declaration: a named tile grid with fixed dimensions and cell type.
+---   name        string   Grid identifier (e.g. "world-map")
+---   width       integer  Number of columns (x-extent)
+---   height      integer  Number of rows    (y-extent)
+---   cell_type   string   Name of the enum/type used for cell values
+---   default_val string?  Default cell value (symbol string, optional)
+---   doc         string?  Documentation string
+function M.defgrid_decl(name, width, height, cell_type, default_val, doc, pos)
+  return M.node(M.K.DEFGRID_DECL, {
+    name        = name,
+    width       = width,
+    height      = height,
+    cell_type   = cell_type,
+    default_val = default_val,
+    doc         = doc,
+  }, pos)
+end
+
+-- ── Type expressions ──────────────────────────────────────────
+
+function M.type_bool(pos)              return M.node(M.K.TYPE_BOOL, {}, pos) end
+function M.type_int(min, max, pos)     return M.node(M.K.TYPE_INT, { min = min, max = max }, pos) end
+function M.type_enum_inline(values, pos)
+  return M.node(M.K.TYPE_ENUM_INLINE, { values = values or {} }, pos)
+end
+function M.type_option(inner, pos)     return M.node(M.K.TYPE_OPTION, { inner = inner }, pos) end
+function M.type_set(inner, max, pos)   return M.node(M.K.TYPE_SET, { inner = inner, max = max }, pos) end
+function M.type_list(inner, max, pos)  return M.node(M.K.TYPE_LIST, { inner = inner, max = max }, pos) end
+function M.type_symbol(pos)            return M.node(M.K.TYPE_SYMBOL, {}, pos) end
+function M.type_symbol_of(family, pos) return M.node(M.K.TYPE_SYMBOL_OF, { family = family }, pos) end
+function M.type_string(pos)            return M.node(M.K.TYPE_STRING, {}, pos) end
+function M.type_float(pos)             return M.node(M.K.TYPE_FLOAT, {}, pos) end
+function M.type_ulist(inner, pos)      return M.node(M.K.TYPE_ULIST, { inner = inner }, pos) end
+function M.type_umap(key, val, pos)    return M.node(M.K.TYPE_UMAP, { key = key, val = val }, pos) end
+function M.type_named(name, pos)       return M.node(M.K.TYPE_NAMED, { name = name }, pos) end
+
+--- param_types is list of type expr nodes; return_type is a type expr node
+function M.type_fn(param_types, return_type, pos)
+  return M.node(M.K.TYPE_FN,
+    { param_types = param_types or {}, return_type = return_type }, pos)
+end
+
+-- ── Literals ──────────────────────────────────────────────────
+
+function M.int_lit(value, pos)          return M.node(M.K.INT_LIT,  { value = value }, pos) end
+function M.float_lit(value, pos)        return M.node(M.K.FLOAT_LIT, { value = value }, pos) end
+function M.bool_lit(value, pos)         return M.node(M.K.BOOL_LIT,  { value = value }, pos) end
+function M.string_lit(value, pos)       return M.node(M.K.STRING_LIT, { value = value }, pos) end
+function M.multiline_string(value, pos) return M.node(M.K.MULTILINE_STRING, { value = value }, pos) end
+function M.symbol_lit(name, pos)        return M.node(M.K.SYMBOL_LIT, { name = name }, pos) end
+
+-- ── Path expressions ──────────────────────────────────────────
+
+--- segments is list of strings; e.g. "player/health" → {"player","health"}
+function M.path_expr(segments, pos)
+  return M.node(M.K.PATH_EXPR, { segments = segments or {} }, pos)
+end
+
+--- segments is list of strings or {interp=varname} tables
+function M.interp_path(segments, pos)
+  return M.node(M.K.INTERP_PATH, { segments = segments or {} }, pos)
+end
+
+function M.path_at_before(path, pos)
+  return M.node(M.K.PATH_AT_BEFORE, { path = path }, pos)
+end
+
+function M.index_expr(base, index, pos)
+  return M.node(M.K.INDEX_EXPR, { base = base, index = index }, pos)
+end
+
+--- from and to are integer expr nodes (may be nil for open slices)
+function M.slice_expr(base, from, to, pos)
+  return M.node(M.K.SLICE_EXPR, { base = base, from = from, to = to }, pos)
+end
+
+-- ── Operators ─────────────────────────────────────────────────
+
+--- op: "+", "-", "*", "/", "=", "!=", "<", ">", "<=", ">=", "and", "or"
+function M.binary_op(op, left, right, pos)
+  return M.node(M.K.BINARY_OP, { op = op, left = left, right = right }, pos)
+end
+
+--- op: "not"
+function M.unary_op(op, expr, pos)
+  return M.node(M.K.UNARY_OP, { op = op, expr = expr }, pos)
+end
+
+function M.nil_coalesce(left, right, pos)
+  return M.node(M.K.NIL_COALESCE, { left = left, right = right }, pos)
+end
+
+--- name is a string; args is list of expr nodes or named_arg nodes
+function M.fn_call(name, args, pos)
+  return M.node(M.K.FN_CALL, { name = name, args = args or {} }, pos)
+end
+
+function M.named_arg(name, value, pos)
+  return M.node(M.K.NAMED_ARG, { name = name, value = value }, pos)
+end
+
+-- ── Control flow ──────────────────────────────────────────────
+
+function M.if_expr(condition, then_body, else_body, pos)
+  return M.node(M.K.IF_EXPR, {
+    condition = condition, then_body = then_body or {}, else_body = else_body,
+  }, pos)
+end
+
+function M.when_stmt(condition, body, pos)
+  return M.node(M.K.WHEN_STMT, { condition = condition, body = body or {} }, pos)
+end
+
+function M.match_expr(expr, arms, pos)
+  return M.node(M.K.MATCH_EXPR, { expr = expr, arms = arms or {} }, pos)
+end
+
+--- pattern is an expr or the string "_" (wildcard)
+--- fields is a table of {name, binding} pairs for variant destructuring (may be nil)
+function M.match_arm(pattern, fields, body, pos)
+  return M.node(M.K.MATCH_ARM, { pattern = pattern, fields = fields, body = body }, pos)
+end
+
+function M.cond_expr(arms, pos)
+  return M.node(M.K.COND_EXPR, { arms = arms or {} }, pos)
+end
+
+--- condition is an expr or the string "_" (wildcard)
+function M.cond_arm(condition, body, pos)
+  return M.node(M.K.COND_ARM, { condition = condition, body = body or {} }, pos)
+end
+
+function M.for_stmt(var, iter, body, pos)
+  return M.node(M.K.FOR_STMT, { var = var, iter = iter, body = body or {} }, pos)
+end
+
+function M.while_stmt(condition, body, pos)
+  return M.node(M.K.WHILE_STMT, { condition = condition, body = body or {} }, pos)
+end
+
+function M.let_stmt(bindings, body, pos)
+  return M.node(M.K.LET_STMT, { bindings = bindings or {}, body = body or {} }, pos)
+end
+
+function M.let_binding(name, expr, pos)
+  return M.node(M.K.LET_BINDING, { name = name, expr = expr }, pos)
+end
+
+function M.lambda_expr(params, body, pos)
+  return M.node(M.K.LAMBDA_EXPR, { params = params or {}, body = body }, pos)
+end
+
+function M.pass_stmt(pos)    return M.node(M.K.PASS_STMT, {}, pos) end
+function M.expr_stmt(expr, pos) return M.node(M.K.EXPR_STMT, { expr = expr }, pos) end
+
+-- ── Collection literals ───────────────────────────────────────
+
+function M.set_lit(elements, pos)
+  return M.node(M.K.SET_LIT, { elements = elements or {} }, pos)
+end
+function M.list_lit(elements, pos)
+  return M.node(M.K.LIST_LIT, { elements = elements or {} }, pos)
+end
+--- entries is list of {key, value} pairs
+function M.map_lit(entries, pos)
+  return M.node(M.K.MAP_LIT, { entries = entries or {} }, pos)
+end
+function M.empty_set(pos)  return M.node(M.K.EMPTY_SET,  {}, pos) end
+function M.empty_list(pos) return M.node(M.K.EMPTY_LIST, {}, pos) end
+function M.empty_map(pos)  return M.node(M.K.EMPTY_MAP,  {}, pos) end
+
+-- ── Mutation primitives ───────────────────────────────────────
+
+function M.set_mut(path, value, pos)
+  return M.node(M.K.SET_MUT, { path = path, value = value }, pos)
+end
+function M.inc_mut(path, amount, pos)
+  return M.node(M.K.INC_MUT, { path = path, amount = amount }, pos)
+end
+function M.dec_mut(path, amount, pos)
+  return M.node(M.K.DEC_MUT, { path = path, amount = amount }, pos)
+end
+function M.add_mut(path, value, pos)
+  return M.node(M.K.ADD_MUT, { path = path, value = value }, pos)
+end
+function M.remove_mut(path, value, pos)
+  return M.node(M.K.REMOVE_MUT, { path = path, value = value }, pos)
+end
+function M.clear_mut(path, pos)
+  return M.node(M.K.CLEAR_MUT, { path = path }, pos)
+end
+function M.push_mut(path, value, pos)
+  return M.node(M.K.PUSH_MUT, { path = path, value = value }, pos)
+end
+function M.pop_mut(path, pos)
+  return M.node(M.K.POP_MUT, { path = path }, pos)
+end
+function M.relate_mut(rel, a, b, pos)
+  return M.node(M.K.RELATE_MUT, { rel = rel, a = a, b = b }, pos)
+end
+function M.unrelate_mut(rel, a, b, pos)
+  return M.node(M.K.UNRELATE_MUT, { rel = rel, a = a, b = b }, pos)
+end
+function M.spawn_mut(family, key, record, pos)
+  return M.node(M.K.SPAWN_MUT, { family = family, key = key, record = record }, pos)
+end
+function M.despawn_mut(family, key, pos)
+  return M.node(M.K.DESPAWN_MUT, { family = family, key = key }, pos)
+end
+function M.send_mut(actor, msg, pos)
+  return M.node(M.K.SEND_MUT, { actor = actor, msg = msg }, pos)
+end
+--- axes is list of {axis, value} tables
+function M.time_inc_mut(axes, pos)
+  return M.node(M.K.TIME_INC_MUT, { axes = axes or {} }, pos)
+end
+--- axes is list of {axis, value} tables (absolute set)
+function M.time_set_mut(axes, pos)
+  return M.node(M.K.TIME_SET_MUT, { axes = axes or {} }, pos)
+end
+function M.undo_mut(steps, pos)
+  return M.node(M.K.UNDO_MUT, { steps = steps }, pos)
+end
+function M.goto_scene_mut(target, pos)
+  return M.node(M.K.GOTO_SCENE_MUT, { target = target }, pos)
+end
+function M.enter_scene_mut(target, pos)
+  return M.node(M.K.ENTER_SCENE_MUT, { target = target }, pos)
+end
+function M.exit_scene_mut(pos)
+  return M.node(M.K.EXIT_SCENE_MUT, {}, pos)
+end
+function M.schedule_mut(name, opts, fn, pos)
+  return M.node(M.K.SCHEDULE_MUT, { name = name, opts = opts or {}, fn = fn }, pos)
+end
+function M.cancel_schedule_mut(name, pos)
+  return M.node(M.K.CANCEL_SCHEDULE_MUT, { name = name }, pos)
+end
+--- fn_name_expr is an optional expression whose value becomes the checkpoint label
+function M.checkpoint_mut(fn_name_expr, pos)
+  return M.node(M.K.CHECKPOINT_MUT, { fn_name = fn_name_expr }, pos)
+end
+--- event is an expression evaluating to the event name (string or symbol);
+--- args is an optional expression for the event payload
+function M.emit_mut(event, args, pos)
+  return M.node(M.K.EMIT_MUT, { event = event, args = args }, pos)
+end
+
+-- ── Scene elements ────────────────────────────────────────────
+
+--- text is list of mixed string segments and inline_expr nodes
+function M.narration_line(text, pos)
+  return M.node(M.K.NARRATION_LINE, { text = text or {} }, pos)
+end
+
+function M.cond_narration(condition, text, pos)
+  return M.node(M.K.COND_NARRATION, { condition = condition, text = text or {} }, pos)
+end
+
+--- guard is an optional condition expr; label is list of mixed text; body is list of stmts
+function M.choice(guard, label, body, pos)
+  return M.node(M.K.CHOICE, { guard = guard, label = label or {}, body = body or {} }, pos)
+end
+
+--- target is a string (scene name) or an expr node (computed goto)
+function M.scene_goto(target, pos)
+  return M.node(M.K.SCENE_GOTO, { target = target }, pos)
+end
+function M.scene_enter(target, pos)
+  return M.node(M.K.SCENE_ENTER, { target = target }, pos)
+end
+function M.scene_exit(pos)
+  return M.node(M.K.SCENE_EXIT, {}, pos)
+end
+
+function M.inline_expr(expr, pos)
+  return M.node(M.K.INLINE_EXPR, { expr = expr }, pos)
+end
+
+-- ── Query / search forms ──────────────────────────────────────
+
+--- clauses is list of tables: {kind, condition, order_path, order_dir, limit, count, ...}
+function M.find_expr(family, clauses, pos)
+  return M.node(M.K.FIND_EXPR, { family = family, clauses = clauses or {} }, pos)
+end
+
+function M.query_at_expr(path, time_expr, pos)
+  return M.node(M.K.QUERY_AT_EXPR, { path = path, time_expr = time_expr }, pos)
+end
+
+function M.query_history_expr(path, from_expr, to_expr, pos)
+  return M.node(M.K.QUERY_HISTORY_EXPR,
+    { path = path, from_expr = from_expr, to_expr = to_expr }, pos)
+end
+
+function M.query_changes_expr(path, last_n, pos)
+  return M.node(M.K.QUERY_CHANGES_EXPR, { path = path, last_n = last_n }, pos)
+end
+
+--- from_tick and transitions are optional; simulate is bool
+function M.counterfactual_expr(from_tick, transitions, simulate, pos)
+  return M.node(M.K.COUNTERFACTUAL_EXPR, {
+    from_tick = from_tick, transitions = transitions or {}, simulate = simulate,
+  }, pos)
+end
+
+function M.in_state_expr(state_expr, inner_expr, pos)
+  return M.node(M.K.IN_STATE_EXPR,
+    { state_expr = state_expr, inner_expr = inner_expr }, pos)
+end
+
+-- ── Record construction ───────────────────────────────────────
+
+--- type_name is string; fields is list of named_arg nodes
+function M.record_constructor(type_name, fields, pos)
+  return M.node(M.K.RECORD_CONSTRUCTOR, { type_name = type_name, fields = fields or {} }, pos)
+end
+
+--- `tag name` declaration.
+---@param name string
+---@param pos  table
+function M.tag_decl(name, pos)
+  return M.node(M.K.TAG_DECL, { name = name }, pos)
+end
+
+--- `hook tag_or_fn:` declaration.
+--- timing is "pre" or "post" (from the block inside the hook).
+--- When hook_kind is "tag", tag_name is the tag being hooked.
+--- When hook_kind is "fn_before"/"fn_after", fn_name is the function being hooked.
+---@param hook_kind string  "tag_pre"|"tag_post"|"fn_before"|"fn_after"
+---@param target    string  tag name or function name
+---@param body      table   list of AST statement nodes
+---@param doc       string?
+---@param pos       table
+function M.hook_decl(hook_kind, target, body, doc, pos)
+  return M.node(M.K.HOOK_DECL, {
+    hook_kind = hook_kind,
+    target    = target,
+    body      = body or {},
+    doc       = doc,
+  }, pos)
+end
+
+-- ============================================================
+-- Diagnostic accumulator
+-- ============================================================
+
+--- Create a new diagnostic accumulator.
+--- The returned table tracks errors and warnings separately and provides
+--- helper methods for pushing, merging, and testing diagnostics.
+function M.new_accum()
+  local acc = { errors = {}, warnings = {}, all = {} }
+
+  --- Push a single diagnostic.
+  function acc:push(diag)
+    table.insert(self.all, diag)
+    if diag.level == "error" then
+      table.insert(self.errors, diag)
+    else
+      table.insert(self.warnings, diag)
+    end
+  end
+
+  --- Push all diagnostics from a list.
+  function acc:push_all(diags)
+    for _, d in ipairs(diags or {}) do
+      self:push(d)
+    end
+  end
+
+  --- Merge another accumulator into this one.
+  function acc:merge(other)
+    self:push_all(other and other.all or {})
+  end
+
+  --- Return true if any errors have been accumulated.
+  function acc:has_errors()
+    return #self.errors > 0
+  end
+
+  --- Convenience: push an error diagnostic.
+  function acc:push_error(code, message, pos, note)
+    self:push(M.error(code, message, pos, note))
+  end
+
+  --- Convenience: push a warning diagnostic.
+  function acc:push_warning(code, message, pos, note)
+    self:push(M.warning(code, message, pos, note))
+  end
+
+  return acc
+end
+
+return M

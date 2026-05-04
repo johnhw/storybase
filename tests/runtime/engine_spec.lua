@@ -188,14 +188,14 @@ describe("engine: test02_choices.sb end-to-end", function()
         pickup_idx = c.index
       end
     end
-    assert.is_not_nil(pickup_idx, "should find 'Pick up the key' choice")
+    assert.is_not_nil(pickup_idx, "should find `Pick up the key' choice")
 
     -- Execute the pickup choice (1 = first visible choice = "Pick up the key")
     local signal = eng:do_choice("room", 1)  -- visible index 1
     assert.is_true(eng._state:get("player/has-key"))
   end)
 
-  it("after picking up key, 'Pick up the key' choice is hidden", function()
+  it("after picking up key, `Pick up the key' choice is hidden", function()
     local eng = engine_mod.new(game)
     eng:init()
 
@@ -207,12 +207,12 @@ describe("engine: test02_choices.sb end-to-end", function()
     for _, c in ipairs(choices) do
       assert.is_false(
         (c.label:find("Pick up") ~= nil),
-        "should not see 'Pick up the key' after picking it up"
+        "should not see `Pick up the key' after picking it up"
       )
     end
   end)
 
-  it("scene transition: goto room returns 'goto' signal", function()
+  it("scene transition: goto room returns `goto' signal", function()
     local eng = engine_mod.new(game)
     eng:init()
 
@@ -265,20 +265,20 @@ engine-config:
 type Phase = a | b
 
 state world:
-  phase: Phase = 'a
+  phase: Phase = `a
 
 scene hub:
   Hub scene.
 
   -> (match world/phase:
-        'a: 'scene-a
-        'b: 'scene-b)
+        `a: `scene-a
+        `b: `scene-b)
 
 scene scene-a:
   You are in A.
 
   * Go to B
-    set! world/phase 'b
+    set! world/phase `b
     -> hub
 
 scene scene-b:
@@ -782,7 +782,7 @@ scene shop:
     return eng
   end
 
-  it("=> choice returns 'enter' signal with target", function()
+  it("=> choice returns `enter' signal with target", function()
     local eng = make_eng()
     local signal = eng:do_choice("lobby", 1)
     assert.is_not_nil(signal)
@@ -803,7 +803,7 @@ scene shop:
     assert.equal(2, #eng._scene_stack)
   end)
 
-  it("<- choice returns 'exit' signal", function()
+  it("<- choice returns `exit' signal", function()
     local eng = make_eng()
     eng:enter_scene("shop")
     local signal = eng:do_choice("shop", 1)
@@ -974,8 +974,8 @@ scene done:
     eng:do_choice("main", 2)  -- add banana
     local narr = eng:render_scene("main")
     local text = narr_text(narr)
-    assert.is_truthy(text:find("Item: apple"),  "expected 'Item: apple' in: "  .. text)
-    assert.is_truthy(text:find("Item: banana"), "expected 'Item: banana' in: " .. text)
+    assert.is_truthy(text:find("Item: apple"),  "expected `Item: apple' in: "  .. text)
+    assert.is_truthy(text:find("Item: banana"), "expected `Item: banana' in: " .. text)
     assert.is_falsy(text:find("no items"))
   end)
 

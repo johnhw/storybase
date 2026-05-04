@@ -1219,7 +1219,7 @@ type M:
   hp: Int(0,100) = 60
 state crew/{member}: M  max: 4
 fn spawn-renn:
-  spawn! crew 'renn M(hp: 80)
+  spawn! crew `renn M(hp: 80)
 fn check:
   path-exists? crew/renn/hp
 fn check-interp member:
@@ -1479,7 +1479,7 @@ type Mob:
   hp: Int(0, 100) = 80
 state mobs/{mob}: Mob  max: 5
 fn do-spawn:
-  spawn! mobs 'goblin Mob(hp: 60)
+  spawn! mobs `goblin Mob(hp: 60)
 scene s:
   * go -> s
 ]]
@@ -1502,9 +1502,9 @@ type Mob:
   hp: Int(0, 100) = 80
 state mobs/{mob}: Mob  max: 5
 fn do-spawn:
-  spawn!   mobs 'goblin Mob(hp: 60)
+  spawn!   mobs `goblin Mob(hp: 60)
 fn do-despawn:
-  despawn! mobs 'goblin
+  despawn! mobs `goblin
 scene s:
   * go -> s
 ]]
@@ -1535,9 +1535,9 @@ type M:
   v: Int(0, 10) = 1
 state items/{item}: M  max: 5
 fn setup:
-  spawn! items 'alpha M(v: 1)
-  spawn! items 'beta  M(v: 2)
-  spawn! items 'gamma M(v: 3)
+  spawn! items `alpha M(v: 1)
+  spawn! items `beta  M(v: 2)
+  spawn! items `gamma M(v: 3)
 fn get-list:
   path-list items
 scene s:
@@ -1732,9 +1732,9 @@ engine-config:
   entry-scene: s
 relation edges: Symbol -> Set(Symbol, 10)
 fn do-relate:
-  relate! edges 'a 'b
+  relate! edges `a `b
 fn do-unrelate:
-  unrelate! edges 'a 'b
+  unrelate! edges `a `b
 ]] .. extra_fn .. [[
 scene s:
   * go -> s
@@ -1993,7 +1993,7 @@ describe("random builtins: rng logging", function()
     return c, l
   end
 
-  it("random-int logs a 'random' entry", function()
+  it("random-int logs a `random' entry", function()
     local c, l = ctx_with_rng(42)
     local node = fn_call("random-int", { kind="int_lit", value=1 }, { kind="int_lit", value=6 })
     eval.eval_expr(node, c)
@@ -2001,10 +2001,10 @@ describe("random builtins: rng logging", function()
     for _, e in ipairs(l:entries()) do
       if e.kind == "random" and e.source == "random-int" then found = true; break end
     end
-    assert.is_true(found, "expected a 'random' log entry for random-int")
+    assert.is_true(found, "expected a `random' log entry for random-int")
   end)
 
-  it("random-bool logs a 'random' entry", function()
+  it("random-bool logs a `random' entry", function()
     local c, l = ctx_with_rng(1)
     local node = fn_call("random-bool", { kind="float_lit", value=0.5 })
     eval.eval_expr(node, c)
@@ -2012,7 +2012,7 @@ describe("random builtins: rng logging", function()
     for _, e in ipairs(l:entries()) do
       if e.kind == "random" and e.source == "random-bool" then found = true; break end
     end
-    assert.is_true(found, "expected a 'random' log entry for random-bool")
+    assert.is_true(found, "expected a `random' log entry for random-bool")
   end)
 
   it("random-bool with no arg defaults to 0.5 and does not crash", function()
@@ -2023,7 +2023,7 @@ describe("random builtins: rng logging", function()
     assert.is_true(v == true or v == false)
   end)
 
-  it("random-enum logs a 'random' entry", function()
+  it("random-enum logs a `random' entry", function()
     local c, l = ctx_with_rng(7)
     c.game = { schema = { types = { { kind="enum", name="Dir", values={"n","s","e","w"} } } } }
     local node = fn_call("random-enum", { kind="fn_call", name="Dir", args={} })
@@ -2032,10 +2032,10 @@ describe("random builtins: rng logging", function()
     for _, e in ipairs(l:entries()) do
       if e.kind == "random" and e.source == "random-enum" then found = true; break end
     end
-    assert.is_true(found, "expected a 'random' log entry for random-enum")
+    assert.is_true(found, "expected a `random' log entry for random-enum")
   end)
 
-  it("random-choice logs a 'random' entry", function()
+  it("random-choice logs a `random' entry", function()
     local c, l = ctx_with_rng(3)
     local node = fn_call("random-choice", {
       kind="list_lit",
@@ -2046,7 +2046,7 @@ describe("random builtins: rng logging", function()
     for _, e in ipairs(l:entries()) do
       if e.kind == "random" and e.source == "random-choice" then found = true; break end
     end
-    assert.is_true(found, "expected a 'random' log entry for random-choice")
+    assert.is_true(found, "expected a `random' log entry for random-choice")
   end)
 
   it("seeded random-int is deterministic across two runs", function()
@@ -2554,7 +2554,7 @@ speaker aldric:
 engine-config:
   entry-scene: intro
 fn speak:
-  say 'aldric "Hello from fn."
+  say `aldric "Hello from fn."
 scene intro:
   The scene begins.
   * Greet:
@@ -2576,24 +2576,24 @@ scene intro:
     assert.is_true(dialogue_found, "expected dialogue from fn body in narration")
   end)
 
-  it("symbol-form say ('speaker text) works in scene body", function()
+  it("symbol-form say (`speaker text) works in scene body", function()
     local src = [[
 speaker mira:
   display: "Mira"
 engine-config:
   entry-scene: s
 scene s:
-  'mira "Scene body with symbol form."
+  `mira "Scene body with symbol form."
   * go -> s
 ]]
-    -- Actually that's narration, not say. Test say 'speaker in scene body:
+    -- Actually that's narration, not say. Test say `speaker in scene body:
     local src2 = [[
 speaker mira:
   display: "Mira"
 engine-config:
   entry-scene: s
 scene s:
-  say 'mira "Symbol-style in scene."
+  say `mira "Symbol-style in scene."
   * go -> s
 ]]
     local eng = compile_and_engine(src2)
@@ -2635,10 +2635,10 @@ type Scores = UMap(Symbol, Int(0, 9999))
 state world:
   scores: Scores = {}
 fn add-score:
-  map-set! world/scores 'alice 100
-  map-set! world/scores 'bob 200
+  map-set! world/scores `alice 100
+  map-set! world/scores `bob 200
 fn remove-score:
-  map-delete! world/scores 'alice
+  map-delete! world/scores `alice
 scene s:
   .
 ]]
@@ -2654,9 +2654,9 @@ scene s:
   it("map-get reads a value from a UMap", function()
     local get_src = src .. [[
 fn get-alice:
-  let v = (map-get world/scores 'alice)
+  let v = (map-get world/scores `alice)
   set! world/scores {}
-  map-set! world/scores 'result v
+  map-set! world/scores `result v
 ]]
     local gt = assert(compiler.compile(get_src, "t.sb"))
     local l  = log_mod.new()
@@ -2844,9 +2844,9 @@ engine-config:
 relation edges: Symbol -> Set(Symbol, 10)
 state world/x : Int(0,10) = 0
 fn do-relate:
-  relate! edges 'a 'b
+  relate! edges `a `b
 fn do-unrelate:
-  unrelate! edges 'a 'b
+  unrelate! edges `a `b
 scene main:
   * Go
     -> main

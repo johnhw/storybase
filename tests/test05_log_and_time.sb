@@ -47,7 +47,7 @@ type Chapter = intro | mid | finale
 
 state player:
   gold:    Gold    = 200
-  chapter: Chapter = 'intro
+  chapter: Chapter = `intro
   moves:   Int(0, 9999) = 0
 
 state world:
@@ -69,14 +69,14 @@ schedule daily-tax:
 schedule mid-point:
   at: [tick: +20]
   fn:
-    when player/chapter = 'intro:
-      set! player/chapter 'mid
+    when player/chapter = `intro:
+      set! player/chapter `mid
 
 schedule finale:
   at: [tick: +50]
   fn:
-    when player/chapter = 'mid:
-      set! player/chapter 'finale
+    when player/chapter = `mid:
+      set! player/chapter `finale
 
 # ── Pure functions ──────────────────────────────────────────────────────────
 

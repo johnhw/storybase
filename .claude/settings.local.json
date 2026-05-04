@@ -43,7 +43,29 @@
       "Bash(grep -n \"local cache = {}\\\\|__time.*= val\\\\|for k, v in pairs\\(ctx.state._cache\\)\" /mnt/c/Users/John/Dropbox/devel/storybase/runtime/eval.lua)",
       "Bash(busted tests/compiler/lexer_spec.lua tests/runtime/debug_http_spec.lua)",
       "Read(//tmp/**)",
-      "Bash(echo \"Exit: $?\")"
+      "Bash(echo \"Exit: $?\")",
+      "Bash(git tag *)",
+      "Bash(bash /tmp/check_test_coverage.sh)",
+      "Bash(bash /tmp/detailed_check.sh)",
+      "Bash(bash /tmp/final_check.lua)",
+      "Bash(grep -v \":0$\")",
+      "Bash(\" /mnt/c/Users/John/Dropbox/devel/storybase/idea.md | head -20)",
+      "Bash(grep -n \"quoted with\\\\|prefix.*apostrophe\\\\|apostrophe.*prefix\\\\|single-quote\\\\|single quote\\\\|' prefix\\\\|`\" /mnt/c/Users/John/Dropbox/devel/storybase/idea.md | head -20)",
+      "Bash(grep \"\\\\.lua$\")",
+      "Bash(sed -n '535,540p' /mnt/c/Users/John/Dropbox/devel/storybase/tests/cli/cli_cmd_spec.lua)",
+      "Bash(sed -n '560,567p' /mnt/c/Users/John/Dropbox/devel/storybase/tests/cli/cli_cmd_spec.lua)",
+      "Bash(sed -i \"s/\\\\`echo %q | lua5.4 cli\\\\/main.lua run demos\\\\/demo01_wanderer.sb --cli %q %s 2>\\\\/dev\\\\/null'/\\\\\\\\'echo %q | lua5.4 cli\\\\\\\\/main.lua run demos\\\\\\\\/demo01_wanderer.sb --cli %q %s 2>\\\\\\\\/dev\\\\\\\\/null\\\\\\\\'/g\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/cli/cli_cmd_spec.lua)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(grep \"^+.*schema\\(\\\\`\")",
+      "Bash(grep \"^+.*\\(\\\\`\")",
+      "Bash(grep \"^+.*\\\\`\")",
+      "Bash(grep -n \"schema\\(\\\\`\\\\|decl\\(\\\\`\\\\|check_ok\\(\\\\`\\\\|check_err\\(\\\\`\\\\|first_stmt\\(\\\\`\\\\|encode_json\\(\\\\`\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/compiler/codegen_spec.lua)",
+      "Bash(grep -n \"\\(\\\\`\\\\|= \\\\`\\\\|,\\\\`\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/runtime/debug_spec.lua)",
+      "Bash(grep -v \"-- \\\\|#\\\\|StoryBase\\\\|schema\\\\|:$\\\\|'$\")",
+      "Bash(grep -n \"\\(\\\\`\\\\|= \\\\`\\\\|,\\\\`\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/compiler/parser_spec.lua)",
+      "Bash(grep -v \"-- \\\\|#\\\\|:$\")",
+      "Bash(grep -Pn \"\\\\\\([\\\\`]|= [\\\\`]|,[\\\\`]\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/runtime/debug_spec.lua)",
+      "Bash(xargs sed *)"
     ]
   }
 }

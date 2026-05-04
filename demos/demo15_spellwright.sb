@@ -5,12 +5,12 @@ module demo15-spellwright
 #
 # Demonstrates:
 #   • macro with-mana-cost: resource-guard with hygienic let binding
-#     (the internal 'required' binding is renamed on each expansion,
+#     (the internal `required' binding is renamed on each expansion,
 #      so caller-side variables of the same name are never shadowed)
 #   • macro craft-spell: ingredient-check + body splicing
 #   • Both macros composed (nested body blocks)
 #   • post: conditions with path@before on spell-casting functions
-#   • Entity family 'spells' for the recipe registry
+#   • Entity family `spells' for the recipe registry
 #   • verify block that exercises the macro-expanded code
 
 engine-config:
@@ -23,7 +23,7 @@ type ComponentKind = dragonscale | frost-crystal | moonpetal | silkweb
 
 "A spell recipe: ingredient, mana cost, and whether it has been successfully cast."
 type SpellRecord:
-  ingredient: ComponentKind = 'dragonscale
+  ingredient: ComponentKind = `dragonscale
   mana-cost:  Int(0, 50)    = 20
   learned:    Bool          = false
 
@@ -31,7 +31,7 @@ type SpellRecord:
 
 state player/mana:        Int(0, 100) = 80
 state player/health:      Int(0, 100) = 100
-state player/components:  Set(ComponentKind, 10) = {'dragonscale, 'frost-crystal, 'moonpetal}
+state player/components:  Set(ComponentKind, 10) = {`dragonscale, `frost-crystal, `moonpetal}
 state player/description: String = ""
 
 state world/spells-cast:  Int(0, 99) = 0
@@ -43,16 +43,16 @@ state spells/{spell}: SpellRecord  max: 8
 # ── Macros ─────────────────────────────────────────────────────────────────────
 
 # Guard a body with a mana cost.
-# Hygiene note: the internal binding 'required' is renamed to a unique
+# Hygiene note: the internal binding `required' is renamed to a unique
 # generated name (_mN_required) on every expansion, ensuring it can never
-# shadow a caller-side variable that happens to be named 'required'.
+# shadow a caller-side variable that happens to be named `required'.
 macro with-mana-cost cost body:
   let required = cost:
     if player/mana >= required:
       dec! player/mana required
       body
     else:
-      goto-scene! 'out-of-mana
+      goto-scene! `out-of-mana
 
 # Consume one unit of an ingredient, then execute body; if missing, report it.
 macro craft-spell ingredient body:
@@ -67,16 +67,16 @@ macro craft-spell ingredient body:
 fn init-workshop:
   when not world/initialized:
     set! world/initialized true
-    spawn! spells 'fireball    SpellRecord(ingredient: 'dragonscale,  mana-cost: 20, learned: false)
-    spawn! spells 'ice-shard   SpellRecord(ingredient: 'frost-crystal, mana-cost: 15, learned: false)
-    spawn! spells 'heal-beam   SpellRecord(ingredient: 'moonpetal,     mana-cost: 25, learned: false)
-    spawn! spells 'binding-rune SpellRecord(ingredient: 'silkweb,      mana-cost: 30, learned: false)
+    spawn! spells `fireball    SpellRecord(ingredient: `dragonscale,  mana-cost: 20, learned: false)
+    spawn! spells `ice-shard   SpellRecord(ingredient: `frost-crystal, mana-cost: 15, learned: false)
+    spawn! spells `heal-beam   SpellRecord(ingredient: `moonpetal,     mana-cost: 25, learned: false)
+    spawn! spells `binding-rune SpellRecord(ingredient: `silkweb,      mana-cost: 30, learned: false)
 
 fn cast-fireball:
   pre:  player/mana > 0
   post: player/mana <= player/mana@before
   with-mana-cost cost: 20:
-    craft-spell ingredient: 'dragonscale:
+    craft-spell ingredient: `dragonscale:
       set! spells/fireball/learned true
       inc! world/spells-cast 1
       set! player/description "A roaring fireball erupts from your outstretched hand!"
@@ -85,7 +85,7 @@ fn cast-ice-shard:
   pre:  player/mana > 0
   post: player/mana <= player/mana@before
   with-mana-cost cost: 15:
-    craft-spell ingredient: 'frost-crystal:
+    craft-spell ingredient: `frost-crystal:
       set! spells/ice-shard/learned true
       inc! world/spells-cast 1
       set! player/description "A lance of pure ice launches forward with a crack!"
@@ -94,17 +94,17 @@ fn cast-heal-beam:
   pre:  player/mana > 0
   post: player/mana <= player/mana@before
   with-mana-cost cost: 25:
-    craft-spell ingredient: 'moonpetal:
+    craft-spell ingredient: `moonpetal:
       inc! player/health 30
       set! spells/heal-beam/learned true
       inc! world/spells-cast 1
       set! player/description "Warm golden light flows over your wounds and knits them closed."
 
 fn gather-components:
-  add! player/components 'dragonscale
-  add! player/components 'frost-crystal
-  add! player/components 'moonpetal
-  add! player/components 'silkweb
+  add! player/components `dragonscale
+  add! player/components `frost-crystal
+  add! player/components `moonpetal
+  add! player/components `silkweb
   set! player/description "You've restocked your component pouches from the garden."
 
 fn rest-and-recover:
@@ -112,13 +112,13 @@ fn rest-and-recover:
   set! player/description "After a brief rest, your mana has fully recovered."
 
 fn can-cast-fireball?:
-  return player/mana >= 20 and contains? player/components 'dragonscale
+  return player/mana >= 20 and contains? player/components `dragonscale
 
 fn can-cast-ice-shard?:
-  return player/mana >= 15 and contains? player/components 'frost-crystal
+  return player/mana >= 15 and contains? player/components `frost-crystal
 
 fn can-cast-heal-beam?:
-  return player/mana >= 25 and contains? player/components 'moonpetal
+  return player/mana >= 25 and contains? player/components `moonpetal
 
 fn spells-mastered:
   return world/spells-cast
@@ -192,5 +192,5 @@ verify "health never exceeds 100":
     player/health <= 100
 
 verify "can always recover mana from out-of-mana":
-  when engine/current-scene = 'out-of-mana:
+  when engine/current-scene = `out-of-mana:
     can-reach? player/mana = 80  depth: 3

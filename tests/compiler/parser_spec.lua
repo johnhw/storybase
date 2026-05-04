@@ -259,7 +259,7 @@ end)
 
 describe("parser — type record declarations", function()
   it("parses a simple record", function()
-    local d = decl("type Entity:\n  health: Health = 50\n  status: Status = 'alive")
+    local d = decl("type Entity:\n  health: Health = 50\n  status: Status = `alive")
     assert.are.equal(ast.K.TYPE_RECORD, d.kind)
     assert.are.equal("Entity", d.name)
     assert.are.equal(2, #d.fields)
@@ -280,7 +280,7 @@ describe("parser — type record declarations", function()
   end)
 
   it("parses record with mixin", function()
-    local src = "type Npc:\n  with Entity\n  disposition: Disposition = 'neutral"
+    local src = "type Npc:\n  with Entity\n  disposition: Disposition = `neutral"
     local d = decl(src)
     assert.are.equal(ast.K.TYPE_RECORD, d.kind)
     assert.are.equal(2, #d.fields)
@@ -374,7 +374,7 @@ end)
 
 describe("parser — state inline record declarations", function()
   it("parses an inline record state", function()
-    local src = "state world:\n  turn: Int(0, 9999) = 0\n  chapter: Chapter = 'intro"
+    local src = "state world:\n  turn: Int(0, 9999) = 0\n  chapter: Chapter = `intro"
     local d = decl(src)
     assert.are.equal(ast.K.STATE_RECORD, d.kind)
     assert.are.same({"world"}, d.path.segments)
@@ -421,7 +421,7 @@ describe("parser — relation declarations", function()
   end)
 
   it("parses a relation with static data block using {...} syntax", function()
-    local src = "relation exits: Location -> Set(Location, 6):\n  'village: {'forest}\n  'forest: {'village, 'dungeon}"
+    local src = "relation exits: Location -> Set(Location, 6):\n  `village: {`forest}\n  `forest: {`village, `dungeon}"
     local d = decl(src)
     assert.are.equal(ast.K.RELATION_DECL, d.kind)
     assert.are.equal(2, #d.initial_data)
@@ -433,7 +433,7 @@ describe("parser — relation declarations", function()
   end)
 
   it("parses a relation with static data block using [...] syntax", function()
-    local src = "relation exits: Location -> Set(Location, 6):\n  'village: ['forest]\n  'forest: ['village, 'dungeon]"
+    local src = "relation exits: Location -> Set(Location, 6):\n  `village: [`forest]\n  `forest: [`village, `dungeon]"
     local d = decl(src)
     assert.are.equal(ast.K.RELATION_DECL, d.kind)
     assert.are.equal(2, #d.initial_data)
@@ -482,7 +482,7 @@ describe("parser — default values", function()
   end)
 
   it("parses symbol default", function()
-    local d = decl("state mood: Disposition = 'neutral")
+    local d = decl("state mood: Disposition = `neutral")
     assert.are.equal(ast.K.SYMBOL_LIT, d.default.kind)
     assert.are.equal("neutral", d.default.name)
   end)
@@ -558,7 +558,7 @@ type Gold = Int(0, 9999)
 "The player record type."
 type Player:
   health: Health = 100
-  status: Status = 'alive
+  status: Status = `alive
   gold:   Gold   = 30
 
 "The player's state."
@@ -566,15 +566,15 @@ state player: Player = Player(health: 100)
 
 state world:
   turn: Int(0, 9999) = 0
-  chapter: Location  = 'village
+  chapter: Location  = `village
 
 "NPCs."
 state npcs/{npc}: Player  max: 20
 
 "Movement graph."
 relation exits: Location -> Set(Location, 6):
-  'village: {'forest}
-  'forest: {'village, 'dungeon}
+  `village: {`forest}
+  `forest: {`village, `dungeon}
 ]]
     local tree, diags = parse(src)
     -- Count errors only (not warnings)
@@ -667,7 +667,7 @@ describe("parser — literal expressions", function()
   end)
 
   it("parses symbol literal", function()
-    local s, _ = first_stmt("'alive")
+    local s, _ = first_stmt("`alive")
     assert.are.equal(ast.K.EXPR_STMT, s.kind)
     assert.are.equal(ast.K.SYMBOL_LIT, s.expr.kind)
     assert.are.equal("alive", s.expr.name)
@@ -705,8 +705,8 @@ end)
 -- ── Collection literals ───────────────────────────────────────────────────────
 
 describe("parser — collection literals", function()
-  it("parses set literal {'a, 'b}", function()
-    local s, _ = first_stmt("{'alive, 'dead}")
+  it("parses set literal {`a, `b}", function()
+    local s, _ = first_stmt("{`alive, `dead}")
     assert.are.equal(ast.K.EXPR_STMT, s.kind)
     assert.are.equal(ast.K.SET_LIT, s.expr.kind)
     assert.are.equal(2, #s.expr.elements)
@@ -818,25 +818,25 @@ describe("parser — binary operators", function()
     assert.are.equal(">=", s.expr.op)
   end)
 
-  it("parses boolean 'and'", function()
+  it("parses boolean `and'", function()
     local s, _ = first_stmt("a and b")
     assert.are.equal(ast.K.BINARY_OP, s.expr.kind)
     assert.are.equal("and", s.expr.op)
   end)
 
-  it("parses boolean 'or'", function()
+  it("parses boolean `or'", function()
     local s, _ = first_stmt("a or b")
     assert.are.equal("or", s.expr.op)
   end)
 
-  it("parses 'not' prefix operator", function()
+  it("parses `not' prefix operator", function()
     local s, _ = first_stmt("not player/alive")
     assert.are.equal(ast.K.EXPR_STMT, s.kind)
     assert.are.equal(ast.K.UNARY_OP, s.expr.kind)
     assert.are.equal("not", s.expr.op)
   end)
 
-  it("'not' binds tighter than 'and'", function()
+  it("`not' binds tighter than `and'", function()
     local s, _ = first_stmt("a and not b")
     -- Should be: a and (not b)
     local e = s.expr
@@ -879,7 +879,7 @@ describe("parser — function calls", function()
   end)
 
   it("parses function call with symbol arg", function()
-    local s, _ = first_stmt("spawn-enemy 'goblin")
+    local s, _ = first_stmt("spawn-enemy `goblin")
     local e = s.expr
     assert.are.equal(1, #e.args)
     assert.are.equal(ast.K.SYMBOL_LIT, e.args[1].kind)
@@ -901,9 +901,9 @@ describe("parser — match expression", function()
   it("parses a match with symbol arms", function()
     local fd, diags = parse_fn("test", [[
 match player/class:
-  'warrior: 20
-  'rogue: 14
-  'mage: 8]])
+  `warrior: 20
+  `rogue: 14
+  `mage: 8]])
     local errs = 0
     for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
     assert.are.equal(0, errs)
@@ -916,11 +916,11 @@ match player/class:
   end)
 
   it("parses a match arm with wildcard _", function()
-    -- Note: bare 'x:' is lexed as NAMED_ARG; parse_match_expr handles this.
+    -- Note: bare `x:' is lexed as NAMED_ARG; parse_match_expr handles this.
     local fd, diags = parse_fn("test", [[
 match x:
-  1: 'one
-  _: 'other]])
+  1: `one
+  _: `other]])
     local errs = 0
     for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
     assert.are.equal(0, errs)
@@ -969,7 +969,7 @@ describe("parser — when statement", function()
   it("parses a when block", function()
     local fd, diags = parse_fn("test", [[
 when player/health <= 0:
-  set! player/status 'dead]])
+  set! player/status `dead]])
     local errs = 0
     for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
     assert.are.equal(0, errs)
@@ -1005,12 +1005,12 @@ describe("parser — mutation primitives", function()
   end)
 
   it("parses add!", function()
-    local s = first_stmt("add! player/friends 'bob")
+    local s = first_stmt("add! player/friends `bob")
     assert.are.equal(ast.K.ADD_MUT, s.kind)
   end)
 
   it("parses remove!", function()
-    local s = first_stmt("remove! player/friends 'alice")
+    local s = first_stmt("remove! player/friends `alice")
     assert.are.equal(ast.K.REMOVE_MUT, s.kind)
   end)
 
@@ -1020,7 +1020,7 @@ describe("parser — mutation primitives", function()
   end)
 
   it("parses push!", function()
-    local s = first_stmt("push! player/log 'event")
+    local s = first_stmt("push! player/log `event")
     assert.are.equal(ast.K.PUSH_MUT, s.kind)
   end)
 
@@ -1036,13 +1036,13 @@ describe("parser — mutation primitives", function()
   end)
 
   it("parses spawn!", function()
-    local s = first_stmt("spawn! npcs 'goblin rec")
+    local s = first_stmt("spawn! npcs `goblin rec")
     assert.are.equal(ast.K.SPAWN_MUT, s.kind)
     assert.are.equal("npcs", s.family)
   end)
 
   it("parses despawn!", function()
-    local s = first_stmt("despawn! npcs 'goblin")
+    local s = first_stmt("despawn! npcs `goblin")
     assert.are.equal(ast.K.DESPAWN_MUT, s.kind)
   end)
 end)
@@ -1088,7 +1088,7 @@ describe("parser — fn declarations", function()
     local fd, diags = parse_fn("foo", [[
 pre:
   amount > 0
-  player/status = 'alive
+  player/status = `alive
 pass]])
     local errs = 0
     for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
@@ -1100,7 +1100,7 @@ pass]])
     local fd, diags = parse_fn("take-damage amount", [[
 dec! player/health amount
 when player/health <= 0:
-  set! player/status 'dead]])
+  set! player/status `dead]])
     local errs = 0
     for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
     assert.are.equal(0, errs)
@@ -1294,7 +1294,7 @@ describe("parser — variant record constructor in parens", function()
   it("parses (Type/variant field: val) as record constructor", function()
     local src = [[
 fn send-alert:
-  send! guard (ActorMsg/alert threat: 'x, location: 'village)
+  send! guard (ActorMsg/alert threat: `x, location: `village)
 ]]
     local tree, diags = parse(src)
     local errs = 0
@@ -1313,7 +1313,7 @@ fn send-alert:
   it("parses (Type/variant) with no fields as record constructor", function()
     local src = [[
 fn send-dismiss:
-  send! guard (ActorMsg/dismiss reason: 'neutral)
+  send! guard (ActorMsg/dismiss reason: `neutral)
 ]]
     local tree, diags = parse(src)
     local errs = 0
@@ -1326,7 +1326,7 @@ describe("parser — send! mutation", function()
   it("parses actor name and message expression", function()
     local src = [[
 fn notify:
-  send! guard (ActorMsg/alert threat: 'enemy, location: 'forest)
+  send! guard (ActorMsg/alert threat: `enemy, location: `forest)
 ]]
     local tree, diags = parse(src)
     local errs = 0
@@ -1457,8 +1457,8 @@ schedule daily-tax:
 schedule mid-point:
   at: [tick: +20]
   fn:
-    when player/chapter = 'intro:
-      set! player/chapter 'mid
+    when player/chapter = `intro:
+      set! player/chapter `mid
 ]]
     local tree, diags = parse(src)
     local errs = 0
@@ -1552,7 +1552,7 @@ describe("parser — schedule! mutation", function()
   end
 
   it("parses schedule! with every and fn", function()
-    local body = parse_fn_body("  schedule! 'patrol every: [tick: 5] fn: my-fn\n")
+    local body = parse_fn_body("  schedule! `patrol every: [tick: 5] fn: my-fn\n")
     assert.equal(1, #body)
     local node = body[1]
     assert.equal(ast.K.SCHEDULE_MUT, node.kind)
@@ -1612,7 +1612,7 @@ describe("parser — indexed list access", function()
   end)
 
   it("parses set! path[n] value as indexed write (index_expr in path)", function()
-    local body = parse_fn_body("  set! player/items[1] 'sword\n")
+    local body = parse_fn_body("  set! player/items[1] `sword\n")
     local node = body[1]
     assert.equal("set_mut", node.kind)
     assert.equal(ast.K.INDEX_EXPR, node.path.kind)
@@ -1620,7 +1620,7 @@ describe("parser — indexed list access", function()
   end)
 
   it("parses path[var:end] as slice_expr when from is a variable (NAMED_ARG fix)", function()
-    -- 'start:' would be lexed as NAMED_ARG; parser must recover the identifier
+    -- `start:' would be lexed as NAMED_ARG; parser must recover the identifier
     local body = parse_fn_body("  queue/orders[start:end]\n")
     local node = (body[1].kind == "expr_stmt") and body[1].expr or body[1]
     assert.equal(ast.K.SLICE_EXPR, node.kind)
@@ -1882,7 +1882,7 @@ scene s:
 engine-config:
   entry-scene: s
 fn greet:
-  say 'aldric "Hello there."
+  say `aldric "Hello there."
 scene s:
   * Done -> s
 ]]

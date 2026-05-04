@@ -6,7 +6,7 @@
 #   find-path           — step count for shortest delivery route
 #   optimal-path        — step count for cheapest-cost route
 #   find-counterexample — reveals the specific doom scenario where things go wrong
-#   engine/emit         — fires 'contract-accepted event when a deal is signed
+#   engine/emit         — fires `contract-accepted event when a deal is signed
 #   engine/checkpoint!  — saves state before each consultation for undo
 #   undo!               — rolls back to the pre-consultation checkpoint
 #   lambda fn(x):       — used in count-where to tally favorable-odds clients
@@ -121,14 +121,14 @@ fn accept-supply:
   inc! world/contracts 1
   set! supply/route 0
   set! supply/arrived false
-  engine/emit 'contract-accepted {kind: 'supply, gold: world/gold}
+  engine/emit `contract-accepted {kind: `supply, gold: world/gold}
 
 "Accept the gambler's consultation fee."
 fn accept-gambler:
   inc! world/gold 10
   inc! world/reputation 5
   inc! world/contracts 1
-  engine/emit 'contract-accepted {kind: 'gamble, gold: world/gold}
+  engine/emit `contract-accepted {kind: `gamble, gold: world/gold}
 
 "Accept the spy's escape-route contract."
 fn accept-spy:
@@ -138,7 +138,7 @@ fn accept-spy:
   inc! world/contracts 1
   set! spy/position 0
   set! spy/caught false
-  engine/emit 'contract-accepted {kind: 'escape, gold: world/gold}
+  engine/emit `contract-accepted {kind: `escape, gold: world/gold}
 
 "Advance to the next day."
 fn next-day:

@@ -438,9 +438,9 @@ state world:
 type Place = village | forest | cave | mountain
 
 relation exits: Place -> Set(Place, 4):
-  'village: ['forest, 'cave]
-  'forest:  ['village, 'mountain]
-  'cave:    ['village]
+  `village: [`forest, `cave]
+  `forest:  [`village, `mountain]
+  `cave:    [`village]
 ]]
   local gt, diags = compiler.compile(src, "relation-test")
   assert.is_false(diags:has_errors(), table.concat(
@@ -494,7 +494,7 @@ describe("eval: adjacent? builtin", function()
 
   it("returns empty table for node with no outgoing edges", function()
     local c = make_ctx_with_game()
-    -- 'mountain has no outgoing exits in this relation
+    -- `mountain has no outgoing exits in this relation
     local node = fn_call_node("adjacent?", ident_node("exits"), sym_node("mountain"))
     local result = eval_mod.eval_expr(node, c)
     assert.same({}, result)
@@ -590,7 +590,7 @@ describe("eval: inverse-adjacent? builtin", function()
 
   it("returns empty for node not pointed to by anyone", function()
     local c = make_ctx_with_game()
-    -- 'village is pointed to by forest and cave; 'unknown has no incoming edges
+    -- `village is pointed to by forest and cave; `unknown has no incoming edges
     local node = fn_call_node("inverse-adjacent?", ident_node("exits"), sym_node("unknown"))
     local result = eval_mod.eval_expr(node, c)
     assert.same({}, result)

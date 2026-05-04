@@ -1,0 +1,264 @@
+# StoryBase — Implementation TODO
+
+Completed work has been moved to [completed.md](completed.md).
+
+---
+
+## Current Status (2026-05-04)
+
+All eight implementation phases complete. Language review passes 1 and 2 complete.
+Demos 01–21 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
+Code review rounds 1, 2, and 3 fully resolved.
+UI driver layer complete: `--ui plain` (default) and `--ui ansi` implemented.
+Authoring ergonomics issues AE-1, AE-2, AE-4, AE-5, AE-6, AE-12 resolved.
+
+**2046 tests passing, 0 failing.**
+
+All significant language features now have polished numbered demos.
+
+Bug fixed: CLI `--cli` save/restore (`restore_engine` in `cli/cli_cmd.lua`) did not
+repopulate `eng._log._entries` after replay, causing `query-history`, `query-changes`,
+and `query-at` to return empty results after the first step.  Fix: append saved entries
+back into `eng._log._entries` and restore `eng._log._seq`.
+
+---
+
+## Next Up
+
+- [x] Write `demos/demo21_merchants_reckoning.sb` (design below)
+- [x] Add CLI integration test entries for demo21 in `tests/cli/cli_integration_spec.lua`
+- [x] Update `code_map.md` demos table with demo21 entry once written
+
+---
+
+## Demo 21 — `query-at` / `query-history` / `query-changes`
+
+**File:** `demos/demo21_merchants_reckoning.sb`
+
+**Goal:** Showcase all three log-backed temporal query builtins as first-class gameplay
+mechanics.  These are the only significant language features with no polished numbered demo
+(only a test fixture, `tests/test05_log_and_time.sb`, uses `query-history`).
+
+### Narrative frame
+
+A travelling merchant performs *the reckoning* — a ritual end-of-day audit in which the
+chronicle (the transaction log) is consulted to reconstruct what happened.  The player
+makes several trade and travel choices across multiple days, building up history, then
+enters the reckoning scene to review it via the three query forms.
+
+### Features to demonstrate
+
+| Builtin | Example syntax | Narrative use |
+|---------|---------------|---------------|
+| `query-history` | `query-history player/gold` | Full ledger — every gold change with day and direction |
+| `query-changes` | `query-changes player/location last-n: 3` | Recent road — last 3 locations visited |
+| `query-at` | `query-at player/gold time: {day: d}` | Opening fortune — what was gold at start of a named day |
+| Wildcard pattern | `query-history player/*` | Broad audit — every player state change combined |
+
+### Types and state
+
+```
+time-model:
+  axes: [day]
+  wrap: [none]
+
+type Location = crossroads | town | market | forest | inn | ruins
+type Gold     = Int(0, 500)
+
+state player:
+  gold:     Gold     = 100
+  location: Location = 'crossroads
+
+state world:
+  day: Int(0, 30) = 1
+```
+
+### Scene outline
+
+- **`crossroads`** — hub scene; navigate to town / market / forest / inn; choice to "take the
+  reckoning" (→ `reckoning`) once `world/day > 1` so there is non-trivial history.
+- **`town`** — sell found goods (+gold); rest (advance day + return).
+- **`market`** — buy provisions (−gold); sell surplus (+gold); return.
+- **`forest`** — explore; may change location to ruins; return.
+- **`inn`** — pay for lodging (−gold); rest advances day; return.
+- **`reckoning`** — three-part audit with sub-choices:
+  - *Consult the ledger* → `reckoning-ledger`: `for entry in (query-history player/gold):`
+    renders each change as "Day N: N gold → N gold".
+  - *Trace the road* → `reckoning-route`: `for entry in (query-changes player/location last-n: 3):`
+    renders last three locations.
+  - *Recall opening fortune* → `reckoning-fortune`: inline `{gold-on-day 1}` using a helper
+    fn that calls `query-at player/gold time: {day: 1}`.
+  - *Close the reckoning* → back to crossroads.
+
+### Key functions
+
+```
+fn travel dest:
+  set! player/location dest
+
+fn earn-gold amount:
+  tags: [checkpoint]
+  inc!  player/gold amount
+
+fn spend-gold amount:
+  pre:  player/gold >= amount
+  tags: [checkpoint]
+  dec!  player/gold amount
+
+fn advance-day:
+  tags: [checkpoint]
+  inc!  world/day 1
+  time-inc! day: 1
+
+fn gold-on-day d:   # query-at with variable time axis value
+  query-at player/gold time: {day: d}
+```
+
+### Rendering log entries in narration
+
+Log entry records have `time`, `old`, `new`, and `path` fields.  Access via path
+interpolation in `for` bodies:
+
+```
+for entry in (query-history player/gold):
+  Day {entry/time/day}: {entry/old} → {entry/new} gold
+```
+
+Confirm that `entry/time/day` resolves correctly (first segment = loop var, subsequent
+segments = table field navigation).  If it does not, use `tostring entry` as a fallback
+for the demo and file a bug.
+
+### Verify blocks
+
+```
+verify "gold never goes negative":
+  verify-always player/gold >= 0
+
+verify "spend-gold reduces gold by exactly the amount":
+  requires player/gold >= 30
+  after (spend-gold 30):
+    player/gold = player/gold@before - 30
+
+verify "query-at day 1 returns initial gold before any trade on day 1":
+  after (advance-day):
+    gold-on-day 1 = 100
+```
+
+The third verify checks that `query-at` with the initial time returns the correct snapshot
+value — a direct test of the builtin's semantics, not just game logic.
+
+### Implementation notes
+
+- Build up enough choices that the reckoning scenes are non-trivial: at least 2 earn/spend
+  actions and 1 day advance before reaching `reckoning`.
+- Use `[world/day > 1]` guard on the "take the reckoning" choice so there is always
+  something in the log.
+- The wildcard query `query-history player/*` in the broad-audit variant is optional; include
+  it only if confirmed to work correctly in the for-loop context (see eval_spec tests for
+  wildcard path patterns).
+- Prefer simple, readable narration over exhaustive coverage — the goal is clarity, not
+  exhaustiveness.
+
+---
+
+## Remaining Polish
+
+- [x] Every public function in every module has at least one passing and one failing test.
+  - Verified across all runtime and compiler modules (2026-05-03).
+  - Added: scheduler dead-stub error test; lexer bare-tick and unclosed-interpolation error tests.
+- [ ] Inelegance #7 — BFS expansion logic duplicated ~5×. Deferred: each BFS function has a different data payload (priority/path/prob/cost) and queue mechanism (FIFO/heap/yield). Extracting a shared helper would require a messy callback strategy and add more complexity than it removes.
+
+---
+
+## Authoring Ergonomics Issues (2026-05-03)
+
+Identified by reviewing all demos and documentation. Numbered for tracking. None yet started.
+
+### Lexer / Parser
+
+- [ ] **AE-1 — Apostrophes in prose text.** Any contraction or possessive (`it's`, `player's`,
+  `you'd`) breaks the lexer: `'` starts a symbol literal token. Confirmed in demo21 (had to
+  rewrite "wayfarer's" to "wayfarer inn").
+  **Decision: change the symbol literal sigil from `'` to backtick (`` ` ``).** Backtick is
+  completely free in the current lexer, never appears in English prose, and the fix is
+  mechanical: one branch in `compiler/lexer.lua`, plus search-replace across all `.sb` files
+  and `idea.md`. Context-sensitive apostrophe detection was considered but rejected — it
+  adds ongoing lexer complexity and still breaks leading-apostrophe cases.
+  Affects: `compiler/lexer.lua`, all `.sb` demo/test files, `idea.md`.
+
+- [ ] **AE-2 — UTF-8 characters silently corrupted in prose.** Em-dashes (`—`), arrows (`→`),
+  curly quotes, ellipsis (`…`) are skipped or produce `ILLEGAL_CHAR`. Confirmed in demo21.
+  **Fix is ~6 lines in `compiler/lexer.lua` only — no parser changes needed.** The `> 127`
+  branch currently calls `adv()` (silently drops the byte). Change it to: decode the full
+  UTF-8 sequence length from the leading byte (1–4 bytes), call `adv(seq_len)`, and emit a
+  new `RAW_TEXT` token with the multi-byte string as its value. The parser's
+  `parse_narration_text` (parser.lua:2186) already handles arbitrary token kinds via its
+  catch-all else branch (`tok_display_and_len → tostring(v), #v`), so `RAW_TEXT` tokens
+  slot in without any parser edits. String literals already round-trip UTF-8 correctly.
+  Affects: `compiler/lexer.lua` only.
+
+- [ ] **AE-5 — No escape for literal `{` in narration.** `{expr}` is an inline interpolation;
+  there is no way to display a literal brace. Any game with rules text or code-like content
+  is blocked. Fix: add `\{` or `{{` as an escape sequence. Affects: `compiler/lexer.lua`,
+  `compiler/parser.lua`.
+
+- [ ] **AE-6 — Narration lines starting with a keyword produce confusing parse errors.**
+  The parser tries to parse any scene body line as a statement first. A line like
+  `Set the scene here.` tries to parse `set` as a keyword. Fix: improve the error message
+  to suggest the line might be intended as narration. Affects: `compiler/parser.lua`.
+
+### Runtime / Semantics
+
+- [ ] **AE-3 — Engine time axis and state variable are independent and must be kept in sync
+  manually.** `time-inc! day: 1` advances the engine time axis (used by `query-at`,
+  `query-history`). `inc! world/day 1` advances a game state variable. They are completely
+  independent; a demo author must do both. Fix candidates: (a) a `time-axis: world/day`
+  annotation that makes `time-inc!` also advance the state variable, or (b) a
+  `time-model: day-var: world/day` unification field. Affects: `runtime/eval.lua`,
+  `compiler/parser.lua`, `idea.md`.
+
+- [ ] **AE-4 — `query-at` returns nil for paths that were never mutated, even if they have
+  a declared initial value.** `init_defaults` does not emit log entries, so
+  `query-at player/gold time: {day: 0}` returns nil when gold was initialized to 100 and
+  never changed on day 0. Authors expect the initial value to be queryable. This forced
+  demo21's third verify block to be reworded. Fix: emit a log entry for each state path
+  at engine startup time (seq=0, time=initial time), before any player action.
+  Affects: `runtime/engine.lua` (`init_defaults` or `init`).
+
+- [ ] **AE-8 — `verify` `after (fn):` always starts from a fresh initial state, not from
+  arbitrary reachable states.** Authors cannot write "after buying from any state where we
+  have enough gold, gold decreases." The `from-any-state:` + `requires:` workaround is
+  more complex. Fix: document this clearly as a known limitation in `docs/reference/language.md`,
+  and consider whether `after (fn):` should optionally sample from BFS-explored states.
+
+- [ ] **AE-12 — No error when `=>` subscene forgets `<-`.** The scene stack grows
+  unboundedly until it hits `scene-stack-max` and crashes with a generic overflow error.
+  Fix: at overflow, report the full scene stack so the author can identify which subscene
+  is missing its `<-` exit.  Affects: `runtime/engine.lua`.
+
+### Missing Features
+
+- [ ] **AE-7 — Actor `perceives:` must be kept in sync manually.** Every path an actor reads
+  must appear in `perceives:`. Adding a read without updating `perceives:` is a compile error.
+  During iteration this is constant friction. Fix: add a `perceives: *` wildcard escape hatch
+  for dev mode, or auto-infer `perceives` from the behavior function's static read-set
+  (the checker already computes write-sets; read-sets are symmetric). Affects:
+  `compiler/checker.lua`, `runtime/actors.lua`.
+
+- [ ] **AE-9 — No debug print / trace from `.sb` code.** The only way to observe intermediate
+  values during development is to `set! player/description (str "debug: " val)`. Fix: add a
+  `trace expr` builtin that writes to stderr in dev mode and is stripped in production builds
+  (tagged `debug-only`). Affects: `runtime/eval.lua`, `compiler/codegen.lua`.
+
+### Documentation Gaps
+
+- [ ] **AE-10 — Return value semantics for multi-statement pure functions undocumented.**
+  Single-expression pure functions auto-return (spec §7.1 examples). Multi-statement pure
+  functions use explicit `return` (demo15). The rule is not stated: does the last expression
+  auto-return, or is `return` required? Clarify in `docs/reference/language.md` §7.
+
+- [ ] **AE-11 — Multi-segment path access on loop variables undocumented.** `{entry/time/day}`
+  in a `for` loop body works because eval checks whether the first path segment is a
+  `ctx.vars` key and then navigates table fields. This is a critical feature for rendering
+  log entries but appears in no documentation. Add an explicit example to
+  `docs/reference/language.md` in the `for` loop and temporal query sections.

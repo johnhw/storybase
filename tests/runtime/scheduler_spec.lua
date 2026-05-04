@@ -398,7 +398,7 @@ fn inc-count:
   inc! world/count 1
 
 fn setup-schedule:
-  schedule! 'counter every: [tick: 1] fn: inc-count
+  schedule! `counter every: [tick: 1] fn: inc-count
 
 scene main:
   * Tick
@@ -451,7 +451,7 @@ fn inc-count:
   inc! world/count 1
 
 fn setup-schedule:
-  schedule! 'counter every: [tick: 1] fn: inc-count
+  schedule! `counter every: [tick: 1] fn: inc-count
 
 scene main:
   * Tick

@@ -243,23 +243,24 @@ describe("debug: time-travel command", function()
     assert.equal(50, resp.snapshot["player/gold"])
   end)
 
-  it("time-travel to seq 1 shows state after first mutation", function()
+  it("time-travel to seq after first mutation shows gold=60", function()
     if not gt then pending("compile failed"); return end
     local eng = engine_mod.new(gt, { io_out = { write = function() end } })
     eng:init()
 
     local eval_mod = require("runtime.eval")
     local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
-    -- Earn 10 gold (seq 1 → gold=60)
+    -- Earn 10 gold; record its seq
     eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)
-    -- Earn 20 gold (seq 2 → gold=80)
+    local earn1_seq = eng._log:seq()
+    -- Earn 20 gold
     eval_mod.call_fn("earn", {{ kind = "int_lit", value = 20 }}, ctx)
 
     local srv = debug_mod.new(eng)
     srv:start()
 
-    -- time-travel to seq=1 → should see gold=60
-    local resp = srv:handle_command("time-travel", { seq = 1 })
+    -- time-travel to the seq of the first earn → should see gold=60
+    local resp = srv:handle_command("time-travel", { seq = earn1_seq })
     assert.is_nil(resp.error, resp.error)
     assert.is_table(resp.snapshot)
     assert.equal(60, resp.snapshot["player/gold"])
@@ -272,17 +273,18 @@ describe("debug: time-travel command", function()
 
     local eval_mod = require("runtime.eval")
     local ctx = eval_mod.new_ctx(eng._state, gt.fns, "test")
-    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)  -- seq 1
-    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 20 }}, ctx)  -- seq 2
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 10 }}, ctx)
+    local earn1_seq = eng._log:seq()
+    eval_mod.call_fn("earn", {{ kind = "int_lit", value = 20 }}, ctx)
 
     local srv = debug_mod.new(eng)
     srv:start()
     srv:register_watch("player/gold", "Gold")
 
-    -- At seq=1 there is 1 log entry; watches reflect that snapshot
-    local resp = srv:handle_command("time-travel", { seq = 1 })
+    -- At the seq of the first earn: all entries up to that point; watches reflect snapshot
+    local resp = srv:handle_command("time-travel", { seq = earn1_seq })
     assert.is_table(resp.entries)
-    assert.equal(1, #resp.entries)
+    assert.equal(earn1_seq, #resp.entries)
     assert.equal(1, resp.entries[1].seq)
     assert.is_table(resp.watches)
     local gold_w
@@ -290,7 +292,7 @@ describe("debug: time-travel command", function()
       if w.label == "Gold" then gold_w = w end
     end
     assert.not_nil(gold_w, "Gold watch should be present")
-    assert.equal(60, gold_w.value)  -- snapshot at seq=1: gold=60
+    assert.equal(60, gold_w.value)  -- snapshot at earn1_seq: gold=60
   end)
 
   it("time-travel returns frozen snapshot (live state unchanged)", function()
@@ -748,7 +750,7 @@ scene next:
     local changes = {}
     srv:on("scene-change", function(p) changes[#changes + 1] = p end)
 
-    -- Execute choice "Go to next" → signal goto 'next
+    -- Execute choice "Go to next" → signal goto `next
     local sig = eng:do_choice("start", 1)
     assert.is_not_nil(sig)
     eng:goto_scene(sig.target)
@@ -1011,7 +1013,7 @@ scene main:
     assert.is_true(resp.ok)
   end)
 
-  it("reload fires 'reload' event", function()
+  it("reload fires `reload' event", function()
     local _, srv = make_eng(BASE_SRC)
     local fired = {}
     srv:on("reload", function(p) fired[#fired+1] = p end)
@@ -1023,7 +1025,7 @@ scene main:
     local eng, srv = make_eng(BASE_SRC)
     -- Set player/status to :alive (valid in old schema, valid in new enum)
     eng._state._cache["player/status"] = "dead"
-    -- New source removes 'dead' from Status
+    -- New source removes `dead' from Status
     local NEW_SRC = [[
 module reload-test
   version: 1.0
@@ -1048,7 +1050,7 @@ scene main:
 
   it("reload: enum value added — current :alive value remains valid", function()
     local _, srv = make_eng(BASE_SRC)
-    -- New source adds 'zombie' to Status enum
+    -- New source adds `zombie' to Status enum
     local NEW_SRC = [[
 module reload-test
   version: 1.0
@@ -1095,7 +1097,7 @@ scene main:
   it("reload: removed field dropped silently from cache", function()
     local eng, srv = make_eng(BASE_SRC)
     eng._state._cache["player/health"] = 42
-    -- New source drops 'health'
+    -- New source drops `health'
     local NEW_SRC = [[
 module reload-test
   version: 1.0
@@ -1488,13 +1490,13 @@ type ShrineKind = hearth | stone | lake
 "World state."
 state world:
   score: Int(0, 999) = 0
-  shrine: ShrineKind = 'hearth
+  shrine: ShrineKind = `hearth
 
 "Shrine paths."
 relation paths: ShrineKind -> Set(ShrineKind, 2):
-  'hearth: {'stone}
-  'stone:  {'lake}
-  'lake:   {'hearth}
+  `hearth: {`stone}
+  `stone:  {`lake}
+  `lake:   {`hearth}
 
 "Advance score."
 fn advance:

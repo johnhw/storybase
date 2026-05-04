@@ -143,7 +143,10 @@ function M.new(game_table, opts)
   ---@param name string
   function eng:push_scene(name)
     if #self._scene_stack >= self._max_stack then
-      error("STACK_OVERFLOW: scene stack exceeded " .. self._max_stack)
+      local stack_str = table.concat(self._scene_stack, " => ")
+      error("STACK_OVERFLOW: scene stack exceeded " .. self._max_stack ..
+            " — check for a missing '<-' exit\n  stack: " .. stack_str ..
+            " => " .. tostring(name))
     end
     self._scene_stack[#self._scene_stack + 1] = name
   end

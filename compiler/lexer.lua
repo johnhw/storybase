@@ -323,7 +323,7 @@ function M.tokenize(source, filename)
       line_has_tok = true
 
     -- ── Symbol literal '‹ident› ──────────────────────────────────────
-    elseif c == "'" then
+    elseif c == "`" then
       local tok_line, tok_col = cur_line, col()
       adv()
       if is_alpha(peek()) then
@@ -334,7 +334,7 @@ function M.tokenize(source, filename)
         end
         emit("SYMBOL", s:sub(start, pos - 1), tok_line, tok_col)
       else
-        err("ILLEGAL_CHAR", "Expected identifier after '''", tok_line, tok_col)
+        err("ILLEGAL_CHAR", "Expected identifier after backtick", tok_line, tok_col)
       end
       line_has_tok = true
 
@@ -478,7 +478,13 @@ function M.tokenize(source, filename)
       elseif c == '-'   then emit("OP", "-",  tok_line, tok_col); adv()
       elseif c == '*'   then emit("OP", "*",  tok_line, tok_col); adv()
       elseif c == '/'   then emit("OP", "/",  tok_line, tok_col); adv()
-      elseif c == '{'   then paren_depth = paren_depth + 1; emit("OP", "{",  tok_line, tok_col); adv()
+      elseif c == '{'   then
+        if peek(1) == '{' then
+          -- {{ escape: literal brace in narration text (no paren_depth change)
+          emit("RAW_TEXT", "{", tok_line, tok_col); adv(2)
+        else
+          paren_depth = paren_depth + 1; emit("OP", "{", tok_line, tok_col); adv()
+        end
       elseif c == '}'   then paren_depth = paren_depth - 1; emit("OP", "}",  tok_line, tok_col); adv()
       elseif c == '['   then paren_depth = paren_depth + 1; emit("OP", "[",  tok_line, tok_col); adv()
       elseif c == ']'   then paren_depth = paren_depth - 1; emit("OP", "]",  tok_line, tok_col); adv()
@@ -489,8 +495,15 @@ function M.tokenize(source, filename)
       elseif c == ':'   then emit("OP", ":",  tok_line, tok_col); adv()
       elseif c == '.'   then emit("OP", ".",  tok_line, tok_col); adv()
       elseif c == '@'   then emit("OP", "@",  tok_line, tok_col); adv()
+      elseif c == "'"  then
+        -- Apostrophe is valid in narration prose (contractions, possessives)
+        emit("RAW_TEXT", "'", tok_line, tok_col); adv()
       elseif c:byte() > 127 then
-        adv()  -- silently skip non-ASCII bytes (UTF-8 in narration text)
+        -- UTF-8 multi-byte sequence: decode length from leading byte and emit as RAW_TEXT
+        local b = c:byte()
+        local seq_len = (b >= 0xF0) and 4 or (b >= 0xE0) and 3 or (b >= 0xC0) and 2 or 1
+        emit("RAW_TEXT", s:sub(pos, pos + seq_len - 1), tok_line, tok_col)
+        adv(seq_len)
       else
         err("ILLEGAL_CHAR", "Illegal character: " .. c, tok_line, tok_col)
         adv()

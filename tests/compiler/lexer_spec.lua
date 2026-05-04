@@ -101,13 +101,13 @@ end)
 -- ── Boolean literals ──────────────────────────────────────────────────────────
 
 describe("lexer — booleans", function()
-  it("lexes 'true'", function()
+  it("lexes `true'", function()
     local t = tok("true", 1)
     assert.equal("BOOL", t.kind)
     assert.equal(true, t.value)
   end)
 
-  it("lexes 'false'", function()
+  it("lexes `false'", function()
     local t = tok("false", 1)
     assert.equal("BOOL", t.kind)
     assert.equal(false, t.value)
@@ -185,21 +185,57 @@ end)
 
 describe("lexer — symbols", function()
   it("lexes a simple symbol", function()
-    local t = tok("'sword", 1)
+    local t = tok("`sword", 1)
     assert.equal("SYMBOL", t.kind)
     assert.equal("sword", t.value)
   end)
 
   it("lexes a hyphenated symbol", function()
-    local t = tok("'my-item", 1)
+    local t = tok("`my-item", 1)
     assert.equal("SYMBOL", t.kind)
     assert.equal("my-item", t.value)
   end)
 
-  it("emits an error for ' not followed by an identifier", function()
-    local d = first_diag("'123")
+  it("emits an error for backtick not followed by an identifier", function()
+    local d = first_diag("`123")
     assert.is_not_nil(d)
     assert.equal("ILLEGAL_CHAR", d.code)
+  end)
+
+  it("emits RAW_TEXT for apostrophe (valid in narration prose)", function()
+    local t = tok("'", 1)
+    assert.equal("RAW_TEXT", t.kind)
+    assert.equal("'", t.value)
+  end)
+end)
+
+-- ── RAW_TEXT tokens (narration prose characters) ──────────────────────────────
+
+describe("lexer — RAW_TEXT", function()
+  it("emits RAW_TEXT for {{ escape (literal brace)", function()
+    local t = tok("{{", 1)
+    assert.equal("RAW_TEXT", t.kind)
+    assert.equal("{", t.value)
+  end)
+
+  it("{{ produces only one RAW_TEXT token, not two OP tokens", function()
+    local ks = kind_list("{{")
+    local op_count = 0
+    for _, k in ipairs(ks) do if k == "OP" then op_count = op_count + 1 end end
+    assert.equal(0, op_count)
+    assert.equal("RAW_TEXT", ks[1])
+  end)
+
+  it("emits RAW_TEXT for UTF-8 two-byte sequence", function()
+    local t = tok("\xC3\xA9", 1)  -- é (U+00E9)
+    assert.equal("RAW_TEXT", t.kind)
+    assert.equal("\xC3\xA9", t.value)
+  end)
+
+  it("emits RAW_TEXT for UTF-8 three-byte sequence (em-dash)", function()
+    local t = tok("\xE2\x80\x94", 1)  -- — (U+2014)
+    assert.equal("RAW_TEXT", t.kind)
+    assert.equal("\xE2\x80\x94", t.value)
   end)
 end)
 
@@ -218,7 +254,7 @@ describe("lexer — paths", function()
     assert.equal("npcs/blacksmith/disposition", t.value)
   end)
 
-  it("does NOT treat 'a / b' as a path (spaces around /)", function()
+  it("does NOT treat `a / b' as a path (spaces around /)", function()
     local ks = kind_list("a / b")
     -- Should be: IDENT OP(/) IDENT NEWLINE EOF
     assert.equal("IDENT", ks[1])
@@ -258,7 +294,7 @@ end)
 -- ── Named argument tokens ─────────────────────────────────────────────────────
 
 describe("lexer — named arguments", function()
-  it("lexes 'depth:' as NAMED_ARG", function()
+  it("lexes `depth:' as NAMED_ARG", function()
     local t = tok("depth: 20", 1)
     assert.equal("NAMED_ARG", t.kind)
     assert.equal("depth", t.value)
@@ -342,13 +378,13 @@ describe("lexer — keywords", function()
     end)
   end
 
-  it("lexes 'watch-when' as KEYWORD", function()
+  it("lexes `watch-when' as KEYWORD", function()
     local t = tok("watch-when", 1)
     assert.equal("KEYWORD", t.kind)
     assert.equal("watch-when", t.value)
   end)
 
-  it("does not treat 'function' as a keyword (not reserved)", function()
+  it("does not treat `function' as a keyword (not reserved)", function()
     local t = tok("function", 1)
     assert.equal("IDENT", t.kind)
   end)
@@ -381,13 +417,13 @@ describe("lexer — identifiers", function()
     assert.equal("set!", t.value)
   end)
 
-  it("lexes 'can-afford?' as a single identifier", function()
+  it("lexes `can-afford?' as a single identifier", function()
     local t = tok("can-afford?", 1)
     assert.equal("IDENT", t.kind)
     assert.equal("can-afford?", t.value)
   end)
 
-  it("lexes 'time-inc!' as a single identifier", function()
+  it("lexes `time-inc!' as a single identifier", function()
     local t = tok("time-inc!", 1)
     assert.equal("IDENT", t.kind)
     assert.equal("time-inc!", t.value)
@@ -537,7 +573,7 @@ describe("lexer — source positions", function()
   end)
 
   it("attaches the correct column number for inline tokens", function()
-    -- "foo bar": 'bar' starts at column 5
+    -- "foo bar": `bar' starts at column 5
     local toks, _ = lexer.tokenize("foo bar", "test")
     -- toks[1]=IDENT(foo), toks[2]=IDENT(bar), toks[3]=NEWLINE, toks[4]=EOF
     assert.equal(5, toks[2].pos.col)
@@ -606,8 +642,8 @@ describe("lexer — error: illegal character", function()
     assert.is_true(found)
   end)
 
-  it("reports ILLEGAL_CHAR for bare tick not followed by identifier", function()
-    local d = first_diag("' ")
+  it("reports ILLEGAL_CHAR for backtick not followed by identifier", function()
+    local d = first_diag("` ")
     assert.is_not_nil(d)
     assert.equal("ILLEGAL_CHAR", d.code)
     assert.matches("identifier", d.message)
@@ -691,13 +727,13 @@ describe("lexer — integration", function()
     assert.equal("EOF", toks[1].kind)
   end)
 
-  it("lexes 'say' as KEYWORD", function()
+  it("lexes `say' as KEYWORD", function()
     local toks = kinds("say")
     assert.equal("KEYWORD", toks[1][1])
     assert.equal("say",     toks[1][2])
   end)
 
-  it("lexes 'speaker' as KEYWORD", function()
+  it("lexes `speaker' as KEYWORD", function()
     local toks = kinds("speaker")
     assert.equal("KEYWORD", toks[1][1])
     assert.equal("speaker", toks[1][2])

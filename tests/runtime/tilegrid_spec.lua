@@ -22,7 +22,7 @@ describe("tilegrid — new", function()
   it("fills every cell with the default value", function()
     local cells = tg.new(3, 3, "wall")
     for i = 1, 9 do
-      assert.equal("wall", cells[i], "cell " .. i .. " should be 'wall'")
+      assert.equal("wall", cells[i], "cell " .. i .. " should be `wall'")
     end
   end)
 
@@ -264,12 +264,12 @@ end)
 describe("tilegrid — visible_from", function()
 
   -- Helper: build a simple 7×7 grid.
-  -- 'floor' = transparent, 'wall' = opaque.
+  -- `floor' = transparent, `wall' = opaque.
   local W, H = 7, 7
   local OPAQUE = { wall = true }
 
   local function make_grid(layout)
-    -- layout: list of rows (top = row 0), each a string of 'f'=floor, 'w'=wall
+    -- layout: list of rows (top = row 0), each a string of `f'=floor, `w'=wall
     local cells = tg.new(W, H, "floor")
     for y, row in ipairs(layout) do
       for x = 1, #row do
@@ -613,14 +613,14 @@ describe("tilegrid — occupied_by", function()
     assert.is_nil(tg.occupied_by(cache, "npcs", 5, 5))
   end)
 
-  it("different family: does not confuse 'units' with 'npcs'", function()
+  it("different family: does not confuse `units' with `npcs'", function()
     local cache = {
       ["units/hero/x"] = 3, ["units/hero/y"] = 4,
       ["npcs/guard/x"] = 0, ["npcs/guard/y"] = 0,
     }
-    -- Querying 'npcs' at (3,4): no npc there
+    -- Querying `npcs' at (3,4): no npc there
     assert.is_nil(tg.occupied_by(cache, "npcs", 3, 4))
-    -- Querying 'units' at (3,4): hero is there
+    -- Querying `units' at (3,4): hero is there
     assert.equal("hero", tg.occupied_by(cache, "units", 3, 4))
   end)
 

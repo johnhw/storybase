@@ -245,7 +245,7 @@ describe("CLI cmd: quit", function()
     if f then f:close() end
   end)
 
-  it("'quit' and 'q' and 'exit' all quit", function()
+  it("`quit' and `q' and `exit' all quit", function()
     for _, cmd in ipairs({"q", "quit", "exit"}) do
       local p = tmp_save()
       step(game01, p, "")
@@ -485,7 +485,7 @@ describe("CLI cmd: schedule persistence across steps (demo05 siege)", function()
     assert.equal(85, r_bs.state["garrison/morale"])
 
     -- Stand down (choice 4 when alert=battle): send stand-down message to captain
-    -- Captain behavior: set alert='calm, morale+10
+    -- Captain behavior: set alert=`calm, morale+10
     local r_sd = step(game05, path, "4")
     assert.equal("calm", r_sd.state["garrison/alert"])
     assert.equal(95, r_sd.state["garrison/morale"])
@@ -623,7 +623,7 @@ describe("CLI cmd: BFS can-reach? uses live scene_stack", function()
       parts[#parts + 1] = (type(item) == "table" and item.text) or tostring(item)
     end
     local narr = table.concat(parts, " ")
-    assert.truthy(narr:find("true"), "expected 'true' in narration, got: " .. narr)
+    assert.truthy(narr:find("true"), "expected `true' in narration, got: " .. narr)
   end)
 end)
 

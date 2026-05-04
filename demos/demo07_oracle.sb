@@ -2,7 +2,7 @@
 #
 # Features demonstrated:
 #   import        — flat import of oracle_lib.sb (shared types + state + relations)
-#   bounded       — oracle-weather divines shrine weather; falls back to 'clear via ??
+#   bounded       — oracle-weather divines shrine weather; falls back to `clear via ??
 #   counterfactual — crystal orb shows glimpses of alternate futures before you act
 #
 # Run:  storybase run demos/demo07_oracle.sb
@@ -23,7 +23,7 @@ engine-config:
 # Bounded: oracle-weather
 # ─────────────────────────────────────────────────────────
 
-"Divine the weather at the next shrine. Falls back to 'clear when no handler is registered."
+"Divine the weather at the next shrine. Falls back to `clear when no handler is registered."
 bounded oracle-weather:
   returns:      WeatherKind
   distribution: uniform
@@ -40,7 +40,7 @@ fn travel shrine:
   pre:  world/day < 20
   set!  world/shrine shrine
   inc!  world/day 1
-  set!  world/weather (oracle-weather ?? 'clear)
+  set!  world/weather (oracle-weather ?? `clear)
 
 "Meditate at the current shrine to deepen your renown."
 fn meditate:
@@ -123,27 +123,27 @@ scene wanderer:
   Renown: {world/renown}. Offerings: {world/offerings}.
 
   [renowned?] Shrine keepers bow as you approach. Your name precedes you.
-  [world/weather = 'stormy] Dark clouds swirl overhead — travel is dangerous today.
-  [world/weather = 'misty] Strange mist clings to the roads ahead.
+  [world/weather = `stormy] Dark clouds swirl overhead — travel is dangerous today.
+  [world/weather = `misty] Strange mist clings to the roads ahead.
   [not safe-travel?] The roads are treacherous. Consider waiting.
 
   when journey-end?:
     -> finale
 
-  * [not journey-end? and 'stone in (adjacent? paths world/shrine)] Travel to the Stone Shrine
-    travel 'stone
+  * [not journey-end? and `stone in (adjacent? paths world/shrine)] Travel to the Stone Shrine
+    travel `stone
     -> wanderer
 
-  * [not journey-end? and 'lake in (adjacent? paths world/shrine)] Travel to the Lake Shrine
-    travel 'lake
+  * [not journey-end? and `lake in (adjacent? paths world/shrine)] Travel to the Lake Shrine
+    travel `lake
     -> wanderer
 
-  * [not journey-end? and 'tower in (adjacent? paths world/shrine)] Travel to the Tower Shrine
-    travel 'tower
+  * [not journey-end? and `tower in (adjacent? paths world/shrine)] Travel to the Tower Shrine
+    travel `tower
     -> wanderer
 
-  * [not journey-end? and 'hearth in (adjacent? paths world/shrine)] Travel to the Hearth Shrine
-    travel 'hearth
+  * [not journey-end? and `hearth in (adjacent? paths world/shrine)] Travel to the Hearth Shrine
+    travel `hearth
     -> wanderer
 
   * Meditate at this shrine (+12 renown, +1 day)

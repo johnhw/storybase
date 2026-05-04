@@ -2,7 +2,7 @@
 -- Tests for the hygienic macro system: parsing, expansion, and error cases.
 --
 -- NOTE: Macro calls use the code-body (fn body) context for expansion.
--- Scene bodies treat 'name:' as narration text, so macro calls must
+-- Scene bodies treat `name:' as narration text, so macro calls must
 -- be placed inside fn bodies (or macro bodies themselves).
 
 local compiler = require("compiler.compiler")
@@ -173,7 +173,7 @@ end)
 
 describe("macro — hygiene", function()
   it("let-binding in macro gets hygienic prefix (no name collision)", function()
-    -- Both the macro and the caller use a let-bound name 'tmp'.
+    -- Both the macro and the caller use a let-bound name `tmp'.
     -- Hygiene should prevent collision so the fn compiles cleanly.
     local gt, errors = compile([[
 macro safe-inc:
@@ -218,14 +218,14 @@ fn run:
 scene main:
   run()
 ]])
-    -- The expander emits UNDEFINED_NAME for 'no-such-macro' in the fn body.
+    -- The expander emits UNDEFINED_NAME for `no-such-macro' in the fn body.
     assert.is_true(#errs > 0, "expected compile error for undefined macro")
   end)
 end)
 
 describe("macro — error: recursive invocation", function()
   it("direct recursive macro invocation is a compile error", function()
-    -- 'loop-forever' calls itself with a body block → MACRO_CALL_STMT in body
+    -- `loop-forever' calls itself with a body block → MACRO_CALL_STMT in body
     -- When expanded from a fn, walk_and_expand detects the cycle.
     local src = BASE .. [[
 macro loop-forever body:
@@ -245,7 +245,7 @@ end)
 
 describe("macro — error: cross-unit macro expansion", function()
   it("macro body calling another macro with body block is a compile error", function()
-    -- 'inner' is a macro; 'outer' calls 'inner' with a body block → MACRO_CALL_STMT
+    -- `inner' is a macro; `outer' calls `inner' with a body block → MACRO_CALL_STMT
     -- The cross-unit check fires at collect time (before expansion).
     local src = BASE .. [[
 macro inner body:

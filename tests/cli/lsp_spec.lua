@@ -190,7 +190,7 @@ describe("lsp.word_at", function()
 
   it("extracts a simple identifier", function()
     local ls = lines_of("fn heal amount:")
-    -- cursor on 'e' of 'heal' (0-based col 3)
+    -- cursor on `e' of `heal' (0-based col 3)
     assert.are.equal("heal", lsp.word_at(ls, 0, 3))
   end)
 
@@ -216,7 +216,7 @@ describe("lsp.word_at", function()
 
   it("returns nil for whitespace between tokens", function()
     local ls = lines_of("fn  heal")
-    -- col 2 is first space between 'fn' and 'heal'
+    -- col 2 is first space between `fn' and `heal'
     assert.is_nil(lsp.word_at(ls, 0, 2))
   end)
 
@@ -231,7 +231,7 @@ describe("lsp.word_at", function()
   end)
 
   it("returns nil when cursor is on space after word", function()
-    -- 'heal ' — col 4 is the trailing space
+    -- `heal ' — col 4 is the trailing space
     local ls = lines_of("heal x")
     assert.is_nil(lsp.word_at(ls, 0, 4))
   end)
@@ -241,7 +241,7 @@ describe("lsp.word_at", function()
     assert.are.equal("second", lsp.word_at(ls, 1, 2))
   end)
 
-  it("extracts 'fn' keyword itself", function()
+  it("extracts `fn' keyword itself", function()
     local ls = lines_of("fn heal")
     assert.are.equal("fn", lsp.word_at(ls, 0, 1))
   end)
@@ -312,7 +312,7 @@ describe("lsp.make_lsp_diags", function()
     assert.are.equal(2, result[2].severity)
   end)
 
-  it("sets source field to 'storybase'", function()
+  it("sets source field to `storybase'", function()
     local d = ast_mod.error("E", "msg", ast_mod.pos("f.sb", 1, 1))
     local acc = { all = { d }, errors = { d }, warnings = {} }
     local result = lsp.make_lsp_diags(acc)

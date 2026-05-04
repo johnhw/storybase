@@ -26,11 +26,11 @@ state quest/started: Bool = false
 # Output accumulates in _pending_narration and is prepended to the next scene render.
 
 fn aldric-greets:
-  say 'aldric "Ready when you are, Commander."
-  say 'aldric "I've been sharpening my blade all morning."
+  say `aldric "Ready when you are, Commander."
+  say `aldric "I've been sharpening my blade all morning."
 
 fn mira-greets:
-  say 'mira "The wind is right for travel today."
+  say `mira "The wind is right for travel today."
 
 # Dynamic speaker: resolved from state at runtime.
 fn companion-speaks message:
@@ -52,11 +52,11 @@ scene tavern:
   Aldric rests a hand on his sword hilt. Mira rolls up a parchment.
 
   * Choose Aldric as companion:
-    set! player/companion 'aldric
+    set! player/companion `aldric
     aldric-greets
     -> journey
   * Choose Mira as companion:
-    set! player/companion 'mira
+    set! player/companion `mira
     mira-greets
     -> journey
   * Ask about the quest:
@@ -84,11 +84,11 @@ scene choose-companion:
   say aldric: Your call, Commander. Who rides with you?
 
   * Take Aldric:
-    set! player/companion 'aldric
+    set! player/companion `aldric
     aldric-greets
     -> journey
   * Take Mira:
-    set! player/companion 'mira
+    set! player/companion `mira
     mira-greets
     -> journey
 
@@ -110,10 +110,10 @@ scene journey:
 scene marsh:
   say narrator: The marsh reeks of damp earth and old wood.
 
-  when player/companion = 'aldric:
+  when player/companion = `aldric:
     say aldric: Careful where you step.
 
-  when player/companion = 'mira:
+  when player/companion = `mira:
     say mira: I know a dry path through. Follow in my footsteps.
 
   * Cross the marsh:

@@ -1,0 +1,530 @@
+-- cli/main.lua
+-- Entry point for the storybase CLI tool.
+--
+-- Usage:
+--   lua cli/main.lua <command> [options] [file]
+--
+-- Commands:
+--   compile <file>             Compile a .sb file; report errors and warnings
+--   run     <file>             Compile and run a game interactively
+--   verify  <file>             Run all verify blocks in a .sb file
+--   migrate <save.log>         Apply outstanding schema migrations to a save log
+--   extract-symbols <file>     Scan symbol literals; suggest type declarations
+--   compact <save.log>         Emit snapshot + delta log for faster replay
+--   help                       Show this help text
+
+local M = {}
+
+-- ── Package path setup ────────────────────────────────────────
+-- Allow running as:  lua cli/main.lua  from the project root.
+-- The script's directory is determined by arg[0] when available.
+local function setup_path()
+  local script = (arg and arg[0]) or ""
+  -- Resolve to the project root (one level above cli/)
+  local root = script:match("^(.*[/\\])cli[/\\]main%.lua$")
+  if root and root ~= "" then
+    -- Normalise separators and strip trailing slash
+    root = root:gsub("\\", "/"):gsub("/$", "")
+    package.path = root .. "/?.lua;" .. package.path
+  end
+end
+
+setup_path()
+
+-- ── Helpers ───────────────────────────────────────────────────
+
+local function print_usage()
+  io.stderr:write([[
+Usage: storybase <command> [options] <file>
+
+Commands:
+  check   <file>              Check a .sb file (lexer+parser+checker; no codegen)
+  compile <file>              Compile a .sb file; report errors and warnings
+  run     <file>              Compile and run a game interactively
+  format  <file>              Pretty-print a .sb file in canonical style
+  repl    <file>              Load and explore a .sb file interactively
+  verify  <file>              Run all verify blocks in a .sb file
+  migrate <save.log>          Apply outstanding schema migrations to a save log
+  extract-symbols <file>      Scan symbol literals; suggest type declarations
+  compact <game.sb> <save.log> Emit snapshot + delta log for faster replay
+  help                        Show this help text
+
+Options (compile / run):
+  --production                Emit a production build (strips debug-only content)
+  --seed N                    Fix random seed for reproducible runs
+
+Options (run):
+  --save <path>               Save game log to <path> on exit
+  --load <path>               Load game log from <path> before starting
+  --debug                     Start debug server (default port 7777)
+
+]])
+end
+
+--- Split source text into a 1-based array of line strings.
+---@param source string
+---@return string[]
+local function split_lines(source)
+  local lines = {}
+  for line in (source .. "\n"):gmatch("([^\n]*)\n") do
+    lines[#lines + 1] = line
+  end
+  return lines
+end
+
+--- Format and print all diagnostics in a list to stderr.
+--- Optional source_map: {[filepath] = source_string} — used to print the
+--- offending source line with a caret (^) pointer beneath it.
+---@param diags      table   diagnostic accumulator
+---@param source_map table?  {[file] = source_string}
+local function print_diags(diags, source_map)
+  -- Pre-split source lines on demand (lazy cache)
+  local line_cache = {}  -- {[file] = string[]}
+  local function get_lines(file)
+    if not source_map or not file then return nil end
+    if not line_cache[file] then
+      local src = source_map[file]
+      if src then line_cache[file] = split_lines(src) end
+    end
+    return line_cache[file]
+  end
+
+  for _, d in ipairs(diags.all or {}) do
+    local loc   = string.format("%s:%d:%d", d.file or "?", d.line or 0, d.col or 0)
+    local label = (d.level == "error") and "error" or "warning"
+    io.stderr:write(string.format("%s: %s [%s]: %s\n", loc, label, d.code, d.message))
+
+    -- Print source context if we have the source and a valid line number
+    if d.line and d.line > 0 then
+      local lines = get_lines(d.file)
+      if lines then
+        local srcline = lines[d.line]
+        if srcline then
+          io.stderr:write(string.format("  %s\n", srcline))
+          local col = math.max(1, d.col or 1)
+          io.stderr:write(string.format("  %s^\n", string.rep(" ", col - 1)))
+        end
+      end
+    end
+
+    if d.note and d.note ~= "" then
+      io.stderr:write(string.format("  note: %s\n", d.note))
+    end
+  end
+end
+
+--- Return a human-readable summary string for a diagnostic accumulator.
+local function diag_summary(diags)
+  local ne = #(diags.errors or {})
+  local nw = #(diags.warnings or {})
+  local parts = {}
+  if ne > 0 then parts[#parts + 1] = ne .. " error" .. (ne > 1 and "s" or "") end
+  if nw > 0 then parts[#parts + 1] = nw .. " warning" .. (nw > 1 and "s" or "") end
+  return table.concat(parts, ", ")
+end
+
+-- Flags that are boolean (do not consume the next token as a value).
+local BOOL_FLAGS = { production = true, auto = true, debug = true }
+
+--- Parse a flat argument list into {flags, positional}.
+--- Flags are --name or --name value pairs; positional are the rest.
+--- Known boolean flags (e.g. --production) never consume the following token.
+local function parse_args(args)
+  local flags = {}
+  local positional = {}
+  local i = 1
+  while i <= #args do
+    local a = args[i]
+    if a:sub(1, 2) == "--" then
+      local key = a:sub(3)
+      if BOOL_FLAGS[key] then
+        -- Boolean flag: no value token
+        flags[key] = true
+        i = i + 1
+      elseif args[i + 1] and args[i + 1]:sub(1, 2) ~= "--" then
+        -- Value flag: next token is the value
+        flags[key] = args[i + 1]
+        i = i + 2
+      else
+        flags[key] = true
+        i = i + 1
+      end
+    else
+      positional[#positional + 1] = a
+      i = i + 1
+    end
+  end
+  return flags, positional
+end
+
+-- ── Command: compile ──────────────────────────────────────────
+
+local function cmd_compile(args)
+  local flags, pos_args = parse_args(args)
+  local filepath = pos_args[1]
+  if not filepath then
+    io.stderr:write("error: storybase compile: no input file\n")
+    return 1
+  end
+
+  local ok, compiler = pcall(require, "compiler.compiler")
+  if not ok then
+    io.stderr:write("error: could not load compiler: " .. tostring(compiler) .. "\n")
+    return 1
+  end
+
+  -- Read source for context lines in error messages
+  local source_map = {}
+  local sf = io.open(filepath, "r")
+  if sf then source_map[filepath] = sf:read("*a"); sf:close() end
+
+  local compile_opts = { production = (flags["production"] == true) }
+  local game_table, diags = compiler.compile_file(filepath, compile_opts)
+  print_diags(diags, source_map)
+
+  if diags:has_errors() then
+    local s = diag_summary(diags)
+    io.stderr:write(string.format("Compilation failed: %s\n", s))
+    return 1
+  end
+
+  local s = diag_summary(diags)
+  local msg = "Compilation succeeded"
+  if s ~= "" then msg = msg .. " (" .. s .. ")" end
+  io.stdout:write(msg .. "\n")
+
+  -- Print basic schema stats when available
+  if game_table and game_table.schema then
+    local sc = game_table.schema
+    io.stdout:write(string.format(
+      "  Types: %d  State paths: %d  Scenes: %d\n",
+      sc.type_count or 0, sc.path_count or 0, sc.scene_count or 0))
+    if sc.state_space_size then
+      io.stdout:write(string.format("  State-space size: %s\n",
+        tostring(sc.state_space_size)))
+    end
+  end
+
+  return 0
+end
+
+-- ── Command: run ─────────────────────────────────────────────
+
+local function cmd_run(args)
+  local flags, pos_args = parse_args(args)
+  local filepath = pos_args[1]
+  if not filepath then
+    io.stderr:write("error: storybase run: no input file\n")
+    return 1
+  end
+
+  local ok_c, compiler = pcall(require, "compiler.compiler")
+  if not ok_c then
+    io.stderr:write("error: could not load compiler: " .. tostring(compiler) .. "\n")
+    return 1
+  end
+
+  -- Read source for context lines in error messages
+  local run_source_map = {}
+  local rsf = io.open(filepath, "r")
+  if rsf then run_source_map[filepath] = rsf:read("*a"); rsf:close() end
+
+  local compile_opts = { production = (flags["production"] == true) }
+  local game_table, diags = compiler.compile_file(filepath, compile_opts)
+  print_diags(diags, run_source_map)
+  if diags:has_errors() then
+    io.stderr:write("Compilation failed; cannot run.\n")
+    return 1
+  end
+
+  local ok_e, engine = pcall(require, "runtime.engine")
+  if not ok_e then
+    io.stderr:write("error: could not load runtime engine: " .. tostring(engine) .. "\n")
+    return 1
+  end
+
+  -- --auto [--steps N]: play automatically (always pick choice 1).
+  -- --steps N: limit auto play to N turns (implies --auto).
+  local auto_steps = flags["steps"] and tonumber(flags["steps"])
+  local is_auto = flags["auto"] == true or auto_steps ~= nil
+
+  local io_in = io.stdin
+  if is_auto then
+    local remaining = auto_steps  -- nil means unlimited
+    io_in = {
+      read = function(_, _fmt)
+        if remaining ~= nil then
+          if remaining <= 0 then return nil end
+          remaining = remaining - 1
+        end
+        return "1"
+      end,
+    }
+  end
+
+  -- --debug: start debug server before the game loop
+  local debug_port = nil
+  if flags["debug"] then
+    -- Prefer port from engine-config, fall back to default 7777
+    local ec = game_table and game_table.schema and game_table.schema.engine_config
+    debug_port = (ec and tonumber(ec["debug-port"])) or 7777
+  end
+
+  local opts = {
+    seed        = flags["seed"] and tonumber(flags["seed"]),
+    production  = flags["production"] == true,
+    save_path   = flags["save"],
+    load_path   = flags["load"],
+    io_in       = io_in,
+    debug_port  = debug_port,
+  }
+
+  return engine.run(game_table, opts) or 0
+end
+
+-- ── Command: verify ───────────────────────────────────────────
+
+local function cmd_verify(args)
+  local ok, verify_cmd = pcall(require, "cli.verify_cmd")
+  if not ok then
+    io.stderr:write("error: could not load verify command: " .. tostring(verify_cmd) .. "\n")
+    return 1
+  end
+  return verify_cmd.run(args) or 0
+end
+
+-- ── Command: migrate ──────────────────────────────────────────
+
+local function cmd_migrate(args)
+  local ok, migrate_cmd = pcall(require, "cli.migrate_cmd")
+  if not ok then
+    io.stderr:write("error: could not load migrate command: " .. tostring(migrate_cmd) .. "\n")
+    return 1
+  end
+  return migrate_cmd.run(args) or 0
+end
+
+-- ── Command: check ───────────────────────────────────────────
+
+local function cmd_check(args)
+  local ok, check_cmd = pcall(require, "cli.check_cmd")
+  if not ok then
+    io.stderr:write("error: could not load check command: " .. tostring(check_cmd) .. "\n")
+    return 1
+  end
+  return check_cmd.run(args) or 0
+end
+
+-- ── Command: format ───────────────────────────────────────────
+
+local function cmd_format(args)
+  local ok, format_cmd = pcall(require, "cli.format_cmd")
+  if not ok then
+    io.stderr:write("error: could not load format command: " .. tostring(format_cmd) .. "\n")
+    return 1
+  end
+  return format_cmd.run(args) or 0
+end
+
+-- ── Command: repl ─────────────────────────────────────────────
+
+local function cmd_repl(args)
+  local ok, repl_cmd = pcall(require, "cli.repl_cmd")
+  if not ok then
+    io.stderr:write("error: could not load repl command: " .. tostring(repl_cmd) .. "\n")
+    return 1
+  end
+  return repl_cmd.run(args) or 0
+end
+
+-- ── Command: extract-symbols ──────────────────────────────────
+
+local function cmd_extract_symbols(args)
+  local ok, extract_cmd = pcall(require, "cli.extract_cmd")
+  if not ok then
+    io.stderr:write(
+      "error: could not load extract-symbols command: " .. tostring(extract_cmd) .. "\n")
+    return 1
+  end
+  return extract_cmd.run(args) or 0
+end
+
+-- ── Command: compact ──────────────────────────────────────────
+
+local function cmd_compact(args)
+  local ok, compact_cmd = pcall(require, "cli.compact_cmd")
+  if not ok then
+    io.stderr:write("error: could not load compact command: " .. tostring(compact_cmd) .. "\n")
+    return 1
+  end
+  return compact_cmd.run(args) or 0
+end
+
+-- ── Dispatch table ────────────────────────────────────────────
+
+local COMMAND_HELP = {
+  ["compile"] = [[
+storybase compile [--production] <file>
+
+  Compile a .sb file and report any errors or warnings.
+  Exits 0 on success, 1 if compilation fails.
+
+  Options:
+    --production   Strip debug-only content (watches, verify blocks)
+                   from the compiled game table.
+]],
+  ["run"] = [[
+storybase run [options] <file>
+
+  Compile and run a game interactively in the terminal.
+
+  Options:
+    --production   Strip debug-only content before running
+    --seed N       Fix the random seed for reproducible runs
+    --save <path>  Save the game log to <path> on exit
+    --load <path>  Load a saved game log from <path> before starting
+    --auto         Auto-play: always select choice 1 until game ends
+    --steps N      Auto-play for at most N turns (implies --auto)
+]],
+  ["verify"] = [[
+storybase verify <file>
+
+  Run all verify blocks defined in a .sb file.
+  Each block performs a BFS over reachable states and checks invariants.
+  Exits 0 if all checks pass, 1 if any fail.
+]],
+  ["migrate"] = [[
+storybase migrate <save.log>
+
+  Apply outstanding schema migrations to a save log.
+  Reads the save log, applies any migration functions defined in the
+  compiled game, and writes the updated log back to the same path.
+]],
+  ["extract-symbols"] = [[
+storybase extract-symbols <file>
+
+  Scan a .sb file for bare symbol literals and group them by the state
+  paths they are written to.  Suggests `type` enum declarations for
+  paths that have consistent sets of symbol values.
+]],
+  ["check"] = [[
+storybase check <file>
+
+  Run lexer → parser → checker on a .sb file and report errors/warnings.
+  Stops before code generation; faster feedback than `compile`.
+  Exits 0 if no errors (warnings are allowed), 1 if any error is found.
+]],
+  ["format"] = [[
+storybase format [--check] <file>
+
+  Pretty-print a .sb file in canonical style (2-space indentation).
+  Without --check, writes the formatted source to stdout.
+  With --check, exits 0 if the file is already canonical, 1 if not.
+
+  Options:
+    --check    Verify the file matches canonical format without printing
+    --write    Rewrite the file in-place (creates a .sb.bak backup)
+]],
+  ["repl"] = [[
+storybase repl <file>
+
+  Load a .sb file and start an interactive expression REPL.
+
+  At the prompt, you can:
+    <expression>       Evaluate a pure expression and print the result
+    <fn-name> [args]   Call a transaction function
+    :state <path>      Inspect a state path value
+    :scene             Show current scene name
+    :choices           List available choices
+    :choose <N>        Execute choice N
+    :tick              Run one autonomous turn
+    :load <path>       Load a save file
+    :save <path>       Save the current state
+    :help              Show this command list
+    :quit / :q         Exit the REPL
+]],
+  ["compact"] = [[
+storybase compact <game.sb> <save.log> [--out <output.log>]
+
+  Collapse a full save log into a snapshot for faster replay.
+  Reads the save log, replays it to get the final state, and emits a
+  new compact log with one synthetic SET entry per state path.
+
+  Options:
+    --out <path>   Write compacted log to <path>
+                   (default: <save.log base>.compact.log)
+]],
+  ["help"] = [[
+storybase help [<command>]
+
+  Show overall usage or detailed help for a specific command.
+
+  Examples:
+    storybase help
+    storybase help run
+    storybase help verify
+]],
+}
+
+local function cmd_help(args)
+  local _, pos_args = parse_args(args)
+  local subcmd = pos_args[1]
+  if subcmd and COMMAND_HELP[subcmd] then
+    io.stdout:write(COMMAND_HELP[subcmd])
+  else
+    print_usage()
+  end
+  return 0
+end
+
+local COMMANDS = {
+  ["compile"]         = cmd_compile,
+  ["run"]             = cmd_run,
+  ["verify"]          = cmd_verify,
+  ["migrate"]         = cmd_migrate,
+  ["extract-symbols"] = cmd_extract_symbols,
+  ["compact"]         = cmd_compact,
+  ["help"]            = cmd_help,
+}
+
+-- ── Main entry point ──────────────────────────────────────────
+
+--- Run the CLI with the given argument vector.
+---@param argv table  Argument list (e.g. the global `arg` table)
+---@return integer    Exit code (0 = success)
+function M.main(argv)
+  if not argv or #argv == 0 then
+    print_usage()
+    return 1
+  end
+
+  local cmd     = argv[1]
+  local handler = COMMANDS[cmd]
+
+  if not handler then
+    io.stderr:write(string.format("storybase: unknown command '%s'\n", cmd))
+    print_usage()
+    return 1
+  end
+
+  -- Shift args (remove command name, pass the rest)
+  local sub_args = {}
+  for i = 2, #argv do sub_args[i - 1] = argv[i] end
+
+  local ok, result = pcall(handler, sub_args)
+  if not ok then
+    io.stderr:write(string.format("storybase: internal error in '%s': %s\n", cmd, tostring(result)))
+    return 1
+  end
+
+  return result or 0
+end
+
+-- Run when invoked directly as:  lua cli/main.lua <args>
+-- Guard: do NOT auto-run when require()'d by the test suite or another module.
+-- When required, package.loaded["cli.main"] is being set, so we detect that.
+if arg and arg[0] and arg[0]:find("[/\\]?main%.lua$") then
+  os.exit(M.main(arg))
+end
+
+return M

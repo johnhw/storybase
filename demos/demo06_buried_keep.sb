@@ -89,7 +89,7 @@ type ScoutMsg:
 
 "World state: current room, turn counter, resources."
 state world:
-  current-room:   Room       = 'entrance
+  current-room:   Room       = `entrance
   turn:           Int(0, 30) = 0
   sunstone-found: Bool       = false
   escaped:        Bool       = false
@@ -111,22 +111,22 @@ state sylva/spells: List(SpellKind, 4) = (list)
 
 "Movement graph between keep rooms."
 relation room-exits: Room -> Set(Room, 3):
-  'entrance:    {'corridor}
-  'corridor:    {'entrance, 'armory, 'vault}
-  'armory:      {'corridor, 'throne-room}
-  'vault:       {'corridor}
-  'throne-room: {'armory}
+  `entrance:    {`corridor}
+  `corridor:    {`entrance, `armory, `vault}
+  `armory:      {`corridor, `throne-room}
+  `vault:       {`corridor}
+  `throne-room: {`armory}
 
 "Items available in each room. Cleared when looted."
 relation room-loot: Room -> Set(ItemKind, 4):
-  'armory: {'iron-sword, 'kite-shield}
-  'vault:  {'sunstone, 'healing-draught, 'torch-bundle}
+  `armory: {`iron-sword, `kite-shield}
+  `vault:  {`sunstone, `healing-draught, `torch-bundle}
 
 "Monsters present in each room. Cleared when defeated."
 relation room-monster: Room -> Set(MonsterKind, 2):
-  'corridor:    {'skeleton}
-  'armory:      {'wraith}
-  'throne-room: {'golem}
+  `corridor:    {`skeleton}
+  `armory:      {`wraith}
+  `throne-room: {`golem}
 
 # ─────────────────────────────────────────────────────────
 # Grid layout
@@ -201,8 +201,8 @@ schedule wraith-stirs:
   every:  [turn: +5]
   offset: [turn: 2]
   fn:
-    when not ('wraith in (adjacent? room-monster world/current-room)):
-      relate! room-monster world/current-room 'wraith
+    when not (`wraith in (adjacent? room-monster world/current-room)):
+      relate! room-monster world/current-room `wraith
       send! scout-npc (ScoutMsg/warn-ambush room: world/current-room)
 
 # ─────────────────────────────────────────────────────────
@@ -224,7 +224,7 @@ verify "escaped requires sunstone found":
 
 "Count party members still alive."
 fn living-count:
-  count-where (path-list party) fn(m): party/{m}/status != 'dead
+  count-where (path-list party) fn(m): party/{m}/status != `dead
 
 "True if all party members are dead."
 fn all-party-dead?:
@@ -232,11 +232,11 @@ fn all-party-dead?:
 
 "True if any party member is wounded."
 fn any-wounded?:
-  any? (path-list party) fn(m): party/{m}/status = 'wounded
+  any? (path-list party) fn(m): party/{m}/status = `wounded
 
 "True if all party members are in active status."
 fn all-healthy?:
-  all? (path-list party) fn(m): party/{m}/status = 'active
+  all? (path-list party) fn(m): party/{m}/status = `active
 
 "True if the given item is in the party inventory."
 fn has-item? kind:
@@ -252,7 +252,7 @@ fn room-clear?:
 
 "True if the party has the Sunstone and is at the entrance."
 fn can-escape?:
-  world/sunstone-found and world/current-room = 'entrance
+  world/sunstone-found and world/current-room = `entrance
 
 "True if torches are critically low."
 fn torches-critical?:
@@ -261,9 +261,9 @@ fn torches-critical?:
 "Base damage from a monster type."
 fn damage-from kind:
   match kind:
-    'skeleton: 3
-    'wraith:   5
-    'golem:    8
+    `skeleton: 3
+    `wraith:   5
+    `golem:    8
     _: 2
 
 "Number of spells the mage has prepared."
@@ -280,19 +280,19 @@ fn first-spell:
 
 "Set up the keep grid with walls and pits."
 fn init-grid:
-  grid-set! keep-layout 0 0 'wall
-  grid-set! keep-layout 1 0 'wall
-  grid-set! keep-layout 5 5 'pit
-  grid-set! keep-layout 4 5 'pit
-  grid-set! keep-layout 0 5 'wall
+  grid-set! keep-layout 0 0 `wall
+  grid-set! keep-layout 1 0 `wall
+  grid-set! keep-layout 5 5 `pit
+  grid-set! keep-layout 4 5 `pit
+  grid-set! keep-layout 0 5 `wall
 
 "Spawn the starting party."
 fn spawn-party:
-  spawn! party 'aldric  PartyMember(role: 'warrior, hp: 20, status: 'active)
-  spawn! party 'sylva   PartyMember(role: 'mage,    hp: 15, status: 'active)
-  spawn! party 'pin     PartyMember(role: 'scout,   hp: 18, status: 'active)
-  push! sylva/spells 'fireball
-  push! sylva/spells 'shield
+  spawn! party `aldric  PartyMember(role: `warrior, hp: 20, status: `active)
+  spawn! party `sylva   PartyMember(role: `mage,    hp: 15, status: `active)
+  spawn! party `pin     PartyMember(role: `scout,   hp: 18, status: `active)
+  push! sylva/spells `fireball
+  push! sylva/spells `shield
 
 "Move to an adjacent room."
 fn move-to room:
@@ -317,14 +317,14 @@ fn attack-monster kind:
   let roll     = random-int 1 4
   let dmg      = clamp (base-dmg + roll - 2) 1 12
   for m in (path-list party):
-    when party/{m}/status = 'active:
+    when party/{m}/status = `active:
       let taken = clamp (dmg - abs (dmg - 3)) 0 8
       dec! party/{m}/hp taken
       when party/{m}/hp = 0:
-        set! party/{m}/status 'dead
+        set! party/{m}/status `dead
         despawn! party m
       when party/{m}/hp > 0 and party/{m}/hp < 8:
-        set! party/{m}/status 'wounded
+        set! party/{m}/status `wounded
   unrelate! room-monster world/current-room kind
   inc! world/kills 1
 
@@ -335,8 +335,8 @@ fn cast-spell:
   pre: not room-clear?
   pop! sylva/spells
   for m in (path-list party):
-    when party/{m}/status = 'wounded:
-      set! party/{m}/status 'active
+    when party/{m}/status = `wounded:
+      set! party/{m}/status `active
       set! party/{m}/hp 12
 
 "Pick up an item from the current room."
@@ -345,19 +345,19 @@ fn pick-up item:
   pre: not (item in inventory)
   add! inventory item
   unrelate! room-loot world/current-room item
-  when item = 'sunstone:
+  when item = `sunstone:
     set! world/sunstone-found true
-  when item = 'torch-bundle:
+  when item = `torch-bundle:
     inc! world/torches 3
 
 "Drink a healing draught to restore a wounded member."
 fn use-healing-draught:
-  pre: has-item? 'healing-draught
+  pre: has-item? `healing-draught
   pre: any-wounded?
-  remove! inventory 'healing-draught
+  remove! inventory `healing-draught
   for m in (path-list party):
-    when party/{m}/status = 'wounded:
-      set! party/{m}/status 'active
+    when party/{m}/status = `wounded:
+      set! party/{m}/status `active
       set! party/{m}/hp 15
 
 "Escape the keep with the Sunstone."
@@ -423,24 +423,24 @@ scene keep:
   when world/torches = 0 and not world/escaped:
     -> defeat
 
-  * ['entrance in (adjacent? room-exits world/current-room)] Move to entrance
-    move-to 'entrance
+  * [`entrance in (adjacent? room-exits world/current-room)] Move to entrance
+    move-to `entrance
     -> keep
 
-  * ['corridor in (adjacent? room-exits world/current-room)] Move to corridor
-    move-to 'corridor
+  * [`corridor in (adjacent? room-exits world/current-room)] Move to corridor
+    move-to `corridor
     -> keep
 
-  * ['armory in (adjacent? room-exits world/current-room)] Move to armory
-    move-to 'armory
+  * [`armory in (adjacent? room-exits world/current-room)] Move to armory
+    move-to `armory
     -> keep
 
-  * ['vault in (adjacent? room-exits world/current-room)] Move to vault
-    move-to 'vault
+  * [`vault in (adjacent? room-exits world/current-room)] Move to vault
+    move-to `vault
     -> keep
 
-  * ['throne-room in (adjacent? room-exits world/current-room)] Move to throne room
-    move-to 'throne-room
+  * [`throne-room in (adjacent? room-exits world/current-room)] Move to throne room
+    move-to `throne-room
     -> keep
 
   * [not room-clear?] Fight a monster
@@ -449,7 +449,7 @@ scene keep:
   * [not (empty? (adjacent? room-loot world/current-room))] Examine loot
     -> loot-room
 
-  * [has-item? 'healing-draught and any-wounded?] Use healing draught
+  * [has-item? `healing-draught and any-wounded?] Use healing draught
     use-healing-draught
     -> keep
 
@@ -465,23 +465,23 @@ scene combat:
   Battle in the {world/current-room}.
   Monsters here: {monster-count}.
 
-  when 'skeleton in (adjacent? room-monster world/current-room):
+  when `skeleton in (adjacent? room-monster world/current-room):
     Skeletons rattle — they deal moderate damage.
-  when 'wraith in (adjacent? room-monster world/current-room):
+  when `wraith in (adjacent? room-monster world/current-room):
     A wraith glides through the air — it drains life force.
-  when 'golem in (adjacent? room-monster world/current-room):
+  when `golem in (adjacent? room-monster world/current-room):
     A massive stone golem guards the passage.
 
-  * ['skeleton in (adjacent? room-monster world/current-room)] Attack the skeleton
-    attack-monster 'skeleton
+  * [`skeleton in (adjacent? room-monster world/current-room)] Attack the skeleton
+    attack-monster `skeleton
     -> keep
 
-  * ['wraith in (adjacent? room-monster world/current-room)] Attack the wraith
-    attack-monster 'wraith
+  * [`wraith in (adjacent? room-monster world/current-room)] Attack the wraith
+    attack-monster `wraith
     -> keep
 
-  * ['golem in (adjacent? room-monster world/current-room)] Attack the golem
-    attack-monster 'golem
+  * [`golem in (adjacent? room-monster world/current-room)] Attack the golem
+    attack-monster `golem
     -> keep
 
   * Retreat (return to entrance if possible)
@@ -491,24 +491,24 @@ scene loot-room:
   You search the {world/current-room}.
   Items found here.
 
-  * ['sunstone in (adjacent? room-loot world/current-room)] Take the Sunstone (KEY ITEM)
-    pick-up 'sunstone
+  * [`sunstone in (adjacent? room-loot world/current-room)] Take the Sunstone (KEY ITEM)
+    pick-up `sunstone
     -> keep
 
-  * ['iron-sword in (adjacent? room-loot world/current-room)] Take the iron sword
-    pick-up 'iron-sword
+  * [`iron-sword in (adjacent? room-loot world/current-room)] Take the iron sword
+    pick-up `iron-sword
     -> keep
 
-  * ['kite-shield in (adjacent? room-loot world/current-room)] Take the kite shield
-    pick-up 'kite-shield
+  * [`kite-shield in (adjacent? room-loot world/current-room)] Take the kite shield
+    pick-up `kite-shield
     -> keep
 
-  * ['healing-draught in (adjacent? room-loot world/current-room)] Take the healing draught
-    pick-up 'healing-draught
+  * [`healing-draught in (adjacent? room-loot world/current-room)] Take the healing draught
+    pick-up `healing-draught
     -> keep
 
-  * ['torch-bundle in (adjacent? room-loot world/current-room)] Take the torch bundle
-    pick-up 'torch-bundle
+  * [`torch-bundle in (adjacent? room-loot world/current-room)] Take the torch bundle
+    pick-up `torch-bundle
     -> keep
 
   * Leave the room

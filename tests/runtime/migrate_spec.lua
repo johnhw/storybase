@@ -256,7 +256,7 @@ end)
 -- ============================================================
 
 describe("migration transform", function()
-  it("applies a scalar transform using the 'old' variable", function()
+  it("applies a scalar transform using the `old' variable", function()
     local src = [[
 module t
   version: 1.0

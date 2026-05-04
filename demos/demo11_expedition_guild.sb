@@ -67,7 +67,7 @@ verify "prestige never goes negative":
 
 verify "hiring spends guild gold":
   requires guild/gold >= members/aldric/hire-cost
-  after (hire-member 'aldric):
+  after (hire-member `aldric):
     guild/gold < guild/gold@before
 
 verify "dispatch earns prestige":
@@ -82,19 +82,19 @@ verify "dispatch earns prestige":
 "Return the companion-specific scene name for a computed goto."
 fn companion-scene key:
   match key:
-    'aldric : 'talk-aldric
-    'mira   : 'talk-mira
-    'zhen   : 'talk-zhen
-    _       : 'no-companion
+    `aldric : `talk-aldric
+    `mira   : `talk-mira
+    `zhen   : `talk-zhen
+    _       : `no-companion
 
 fn can-hire? m:
-  members/{m}/status = 'available  and  guild/gold >= members/{m}/hire-cost
+  members/{m}/status = `available  and  guild/gold >= members/{m}/hire-cost
 
 fn available-count:
-  find members where: members/{members}/status = 'available count
+  find members where: members/{members}/status = `available count
 
 fn injured-count:
-  find members where: members/{members}/status = 'injured count
+  find members where: members/{members}/status = `injured count
 
 # ─────────────────────────────────────────────────────────
 # Transaction functions
@@ -102,29 +102,29 @@ fn injured-count:
 
 "Populate the guild roster.  Must be called once at game start."
 fn init-guild:
-  set! members/aldric/status    'available
+  set! members/aldric/status    `available
   set! members/aldric/skill     8
   set! members/aldric/hire-cost 30
-  set! members/mira/status      'available
+  set! members/mira/status      `available
   set! members/mira/skill       6
   set! members/mira/hire-cost   20
-  set! members/zhen/status      'available
+  set! members/zhen/status      `available
   set! members/zhen/skill       9
   set! members/zhen/hire-cost   40
-  set! members/bran/status      'available
+  set! members/bran/status      `available
   set! members/bran/skill       4
   set! members/bran/hire-cost   10
-  set! members/lyra/status      'injured
+  set! members/lyra/status      `injured
   set! members/lyra/skill       7
   set! members/lyra/hire-cost   25
   set! guild/ready true
 
 "Hire adventurer m as your companion."
 fn hire-member m:
-  pre:  members/{m}/status = 'available
+  pre:  members/{m}/status = `available
   pre:  guild/gold >= members/{m}/hire-cost
   dec!  guild/gold members/{m}/hire-cost
-  set!  members/{m}/status 'on-mission
+  set!  members/{m}/status `on-mission
   set!  player/companion m
 
 "Equip a weapon from the armory."
@@ -138,7 +138,7 @@ fn unequip:
 "Release the companion back to available."
 fn dismiss-companion:
   pre:  player/companion != nil
-  set!  members/{player/companion}/status 'available
+  set!  members/{player/companion}/status `available
   set!  player/companion nil
 
 "Dispatch a mission: advance the day and gain prestige."
@@ -163,10 +163,10 @@ scene prologue:
 
 scene guild-hall:
   Day {guild/day} of 30.  Gold: {guild/gold}.  Prestige: {guild/prestige}.
-  Companion: {player/companion ?? 'none}.  Weapon: {player/weapon ?? 'unarmed}.
+  Companion: {player/companion ?? `none}.  Weapon: {player/weapon ?? `unarmed}.
 
   Available adventurers (top 4 by skill):
-  {find members where: members/{members}/status = 'available order-by: members/{members}/skill desc limit: 4}
+  {find members where: members/{members}/status = `available order-by: members/{members}/skill desc limit: 4}
 
   Injured and unable to travel: {injured-count} adventurer(s).
 
@@ -191,40 +191,40 @@ scene guild-hall:
 
 scene hire-roster:
   The guild notice board.  Available adventurers (best four by skill):
-  {find members where: members/{members}/status = 'available order-by: members/{members}/skill desc limit: 4}
+  {find members where: members/{members}/status = `available order-by: members/{members}/skill desc limit: 4}
 
-  * [can-hire? 'aldric] Hire Aldric  (skill {members/aldric/skill}, cost {members/aldric/hire-cost} gold)
-    hire-member 'aldric
+  * [can-hire? `aldric] Hire Aldric  (skill {members/aldric/skill}, cost {members/aldric/hire-cost} gold)
+    hire-member `aldric
     -> guild-hall
 
-  * [can-hire? 'mira] Hire Mira  (skill {members/mira/skill}, cost {members/mira/hire-cost} gold)
-    hire-member 'mira
+  * [can-hire? `mira] Hire Mira  (skill {members/mira/skill}, cost {members/mira/hire-cost} gold)
+    hire-member `mira
     -> guild-hall
 
-  * [can-hire? 'zhen] Hire Zhen  (skill {members/zhen/skill}, cost {members/zhen/hire-cost} gold)
-    hire-member 'zhen
+  * [can-hire? `zhen] Hire Zhen  (skill {members/zhen/skill}, cost {members/zhen/hire-cost} gold)
+    hire-member `zhen
     -> guild-hall
 
-  * [can-hire? 'bran] Hire Bran  (skill {members/bran/skill}, cost {members/bran/hire-cost} gold)
-    hire-member 'bran
+  * [can-hire? `bran] Hire Bran  (skill {members/bran/skill}, cost {members/bran/hire-cost} gold)
+    hire-member `bran
     -> guild-hall
 
   * Back to the hall
     -> guild-hall
 
 scene armory:
-  The armory.  Your current weapon: {player/weapon ?? 'unarmed}.
+  The armory.  Your current weapon: {player/weapon ?? `unarmed}.
 
-  * [player/weapon != 'sword] Take the sword
-    equip-weapon 'sword
+  * [player/weapon != `sword] Take the sword
+    equip-weapon `sword
     -> armory
 
-  * [player/weapon != 'bow] Take the bow
-    equip-weapon 'bow
+  * [player/weapon != `bow] Take the bow
+    equip-weapon `bow
     -> armory
 
-  * [player/weapon != 'staff] Take the staff
-    equip-weapon 'staff
+  * [player/weapon != `staff] Take the staff
+    equip-weapon `staff
     -> armory
 
   * [player/weapon != nil] Return your weapon to the rack
@@ -239,7 +239,7 @@ scene talk-aldric:
   "Ready when you are, Commander. Just say the word and we march."
   His hand rests on the pommel of his blade.
 
-  * [player/companion = 'aldric] Dismiss Aldric
+  * [player/companion = `aldric] Dismiss Aldric
     dismiss-companion
     -> guild-hall
 
@@ -251,7 +251,7 @@ scene talk-mira:
   "The wind is right for travel. I have been watching the treeline."
   She nods towards the eastern path.
 
-  * [player/companion = 'mira] Dismiss Mira
+  * [player/companion = `mira] Dismiss Mira
     dismiss-companion
     -> guild-hall
 
@@ -263,7 +263,7 @@ scene talk-zhen:
   "Each mission is a brushstroke. The season is our canvas."
   She opens one eye and smiles faintly.
 
-  * [player/companion = 'zhen] Dismiss Zhen
+  * [player/companion = `zhen] Dismiss Zhen
     dismiss-companion
     -> guild-hall
 
@@ -278,7 +278,7 @@ scene no-companion:
     -> guild-hall
 
 scene mission-briefing:
-  {player/companion ?? 'unknown} steps forward as you unroll the contract.
+  {player/companion ?? `unknown} steps forward as you unroll the contract.
 
   """
   EXPEDITION CONTRACT
@@ -293,7 +293,7 @@ scene mission-briefing:
   Return before nightfall.
   """
 
-  Weapon in hand: {player/weapon ?? 'unarmed}.
+  Weapon in hand: {player/weapon ?? `unarmed}.
   Guild funds committed: {guild/gold} gold.
 
   * Depart on the mission  (Day {guild/day} -> Day {guild/day + 1}, +5 Prestige)

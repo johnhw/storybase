@@ -1,10 +1,10 @@
 -- tests/runtime/migrate_demo14_spec.lua
--- Integration test for demo14's full 1->2->3->4 migration chain.
+-- Integration test for demo14`s full 1->2->3->4 migration chain.
 --
 -- Exercises all four migration operation kinds in a single chain:
 --   1->2: add   (world/treasury-notes = "")
 --   2->3: rename (census-count -> population) + drop (treasury-notes)
---   3->4: transform (population * 100) + rename-enum ('at-war -> 'warring)
+--   3->4: transform (population * 100) + rename-enum (`at-war -> `warring)
 --
 -- Run with:  busted tests/
 
@@ -81,7 +81,7 @@ describe("demo14 migration chain (1->2->3->4)", function()
     assert.is_nil(cache["world/treasury-notes"])
   end)
 
-  it("migration 3->4 scales population by 100 and renames 'at-war to 'warring", function()
+  it("migration 3->4 scales population by 100 and renames `at-war to `warring", function()
     local gt, errs = compile_demo14()
     assert.equals(0, #errs, errs[1] and errs[1].message)
 

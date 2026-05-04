@@ -63,7 +63,7 @@ state messages:
   delivered: Int(0, 999) = 0
 
 state weather:
-  kind:       Weather    = 'clear
+  kind:       Weather    = `clear
   visibility: Int(0, 10) = 8
   storm:      Bool       = false
 
@@ -88,7 +88,7 @@ fn survey-complete?:
   messages/delivered >= 10
 
 fn clear-sky?:
-  weather/kind = 'clear
+  weather/kind = `clear
 
 # ── Transaction functions ──────────────────────────────────────────────────────
 
@@ -118,21 +118,21 @@ fn take-message:
   inc! messages/pending 1
 
 fn storm-rolls-in:
-  pre: weather/kind = 'clear  or  weather/kind = 'overcast
-  set! weather/kind 'storm
+  pre: weather/kind = `clear  or  weather/kind = `overcast
+  set! weather/kind `storm
   set! weather/storm true
   dec! weather/visibility 6
   set! tower/beacon false
 
 fn overcast-arrives:
-  pre: weather/kind = 'clear
-  set! weather/kind 'overcast
+  pre: weather/kind = `clear
+  set! weather/kind `overcast
   set! weather/storm false
   dec! weather/visibility 3
 
 fn weather-clears:
   pre: weather/storm
-  set! weather/kind 'clear
+  set! weather/kind `clear
   set! weather/storm false
   set! weather/visibility 8
 
@@ -141,7 +141,7 @@ fn advance-day:
   inc! messages/pending 2
   set! operator/focus 10
   set! operator/fatigue 0
-  set! weather/kind 'clear
+  set! weather/kind `clear
   set! weather/storm false
   set! weather/visibility 8
 
@@ -183,7 +183,7 @@ scene tower:
     overcast-arrives
     -> tower
 
-  * [weather/kind = 'clear  or  weather/kind = 'overcast] Storm rolls in (-6 visibility)
+  * [weather/kind = `clear  or  weather/kind = `overcast] Storm rolls in (-6 visibility)
     storm-rolls-in
     -> tower
 

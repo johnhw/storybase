@@ -30,7 +30,7 @@ type Goods = herbs | iron | silk | empty
 
 state merchant:
   gold:   Int(0, 9999) = 100
-  item:   Goods = 'empty
+  item:   Goods = `empty
 
 # Prices fluctuate based on which town the merchant visits.
 state market:
@@ -45,27 +45,27 @@ state market:
 
 fn buy-herbs:
   dec! merchant/gold market/herb-price
-  set! merchant/item 'herbs
+  set! merchant/item `herbs
 
 fn buy-iron:
   dec! merchant/gold market/iron-price
-  set! merchant/item 'iron
+  set! merchant/item `iron
 
 fn buy-silk:
   dec! merchant/gold market/silk-price
-  set! merchant/item 'silk
+  set! merchant/item `silk
 
 fn sell-herbs:
   inc! merchant/gold market/herb-price * 2 + market/sell-bonus
-  set! merchant/item 'empty
+  set! merchant/item `empty
 
 fn sell-iron:
   inc! merchant/gold market/iron-price * 2 + market/sell-bonus
-  set! merchant/item 'empty
+  set! merchant/item `empty
 
 fn sell-silk:
   inc! merchant/gold market/silk-price * 2 + market/sell-bonus
-  set! merchant/item 'empty
+  set! merchant/item `empty
 
 # ─────────────────────────────────────────────────────────
 # Scenes
@@ -75,16 +75,16 @@ scene market:
   You are at the market.
   Gold: {merchant/gold}. Carrying: {merchant/item}.
   Herb price: {market/herb-price}. Iron price: {market/iron-price}. Silk price: {market/silk-price}.
-  * [merchant/gold >= market/herb-price and merchant/item = 'empty] Buy herbs ({market/herb-price}g)
+  * [merchant/gold >= market/herb-price and merchant/item = `empty] Buy herbs ({market/herb-price}g)
     buy-herbs
     -> market
-  * [merchant/gold >= market/iron-price and merchant/item = 'empty] Buy iron ({market/iron-price}g)
+  * [merchant/gold >= market/iron-price and merchant/item = `empty] Buy iron ({market/iron-price}g)
     buy-iron
     -> market
-  * [merchant/gold >= market/silk-price and merchant/item = 'empty] Buy silk ({market/silk-price}g)
+  * [merchant/gold >= market/silk-price and merchant/item = `empty] Buy silk ({market/silk-price}g)
     buy-silk
     -> market
-  * [merchant/item != 'empty] Travel to port town to sell
+  * [merchant/item != `empty] Travel to port town to sell
     -> port
   * Stay home and count gold
     -> end-scene
@@ -94,17 +94,17 @@ scene port:
   Merchants here pay a premium for goods.
   Gold: {merchant/gold}. Carrying: {merchant/item}.
   Port bonus: +{market/sell-bonus} gold.
-  * [merchant/item = 'herbs] Sell herbs here
+  * [merchant/item = `herbs] Sell herbs here
     set! market/sell-bonus 5
     sell-herbs
     set! market/sell-bonus 0
     -> market
-  * [merchant/item = 'iron] Sell iron here
+  * [merchant/item = `iron] Sell iron here
     set! market/sell-bonus 5
     sell-iron
     set! market/sell-bonus 0
     -> market
-  * [merchant/item = 'silk] Sell silk here
+  * [merchant/item = `silk] Sell silk here
     set! market/sell-bonus 5
     sell-silk
     set! market/sell-bonus 0

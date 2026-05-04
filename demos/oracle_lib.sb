@@ -21,11 +21,11 @@ type WeatherKind = clear | stormy | misty
 
 "The wanderer's world state."
 state world:
-  shrine:    Shrine      = 'hearth
+  shrine:    Shrine      = `hearth
   day:       Int(0, 20)  = 1
   offerings: Int(0, 100) = 30
   renown:    Int(0, 100) = 50
-  weather:   WeatherKind = 'clear
+  weather:   WeatherKind = `clear
 
 # ─────────────────────────────────────────────────────────
 # Relations
@@ -33,10 +33,10 @@ state world:
 
 "Roads between shrines."
 relation paths: Shrine -> Set(Shrine, 3):
-  'hearth: {'stone, 'lake}
-  'stone:  {'hearth, 'tower}
-  'lake:   {'hearth, 'tower}
-  'tower:  {'stone, 'lake}
+  `hearth: {`stone, `lake}
+  `stone:  {`hearth, `tower}
+  `lake:   {`hearth, `tower}
+  `tower:  {`stone, `lake}
 
 # ─────────────────────────────────────────────────────────
 # Pure helpers
@@ -56,4 +56,4 @@ fn journey-end?:
 
 "True when weather allows safe travel."
 fn safe-travel?:
-  world/weather != 'stormy
+  world/weather != `stormy

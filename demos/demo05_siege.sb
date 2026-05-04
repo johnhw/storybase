@@ -44,7 +44,7 @@ state castle:
   siege-ended: Bool        = false
 
 state garrison:
-  alert:  AlertLevel    = 'calm
+  alert:  AlertLevel    = `calm
   morale: Int(0, 100)   = 80
 
 # ─────────────────────────────────────────────────────────
@@ -69,11 +69,11 @@ schedule attacker-wave:
   offset: [turn: 0]
   fn:
     match garrison/alert:
-      'battle:
+      `battle:
         dec! castle/hp 15
-      'guarded:
+      `guarded:
         dec! castle/hp 30
-      'calm:
+      `calm:
         dec! castle/hp 50
 
 "Resupply caravan arrives every 4 turns."
@@ -107,7 +107,7 @@ fn captain-behavior:
         when garrison/morale < 100:
           inc! garrison/morale 5
       stand-down:
-        set! garrison/alert 'calm
+        set! garrison/alert `calm
         inc! garrison/morale 10
       resupply {amount}:
         inc! castle/supplies amount
@@ -149,15 +149,15 @@ fn reinforce-walls:
   inc! castle/hp 40
 
 fn order-battle-stations:
-  pre: garrison/alert != 'battle
-  send! captain (CaptainMsg/raise-alert level: 'battle)
+  pre: garrison/alert != `battle
+  send! captain (CaptainMsg/raise-alert level: `battle)
 
 fn order-guarded:
-  pre: garrison/alert != 'guarded
-  send! captain (CaptainMsg/raise-alert level: 'guarded)
+  pre: garrison/alert != `guarded
+  send! captain (CaptainMsg/raise-alert level: `guarded)
 
 fn order-stand-down:
-  pre: garrison/alert != 'calm
+  pre: garrison/alert != `calm
   send! captain (CaptainMsg/stand-down)
 
 fn call-resupply:
@@ -180,11 +180,11 @@ scene fortress:
   Supplies {castle/supplies}. Alert level {garrison/alert}.
   Garrison morale {garrison/morale}.
 
-  when garrison/alert = 'battle:
+  when garrison/alert = `battle:
     The garrison stands at full battle readiness.
-  when garrison/alert = 'guarded:
+  when garrison/alert = `guarded:
     The garrison is on guard. Extra sentries patrol the walls.
-  when garrison/alert = 'calm:
+  when garrison/alert = `calm:
     Routine patrols only. The garrison rests between sorties.
 
   when castle/hp < 150:
@@ -200,15 +200,15 @@ scene fortress:
     reinforce-walls
     -> fortress
 
-  * [garrison/alert != 'battle] Order battle stations
+  * [garrison/alert != `battle] Order battle stations
     order-battle-stations
     -> fortress
 
-  * [garrison/alert != 'guarded] Order guarded posture
+  * [garrison/alert != `guarded] Order guarded posture
     order-guarded
     -> fortress
 
-  * [garrison/alert != 'calm] Stand down
+  * [garrison/alert != `calm] Stand down
     order-stand-down
     -> fortress
 

@@ -40,7 +40,7 @@ end)
 -- ============================================================
 
 describe("ast.error", function()
-  it("creates an error diagnostic with level = 'error'", function()
+  it("creates an error diagnostic with level = `error'", function()
     local d = ast.error("SOME_CODE", "bad thing happened", ast.pos("f.sb", 3, 7))
     assert.equal("error", d.level)
     assert.equal("SOME_CODE", d.code)
@@ -66,7 +66,7 @@ describe("ast.error", function()
 end)
 
 describe("ast.warning", function()
-  it("creates a warning diagnostic with level = 'warning'", function()
+  it("creates a warning diagnostic with level = `warning'", function()
     local d = ast.warning("WARN_CODE", "be careful", ast.pos("f.sb", 1, 1))
     assert.equal("warning", d.level)
     assert.equal("WARN_CODE", d.code)

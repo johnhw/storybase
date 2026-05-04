@@ -59,8 +59,8 @@ type Health = Int(0, 100)
 type Gold   = Int(0, 999)
 
 type Npc:
-  disposition: Disposition = 'neutral
-  location:    Location    = 'village
+  disposition: Disposition = `neutral
+  location:    Location    = `village
   health:      Health      = 60
   name:        String      = "Unknown"
 
@@ -73,7 +73,7 @@ type ActorMsg:
 # ── State ──────────────────────────────────────────────────────────────────
 
 state player:
-  location:  Location         = 'village
+  location:  Location         = `village
   gold:      Gold             = 80
   inventory: Set(ItemKind, 6) = (set)
 
@@ -109,14 +109,14 @@ schedule morning-reset:
   offset: [tick: 0]
   fn:
     for npc in (path-list npcs):
-      set! npcs/{npc}/disposition 'neutral
+      set! npcs/{npc}/disposition `neutral
 
 # ── Behavior functions ─────────────────────────────────────────────────────
 
 fn blacksmith-behavior:
   # Become friendly when player is in the village
-  when player/location = 'village:
-    set! npcs/blacksmith/disposition 'friendly
+  when player/location = `village:
+    set! npcs/blacksmith/disposition `friendly
   # Process inbox
   for msg in npcs/blacksmith/inbox:
     match msg:
@@ -126,16 +126,16 @@ fn blacksmith-behavior:
         when not (contains? player/inventory item):
           add! player/inventory item   # deferred; applied after all actors
       dismiss {reason}:
-        set! npcs/blacksmith/disposition 'neutral
+        set! npcs/blacksmith/disposition `neutral
       _: pass
 
 fn guard-behavior:
   for msg in npcs/guard/inbox:
     match msg:
       alert {threat, location}:
-        set! npcs/guard/disposition 'hostile
+        set! npcs/guard/disposition `hostile
       dismiss {reason}:
-        set! npcs/guard/disposition 'neutral
+        set! npcs/guard/disposition `neutral
       _: pass
 
 # ── Pure functions ──────────────────────────────────────────────────────────
@@ -153,8 +153,8 @@ fn guard-present?:
 
 fn setup-village:
   pre: not blacksmith-present?
-  spawn! npcs 'blacksmith Npc(name: "Aldric",  health: 80, location: 'village)
-  spawn! npcs 'guard      Npc(name: "Brennan", health: 90, location: 'village)
+  spawn! npcs `blacksmith Npc(name: "Aldric",  health: 80, location: `village)
+  spawn! npcs `guard      Npc(name: "Brennan", health: 90, location: `village)
 
 fn move-to loc:
   pre: player/location != loc
@@ -167,19 +167,19 @@ fn offer-trade item price:
   send! blacksmith (ActorMsg/trade-offer item: item, price: price)
 
 fn alert-guard:
-  send! guard (ActorMsg/alert threat: 'wanderer, location: player/location)
+  send! guard (ActorMsg/alert threat: `wanderer, location: player/location)
 
 fn dismiss-guard:
-  send! guard (ActorMsg/dismiss reason: 'neutral)
+  send! guard (ActorMsg/dismiss reason: `neutral)
 
 fn spawn-wanderer:
   pre: not (path-exists? npcs/wanderer/health)
-  spawn! npcs 'wanderer Npc(name: "Wanderer", health: 40,
-                            disposition: 'hostile, location: 'forest)
+  spawn! npcs `wanderer Npc(name: "Wanderer", health: 40,
+                            disposition: `hostile, location: `forest)
 
 fn despawn-wanderer:
   pre: path-exists? npcs/wanderer/health
-  despawn! npcs 'wanderer
+  despawn! npcs `wanderer
 
 fn tick-forward:
   # Advance time — no player action; actors and schedules will still run
@@ -202,11 +202,11 @@ scene village:
     -> village
 
   * [blacksmith-present?  and  can-afford? 20] Buy bread (20 gold)
-    offer-trade 'bread 20
+    offer-trade `bread 20
     -> village
 
   * [blacksmith-present?  and  can-afford? 50] Buy sword (50 gold)
-    offer-trade 'sword 50
+    offer-trade `sword 50
     -> village
 
   * Alert the guard
@@ -218,7 +218,7 @@ scene village:
     -> village
 
   * Go to the forest
-    move-to 'forest
+    move-to `forest
     -> forest
 
   * Advance one tick (autonomous turn)
@@ -243,26 +243,26 @@ scene forest:
     -> forest
 
   * Return to village
-    move-to 'village
+    move-to `village
     -> village
 
 # ── Watches ────────────────────────────────────────────────────────────────
 
 watch player/gold               "Gold"
 watch world/tick                "Tick"
-watch-when guard-present?  and  npcs/guard/disposition = 'hostile
+watch-when guard-present?  and  npcs/guard/disposition = `hostile
   "Guard is hostile — tick {world/tick}"
 
 # ── Verification ───────────────────────────────────────────────────────────
 
 verify "guard can always be made hostile":
   from-any-state:
-    can-reach? (npcs/guard/disposition = 'hostile)
+    can-reach? (npcs/guard/disposition = `hostile)
 
 verify "guard can always be dismissed":
   from-any-state:
-    can-reach? (npcs/guard/disposition = 'neutral)
-  when npcs/guard/disposition = 'hostile:
+    can-reach? (npcs/guard/disposition = `neutral)
+  when npcs/guard/disposition = `hostile:
 
 verify "player gold never goes negative":
   verify-always player/gold >= 0

@@ -37,21 +37,21 @@ type Damage = Int(0, 40)
 
 type Member:
   health: Health = 60
-  status: Status = 'alive
-  class:  CharClass = 'warrior
+  status: Status = `alive
+  class:  CharClass = `warrior
 
 # ── State ──────────────────────────────────────────────────────────────────
 
 state player:
   health:  Health = 100
-  status:  Status = 'alive
-  class:   CharClass = 'warrior
+  status:  Status = `alive
+  class:   CharClass = `warrior
   round:   Int(0, 99) = 0
 
 state party/{member}: Member  max: 4
 
 state world:
-  phase:       Phase = 'setup
+  phase:       Phase = `setup
   enemy-hp:    Health = 80
   rounds-done: Int(0, 99) = 0
 
@@ -60,59 +60,59 @@ state world:
 fn danger-level:
   # cond as expression — each branch is a return value
   cond:
-    player/health <= 10:  'critical
-    player/health <= 30:  'danger
-    player/health <= 60:  'caution
-    _:                    'safe
+    player/health <= 10:  `critical
+    player/health <= 30:  `danger
+    player/health <= 60:  `caution
+    _:                    `safe
 
 fn living-count:
   # count-where with a lambda over the party family
-  count-where (path-list party)  fn(m): party/{m}/status = 'alive
+  count-where (path-list party)  fn(m): party/{m}/status = `alive
 
 fn any-alive?:
   # any? with a lambda
-  any? (path-list party)  fn(m): party/{m}/status = 'alive
+  any? (path-list party)  fn(m): party/{m}/status = `alive
 
 fn all-dead?:
   # all? with a lambda
-  all? (path-list party)  fn(m): party/{m}/status = 'dead
+  all? (path-list party)  fn(m): party/{m}/status = `dead
 
 fn warrior-damage:
   match player/class:
-    'warrior: 18
-    'rogue:   12
-    'mage:     7
+    `warrior: 18
+    `rogue:   12
+    `mage:     7
 
 # ── Transaction functions ───────────────────────────────────────────────────
 
 fn spawn-party:
-  spawn! party 'fighter  Member(class: 'warrior, health: 80)
-  spawn! party 'scout    Member(class: 'rogue,   health: 60)
-  spawn! party 'wizard   Member(class: 'mage,    health: 50)
-  set!   world/phase 'combat
+  spawn! party `fighter  Member(class: `warrior, health: 80)
+  spawn! party `scout    Member(class: `rogue,   health: 60)
+  spawn! party `wizard   Member(class: `mage,    health: 50)
+  set!   world/phase `combat
 
 fn resolve-combat:
-  pre:  world/phase = 'combat
+  pre:  world/phase = `combat
   pre:  world/enemy-hp > 0
   # while loop: runs until enemy or player dies, or 10 rounds maximum
-  while world/enemy-hp > 0  and  player/status = 'alive  and  world/rounds-done < 10:
+  while world/enemy-hp > 0  and  player/status = `alive  and  world/rounds-done < 10:
     let dmg-to-enemy = warrior-damage:
       let dmg-to-player = (random-int 5 15):
         dec! world/enemy-hp    dmg-to-enemy
         dec! player/health     dmg-to-player
         inc! world/rounds-done 1
         when player/health <= 0:
-          set! player/status 'dead
+          set! player/status `dead
   when world/enemy-hp <= 0:
-    set! world/phase 'rest
+    set! world/phase `rest
 
 fn rest-party:
-  pre:  world/phase = 'rest
+  pre:  world/phase = `rest
   # for loop over party members — heal all living members
   for m in (path-list party):
-    when party/{m}/status = 'alive:
+    when party/{m}/status = `alive:
       inc! party/{m}/health 20
-  set! world/phase 'setup
+  set! world/phase `setup
 
 fn apply-class-bonus:
   # nested let demonstrating sequential binding (each let can reference outer)
@@ -128,9 +128,9 @@ scene overview:
   Living party members: {living-count}.  Enemy HP: {world/enemy-hp}.
 
   -> (match world/phase:
-        'setup:  'setup-scene
-        'combat: 'combat-scene
-        'rest:   'rest-scene)
+        `setup:  `setup-scene
+        `combat: `combat-scene
+        `rest:   `rest-scene)
 
 scene setup-scene:
   The adventuring party assembles.
@@ -140,7 +140,7 @@ scene setup-scene:
     -> overview
 
   * [any-alive?] Party already assembled — proceed
-    set! world/phase 'combat
+    set! world/phase `combat
     -> overview
 
 scene combat-scene:

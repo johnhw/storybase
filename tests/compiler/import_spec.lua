@@ -55,7 +55,7 @@ module lib
 type Color = red | green | blue
 
 state world:
-  color: Color = 'red
+  color: Color = `red
 ]])
     -- Write main file that imports the lib using its actual path
     local main = tmpfile(string.format([[
@@ -67,7 +67,7 @@ engine-config:
 import %q
 
 state player:
-  fav: Color = 'blue
+  fav: Color = `blue
 
 scene s:
   Done.
@@ -222,7 +222,7 @@ module b-lib
 import %q
 
 state enemy:
-  status: Status = 'alive
+  status: Status = `alive
 ]], c))
     local main = tmpfile(string.format([[
 module trans-main
@@ -233,7 +233,7 @@ engine-config:
 import %q
 
 state player:
-  status: Status = 'alive
+  status: Status = `alive
 
 scene s:
   Done.
@@ -349,7 +349,7 @@ engine-config:
 import %q as C
 
 state world:
-  color: C.Color = 'red
+  color: C.Color = `red
 
 scene s:
   Done.
@@ -521,8 +521,8 @@ import %q as A
 import %q as B
 
 state world:
-  ca: A.Color = 'red
-  cb: B.Color = 'green
+  ca: A.Color = `red
+  cb: B.Color = `green
 
 scene s:
   Done.
@@ -556,7 +556,7 @@ engine-config:
 import %q as W
 
 state world:
-  w: Widget = 'big
+  w: Widget = `big
 
 scene s:
   Done.
@@ -585,7 +585,7 @@ module exports-lib
 type Color = red | green
 type Secret = hidden | revealed
 state world:
-  color: Color = 'red
+  color: Color = `red
 ]])
     local main = tmpfile(string.format([[
 module exports-main
@@ -596,7 +596,7 @@ engine-config:
 import %q
 
 state player:
-  color: Color = 'green
+  color: Color = `green
 
 scene s:
   Done.
@@ -626,7 +626,7 @@ engine-config:
 import %q
 
 state player:
-  secret: Secret = 'hidden
+  secret: Secret = `hidden
 
 scene s:
   Done.
@@ -675,7 +675,7 @@ module state-exports-lib
 
 type Color = red | green
 state world:
-  color: Color = 'red
+  color: Color = `red
 ]])
     local main = tmpfile(string.format([[
 module state-exports-main
@@ -736,7 +736,7 @@ engine-config:
   entry-scene: s
 import %q
 state item:
-  rarity: Rarity = 'common
+  rarity: Rarity = `common
 scene s:
   Done.
 ]], lib)

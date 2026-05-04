@@ -55,7 +55,7 @@ schedule morning-bell:
     set!  market/open  true
     set!  prices/grain (random-int 5 12)
     set!  prices/cloth (random-int 10 25)
-    engine/emit 'market-opened {day: world/day, hour: world/hour}
+    engine/emit `market-opened {day: world/day, hour: world/hour}
 
 "The grand festival arrives on day five, closing the market for good."
 schedule grand-festival:
@@ -64,7 +64,7 @@ schedule grand-festival:
     set!  market/festival true
     set!  market/open     false
     cancel-schedule! morning-bell
-    engine/emit 'festival-begins {day: world/day}
+    engine/emit `festival-begins {day: world/day}
 
 # ─────────────────────────────────────────────────────────
 # Watches
@@ -138,7 +138,7 @@ fn browse-stalls:
   inc!  world/hour 2
   when  world/hour >= 18:
     set!  market/open false
-    engine/emit 'market-closed {day: world/day, hour: world/hour}
+    engine/emit `market-closed {day: world/day, hour: world/hour}
 
 "Sleep until morning.  Advances the day clock and resets the hour to 8:00."
 fn rest:

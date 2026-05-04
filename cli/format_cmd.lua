@@ -142,7 +142,7 @@ fmt_type = function(node)
   end
   if k == K.TYPE_ENUM_INLINE then
     local vals = {}
-    for _, v in ipairs(node.values or {}) do vals[#vals + 1] = "'" .. v end
+    for _, v in ipairs(node.values or {}) do vals[#vals + 1] = "`" .. v end
     return table.concat(vals, " | ")
   end
   if k == K.TYPE_FN then
@@ -177,7 +177,7 @@ fmt_expr = function(node)
   if k == K.MULTILINE_STRING then
     return '"""' .. (node.value or "") .. '"""'
   end
-  if k == K.SYMBOL_LIT then return "'" .. (node.name or "?") end
+  if k == K.SYMBOL_LIT then return "`" .. (node.name or "?") end
 
   if k == K.PATH_EXPR then
     local segs = {}

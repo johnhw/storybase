@@ -25,7 +25,7 @@ engine-config:
 type Role = scout | medic | porter
 
 type CrewMember:
-  role:   Role         = 'scout
+  role:   Role         = `scout
   hp:     Int(0, 100)  = 100
   morale: Int(0, 100)  = 80
 
@@ -59,9 +59,9 @@ fn well-fed?:
 
 fn recruit-crew:
   pre: not (path-exists? crew/renn/hp)
-  spawn! crew 'renn  CrewMember(role: 'scout,  hp: 100, morale: 90)
-  spawn! crew 'lyra  CrewMember(role: 'medic,  hp: 100, morale: 85)
-  spawn! crew 'bram  CrewMember(role: 'porter, hp: 100, morale: 75)
+  spawn! crew `renn  CrewMember(role: `scout,  hp: 100, morale: 90)
+  spawn! crew `lyra  CrewMember(role: `medic,  hp: 100, morale: 85)
+  spawn! crew `bram  CrewMember(role: `porter, hp: 100, morale: 75)
 
 fn advance-day:
   inc! expedition/day 1
@@ -93,7 +93,7 @@ fn explore:
 
 fn evacuate-renn:
   pre: path-exists? crew/renn/hp
-  despawn! crew 'renn
+  despawn! crew `renn
 
 fn complete-expedition:
   pre: expedition/day >= 5

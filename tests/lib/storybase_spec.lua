@@ -168,7 +168,7 @@ describe("game object", function()
 
   -- ── on / event listeners ─────────────────────────────────────────
 
-  it("on('choice') fires after each choose", function()
+  it("on(`choice') fires after each choose", function()
     local g = make()
     local fired = {}
     g:on("choice", function(e) fired[#fired+1] = e end)
@@ -579,7 +579,7 @@ scene end-scene:
   All done.
 ]]
 
-  it("on('choice') fires once per choose call", function()
+  it("on(`choice') fires once per choose call", function()
     local g = sb.from_source(SRC, "event-test")
     assert.is_not_nil(g)
     g:init()
@@ -590,7 +590,7 @@ scene end-scene:
     assert.equal(2, fired)
   end)
 
-  it("on('choice') payload contains index and scene", function()
+  it("on(`choice') payload contains index and scene", function()
     local g = sb.from_source(SRC, "event-test")
     assert.is_not_nil(g)
     g:init()
@@ -691,9 +691,9 @@ state world:
   x: Int(0, 99) = 0
 fn do-thing:
   inc! world/x 1
-  engine/emit 'thing-happened {x: world/x}
+  engine/emit `thing-happened {x: world/x}
 fn emit-no-args:
-  engine/emit 'simple-event
+  engine/emit `simple-event
 scene main:
   * Go -> main
 ]]

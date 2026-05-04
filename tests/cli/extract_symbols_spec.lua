@@ -102,24 +102,24 @@ engine-config:
   entry-scene: main
 
 state player:
-  location: Symbol = 'village
-  mood:     Symbol = 'happy
+  location: Symbol = `village
+  mood:     Symbol = `happy
 
 scene main:
   * Go to forest
-    set! player/location 'forest
+    set! player/location `forest
     -> forest
   * Go to dungeon
-    set! player/location 'dungeon
+    set! player/location `dungeon
     -> main
   * Feel sad
-    set! player/mood 'sad
+    set! player/mood `sad
     -> main
 
 scene forest:
   * Return
-    set! player/location 'village
-    set! player/mood 'happy
+    set! player/location `village
+    set! player/mood `happy
     -> main
 ]]
 
@@ -234,10 +234,10 @@ engine-config:
   entry-scene: main
 
 state player:
-  status: Symbol = 'alive
+  status: Symbol = `alive
 
 fn update:
-  set! player/status 'dead
+  set! player/status `dead
 
 scene main:
   * Die

@@ -27,7 +27,7 @@
 #   if player/title = "Sir":   # ERROR: String in condition
 #     inc! player/gold 10
 #
-#   set! player/class (random-choice ['warrior, 'rogue, 'mage])
+#   set! player/class (random-choice [`warrior, `rogue, `mage])
 #                              # OK: random-choice on a list of symbols is fine
 #                              # (all discrete)
 #
@@ -55,8 +55,8 @@ type Damage = Int(0, 50)
 # Base entity — shared fields used as a mixin
 type Entity:
   health:   Health   = 50
-  status:   Status   = 'alive
-  location: Location = 'village
+  status:   Status   = `alive
+  location: Location = `village
   name:     String   = "Unknown"    # superficial — display only
 
 # Player extends Entity, overriding the health default
@@ -64,7 +64,7 @@ type Player:
   with Entity
   health:   Health    = 100         # override default; type stays Health
   gold:     Gold      = 30
-  class:    CharClass = 'warrior
+  class:    CharClass = `warrior
   title:    String    = "Adventurer" # superficial — display only
 
 # Variant: different message shapes share one type
@@ -78,11 +78,11 @@ type NpcId = SymbolOf(npcs)
 
 type Npc:
   with Entity
-  disposition: Status = 'alive     # reusing Status here for simplicity
+  disposition: Status = `alive     # reusing Status here for simplicity
 
 # ── State ──────────────────────────────────────────────────────────────────
 
-state player: Player = Player(name: "Aldric", class: 'warrior)
+state player: Player = Player(name: "Aldric", class: `warrior)
 
 state npcs/{npc}: Npc  max: 10
 
@@ -91,9 +91,9 @@ state npcs/{npc}: Npc  max: 10
 fn base-damage:
   # match as expression — returns an Int
   match player/class:
-    'warrior: 20
-    'rogue:   14
-    'mage:    8
+    `warrior: 20
+    `rogue:   14
+    `mage:    8
 
 fn max-damage:
   base-damage + 10
@@ -102,7 +102,7 @@ fn min-damage:
   base-damage - 5
 
 fn alive?:
-  player/status = 'alive
+  player/status = `alive
 
 fn can-afford? price:
   player/gold >= price
@@ -110,25 +110,25 @@ fn can-afford? price:
 # Superficial value computed from discrete — this is allowed
 fn status-label:
   match player/status:
-    'alive:       "alive and well"
-    'dead:        "dead"
-    'unconscious: "unconscious"
+    `alive:       "alive and well"
+    `dead:        "dead"
+    `unconscious: "unconscious"
 
 # ── Transaction functions ───────────────────────────────────────────────────
 
 fn take-damage amount:
   pre:
     amount > 0
-    player/status = 'alive
+    player/status = `alive
   post:
     player/health >= 0
   dec!  player/health amount
   when  player/health <= 0:
-    set!  player/status 'dead
+    set!  player/status `dead
     set!  player/name (str player/name " (fallen)")   # superficial update OK
 
 fn heal amount:
-  pre:  player/status = 'alive
+  pre:  player/status = `alive
   inc!  player/health (min amount (100 - player/health))
 
 # ── Scenes ─────────────────────────────────────────────────────────────────

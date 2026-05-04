@@ -626,7 +626,7 @@ describe("state store: set_time ignores undeclared axes (Bug #5 regression)", fu
     local schema = { time_model = { axes = { "day", "hour" }, wrap = {} } }
     local l = log_mod.new()
     local s = state_mod.new(schema, l)
-    -- 'tick' is not declared; calling set_time on it must not install a new key
+    -- `tick' is not declared; calling set_time on it must not install a new key
     s:set_time("tick", 99)
     local t = s:get_time()
     assert.is_nil(t.tick, "undeclared axis must not be added to _time")

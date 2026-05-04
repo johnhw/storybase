@@ -39,7 +39,7 @@ type Gold = Int(0, 500)
 
 state player:
   gold:     Gold     = 100
-  location: Location = 'crossroads
+  location: Location = `crossroads
 
 state world:
   day: Int(0, 30) = 1
@@ -76,19 +76,19 @@ scene crossroads:
   forest to the north, and the inn a short walk south.
 
   * Travel to town
-    travel 'town
+    travel `town
     -> town
 
   * Travel to market
-    travel 'market
+    travel `market
     -> market
 
   * Venture into the forest
-    travel 'forest
+    travel `forest
     -> forest
 
   * Rest at the inn
-    travel 'inn
+    travel `inn
     -> inn
 
   * [world/day > 1] Take the reckoning
@@ -106,11 +106,11 @@ scene town:
 
   * Rest in the common room (advance day, back to crossroads)
     advance-day
-    travel 'crossroads
+    travel `crossroads
     -> crossroads
 
   * Return to the crossroads
-    travel 'crossroads
+    travel `crossroads
     -> crossroads
 
 scene market:
@@ -131,7 +131,7 @@ scene market:
     -> market
 
   * Return to the crossroads
-    travel 'crossroads
+    travel `crossroads
     -> crossroads
 
 scene forest:
@@ -145,11 +145,11 @@ scene forest:
     -> forest
 
   * Follow the deer-track to the ruins
-    travel 'ruins
+    travel `ruins
     -> ruins
 
   * Return to the crossroads
-    travel 'crossroads
+    travel `crossroads
     -> crossroads
 
 scene ruins:
@@ -163,7 +163,7 @@ scene ruins:
     -> ruins
 
   * Return to the crossroads through the forest
-    travel 'crossroads
+    travel `crossroads
     -> crossroads
 
 scene inn:
@@ -174,11 +174,11 @@ scene inn:
   * [player/gold >= 10] Pay for a room (-10 gold, advance day)
     spend-gold 10
     advance-day
-    travel 'crossroads
+    travel `crossroads
     -> crossroads
 
   * Return to the crossroads
-    travel 'crossroads
+    travel `crossroads
     -> crossroads
 
 # ── The Reckoning ─────────────────────────────────────────────────────────────

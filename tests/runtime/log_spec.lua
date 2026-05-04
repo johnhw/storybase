@@ -373,7 +373,7 @@ end)
 -- ============================================================
 
 describe("transaction log: checkpoint markers", function()
-  it("checkpoint appends an entry with kind='checkpoint'", function()
+  it("checkpoint appends an entry with kind=`checkpoint'", function()
     local l = log_mod.new()
     l:checkpoint("my_fn")
     local entries = l:entries()

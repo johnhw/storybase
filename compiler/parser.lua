@@ -2163,7 +2163,7 @@ local function tok_display_and_len(tok)
   local k, v = tok.kind, tok.value
   if k == "SYMBOL" then
     local s = tostring(v)
-    return "'" .. s, 1 + #s          -- ' prefix not in value
+    return "`" .. s, 1 + #s          -- ` prefix not in value
   elseif k == "NAMED_ARG" then
     local s = tostring(v)
     return s .. ":", #s + 1          -- : suffix not in value
@@ -2171,6 +2171,9 @@ local function tok_display_and_len(tok)
     local s = v and "true" or "false"
     return s, #s
   elseif k == "INT" or k == "FLOAT" then
+    local s = tostring(v)
+    return s, #s
+  elseif k == "RAW_TEXT" then
     local s = tostring(v)
     return s, #s
   else
@@ -2290,11 +2293,26 @@ parse_body_items = function(p, is_scene)
         p:adv(); p:skip_to_eol(); item = ast.scene_exit(tpos)
 
       elseif t.kind == "KEYWORD" and t.value == "if" then
+        local nd = #p.diags
         item = parse_if_expr(p, true)    -- scene mode
+        if #p.diags > nd then
+          local d = p.diags[#p.diags]
+          if d then d.note = "if this line is narration beginning with 'if', start it with a different word" end
+        end
       elseif t.kind == "KEYWORD" and t.value == "when" then
+        local nd = #p.diags
         item = parse_when_stmt(p, true)  -- scene mode
+        if #p.diags > nd then
+          local d = p.diags[#p.diags]
+          if d then d.note = "if this line is narration beginning with 'when', start it with a different word" end
+        end
       elseif t.kind == "KEYWORD" and t.value == "for" then
+        local nd = #p.diags
         item = parse_for_stmt(p, true)   -- scene mode: body parsed as narration
+        if #p.diags > nd then
+          local d = p.diags[#p.diags]
+          if d then d.note = "if this line is narration beginning with 'for', start it with a different word" end
+        end
       elseif t.kind == "KEYWORD" and t.value == "match" then
         local e = parse_match_expr(p); item = ast.expr_stmt(e, tpos)
 

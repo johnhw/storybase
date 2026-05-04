@@ -91,7 +91,7 @@ describe("CLI: help", function()
                      _:find("Usage") or _:find("usage"), "expected usage text")
   end)
 
-  it("'help' subcommand returns 0 and prints usage", function()
+  it("`help' subcommand returns 0 and prints usage", function()
     local rc, out, _ = run_cli({"help"})
     assert.equal(0, rc)
     local combined = out .. _
@@ -99,13 +99,13 @@ describe("CLI: help", function()
       "expected command list in help output")
   end)
 
-  it("'help compile' shows compile-specific help", function()
+  it("`help compile' shows compile-specific help", function()
     local rc, out, _ = run_cli({"help", "compile"})
     assert.equal(0, rc)
     assert.is_truthy((out .. _):find("--production"), "expected --production flag docs")
   end)
 
-  it("'help run' shows run-specific help including --auto", function()
+  it("`help run' shows run-specific help including --auto", function()
     local rc, out, _ = run_cli({"help", "run"})
     assert.equal(0, rc)
     assert.is_truthy((out .. _):find("--auto"), "expected --auto flag docs")
@@ -431,7 +431,7 @@ describe("CLI verify: error cases", function()
     assert.is_truthy(err:find("Compilation failed"), err)
   end)
 
-  it("reports 'No verify blocks' for a file with none", function()
+  it("reports `No verify blocks' for a file with none", function()
     local rc, out, _ = run_cli({"verify", "demos/demo01_wanderer.sb"})
     assert.equal(0, rc)
     assert.is_truthy(out:find("No verify blocks"), out)
@@ -520,7 +520,7 @@ describe("CLI demo07_oracle: import / bounded / counterfactual", function()
         orb_idx = i; break
       end
     end
-    assert.is_not_nil(orb_idx, "expected 'Consult the crystal orb' choice")
+    assert.is_not_nil(orb_idx, "expected `Consult the crystal orb' choice")
     game:choose(orb_idx)
     local orb_narr = game:render()
     -- Counterfactual preview values should appear in narration (meditate: 50+12=62)
@@ -528,13 +528,13 @@ describe("CLI demo07_oracle: import / bounded / counterfactual", function()
     assert.is_truthy(text:find("62") or text:find("meditate"), text)
   end)
 
-  it("bounded oracle-weather falls back to 'clear when no handler registered", function()
+  it("bounded oracle-weather falls back to `clear when no handler registered", function()
     local sb = require("lib.storybase")
     local game = sb.load("demos/demo07_oracle.sb")
     game:init()
     game:choose(1)   -- Begin the wandering (into wanderer scene)
     game:choose(1)   -- Travel to Stone Shrine (travel calls oracle-weather)
-    -- weather should be 'clear (bounded fallback)
+    -- weather should be `clear (bounded fallback)
     local weather = game:get("world/weather")
     assert.equal("clear", weather)
   end)
@@ -630,7 +630,7 @@ describe("CLI demo09_wardens_map: grid builtins + path-to + visible-from + verif
     game:choose(1)  -- Stand watch (calls init-dungeon)
     local narr = game:render()
     local text = narr_text(narr)
-    assert.is_truthy(text:find("floor"), text)  -- grid-get returns 'floor default
+    assert.is_truthy(text:find("floor"), text)  -- grid-get returns `floor default
     assert.is_truthy(text:find("Guard Alpha"), text)
   end)
 
@@ -846,14 +846,14 @@ describe("CLI demo11_expedition_guild: type aliases + Option(T) + find + compute
     assert.equal(15, game:get("guild/prestige"))
   end)
 
-  it("nil-coalescing ?? renders 'none' when companion is nil", function()
+  it("nil-coalescing ?? renders `none' when companion is nil", function()
     local sb = require("lib.storybase")
     local game = sb.load("demos/demo11_expedition_guild.sb")
     game:init()
     game:choose(1)  -- Begin
     local narr = game:render()
     local text = narr_text(narr)
-    assert.is_truthy(text:find("none"), text)  -- player/companion ?? 'none
+    assert.is_truthy(text:find("none"), text)  -- player/companion ?? `none
   end)
 end)
 
@@ -1024,7 +1024,7 @@ describe("CLI demo13_healers_ward: speaker/say + post: + multi-line lambdas", fu
       "expected buffered dialogue as first narration item; got: " .. tostring(narration[1]))
   end)
 
-  it("discharge fn sets condition to 'discharged and marks treated", function()
+  it("discharge fn sets condition to `discharged and marks treated", function()
     local game = load_and_init()
     -- Navigate to discharge mira (stable)
     game:choose(2)   -- discharge-patient scene (mira selected)
@@ -1361,7 +1361,7 @@ migration from: 1.0
     assert.equal(1, rc)
   end)
 
-  it("reports 'no migration blocks' for a game without migrations", function()
+  it("reports `no migration blocks' for a game without migrations", function()
     -- demo01 has no migration blocks
     -- We need a real (though possibly empty) save file
     local save_path = os.tmpname() .. ".log"
@@ -1616,7 +1616,7 @@ import "%s" as Lib
 engine-config:
   entry-scene: start
 state world:
-  sz: Lib.Size = 'small
+  sz: Lib.Size = `small
 scene start:
   Done.
 ]], imported)
@@ -1631,25 +1631,25 @@ end)
 -- ── help for new commands ─────────────────────────────────────────────────────
 
 describe("CLI: help for new commands", function()
-  it("'help check' shows check-specific help", function()
+  it("`help check' shows check-specific help", function()
     local rc, out, _ = run_cli({"help", "check"})
     assert.equal(0, rc)
     assert.is_truthy((out .. _):find("check"), "expected check docs")
   end)
 
-  it("'help format' shows format-specific help", function()
+  it("`help format' shows format-specific help", function()
     local rc, out, _ = run_cli({"help", "format"})
     assert.equal(0, rc)
     assert.is_truthy((out .. _):find("format") or (out .. _):find("pretty"), "expected format docs")
   end)
 
-  it("'help repl' shows repl-specific help", function()
+  it("`help repl' shows repl-specific help", function()
     local rc, out, _ = run_cli({"help", "repl"})
     assert.equal(0, rc)
     assert.is_truthy((out .. _):find("repl") or (out .. _):find("REPL"), "expected repl docs")
   end)
 
-  it("'help run' mentions --debug flag", function()
+  it("`help run' mentions --debug flag", function()
     local rc, out, _ = run_cli({"help", "run"})
     assert.equal(0, rc)
     assert.is_truthy((out .. _):find("--debug"), "expected --debug in run help")

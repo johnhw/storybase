@@ -341,7 +341,7 @@ time-model:
   axes: [tick]
   wrap: [none]
 type Disposition = friendly | neutral | hostile
-state player/location: Disposition = 'neutral
+state player/location: Disposition = `neutral
 state npcs/{npc}: Disposition max: 4
 state world/tick: Int(0,9999) = 0
 actor smith:
@@ -351,12 +351,12 @@ actor smith:
   behavior:  smith-behavior
   priority:  10
 fn setup:
-  spawn! npcs 'smith 'neutral
+  spawn! npcs `smith `neutral
 fn smith-behavior:
-  when player/location = 'friendly:
-    set! npcs/smith 'friendly
+  when player/location = `friendly:
+    set! npcs/smith `friendly
 fn tick:
-  set! player/location 'friendly
+  set! player/location `friendly
   time-inc! tick: 1
 scene village:
   * Setup
@@ -376,8 +376,8 @@ scene village:
     local inp = make_input({ "1", "2", "q" })  -- setup, tick (triggers smith)
     engine_mod.run(gt, { io_out=out, io_in=inp })
 
-    -- After "tick" choice, smith-behavior should have seen player/location='friendly
-    -- and set npcs/smith to 'friendly
+    -- After "tick" choice, smith-behavior should have seen player/location=`friendly
+    -- and set npcs/smith to `friendly
     -- (We can't easily inspect the final state through run(), but no error = pass)
     assert.is_true(#out.lines > 0)
   end)
@@ -409,7 +409,7 @@ actor bot:
   behavior:  bot-behavior
   priority:  10
 fn setup:
-  spawn! npcs 'bot 0
+  spawn! npcs `bot 0
 fn send-ping:
   send! bot (Msg/ping value: 42)
   time-inc! tick: 1
@@ -651,10 +651,10 @@ module test-perceives
 engine-config:
   entry-scene: main
 state player:
-  location: Symbol = 'village
+  location: Symbol = `village
   gold: Int(0,999) = 50
 state npc:
-  saw_location: Symbol = 'none
+  saw_location: Symbol = `none
   saw_gold: Int(0,999) = 0
 fn npc-behavior:
   set! npc/saw_location player/location
@@ -682,7 +682,7 @@ scene main:
     eng:init()
     while eng:step() do end
 
-    -- npc/saw_location should be 'village (it's in perceives)
+    -- npc/saw_location should be `village (it's in perceives)
     assert.equal("village", eng._state:get("npc/saw_location"))
     -- npc/saw_gold should be nil — player/gold is NOT in perceives, proxy returns nil,
     -- so set! nil clears the path (the actor cannot observe the real value 50)
@@ -837,7 +837,7 @@ time-model:
   wrap: [none]
 state world/tax: Int(0,9999) = 0
 fn start-tax:
-  schedule! 'daily-tax every: [day: 1] fn: collect-tax
+  schedule! `daily-tax every: [day: 1] fn: collect-tax
 fn collect-tax:
   inc! world/tax 5
 scene main:
@@ -864,7 +864,7 @@ scene main:
         has_created = true; break
       end
     end
-    assert.is_true(has_created, "expected schedule_created log entry for 'daily-tax'")
+    assert.is_true(has_created, "expected schedule_created log entry for `daily-tax'")
   end)
 end)
 

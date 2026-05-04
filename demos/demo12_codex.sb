@@ -48,8 +48,8 @@ verify "reputation never goes negative":
   verify-always player/rep >= 0
 
 verify "brewing consumes feverwort":
-  requires Herb.assess-stock 'feverwort 3
-  after (brew-remedy 'tonic):
+  requires Herb.assess-stock `feverwort 3
+  after (brew-remedy `tonic):
     garden/feverwort/quantity < garden/feverwort/quantity@before
 
 verify "selling clears workbench":
@@ -79,7 +79,7 @@ fn init-garden:
 
 "Brew a remedy from feverwort (costs 3 units)."
 fn brew-remedy r:
-  pre:  Herb.assess-stock 'feverwort 3
+  pre:  Herb.assess-stock `feverwort 3
   dec!  garden/feverwort/quantity 3
   set!  workbench/remedy r
 
@@ -111,7 +111,7 @@ scene workshop:
 
   Day {workbench/day} of 20.
   Gold: {player/gold}.  Reputation: {player/rep}.
-  Workbench: {workbench/remedy ?? 'empty}.
+  Workbench: {workbench/remedy ?? `empty}.
 
   * [true] Begin — stock the garden
     init-garden
@@ -120,12 +120,12 @@ scene workshop:
   * [true] Go to the garden
     => Herb.harvest
 
-  * [Herb.assess-stock 'feverwort 3 and workbench/remedy = nil] Brew a tonic
-    brew-remedy 'tonic
+  * [Herb.assess-stock `feverwort 3 and workbench/remedy = nil] Brew a tonic
+    brew-remedy `tonic
     -> workshop
 
-  * [Herb.assess-stock 'feverwort 3 and workbench/remedy = nil] Brew a salve
-    brew-remedy 'salve
+  * [Herb.assess-stock `feverwort 3 and workbench/remedy = nil] Brew a salve
+    brew-remedy `salve
     -> workshop
 
   * [workbench/remedy != nil] Sell remedy (+15 gold, +5 rep)

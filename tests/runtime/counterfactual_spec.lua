@@ -553,7 +553,7 @@ scene main:
     for _, k in ipairs(result) do
       if k == "hero" then found_hero = true end
     end
-    assert.is_true(found_hero, "expected 'hero' in snapshot find results")
+    assert.is_true(found_hero, "expected `hero' in snapshot find results")
     -- Live state still has no npc "hero"
     assert.is_nil(ctx.state._cache["npcs/hero"])
   end)
@@ -731,9 +731,9 @@ scene end-scene:
     }
     local gs = eval_mod.eval_expr(node, ctx)
     assert.equals(42, gs:get("world/scores") and gs:get("world/scores")["alice"],
-      "UMap key 'alice' must survive the counterfactual copy")
+      "UMap key `alice' must survive the counterfactual copy")
     assert.equals(7, gs:get("world/scores") and gs:get("world/scores")["bob"],
-      "UMap key 'bob' must survive the counterfactual copy")
+      "UMap key `bob' must survive the counterfactual copy")
   end)
 
   it("counterfactual is isolated: UMap mutations in branch do not affect live state", function()

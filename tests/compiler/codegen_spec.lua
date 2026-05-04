@@ -130,7 +130,7 @@ describe("codegen — schema.states", function()
     assert.is_nil(s.default)
   end)
 
-  it("named record type in state is expanded to kind='record'", function()
+  it("named record type in state is expanded to kind=`record'", function()
     -- state player: P  where P is a record type → expand to kind="record"
     local sc = schema("type P:\n  hp: Int(0,100) = 50\nstate player: P")
     local s = sc.states[1]
@@ -269,7 +269,7 @@ describe("codegen — state-space size", function()
     assert.are.equal(4, sc.state_space_size)
   end)
 
-  it("reports 'unbounded' for String state", function()
+  it("reports `unbounded' for String state", function()
     local sc = schema("state desc: String")
     assert.are.equal("unbounded", sc.state_space_size)
   end)
@@ -302,7 +302,7 @@ describe("codegen — type_desc.discrete tag", function()
   end)
 
   it("String is not discrete", function()
-    local sc = schema('state name: String = "x"')
+    local sc = schema([[state name: String = "x"]])
     assert.is_false(sc.states[1].type_desc.discrete)
   end)
 
@@ -332,7 +332,7 @@ describe("codegen — type_desc.discrete tag", function()
   end)
 
   it("named enum type is discrete", function()
-    local sc = schema("type Status = alive|dead\nstate x: Status = 'alive")
+    local sc = schema("type Status = alive|dead\nstate x: Status = `alive")
     assert.is_true(sc.states[1].type_desc.discrete)
   end)
 
@@ -374,7 +374,7 @@ describe("codegen — default value descriptors", function()
   end)
 
   it("emits symbol default", function()
-    local sc = schema("type S = alive|dead\nstate status: S = 'alive")
+    local sc = schema("type S = alive|dead\nstate status: S = `alive")
     assert.are.equal("symbol", sc.states[1].default.tag)
     assert.are.equal("alive",  sc.states[1].default.name)
   end)
@@ -426,15 +426,15 @@ type Gold     = Int(0, 9999)
 
 type Player:
   health:   Health   = 100
-  status:   Status   = 'alive
-  location: Location = 'village
+  status:   Status   = `alive
+  location: Location = `village
   gold:     Gold     = 30
 
 state player: Player
 
 state world:
   turn:    Int(0, 9999) = 0
-  chapter: Location     = 'village
+  chapter: Location     = `village
 
 state npcs/{npc}: Player  max: 20
 
@@ -762,9 +762,9 @@ migration 1 -> 2:
   it("emits rename-enum op in migration", function()
     local gt = compile([[
 type Class = fighter | mage
-state player/class: Class = 'fighter
+state player/class: Class = `fighter
 migration 2 -> 3:
-  rename-enum player/class 'fighter -> 'warrior
+  rename-enum player/class `fighter -> `warrior
 ]])
     local m = gt.migrations[1]
     assert.equal(1, #m.ops)
@@ -888,7 +888,7 @@ verify "hp positive":
     assert.equal(1, #v.clauses)
   end)
 
-  it("emits verify-always clause with kind='always'", function()
+  it("emits verify-always clause with kind=`always'", function()
     local gt = compile([[
 state world/hp: Int(0,100) = 50
 verify "hp positive":
@@ -1006,7 +1006,7 @@ hook broadcast:
     for _, h in ipairs(gt.hooks) do
       if h.hook_kind == "tag_pre" and h.target == "broadcast" then found = true end
     end
-    assert.is_true(found, "expected a tag_pre hook for 'broadcast'")
+    assert.is_true(found, "expected a tag_pre hook for `broadcast'")
   end)
 
   it("emits a tag_post hook", function()
@@ -1023,7 +1023,7 @@ hook broadcast:
     for _, h in ipairs(gt.hooks) do
       if h.hook_kind == "tag_post" and h.target == "broadcast" then found = true end
     end
-    assert.is_true(found, "expected a tag_post hook for 'broadcast'")
+    assert.is_true(found, "expected a tag_post hook for `broadcast'")
   end)
 
   it("emits a fn_after hook for a specific function", function()
@@ -1038,7 +1038,7 @@ hook after: foo:
     for _, h in ipairs(gt.hooks) do
       if h.hook_kind == "fn_after" and h.target == "foo" then found = true end
     end
-    assert.is_true(found, "expected fn_after hook for 'foo'")
+    assert.is_true(found, "expected fn_after hook for `foo'")
   end)
 
   it("emits a fn_before hook for a specific function", function()
@@ -1053,6 +1053,6 @@ hook before: foo:
     for _, h in ipairs(gt.hooks) do
       if h.hook_kind == "fn_before" and h.target == "foo" then found = true end
     end
-    assert.is_true(found, "expected fn_before hook for 'foo'")
+    assert.is_true(found, "expected fn_before hook for `foo'")
   end)
 end)

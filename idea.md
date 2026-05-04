@@ -44,8 +44,8 @@ true   false
   A distant horn echoes through the trees.
 """
 
-# Symbol literals  (quoted with ')
-'sword   'alive   'blacksmith
+# Symbol literals  (prefixed with `)
+`sword   `alive   `blacksmith
 
 # Paths  — any token containing / is a path
 player/health
@@ -83,7 +83,7 @@ Parentheses are **grouping only** and never open a block. All block structure is
 fn take-damage amount:
   dec!  player/health amount
   when  player/health <= 0:
-    set! player/status 'dead
+    set! player/status `dead
 
 # Parentheses for inline grouping
 fn effective-damage base roll:
@@ -97,23 +97,23 @@ Comparisons and boolean operators use **infix** notation. Function calls use **p
 ```
 # Infix comparisons
 player/health > 0
-player/status = 'alive
+player/status = `alive
 world/turn != 0
 npcs/{npc}/health >= 50
 
 # Infix boolean operators
-player/status = 'alive  and  player/health > 0
+player/status = `alive  and  player/health > 0
 not player/has-key
 x > 0  or  y < 10
 
 # Prefix function calls
 can-afford? 40
 min amount (100 - player/health)
-contains? player/inventory 'sword
+contains? player/inventory `sword
 
 # Nil-coalescing (right side evaluated only if left is nil)
 npcs/{npc}/health ?? 0
-player/companion ?? 'none
+player/companion ?? `none
 
 # Arithmetic (infix)
 player/gold - 40
@@ -132,8 +132,8 @@ fn(x y): x + y
 
 # Multi-line lambda — body is an indented block
 fn(npc):
-  npcs/{npc}/status = 'alive
-  and  npcs/{npc}/disposition = 'hostile
+  npcs/{npc}/status = `alive
+  and  npcs/{npc}/disposition = `hostile
 ```
 
 The compiler infers the parameter types from context. Lambdas are always pure (they may not call mutation primitives).
@@ -143,7 +143,7 @@ The compiler infers the parameter types from context. Lambdas are always pure (t
 ```
 # Conditional (no else)
 when player/health <= 0:
-  set! player/status 'dead
+  set! player/status `dead
 
 # Conditional with else
 if player/has-key:
@@ -153,23 +153,23 @@ else:
 
 # Pattern match (expression or statement)
 match player/class:
-  'warrior: 15
-  'rogue:   12
-  'mage:     8
+  `warrior: 15
+  `rogue:   12
+  `mage:     8
   _:         0     # wildcard branch
 
 # Multi-way conditional — each branch tests an arbitrary boolean expression
 cond:
-  player/health <= 0:   set! player/status 'dead
+  player/health <= 0:   set! player/status `dead
   player/health < 20:   set! player/description "Badly wounded."
   _:                    set! player/description "Feeling fine."
 
 # For loop
 for npc in (path-list npcs):
-  set! npcs/{npc}/location 'village
+  set! npcs/{npc}/location `village
 
 # While loop — condition re-evaluated each iteration; body may mutate state
-while combat/active  and  player/status = 'alive:
+while combat/active  and  player/status = `alive:
   attack-enemy
   enemy-attacks
 
@@ -184,15 +184,15 @@ let base  = base-damage
 
 ```
 # Set — bare values, commas optional
-{'sword, 'potion, 'key}
+{`sword, `potion, `key}
 (set)                       # empty set
 
 # List — ordered, indexed
-['north, 'east, 'south]
+[`north, `east, `south]
 []                          # empty list
 
 # Map — key: value pairs, commas optional
-{name: "Aldric", class: 'warrior, level: 5}
+{name: "Aldric", class: `warrior, level: 5}
 {}                          # empty map
 ```
 
@@ -226,12 +226,12 @@ scene village:
   [hostile-nearby?] A hostile figure lurks nearby!
 
   * Enter the forest
-    move-to 'forest
+    move-to `forest
     random-encounter
     -> forest
 
   * [can-afford? 40] Buy a health potion (40 gold)
-    buy-item 'health-potion 40
+    buy-item `health-potion 40
     -> village
 
   * Talk to the blacksmith
@@ -311,8 +311,8 @@ if player/health < 20:
 # OK: superficial value updated from discrete
 set! player/description
   match player/status:
-    'alive: "Hale and hearty."
-    'dead:  "Dead."
+    `alive: "Hale and hearty."
+    `dead:  "Dead."
 
 # ERROR: superficial value in a conditional
 if player/name = "Alice":      # compile error: String in condition
@@ -345,7 +345,7 @@ Reads from an uninstantiated family member (e.g. `npcs/stranger/health` before t
 
 ```
 npcs/{npc}/health ?? 0       # 0 if npc not yet spawned
-player/companion ?? 'none    # 'none if companion path is nil
+player/companion ?? `none    # `none if companion path is nil
 ```
 
 `??` is a binary infix operator. The right-hand side is evaluated only if the left-hand side is nil. `??` may not appear in write positions.
@@ -486,20 +486,20 @@ type Damage = Int(0, 999)
 ```
 type Entity:
   health:   Health   = 50
-  status:   Status   = 'alive
-  location: Location = 'village
+  status:   Status   = `alive
+  location: Location = `village
   name:     String   = "Unknown"
 
 type Npc:
   with Entity                        # mixin — splices all Entity fields here
-  disposition: Disposition = 'neutral
+  disposition: Disposition = `neutral
 
 type Player:
   with Entity
   health:      Health           = 100   # override default only, not type
   mana:        Int(0, 50)       = 50
   gold:        Gold             = 30
-  class:       CharClass        = 'warrior
+  class:       CharClass        = `warrior
   has-key:     Bool             = false
   inventory:   Set(ItemKind, 10) = (set)
   quest-flags: Set(QuestFlag, 20) = (set)
@@ -523,7 +523,7 @@ Each branch is an anonymous record. State-space size is the sum of all branch si
 ### 6.2 State Declarations
 
 ```
-"The player's persistent state."
+"The player`s persistent state."
 state player: Player = Player(name: "Hero")
 
 "One entry per spawned NPC. Up to 20 concurrent."
@@ -531,12 +531,12 @@ state npcs/{npc}: Npc  max: 20       # npc auto-typed as SymbolOf(npcs)
 
 state world:
   turn:    Int(0, 9999) = 0
-  chapter: Chapter      = 'intro
+  chapter: Chapter      = `intro
 
 state combat:
   active:  Bool         = false
-  enemy:   NpcId        = 'wanderer
-  outcome: CombatResult = 'ongoing
+  enemy:   NpcId        = `wanderer
+  outcome: CombatResult = `ongoing
 ```
 
 For entity families (`state family/{var}: Type`), `max: N` declares the maximum number of simultaneously instantiated members, bounding the state-space size for search. Instances are created and destroyed with `spawn!` and `despawn!` (§8.5).
@@ -548,10 +548,10 @@ A string literal immediately before any declaration is a **doc string**, attache
 ```
 "Movement graph between locations."
 relation exits: Location -> Set(Location, 6):
-  'village: {'forest}
-  'forest:  {'village, 'dungeon}
-  'dungeon: {'forest, 'castle}
-  'castle:  {'village}
+  `village: {`forest}
+  `forest:  {`village, `dungeon}
+  `dungeon: {`forest, `castle}
+  `castle:  {`village}
 ```
 
 The static data block is optional. Relations may also be populated or modified at runtime with `relate!` and `unrelate!` (§8.3). A relation without a static block starts empty.
@@ -611,14 +611,14 @@ fn move-to loc:
   time-inc! tick:
 
 fn heal amount:
-  pre:  player/status = 'alive
+  pre:  player/status = `alive
   inc!  player/health (min amount (100 - player/health))
 
 fn can-afford? price:
   player/gold >= price
 
 fn alive? entity:
-  npcs/{entity}/status = 'alive
+  npcs/{entity}/status = `alive
 ```
 
 ### 7.2 Pure vs. Transaction Inference
@@ -636,12 +636,12 @@ There is no annotation required. The compiler infers the classification and veri
 fn take-damage amount:
   pre:
     amount > 0
-    player/status = 'alive
+    player/status = `alive
   post:
     player/health >= 0
   dec!  player/health amount
   when  player/health <= 0:
-    set! player/status 'dead
+    set! player/status `dead
     set! player/description "You have fallen."
 ```
 
@@ -710,16 +710,16 @@ unrelate! relation a b       # remove (a → b) from relation
 ### 8.4 Actor Messaging
 
 ```
-send! actor-name message     # enqueue a typed message to actor's inbox
+send! actor-name message     # enqueue a typed message to actor`s inbox
 ```
 
-Messages sent during a turn are delivered at the start of the next turn's message-delivery step (§14.4).
+Messages sent during a turn are delivered at the start of the next turn`s message-delivery step (§14.4).
 
 ### 8.5 Spawning
 
 ```
-spawn!   npcs 'blacksmith Npc(name: "Aldric", health: 80)
-despawn! npcs 'blacksmith
+spawn!   npcs `blacksmith Npc(name: "Aldric", health: 80)
+despawn! npcs `blacksmith
 ```
 
 `spawn! family key Record(...)` instantiates a new family member. The key must not already exist (runtime error otherwise). `despawn!` removes the instance; subsequent reads of its paths return nil. Both operations are logged and are reversible by undo and counterfactual (§21).
@@ -727,8 +727,8 @@ despawn! npcs 'blacksmith
 ### 8.6 Scene Navigation (from transaction functions)
 
 ```
-goto-scene!  'combat          # goto from inside a transaction function
-enter-scene! 'talk-npc        # enter (push) from inside a transaction function
+goto-scene!  `combat          # goto from inside a transaction function
+enter-scene! `talk-npc        # enter (push) from inside a transaction function
 exit-scene!                   # exit (pop) from inside a transaction function
 ```
 
@@ -748,7 +748,7 @@ undo!                        # revert state to the last checkpoint
 undo! steps: 3               # revert to 3 checkpoints ago
 ```
 
-`undo!` replays the log from the most recent checkpoint, reconstructing state. It does not erase log entries; it appends a special `undo` event so the full play history remains auditable. The undo target must have been produced by a function tagged `checkpoint` or by the engine's auto-checkpoint mechanism.
+`undo!` replays the log from the most recent checkpoint, reconstructing state. It does not erase log entries; it appends a special `undo` event so the full play history remains auditable. The undo target must have been produced by a function tagged `checkpoint` or by the engine`s auto-checkpoint mechanism.
 
 ---
 
@@ -765,11 +765,11 @@ hook checkpoint:
   pre:  engine/checkpoint! fn-name
 
 hook broadcast:
-  post: engine/emit 'state-changed changes
+  post: engine/emit `state-changed changes
 
 # Hook on a specific function
 hook after: move-to:
-  engine/emit 'player-moved {from: old-location, to: player/location}
+  engine/emit `player-moved {from: old-location, to: player/location}
 ```
 
 `changes` in a `post:` hook is a read-only list of `{path, old, new}` records for all mutations made during the tagged function.
@@ -835,7 +835,7 @@ The log is the single source of truth. Current state is always a projection of a
 
 ```
 query-at player/location  time: {day: 1, hour: 3, tick: 0}
-  → 'forest
+  → `forest
 
 query-history player/health
   from: {tick: 0}
@@ -858,8 +858,8 @@ schedule morning-reset:
   offset: [hour: 6]
   fn:
     for npc in (path-list npcs):
-      set! npcs/{npc}/location 'village
-    set! npcs/blacksmith/disposition 'friendly
+      set! npcs/{npc}/location `village
+    set! npcs/blacksmith/disposition `friendly
 
 schedule gate-close:
   at: [tick: +50]
@@ -870,8 +870,8 @@ schedule gate-close:
 **Imperative scheduling** from inside a transaction function:
 
 ```
-schedule! 'patrol  every: [tick: +10]  fn: patrol-route
-cancel-schedule! 'patrol
+schedule! `patrol  every: [tick: +10]  fn: patrol-route
+cancel-schedule! `patrol
 ```
 
 The pending schedule queue is itself discrete logged state — it appears in the log when created or cancelled, and is included in future-state search.
@@ -910,12 +910,12 @@ A behavior function is a transaction function called by the engine during the ac
 
 ```
 fn blacksmith-behavior:
-  when player/location = 'village:
-    set! npcs/blacksmith/disposition 'friendly
+  when player/location = `village:
+    set! npcs/blacksmith/disposition `friendly
   for msg in npcs/blacksmith/inbox:
     match msg:
       alert {threat, location}:
-        set! npcs/blacksmith/disposition 'hostile
+        set! npcs/blacksmith/disposition `hostile
         send! guard (ActorMsg/attack-request target: threat, damage: 10)
       trade-offer {item, price}:
         when player/gold >= price:
@@ -927,7 +927,7 @@ fn guard-behavior:
   for msg in npcs/guard/inbox:
     match msg:
       attack-request {target, damage}:
-        set! npcs/guard/disposition 'hostile
+        set! npcs/guard/disposition `hostile
       _: pass
 ```
 
@@ -938,13 +938,13 @@ Actor mutations are **deferred** — they are queued and applied only after all 
 Each game turn proceeds in six steps:
 
 1. **Player action (optional)** — if player input is available, the corresponding transaction function is applied immediately. If no input is provided the step is skipped, allowing fully autonomous turns driven by actors and scheduled events alone.
-2. **Message delivery** — messages sent in the previous turn are moved to each actor's `inbox`.
+2. **Message delivery** — messages sent in the previous turn are moved to each actor`s `inbox`.
 3. **Actor behaviors** — all actors run their behavior functions in `priority` order; mutations are deferred.
 4. **Mutation application** — deferred actor mutations are applied in priority order.
 5. **Scheduled events** — any schedule whose trigger time has arrived fires.
 6. **Queue rotation** — actor inboxes are cleared; `time-inc! tick:` fires if time was not already advanced during this turn (regardless of whether a player action occurred).
 
-Autonomous turns (step 1 skipped) are the normal mechanism for NPC speed and pacing: a fast NPC's schedule can fire every tick while a slow NPC fires every five, all without any player involvement. Steps 2–6 are included as transitions in future-state search.
+Autonomous turns (step 1 skipped) are the normal mechanism for NPC speed and pacing: a fast NPC`s schedule can fire every tick while a slow NPC fires every five, all without any player involvement. Steps 2–6 are included as transitions in future-state search.
 
 ---
 
@@ -957,7 +957,7 @@ Autonomous turns (step 1 skipped) are the normal mechanism for NPC speed and pac
 player/health
 
 # Boolean expression
-player/status = 'alive  and  player/health > 20
+player/status = `alive  and  player/health > 20
 
 # Historical query
 query-history player/health  from: 5 ticks ago  to: now
@@ -969,7 +969,7 @@ query-history player/health  from: 5 ticks ago  to: now
 
 ```
 find npc
-  where    npcs/{npc}/disposition = 'hostile
+  where    npcs/{npc}/disposition = `hostile
   within   3 hops of exits from player/location
   order-by npcs/{npc}/health asc
   limit    5
@@ -994,24 +994,24 @@ Clauses (all optional; multiple `where` clauses are ANDed):
 Built-in queries on `relation` declarations. All return discrete values.
 
 ```
-adjacent?         exits 'village              # Set of locations 1 hop from village
+adjacent?         exits `village              # Set of locations 1 hop from village
 adjacent?         exits player/location       # Set 1 hop from player
-reachable?        exits player/location 'castle              # Bool
-reachable?        exits player/location 'castle  max-hops: 5 # Bool
-shortest-path     exits player/location 'castle              # List(Location, ...)
+reachable?        exits player/location `castle              # Bool
+reachable?        exits player/location `castle  max-hops: 5 # Bool
+shortest-path     exits player/location `castle              # List(Location, ...)
 reachable-set     exits player/location  max-hops: 2         # Set of locations
-inverse-adjacent? exits 'forest              # Set of locations that lead into forest
+inverse-adjacent? exits `forest              # Set of locations that lead into forest
 ```
 
 ### 15.4 Future-State Search
 
 ```
-can-reach?          player/status = 'dead            # Bool
-can-reach?          player/status = 'dead  depth: 20
-find-path           player/location = 'castle        # action sequence or nil
+can-reach?          player/status = `dead            # Bool
+can-reach?          player/status = `dead  depth: 20
+find-path           player/location = `castle        # action sequence or nil
 verify-always       player/health >= 0               # Bool: holds in all futures?
 find-counterexample player/health >= 0               # failing state, or nil
-probability         player/status = 'dead  depth: 10 # Float
+probability         player/status = `dead  depth: 10 # Float
 optimal-path        quest-complete?  by: min-turns   # optimal action sequence
 ```
 
@@ -1059,16 +1059,16 @@ scene village:
   [hostile-nearby?] A hostile figure lurks nearby!
 
   * Enter the forest
-    move-to 'forest
+    move-to `forest
     random-encounter
     -> forest
 
   * [can-afford? 40] Buy a health potion (40 gold)
-    buy-item 'health-potion 40
+    buy-item `health-potion 40
     -> village
 
   * [player/has-key] Ride to the castle
-    move-to 'castle
+    move-to `castle
     -> castle
 
   * Talk to the blacksmith
@@ -1098,10 +1098,10 @@ All scene names form an auto-generated `SceneId` enum. Scene names must be globa
 ```
 scene main:
   -> (match player/location:
-        'village: 'village
-        'forest:  'forest
-        'castle:  'castle
-        'dungeon: 'dungeon)
+        `village: `village
+        `forest:  `forest
+        `castle:  `castle
+        `dungeon: `dungeon)
 
 scene combat:
   Fighting {npcs/{combat/enemy}/name}!
@@ -1110,8 +1110,8 @@ scene combat:
     attack-enemy
     enemy-attacks
     -> (match combat/outcome:
-          'ongoing: 'combat
-          _:        'main)
+          `ongoing: `combat
+          _:        `main)
 ```
 
 ---
@@ -1171,7 +1171,7 @@ get-log         {from, to}          → log entries
 watch player/health  "HP"
 watch player/gold    "Gold"
 watch world/turn     "Turn"
-watch-when player/status = 'dead  "Player died — turn {world/turn}"
+watch-when player/status = `dead  "Player died — turn {world/turn}"
 watch-when (hostile-nearby?)      "Hostile NPC nearby"
 ```
 
@@ -1179,13 +1179,13 @@ Watch declarations are tagged `debug-only` and stripped from production builds. 
 
 ### 18.4 Doc Strings
 
-A string literal immediately before any `type`, `state`, `relation`, `fn`, `actor`, `schedule`, `scene`, or `bounded` declaration is attached as a doc string and surfaced in the live inspector's schema browser.
+A string literal immediately before any `type`, `state`, `relation`, `fn`, `actor`, `schedule`, `scene`, or `bounded` declaration is attached as a doc string and surfaced in the live inspector`s schema browser.
 
 ```
-"The player's current hit points. Clamped to 0–100."
+"The player`s current hit points. Clamped to 0–100."
 state player:
   "Discrete location token — determines available exits."
-  location: Location = 'village
+  location: Location = `village
 ```
 
 ---
@@ -1217,7 +1217,7 @@ migration 2 -> 3:
     fn old: old * 10          # rescale — fn body runs per-entity
   transform npcs/*/health:
     fn old: min old 100       # clamp to new range
-  rename-enum player/class  'fighter -> 'warrior
+  rename-enum player/class  `fighter -> `warrior
 ```
 
 Migration operations:
@@ -1243,25 +1243,25 @@ Migration operations:
 ```
 verify "player can always reach the castle eventually":
   from-any-state:
-    can-reach? player/location = 'castle  depth: 100
+    can-reach? player/location = `castle  depth: 100
 
 verify "health is always non-negative":
   verify-always player/health >= 0
 
 verify "buying a potion costs exactly 40 gold":
   requires player/gold >= 40
-  after (buy-item 'health-potion 40):
+  after (buy-item `health-potion 40):
     player/gold = player/gold@before - 40
-    contains? player/inventory 'health-potion
+    contains? player/inventory `health-potion
 
 verify "combat is always resolvable":
   when combat/active = true:
     can-reach? combat/active = false  depth: 20
 
 verify "death is recoverable via undo":
-  when player/status = 'dead:
+  when player/status = `dead:
     after undo!:
-      player/status != 'dead
+      player/status != `dead
 ```
 
 **Clauses:**
@@ -1286,7 +1286,7 @@ Failures report the specific state, counterexample path, and log excerpt that vi
 
 ```
 let alt = counterfactual from: world/turn - 3 do:
-  move-to 'forest
+  move-to `forest
   random-encounter
 ```
 
@@ -1305,11 +1305,11 @@ if (in-state alt) player/health < player/health:
 All pure query operations accept `(in-state gs)` to redirect reads:
 
 ```
-can-reach? (in-state alt) player/status = 'dead  depth: 20
+can-reach? (in-state alt) player/status = `dead  depth: 20
 
 find npc
   in-state: alt
-  where     npcs/{npc}/disposition = 'hostile
+  where     npcs/{npc}/disposition = `hostile
 ```
 
 ### 21.3 Semantics
@@ -1318,7 +1318,7 @@ find npc
 - Actors and scheduled events do **not** run in a counterfactual by default. Use `simulate: true` to include them:
   ```
   let alt = counterfactual from: world/turn  simulate: true  do:
-    move-to 'forest
+    move-to `forest
   ```
 - Counterfactuals may be nested; nesting depth is bounded (see `max-counterfactual-depth` in engine config).
 - Counterfactuals are logged as `counterfactual(from: T, transitions: [...])` entries, visible in the debug timeline.
@@ -1349,7 +1349,7 @@ local sb = require("storybase")
 local game = sb.load("game.sb")
 
 -- Call a transaction function
-game:call("move-to", "'forest")
+game:call("move-to", "`forest")
 
 -- Read state
 local health = game:get("player/health")
@@ -1357,7 +1357,7 @@ local loc    = game:get("player/location")
 
 -- Run a query
 local hostiles = game:find("npc", {
-  where  = "npcs/{npc}/disposition = 'hostile",
+  where  = "npcs/{npc}/disposition = `hostile",
   within = {hops=3, relation="exits", from="player/location"},
   limit  = 5
 })
@@ -1373,7 +1373,7 @@ end)
 
 -- Send player input
 game:choose(2)               -- player selected choice index 2
-game:eval("pickup-item 'key")
+game:eval("pickup-item `key")
 ```
 
 ### 22.2 Bounded Computations
@@ -1398,7 +1398,7 @@ The runtime calls this function synchronously during the turn and logs the resul
 game:register_bounded("game.ai.evaluate_options", function(npc, state)
   -- Use the storybase counterfactual API to evaluate options
   local alt = game:counterfactual({from = state["world/turn"]}, function(g)
-    g:call("move-to", "'forest")
+    g:call("move-to", "`forest")
   end)
   local future_health = alt:get("player/health")
   return future_health > 50 and "cooperate" or "defect"
@@ -1523,20 +1523,20 @@ type Damage = Int(0, 999)
 
 type Entity:
   health:   Health   = 50
-  status:   Status   = 'alive
-  location: Location = 'village
+  status:   Status   = `alive
+  location: Location = `village
   name:     String   = "Unknown"
 
 type Npc:
   with Entity
-  disposition: Disposition = 'neutral
+  disposition: Disposition = `neutral
 
 type Player:
   with Entity
   health:      Health              = 100
   mana:        Int(0, 50)          = 50
   gold:        Gold                = 30
-  class:       CharClass           = 'warrior
+  class:       CharClass           = `warrior
   has-key:     Bool                = false
   inventory:   Set(ItemKind, 10)   = (set)
   quest-flags: Set(QuestFlag, 20)  = (set)
@@ -1559,12 +1559,12 @@ state npcs/{npc}: Npc  max: 20
 
 state world:
   turn:    Int(0, 9999) = 0
-  chapter: Chapter      = 'intro
+  chapter: Chapter      = `intro
 
 state combat:
   active:  Bool         = false
-  enemy:   NpcId        = 'wanderer
-  outcome: CombatResult = 'ongoing
+  enemy:   NpcId        = `wanderer
+  outcome: CombatResult = `ongoing
 
 # ============================================================
 # RELATIONS
@@ -1572,10 +1572,10 @@ state combat:
 
 "Navigation graph between locations."
 relation exits: Location -> Set(Location, 6):
-  'village: {'forest}
-  'forest:  {'village, 'dungeon}
-  'dungeon: {'forest, 'castle}
-  'castle:  {'village}
+  `village: {`forest}
+  `forest:  {`village, `dungeon}
+  `dungeon: {`forest, `castle}
+  `castle:  {`village}
 
 # ============================================================
 # SCHEDULING
@@ -1586,8 +1586,8 @@ schedule morning-reset:
   offset: [hour: 6]
   fn:
     for npc in (path-list npcs):
-      set! npcs/{npc}/location 'village
-    set! npcs/blacksmith/disposition 'friendly
+      set! npcs/{npc}/location `village
+    set! npcs/blacksmith/disposition `friendly
 
 # ============================================================
 # ACTORS
@@ -1615,7 +1615,7 @@ actor guard:
 # ============================================================
 
 fn alive? entity:
-  npcs/{entity}/status = 'alive
+  npcs/{entity}/status = `alive
 
 fn can-afford? price:
   player/gold >= price
@@ -1623,42 +1623,42 @@ fn can-afford? price:
 fn hostile-nearby?:
   (find npc
     where  npcs/{npc}/location = player/location
-    and    npcs/{npc}/disposition = 'hostile
+    and    npcs/{npc}/disposition = `hostile
     count) > 0
 
 fn base-damage:
   match player/class:
-    'warrior: 15
-    'rogue:   12
-    'mage:     8
+    `warrior: 15
+    `rogue:   12
+    `mage:     8
 
 fn quest-complete?:
-  (contains? player/quest-flags 'goblin-defeated)
-  and (contains? player/quest-flags 'found-crown)
-  and player/location = 'castle
+  (contains? player/quest-flags `goblin-defeated)
+  and (contains? player/quest-flags `found-crown)
+  and player/location = `castle
 
 # ============================================================
 # TRANSACTION FUNCTIONS
 # ============================================================
 
 fn move-to loc:
-  pre:  player/status = 'alive
+  pre:  player/status = `alive
   set!  player/location loc
   time-inc! tick:
 
 fn take-damage amount:
   pre:
     amount > 0
-    player/status = 'alive
+    player/status = `alive
   post:
     player/health >= 0
   dec!  player/health amount
   when  player/health <= 0:
-    set! player/status 'dead
+    set! player/status `dead
     set! player/description "You have fallen."
 
 fn heal amount:
-  pre:  player/status = 'alive
+  pre:  player/status = `alive
   inc!  player/health (min amount (100 - player/health))
 
 fn pickup-item item:
@@ -1677,8 +1677,8 @@ fn enter-combat enemy:
   tags: [checkpoint]
   set!  combat/active  true
   set!  combat/enemy   enemy
-  set!  combat/outcome 'ongoing
-  goto-scene! 'combat
+  set!  combat/outcome `ongoing
+  goto-scene! `combat
 
 fn attack-enemy:
   pre:  combat/active = true
@@ -1688,33 +1688,33 @@ fn attack-enemy:
     dec!  npcs/{combat/enemy}/health total
     set!  player/description (str "You deal " total " damage.")
     when  npcs/{combat/enemy}/health <= 0:
-      set!  npcs/{combat/enemy}/status 'dead
-      set!  combat/outcome 'victory
+      set!  npcs/{combat/enemy}/status `dead
+      set!  combat/outcome `victory
       inc!  player/gold (random-int 10 30)
 
 fn enemy-attacks:
   let dmg = (random-int 5 15):
     take-damage dmg
-    when player/status = 'dead:
-      set! combat/outcome 'defeat
+    when player/status = `dead:
+      set! combat/outcome `defeat
 
 fn random-encounter:
   when (random-bool 0.25):
     let kind = (random-enum EnemyKind):
-      spawn! npcs 'wanderer Npc(status: 'alive, health: 30,
+      spawn! npcs `wanderer Npc(status: `alive, health: 30,
                                 location: player/location,
-                                disposition: 'hostile)
-      enter-combat 'wanderer
+                                disposition: `hostile)
+      enter-combat `wanderer
 
 fn deliver-ore:
-  pre:  contains? player/quest-flags 'iron-ore
-  remove! player/inventory 'iron-ore
-  add!    player/quest-flags 'ore-delivered
-  set!    npcs/blacksmith/disposition 'friendly
+  pre:  contains? player/quest-flags `iron-ore
+  remove! player/inventory `iron-ore
+  add!    player/quest-flags `ore-delivered
+  set!    npcs/blacksmith/disposition `friendly
 
 fn end-chapter:
   when quest-complete?:
-    set! world/chapter 'finale
+    set! world/chapter `finale
     inc! player/gold 500
 
 # ============================================================
@@ -1722,12 +1722,12 @@ fn end-chapter:
 # ============================================================
 
 fn blacksmith-behavior:
-  when player/location = 'village:
-    set! npcs/blacksmith/disposition 'friendly
+  when player/location = `village:
+    set! npcs/blacksmith/disposition `friendly
   for msg in npcs/blacksmith/inbox:
     match msg:
       alert {threat, location}:
-        set! npcs/blacksmith/disposition 'hostile
+        set! npcs/blacksmith/disposition `hostile
         send! guard (ActorMsg/attack-request target: threat, damage: 10)
       trade-offer {item, price}:
         when player/gold >= price:
@@ -1739,7 +1739,7 @@ fn guard-behavior:
   for msg in npcs/guard/inbox:
     match msg:
       attack-request {target, damage}:
-        set! npcs/guard/disposition 'hostile
+        set! npcs/guard/disposition `hostile
       _: pass
 
 # ============================================================
@@ -1748,10 +1748,10 @@ fn guard-behavior:
 
 scene main:
   -> (match player/location:
-        'village: 'village
-        'forest:  'forest
-        'castle:  'castle
-        'dungeon: 'dungeon)
+        `village: `village
+        `forest:  `forest
+        `castle:  `castle
+        `dungeon: `dungeon)
 
 scene village:
   You are in the **village square**. The smell of bread and coal smoke drifts on the air.
@@ -1759,21 +1759,21 @@ scene village:
   [hostile-nearby?] A hostile figure lurks nearby!
 
   * Enter the forest
-    move-to 'forest
+    move-to `forest
     random-encounter
     -> forest
 
   * [can-afford? 40] Buy a health potion (40 gold)
-    buy-item 'health-potion 40
+    buy-item `health-potion 40
     -> village
 
-  * [can-afford? 200  and  contains? player/quest-flags 'ore-delivered]
+  * [can-afford? 200  and  contains? player/quest-flags `ore-delivered]
     Collect your iron blade from the blacksmith (200 gold)
-    buy-item 'iron-blade 200
+    buy-item `iron-blade 200
     -> village
 
   * [player/has-key] Ride to the castle
-    move-to 'castle
+    move-to `castle
     -> castle
 
   * Talk to the blacksmith
@@ -1786,13 +1786,13 @@ scene village:
 scene forest:
   You stand in the **dark forest**. The trees press in on all sides.
 
-  * [not (contains? player/quest-flags 'goblin-defeated)]
+  * [not (contains? player/quest-flags `goblin-defeated)]
     Press deeper — into the dungeon
-    move-to 'dungeon
+    move-to `dungeon
     -> dungeon
 
   * Return to the village
-    move-to 'village
+    move-to `village
     -> village
 
 scene dungeon:
@@ -1803,7 +1803,7 @@ scene dungeon:
     -> dungeon
 
   * Return to the forest
-    move-to 'forest
+    move-to `forest
     -> forest
 
 scene castle:
@@ -1814,7 +1814,7 @@ scene castle:
     -> castle
 
   * Return to the village
-    move-to 'village
+    move-to `village
     -> village
 
 scene combat:
@@ -1825,16 +1825,16 @@ scene combat:
     attack-enemy
     enemy-attacks
     -> (match combat/outcome:
-          'ongoing: 'combat
-          _:        'main)
+          `ongoing: `combat
+          _:        `main)
 
-  * [contains? player/inventory 'health-potion] Use health potion
-    remove! player/inventory 'health-potion
+  * [contains? player/inventory `health-potion] Use health potion
+    remove! player/inventory `health-potion
     heal 40
     enemy-attacks
     -> (match combat/outcome:
-          'ongoing: 'combat
-          _:        'main)
+          `ongoing: `combat
+          _:        `main)
 
   * [can-afford? 10] Flee (lose 10 gold)
     dec!  player/gold 10
@@ -1844,11 +1844,11 @@ scene combat:
 scene talk-blacksmith:
   The blacksmith looks you over with a practiced eye.
 
-  * [not (contains? player/quest-flags 'ore-delivered)]
-    "Bring me iron ore and I'll forge you a blade."
+  * [not (contains? player/quest-flags `ore-delivered)]
+    "Bring me iron ore and I`ll forge you a blade."
     -> talk-blacksmith
 
-  * [contains? player/inventory 'iron-ore] Deliver the iron ore
+  * [contains? player/inventory `iron-ore] Deliver the iron ore
     deliver-ore
     <-
 
@@ -1863,7 +1863,7 @@ watch player/health  "HP"
 watch player/gold    "Gold"
 watch world/turn     "Turn"
 watch world/chapter  "Chapter"
-watch-when player/status = 'dead  "Player died — turn {world/turn}"
+watch-when player/status = `dead  "Player died — turn {world/turn}"
 
 # ============================================================
 # TESTS
@@ -1871,23 +1871,23 @@ watch-when player/status = 'dead  "Player died — turn {world/turn}"
 
 verify "player can always reach the castle eventually":
   from-any-state:
-    can-reach? player/location = 'castle  depth: 100
+    can-reach? player/location = `castle  depth: 100
 
 verify "health is always non-negative":
   verify-always player/health >= 0
 
 verify "buying a potion costs exactly 40 gold":
   requires player/gold >= 40
-  after (buy-item 'health-potion 40):
+  after (buy-item `health-potion 40):
     player/gold = player/gold@before - 40
-    contains? player/inventory 'health-potion
+    contains? player/inventory `health-potion
 
 verify "combat is always resolvable":
   when combat/active = true:
     can-reach? combat/active = false  depth: 20
 
 verify "death is recoverable via undo":
-  when player/status = 'dead:
+  when player/status = `dead:
     after undo!:
-      player/status != 'dead
+      player/status != `dead
 ```

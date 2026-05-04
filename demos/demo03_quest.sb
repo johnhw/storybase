@@ -30,7 +30,7 @@ type Class = warrior | mage | rogue
 # ─────────────────────────────────────────────────────────
 
 state player:
-  class:        Class  = 'warrior
+  class:        Class  = `warrior
   found-herb:   Bool   = false
   slew-wolf:    Bool   = false
   spoke-elder:  Bool   = false
@@ -76,13 +76,13 @@ scene intro:
   To find it you must prove yourself to the village elder.
   Choose your path.
   * Become a warrior
-    set! player/class 'warrior
+    set! player/class `warrior
     -> village
   * Become a mage
-    set! player/class 'mage
+    set! player/class `mage
     -> village
   * Become a rogue
-    set! player/class 'rogue
+    set! player/class `rogue
     -> village
 
 scene village:
