@@ -188,6 +188,10 @@ time-model:
 
 Omit `wrap:` for non-cyclic time. Axis names are arbitrary identifiers.
 
+Each declared axis is automatically available as a read-only pseudo-path `time/<axis-name>`
+(e.g. `time/day`, `time/tick`). Use `time-inc!` to advance an axis and `time-set!` to
+assign it directly. No separate state variable is needed to track the current time value.
+
 ### `type`
 
 **Enum:**
@@ -809,7 +813,38 @@ time-inc! tick:
 time-inc! day: 1, tick: 3
 ```
 
-Advance time. Uses the time axes declared in `time-model`.
+Advance one or more time axes declared in `time-model` by the given amounts. Omitting a
+value defaults to 1.
+
+Each axis is also accessible as a read-only pseudo-path `time/<axis-name>` — useful in
+narration, guards, and pure functions without needing a separate state variable:
+
+```
+time-inc! day: 1
+
+When day {time/day} begins...
+when time/day > 3:
+  set! world/phase `late-game
+```
+
+`time/<axis>` always reflects the current axis value. It is read-only: `set!` on a `time/`
+path is a runtime error. Use `time-set!` to assign an absolute value.
+
+### `time-set!`
+
+```
+time-set! day: 1
+time-set! day: 5, tick: 0
+```
+
+Set one or more time axes to absolute values. Used for time-warp mechanics or resetting
+time after a scene transition. Only affects declared axes; undeclared axis names are silently
+ignored.
+
+```
+fn warp-to-day n:
+  time-set! day: n
+```
 
 ### `schedule!` / `cancel-schedule!`
 

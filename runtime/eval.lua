@@ -296,6 +296,13 @@ eval_expr = function(node, ctx)
         return t
       end
       return {}
+    elseif path:sub(1, 5) == "time/" then
+      -- time/<axis> — read-only pseudo-path for a declared time axis value
+      local axis = path:sub(6)
+      if ctx.state and ctx.state._time then
+        return ctx.state._time[axis]
+      end
+      return nil
     end
     return ctx.state:get(path)
 

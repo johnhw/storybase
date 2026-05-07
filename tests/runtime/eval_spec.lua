@@ -1100,6 +1100,120 @@ scene start:
   end)
 end)
 
+-- ── time/<axis> pseudo-paths ─────────────────────────────────────────────────
+
+describe("eval: time/<axis> read-only pseudo-paths", function()
+  local log_mod2   = require("runtime.log")
+  local state_mod2 = require("runtime.state")
+  local compiler2  = require("compiler.compiler")
+
+  local function make_time_ctx(axes_src)
+    local src = [[
+module t
+  version: 1.0
+schema-version: 1
+time-model:
+]] .. axes_src .. [[
+fn noop:
+  pass
+scene start:
+  .
+  * Go -> start
+]]
+    local gt, diags = compiler2.compile(src, "test")
+    assert.equal(0, #diags.errors, "compile failed")
+    local log   = log_mod2.new()
+    local store = state_mod2.new(gt.schema, log)
+    store:init_defaults(gt.schema)
+    local c = eval.new_ctx(store, gt.fns, "test")
+    return c, store
+  end
+
+  it("time/day reads declared axis value (initial 0)", function()
+    local c, _ = make_time_ctx("  axes: [day]\n  wrap: [none]\n")
+    local node = { kind = "path_expr", segments = {"time", "day"} }
+    assert.equal(0, eval.eval_expr(node, c))
+  end)
+
+  it("time/day reflects value after time-inc!", function()
+    local c, store = make_time_ctx("  axes: [day, tick]\n  wrap: [none, none]\n")
+    store:inc_time("day", 5)
+    local node = { kind = "path_expr", segments = {"time", "day"} }
+    assert.equal(5, eval.eval_expr(node, c))
+  end)
+
+  it("time/tick is independent of time/day", function()
+    local c, store = make_time_ctx("  axes: [day, tick]\n  wrap: [none, none]\n")
+    store:inc_time("day", 3)
+    store:inc_time("tick", 7)
+    local day_node  = { kind = "path_expr", segments = {"time", "day"}  }
+    local tick_node = { kind = "path_expr", segments = {"time", "tick"} }
+    assert.equal(3, eval.eval_expr(day_node,  c))
+    assert.equal(7, eval.eval_expr(tick_node, c))
+  end)
+
+  it("time/day reflects value after time-set!", function()
+    local c, store = make_time_ctx("  axes: [day]\n  wrap: [none]\n")
+    store:set_time("day", 12)
+    local node = { kind = "path_expr", segments = {"time", "day"} }
+    assert.equal(12, eval.eval_expr(node, c))
+  end)
+
+  it("returns nil for an undeclared axis", function()
+    local c, _ = make_time_ctx("  axes: [day]\n  wrap: [none]\n")
+    local node = { kind = "path_expr", segments = {"time", "year"} }
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+
+  it("time/<axis> is readable in compiled narration via inline expression", function()
+    local src = [[
+module t
+  version: 1.0
+schema-version: 1
+time-model:
+  axes: [day]
+  wrap: [none]
+engine-config:
+  entry-scene: start
+scene start:
+  Day {time/day}.
+  * Next -> start
+]]
+    local gt = assert(compiler2.compile(src, "test"))
+    local eng_mod = require("runtime.engine")
+    local eng = eng_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    eng._state:inc_time("day", 4)
+    local narr = eng:render_scene("start")
+    local text = narr[1] and narr[1].text or narr[1]
+    assert.matches("Day 4", tostring(text))
+  end)
+
+  it("time/<axis> is usable in a pure fn return value", function()
+    local src = [[
+module t
+  version: 1.0
+schema-version: 1
+time-model:
+  axes: [day]
+  wrap: [none]
+fn current-day:
+  time/day
+scene start:
+  .
+  * Go -> start
+]]
+    local gt = assert(compiler2.compile(src, "test"))
+    local log3  = log_mod2.new()
+    local st3   = state_mod2.new(gt.schema, log3)
+    st3:init_defaults(gt.schema)
+    st3:inc_time("day", 9)
+    local c3 = eval.new_ctx(st3, gt.fns, "current-day", gt)
+    local result = eval.call_fn("current-day", {}, c3)
+    assert.equal(9, result)
+  end)
+end)
+
 -- ── indexed list access ──────────────────────────────────────────────────────
 
 describe("eval — indexed list access", function()
