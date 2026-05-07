@@ -14,186 +14,34 @@ Authoring ergonomics issues AE-1, AE-2, AE-4, AE-5, AE-6, AE-9, AE-12 resolved.
 
 **2070 tests passing, 0 failing.**
 
-All significant language features now have polished numbered demos.
-
-Bug fixed: CLI `--cli` save/restore (`restore_engine` in `cli/cli_cmd.lua`) did not
-repopulate `eng._log._entries` after replay, causing `query-history`, `query-changes`,
-and `query-at` to return empty results after the first step.  Fix: append saved entries
-back into `eng._log._entries` and restore `eng._log._seq`.
-
 ---
 
 ## Next Up
 
-- [x] Write `demos/demo21_merchants_reckoning.sb` (design below)
-- [x] Add CLI integration test entries for demo21 in `tests/cli/cli_integration_spec.lua`
-- [x] Update `code_map.md` demos table with demo21 entry once written
+Remaining authoring ergonomics issues, roughly in priority order:
 
----
-
-## Demo 21 — `query-at` / `query-history` / `query-changes`
-
-**File:** `demos/demo21_merchants_reckoning.sb`
-
-**Goal:** Showcase all three log-backed temporal query builtins as first-class gameplay
-mechanics.  These are the only significant language features with no polished numbered demo
-(only a test fixture, `tests/test05_log_and_time.sb`, uses `query-history`).
-
-### Narrative frame
-
-A travelling merchant performs *the reckoning* — a ritual end-of-day audit in which the
-chronicle (the transaction log) is consulted to reconstruct what happened.  The player
-makes several trade and travel choices across multiple days, building up history, then
-enters the reckoning scene to review it via the three query forms.
-
-### Features to demonstrate
-
-| Builtin | Example syntax | Narrative use |
-|---------|---------------|---------------|
-| `query-history` | `query-history player/gold` | Full ledger — every gold change with day and direction |
-| `query-changes` | `query-changes player/location last-n: 3` | Recent road — last 3 locations visited |
-| `query-at` | `query-at player/gold time: {day: d}` | Opening fortune — what was gold at start of a named day |
-| Wildcard pattern | `query-history player/*` | Broad audit — every player state change combined |
-
-### Types and state
-
-```
-time-model:
-  axes: [day]
-  wrap: [none]
-
-type Location = crossroads | town | market | forest | inn | ruins
-type Gold     = Int(0, 500)
-
-state player:
-  gold:     Gold     = 100
-  location: Location = 'crossroads
-
-state world:
-  day: Int(0, 30) = 1
-```
-
-### Scene outline
-
-- **`crossroads`** — hub scene; navigate to town / market / forest / inn; choice to "take the
-  reckoning" (→ `reckoning`) once `world/day > 1` so there is non-trivial history.
-- **`town`** — sell found goods (+gold); rest (advance day + return).
-- **`market`** — buy provisions (−gold); sell surplus (+gold); return.
-- **`forest`** — explore; may change location to ruins; return.
-- **`inn`** — pay for lodging (−gold); rest advances day; return.
-- **`reckoning`** — three-part audit with sub-choices:
-  - *Consult the ledger* → `reckoning-ledger`: `for entry in (query-history player/gold):`
-    renders each change as "Day N: N gold → N gold".
-  - *Trace the road* → `reckoning-route`: `for entry in (query-changes player/location last-n: 3):`
-    renders last three locations.
-  - *Recall opening fortune* → `reckoning-fortune`: inline `{gold-on-day 1}` using a helper
-    fn that calls `query-at player/gold time: {day: 1}`.
-  - *Close the reckoning* → back to crossroads.
-
-### Key functions
-
-```
-fn travel dest:
-  set! player/location dest
-
-fn earn-gold amount:
-  tags: [checkpoint]
-  inc!  player/gold amount
-
-fn spend-gold amount:
-  pre:  player/gold >= amount
-  tags: [checkpoint]
-  dec!  player/gold amount
-
-fn advance-day:
-  tags: [checkpoint]
-  inc!  world/day 1
-  time-inc! day: 1
-
-fn gold-on-day d:   # query-at with variable time axis value
-  query-at player/gold time: {day: d}
-```
-
-### Rendering log entries in narration
-
-Log entry records have `time`, `old`, `new`, and `path` fields.  Access via path
-interpolation in `for` bodies:
-
-```
-for entry in (query-history player/gold):
-  Day {entry/time/day}: {entry/old} → {entry/new} gold
-```
-
-Confirm that `entry/time/day` resolves correctly (first segment = loop var, subsequent
-segments = table field navigation).  If it does not, use `tostring entry` as a fallback
-for the demo and file a bug.
-
-### Verify blocks
-
-```
-verify "gold never goes negative":
-  verify-always player/gold >= 0
-
-verify "spend-gold reduces gold by exactly the amount":
-  requires player/gold >= 30
-  after (spend-gold 30):
-    player/gold = player/gold@before - 30
-
-verify "query-at day 1 returns initial gold before any trade on day 1":
-  after (advance-day):
-    gold-on-day 1 = 100
-```
-
-The third verify checks that `query-at` with the initial time returns the correct snapshot
-value — a direct test of the builtin's semantics, not just game logic.
-
-### Implementation notes
-
-- Build up enough choices that the reckoning scenes are non-trivial: at least 2 earn/spend
-  actions and 1 day advance before reaching `reckoning`.
-- Use `[world/day > 1]` guard on the "take the reckoning" choice so there is always
-  something in the log.
-- The wildcard query `query-history player/*` in the broad-audit variant is optional; include
-  it only if confirmed to work correctly in the for-loop context (see eval_spec tests for
-  wildcard path patterns).
-- Prefer simple, readable narration over exhaustive coverage — the goal is clarity, not
-  exhaustiveness.
+1. **AE-10** / **AE-11** — Documentation gaps (low effort, high value for authors)
+2. **AE-8** — Document `verify` limitation (low effort)
+3. **AE-3** — Time axis / state variable sync (design decision needed)
+4. **AE-7** — Actor `perceives:` friction (larger change)
+5. **Inelegance #7** — BFS duplication (deferred; low priority)
 
 ---
 
 ## Remaining Polish
 
-- [x] Every public function in every module has at least one passing and one failing test.
-  - Verified across all runtime and compiler modules (2026-05-03).
-  - Added: scheduler dead-stub error test; lexer bare-tick and unclosed-interpolation error tests.
-- [ ] Inelegance #7 — BFS expansion logic duplicated ~5×. Deferred: each BFS function has a different data payload (priority/path/prob/cost) and queue mechanism (FIFO/heap/yield). Extracting a shared helper would require a messy callback strategy and add more complexity than it removes.
+- [ ] **Inelegance #7** — BFS expansion logic duplicated ~5×. Deferred: each BFS function
+  has a different data payload (priority/path/prob/cost) and queue mechanism
+  (FIFO/heap/yield). Extracting a shared helper would require a messy callback strategy and
+  add more complexity than it removes.
 
 ---
 
-## Authoring Ergonomics Issues (2026-05-04)
-
-Identified by reviewing all demos and documentation. AE-1, AE-2, AE-4, AE-5, AE-6,
-AE-12 resolved in this session.
+## Authoring Ergonomics Issues (open)
 
 ### Lexer / Parser
 
-- [x] **AE-1 — Apostrophes in prose text.** Symbol literal sigil changed from `'` to
-  backtick (`` ` ``). Apostrophe (`'`) now emits `RAW_TEXT` and is valid in narration prose.
-  All `.sb` files and `idea.md` updated. `compiler/lexer.lua`, `compiler/parser.lua`,
-  `cli/format_cmd.lua`, all demo/test `.sb` files updated.
-
-- [x] **AE-2 — UTF-8 characters silently corrupted in prose.** The `> 127` branch in
-  `compiler/lexer.lua` now decodes the full UTF-8 sequence length and emits a `RAW_TEXT`
-  token. Em-dashes, arrows, curly quotes, ellipsis etc. now appear correctly in narration.
-
-- [ ] **AE-5 — No escape for literal `{` in narration.** Fixed: `{{` in source now emits
-  `RAW_TEXT "{"` at the lexer level without incrementing `paren_depth`. Implemented in
-  `compiler/lexer.lua`.
-
-- [ ] **AE-6 — Narration lines starting with a keyword produce confusing parse errors.**
-  Fixed: `parse_body_items` in scene mode now appends a note to the last diagnostic after
-  `parse_if_expr`, `parse_when_stmt`, or `parse_for_stmt` produce errors, suggesting the
-  line may be narration. Implemented in `compiler/parser.lua`.
+*(No open lexer/parser AEs.)*
 
 ### Runtime / Semantics
 
@@ -205,21 +53,11 @@ AE-12 resolved in this session.
   `time-model: day-var: world/day` unification field. Affects: `runtime/eval.lua`,
   `compiler/parser.lua`, `idea.md`.
 
-- [x] **AE-4 — `query-at` returns nil for paths that were never mutated, even if they have
-  a declared initial value.** Fixed: `init_defaults` in `runtime/state.lua` now calls
-  `_log_entry` for each default value, so `query-at` can find initial state. Demo21's
-  third verify block now uses the original wording and passes. Seq numbers in debug
-  time-travel tests updated accordingly.
-
 - [ ] **AE-8 — `verify` `after (fn):` always starts from a fresh initial state, not from
   arbitrary reachable states.** Authors cannot write "after buying from any state where we
-  have enough gold, gold decreases." The `from-any-state:` + `requires:` workaround is
-  more complex. Fix: document this clearly as a known limitation in `docs/reference/language.md`,
+  have enough gold, gold decreases." The `from-any-state:` + `requires:` workaround is more
+  complex. Fix: document this clearly as a known limitation in `docs/reference/language.md`,
   and consider whether `after (fn):` should optionally sample from BFS-explored states.
-
-- [x] **AE-12 — No error when `=>` subscene forgets `<-`.** Fixed: `push_scene` in
-  `runtime/engine.lua` now includes the full scene stack in the overflow error message,
-  showing the chain of `=>` pushes so the author can identify which scene is missing `<-`.
 
 ### Missing Features
 
@@ -229,13 +67,6 @@ AE-12 resolved in this session.
   for dev mode, or auto-infer `perceives` from the behavior function's static read-set
   (the checker already computes write-sets; read-sets are symmetric). Affects:
   `compiler/checker.lua`, `runtime/actors.lua`.
-
-- [x] **AE-9 — No debug print / trace from `.sb` code.** Fixed: added two builtins in
-  `runtime/eval.lua`: `print` (varargs, space-joined, stderr/sink) and `log` (levelled with
-  source location — `[LEVEL] file:line (fn): msg`). Both are suppressed when
-  `ctx.game.production` is true. Output routed via `ctx.game._print_sink` callback (default
-  stderr). Source location available to `log` via `ctx.call_pos` set at each FN_CALL
-  dispatch. 24 tests added to `tests/runtime/eval_spec.lua`.
 
 ### Documentation Gaps
 
