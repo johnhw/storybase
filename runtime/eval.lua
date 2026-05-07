@@ -11,6 +11,9 @@
 --   ctx.fn_name  — string: current function name, used in log entries
 --   ctx.signal   — set by scene-navigation stmts: {type="goto"|"enter"|"exit", target=name}
 --   ctx.retval   — last expression value (for pure function return values)
+--   ctx.call_pos — {file,line,col} of the most recent fn_call node; used by log builtin
+--   ctx.game._print_sink — optional function(string) for redirecting print/log output
+--   ctx.game.production  — when true, print/log are silently suppressed
 
 local M = {}
 
@@ -535,6 +538,7 @@ eval_expr = function(node, ctx)
 
   -- Function call
   elseif k == K.FN_CALL then
+    ctx.call_pos = node.pos   -- expose source location to builtins (print/log)
     return call_fn(node.name, node.args, ctx)
 
   -- If expression
@@ -934,6 +938,42 @@ local BUILTINS = {
   end,
   ["tostring"] = function(args, ctx)
     return tostring(eval_expr(args[1], ctx))
+  end,
+  -- ── Debug output (dev-mode only; suppressed when ctx.game.production is true) ─
+  ["print"] = function(args, ctx)
+    if ctx.game and ctx.game.production then return nil end
+    local parts = {}
+    for _, arg in ipairs(args) do
+      local v = eval_expr(arg, ctx)
+      parts[#parts + 1] = (v == nil) and "nil" or tostring(v)
+    end
+    local msg = table.concat(parts, " ") .. "\n"
+    local sink = ctx.game and ctx.game._print_sink
+    if sink then sink(msg) else io.stderr:write(msg) end
+    return nil
+  end,
+  ["log"] = function(args, ctx)
+    if ctx.game and ctx.game.production then return nil end
+    local level_val = eval_expr(args[1], ctx)
+    local level = tostring(level_val or "debug"):upper()
+    local parts = {}
+    for i = 2, #args do
+      local v = eval_expr(args[i], ctx)
+      parts[#parts + 1] = (v == nil) and "nil" or tostring(v)
+    end
+    local msg_text = table.concat(parts, " ")
+    local pos = ctx.call_pos
+    local loc
+    if pos and pos.file and pos.file ~= "?" then
+      loc = pos.file .. ":" .. tostring(pos.line)
+    else
+      loc = "?"
+    end
+    local fn = ctx.fn_name or "?"
+    local msg = "[" .. level .. "] " .. loc .. " (" .. fn .. "): " .. msg_text .. "\n"
+    local sink = ctx.game and ctx.game._print_sink
+    if sink then sink(msg) else io.stderr:write(msg) end
+    return nil
   end,
   -- ── String / numeric stdlib ──────────────────────────────────────────────────
   ["str"] = function(args, ctx)
@@ -2419,6 +2459,7 @@ eval_stmt = function(node, ctx)
 
   elseif k == K.FN_CALL then
     -- fn_call appearing directly as a statement (not wrapped in expr_stmt)
+    ctx.call_pos = node.pos   -- expose source location to builtins (print/log)
     ctx.retval = call_fn(node.name, node.args, ctx)
 
   elseif k == K.SAY_STMT then

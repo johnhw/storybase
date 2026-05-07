@@ -2913,3 +2913,262 @@ scene main:
     assert.is_nil(eval.eval_expr(adj_node, ctx_live) and eval.eval_expr(adj_node, ctx_live)["b"])
   end)
 end)
+
+-- ── print / log builtins ──────────────────────────────────────────────────────
+
+describe("print builtin", function()
+  local function make_ctx_with_sink()
+    local output = {}
+    local game = { _print_sink = function(s) output[#output+1] = s end }
+    local s = make_store({})
+    local c = eval.new_ctx(s, {}, "test-fn", game)
+    return c, output
+  end
+
+  it("writes space-joined args to sink", function()
+    local c, out = make_ctx_with_sink()
+    local node = fn_call("print",
+      { kind="string_lit", value="hello" },
+      { kind="string_lit", value="world" })
+    eval.eval_expr(node, c)
+    assert.equal("hello world\n", out[1])
+  end)
+
+  it("converts numbers to string", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(fn_call("print", int_lit(42)), c)
+    assert.equal("42\n", out[1])
+  end)
+
+  it("converts nil to the string 'nil'", function()
+    local c, out = make_ctx_with_sink()
+    -- path to non-existent key → nil
+    eval.eval_expr(fn_call("print", path("missing")), c)
+    assert.equal("nil\n", out[1])
+  end)
+
+  it("works with a single bool arg", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(fn_call("print", bool_lit(true)), c)
+    assert.equal("true\n", out[1])
+  end)
+
+  it("returns nil", function()
+    local c, _ = make_ctx_with_sink()
+    local result = eval.eval_expr(fn_call("print", str_lit("x")), c)
+    assert.is_nil(result)
+  end)
+
+  it("prints nothing and returns nil when production=true", function()
+    local output = {}
+    local game = { production = true, _print_sink = function(s) output[#output+1] = s end }
+    local s = make_store({})
+    local c = eval.new_ctx(s, {}, "test-fn", game)
+    eval.eval_expr(fn_call("print", str_lit("secret")), c)
+    assert.equal(0, #output)
+  end)
+
+  it("handles zero args", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(fn_call("print"), c)
+    assert.equal("\n", out[1])
+  end)
+
+  it("handles three args", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(fn_call("print",
+      str_lit("a"), str_lit("b"), str_lit("c")), c)
+    assert.equal("a b c\n", out[1])
+  end)
+
+  it("uses stderr when no sink is set", function()
+    -- No game table at all — should not error
+    local s = make_store({})
+    local c = eval.new_ctx(s, {}, "test-fn", nil)
+    -- Redirect stderr temporarily
+    local old_stderr = io.stderr
+    local captured = {}
+    io.stderr = { write = function(_, s2) captured[#captured+1] = s2 end }
+    eval.eval_expr(fn_call("print", str_lit("fallback")), c)
+    io.stderr = old_stderr
+    assert.equal("fallback\n", captured[1])
+  end)
+end)
+
+describe("log builtin", function()
+  local function make_ctx_with_sink(fn_name)
+    local output = {}
+    local game = { _print_sink = function(s) output[#output+1] = s end }
+    local s = make_store({})
+    local c = eval.new_ctx(s, {}, fn_name or "test-fn", game)
+    return c, output
+  end
+
+  -- Helper: fn_call node with pos info
+  local function log_call(level_name, ...)
+    local node = {
+      kind = "fn_call",
+      name = "log",
+      pos  = { file = "test.sb", line = 12, col = 1 },
+      args = { { kind="symbol_lit", name=level_name }, ... },
+    }
+    return node
+  end
+
+  it("formats with [LEVEL] prefix, file:line, and fn name", function()
+    local c, out = make_ctx_with_sink("my-fn")
+    local node = log_call("warn", str_lit("too much gold"))
+    -- eval_expr sets ctx.call_pos from node.pos when dispatching FN_CALL
+    eval.eval_expr(node, c)
+    assert.equal("[WARN] test.sb:12 (my-fn): too much gold\n", out[1])
+  end)
+
+  it("debug level", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(log_call("debug", str_lit("checkpoint")), c)
+    assert.matches("^%[DEBUG%]", out[1])
+  end)
+
+  it("info level", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(log_call("info", str_lit("msg")), c)
+    assert.matches("^%[INFO%]", out[1])
+  end)
+
+  it("error level", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(log_call("error", str_lit("boom")), c)
+    assert.matches("^%[ERROR%]", out[1])
+  end)
+
+  it("concatenates multiple message args with spaces", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(log_call("info", str_lit("gold"), int_lit(99)), c)
+    assert.matches("gold 99", out[1])
+  end)
+
+  it("converts nil message arg to 'nil'", function()
+    local c, out = make_ctx_with_sink()
+    eval.eval_expr(log_call("debug", path("missing")), c)
+    assert.matches("nil", out[1])
+  end)
+
+  it("returns nil", function()
+    local c, _ = make_ctx_with_sink()
+    local result = eval.eval_expr(log_call("info", str_lit("x")), c)
+    assert.is_nil(result)
+  end)
+
+  it("is suppressed when production=true", function()
+    local output = {}
+    local game = { production = true, _print_sink = function(s) output[#output+1] = s end }
+    local s = make_store({})
+    local c = eval.new_ctx(s, {}, "fn", game)
+    eval.eval_expr(log_call("warn", str_lit("hidden")), c)
+    assert.equal(0, #output)
+  end)
+
+  it("shows '?' for file when no pos is available", function()
+    local c, out = make_ctx_with_sink()
+    -- call_fn directly (no node.pos set → call_pos is nil)
+    eval.call_fn("log", {
+      { kind="symbol_lit", name="info" },
+      { kind="string_lit", value="no pos" },
+    }, c)
+    assert.matches("%?", out[1])
+  end)
+
+  it("uses stderr when no sink is set", function()
+    local s = make_store({})
+    local c = eval.new_ctx(s, {}, "fn", nil)
+    local old_stderr = io.stderr
+    local captured = {}
+    io.stderr = { write = function(_, s2) captured[#captured+1] = s2 end }
+    eval.eval_expr(log_call("info", str_lit("stderr-test")), c)
+    io.stderr = old_stderr
+    assert.matches("%[INFO%]", captured[1])
+    assert.matches("stderr%-test", captured[1])
+  end)
+end)
+
+describe("print/log: end-to-end via compiler", function()
+  local compiler_mod3 = require("compiler.compiler")
+  local engine_mod3   = require("runtime.engine")
+  local log_mod3      = require("runtime.log")
+  local state_mod3    = require("runtime.state")
+
+  local function run_with_sink(src)
+    local gt = assert(compiler_mod3.compile(src, "test.sb"))
+    local output = {}
+    gt._print_sink = function(s) output[#output+1] = s end
+    local eng = engine_mod3.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local ctx3 = eng:make_ctx("main")
+    eval.call_fn("main", {}, ctx3)
+    return output
+  end
+
+  it("print in compiled fn writes to sink", function()
+    local src = [[
+state world:
+  gold: Int(0, 9999) = 0
+fn main:
+  print "gold" world/gold
+]]
+    local out = run_with_sink(src)
+    assert.equal(1, #out)
+    assert.equal("gold 0\n", out[1])
+  end)
+
+  it("log in compiled fn writes formatted line to sink", function()
+    local src = "state world:\n  gold: Int(0, 9999) = 0\nfn main:\n  log `info \"balance\" world/gold\n"
+    local out = run_with_sink(src)
+    assert.equal(1, #out)
+    assert.matches("%[INFO%]", out[1])
+    assert.matches("test%.sb:%d+", out[1])
+    assert.matches("balance 0", out[1])
+  end)
+
+  it("log includes fn name in output", function()
+    local src = "state world:\n  gold: Int(0, 9999) = 0\nfn report-balance:\n  log `debug \"checking\"\n"
+    local gt = assert(compiler_mod3.compile(src, "test.sb"))
+    local output = {}
+    gt._print_sink = function(s) output[#output+1] = s end
+    local eng = engine_mod3.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local ctx3 = eng:make_ctx("report-balance")
+    eval.call_fn("report-balance", {}, ctx3)
+    assert.matches("report%-balance", output[1])
+  end)
+
+  it("print suppressed in production mode", function()
+    local src = [[
+state world:
+  gold: Int(0, 9999) = 0
+fn main:
+  print "secret"
+]]
+    local gt = assert(compiler_mod3.compile(src, "test.sb"))
+    local output = {}
+    gt._print_sink = function(s) output[#output+1] = s end
+    gt.production  = true
+    local eng = engine_mod3.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local ctx3 = eng:make_ctx("main")
+    eval.call_fn("main", {}, ctx3)
+    assert.equal(0, #output)
+  end)
+
+  it("log suppressed in production mode", function()
+    local src = "state world:\n  gold: Int(0, 9999) = 0\nfn main:\n  log `warn \"secret\"\n"
+    local gt = assert(compiler_mod3.compile(src, "test.sb"))
+    local output = {}
+    gt._print_sink = function(s) output[#output+1] = s end
+    gt.production  = true
+    local eng = engine_mod3.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local ctx3 = eng:make_ctx("main")
+    eval.call_fn("main", {}, ctx3)
+    assert.equal(0, #output)
+  end)
+end)

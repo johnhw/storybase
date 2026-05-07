@@ -4,15 +4,15 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-04)
+## Current Status (2026-05-07)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–21 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 Code review rounds 1, 2, and 3 fully resolved.
 UI driver layer complete: `--ui plain` (default) and `--ui ansi` implemented.
-Authoring ergonomics issues AE-1, AE-2, AE-4, AE-5, AE-6, AE-12 resolved.
+Authoring ergonomics issues AE-1, AE-2, AE-4, AE-5, AE-6, AE-9, AE-12 resolved.
 
-**2046 tests passing, 0 failing.**
+**2070 tests passing, 0 failing.**
 
 All significant language features now have polished numbered demos.
 
@@ -230,10 +230,12 @@ AE-12 resolved in this session.
   (the checker already computes write-sets; read-sets are symmetric). Affects:
   `compiler/checker.lua`, `runtime/actors.lua`.
 
-- [ ] **AE-9 — No debug print / trace from `.sb` code.** The only way to observe intermediate
-  values during development is to `set! player/description (str "debug: " val)`. Fix: add a
-  `trace expr` builtin that writes to stderr in dev mode and is stripped in production builds
-  (tagged `debug-only`). Affects: `runtime/eval.lua`, `compiler/codegen.lua`.
+- [x] **AE-9 — No debug print / trace from `.sb` code.** Fixed: added two builtins in
+  `runtime/eval.lua`: `print` (varargs, space-joined, stderr/sink) and `log` (levelled with
+  source location — `[LEVEL] file:line (fn): msg`). Both are suppressed when
+  `ctx.game.production` is true. Output routed via `ctx.game._print_sink` callback (default
+  stderr). Source location available to `log` via `ctx.call_pos` set at each FN_CALL
+  dispatch. 24 tests added to `tests/runtime/eval_spec.lua`.
 
 ### Documentation Gaps
 
