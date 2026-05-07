@@ -891,6 +891,63 @@ All items specified in `idea.md` but missing from the implementation. All are no
 
 ---
 
+## Demo 21 — `query-at` / `query-history` / `query-changes` ✅ (2026-05-04)
+
+`demos/demo21_merchants_reckoning.sb` — merchant end-of-day audit narrative showcasing all
+three log-backed temporal query builtins as first-class gameplay mechanics. CLI integration
+tests added to `tests/cli/cli_integration_spec.lua`. `code_map.md` demos table updated.
+
+---
+
+## Authoring Ergonomics (AE) Fixes ✅ (2026-05-04 / 2026-05-07)
+
+### AE-1 — Apostrophes in prose text
+Symbol literal sigil changed from `'` to backtick (`` ` ``). Apostrophe now emits
+`RAW_TEXT` and is valid in narration prose. Updated: `compiler/lexer.lua`,
+`compiler/parser.lua`, `cli/format_cmd.lua`, all demo/test `.sb` files, `idea.md`.
+
+### AE-2 — UTF-8 characters silently corrupted in prose
+The `> 127` branch in `compiler/lexer.lua` now decodes the full UTF-8 sequence length and
+emits a `RAW_TEXT` token. Em-dashes, arrows, curly quotes, ellipsis etc. appear correctly.
+
+### AE-4 — `query-at` returns nil for paths with declared initial values
+`init_defaults` in `runtime/state.lua` now calls `_log_entry` for each default value, so
+`query-at` can find initial state. Demo21's third verify block now uses the original wording
+and passes.
+
+### AE-5 — No escape for literal `{` in narration
+`{{` in source now emits `RAW_TEXT "{"` at the lexer level without incrementing
+`paren_depth`. Implemented in `compiler/lexer.lua`.
+
+### AE-6 — Narration lines starting with a keyword produce confusing parse errors
+`parse_body_items` in scene mode now appends a note to the last diagnostic after
+`parse_if_expr`, `parse_when_stmt`, or `parse_for_stmt` produce errors, suggesting the line
+may be narration. Implemented in `compiler/parser.lua`.
+
+### AE-9 — No debug print / trace from `.sb` code
+Added two builtins in `runtime/eval.lua`:
+- `print` — varargs, space-joined, writes to stderr or `ctx.game._print_sink`
+- `log` — levelled (`[DEBUG]`/`[INFO]`/`[WARN]`/`[ERROR]`) with source location
+  `file:line (fn-name): msg`; level is a symbol arg (`` `debug ``, `` `info ``, etc.)
+
+Both suppressed silently when `ctx.game.production = true`. Source location comes from
+`ctx.call_pos` set at each `FN_CALL` dispatch in `eval_expr` and `eval_stmt`. 24 tests
+added to `tests/runtime/eval_spec.lua`.
+
+### AE-12 — No error when `=>` subscene forgets `<-`
+`push_scene` in `runtime/engine.lua` now includes the full scene stack in the overflow error
+message, showing the chain of `=>` pushes so the author can identify the missing `<-`.
+
+---
+
+## Remaining Polish — Public Function Test Coverage ✅ (2026-05-03)
+
+Every public function in every module verified to have at least one passing and one failing
+test. Added: scheduler dead-stub error test; lexer bare-tick and unclosed-interpolation
+error tests.
+
+---
+
 ## Previously Noted Deviations from Plan
 
 - **`types.lua` not created.** Type expression parsing is in `compiler/parser.lua`; type descriptors and state-space size computation are in `compiler/codegen.lua`. A separate file was not needed.
