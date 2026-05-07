@@ -303,6 +303,26 @@ fn heal amount:
 
 Functions are automatically classified as **transaction** (calls mutations) or **pure** (no mutations). The compiler infers this and enforces it.
 
+**Return values:** A single-expression pure function returns that expression's value without a `return` keyword:
+
+```
+fn gold-on-day d:
+  query-at player/gold time: {day: d}
+```
+
+A multi-statement pure function returns the value of its last expression-type statement, or you can use an explicit `return` anywhere for early exit:
+
+```
+fn classify-health:
+  if player/health > 60:
+    return `safe
+  if player/health > 20:
+    return `danger
+  `critical                 # last expression — returned implicitly
+```
+
+Transaction functions (those that call mutations) cannot return a value; their return type is always nil.
+
 ### `actor`
 
 ```
@@ -863,7 +883,7 @@ Multiple free `let` statements accumulate in the same scope; each can reference 
 ```
 for npc in (path-list npcs):
   when npcs/{npc}/alive:
-    set! npcs/{npc}/location 'village
+    set! npcs/{npc}/location `village
 ```
 
 Iterate over a list or `path-list`.
@@ -874,8 +894,28 @@ Iterate over a list or `path-list`.
 for item in world/items:
   process item
 else:
-  set! world/result 'none
+  set! world/result `none
 ```
+
+**Multi-segment field access on loop variables:** when the loop variable is bound to a table (such as a log entry record), subsequent path segments navigate into its fields using the same `/`-separated syntax:
+
+```
+for entry in (query-history player/gold):
+  Day {entry/time/day}: {entry/old} → {entry/new} gold
+```
+
+Here `entry` is the loop variable; `entry/time/day` reads the `day` field of the nested `time` table inside the entry record. This works in both narration interpolations (`{...}`) and expression contexts. The same pattern applies to any structured value in a list — the first segment resolves the loop variable, subsequent segments traverse its fields.
+
+Log entry records returned by `query-history`, `query-changes`, and `query-at` always carry these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | String | State path that was mutated |
+| `old` | any | Value before the mutation |
+| `new` | any | Value after the mutation |
+| `time` | table | Time-axis snapshot at the point of mutation, e.g. `{day=3}` |
+
+Access these as `entry/path`, `entry/old`, `entry/new`, and `entry/time/<axis-name>`.
 
 ### `while`
 
@@ -915,7 +955,11 @@ fn classify n:
   return 'low
 ```
 
-`return expr` exits a function early and returns the given value. Execution of subsequent statements in the function body is skipped. Without an early `return`, a function's return value is the result of the last expression-type statement.
+`return expr` exits a function early and returns the given value. Execution of subsequent statements in the function body is skipped.
+
+Without an explicit `return`, a pure function's return value is the result of its **last expression-type statement** — including single-expression bodies. Transaction functions (those calling mutations) always return nil; `return` is not valid inside them.
+
+See also: **Return values** under the `fn` declaration section above.
 
 ### `when`
 

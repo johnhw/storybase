@@ -713,6 +713,77 @@ optimal-path player/gold > 1000  by: min player/hp-lost 0
 
 ---
 
+## Temporal Queries
+
+These builtins are available when a `time-model` is declared. They consult the transaction
+log to reconstruct history, so they reflect only mutations that occurred after engine
+initialisation (defaults are logged at `init` time, so initial values are always visible).
+
+### `query-history`
+
+```
+query-history <path>            →  List of log-entry records
+query-history <path-pattern>    →  List of log-entry records
+```
+
+Returns every recorded mutation of `path` (or paths matching a wildcard pattern), oldest
+first. Each element is a log-entry record with the fields below.
+
+```
+for entry in (query-history player/gold):
+  Day {entry/time/day}: {entry/old} → {entry/new} gold
+
+for entry in (query-history player/*):
+  {entry/path} changed on day {entry/time/day}
+```
+
+### `query-changes`
+
+```
+query-changes <path>                      →  List of log-entry records
+query-changes <path>  last-n: N           →  List (most recent N, oldest first)
+```
+
+Returns recorded mutations of `path`. With `last-n: N`, returns only the N most recent
+entries (still returned oldest-first within that window).
+
+```
+for entry in (query-changes player/location last-n: 3):
+  Visited: {entry/new}
+```
+
+### `query-at`
+
+```
+query-at <path>  time: {axis: value, ...}  →  value | nil
+```
+
+Returns the value of `path` as it was at the given time-axis coordinates — i.e. the `new`
+field of the last mutation whose time snapshot is ≤ the requested time. Returns nil if no
+entry exists at or before that time.
+
+```
+fn gold-on-day d:
+  query-at player/gold time: {day: d}
+
+When {gold-on-day 1} gold in hand, the journey began.
+```
+
+**Log-entry record fields** (returned by all three query builtins):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | String | State path that was mutated |
+| `old` | any | Value before the mutation |
+| `new` | any | Value after the mutation |
+| `time` | table | Time-axis snapshot at point of mutation, e.g. `{day=3}` |
+
+Access nested time fields with `entry/time/<axis-name>` — the loop variable followed by
+`/time/` and the axis name (e.g. `entry/time/day`). This uses the multi-segment loop
+variable path syntax described in the `for` statement section of the language reference.
+
+---
+
 ## Tile Grid Builtins
 
 These are only available when a `defgrid` declaration is present and the engine has been initialized with grids.
