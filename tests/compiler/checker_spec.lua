@@ -601,7 +601,7 @@ fn guard-behavior:
     assert.equal(0, #warns)
   end)
 
-  it("does not warn when actor has empty perceives list (perceives all)", function()
+  it("does not warn when perceives: is omitted entirely (opt-in contract)", function()
     local _, diags = compile([[
 state player:
   gold: Int(0,999) = 50
@@ -620,6 +620,29 @@ fn bot-behavior:
       if d.code == ast.E.PERCEIVES_VIOLATION then warns[#warns+1] = d end
     end
     assert.equal(0, #warns)
+  end)
+
+  it("warns when behavior reads path outside an explicit perceives: [] list", function()
+    local _, diags = compile([[
+state player:
+  gold: Int(0,999) = 50
+state npcs/{npc}: Int(0,9) max: 4
+actor bot:
+  state:     npcs/bot
+  perceives: []
+  inbox:     List(Int, 4)
+  behavior:  bot-behavior
+  priority:  10
+fn bot-behavior:
+  when player/gold > 50:
+    set! npcs/bot/active true
+]])
+    local warns = {}
+    for _, d in ipairs(diags) do
+      if d.code == ast.E.PERCEIVES_VIOLATION then warns[#warns+1] = d end
+    end
+    assert.equal(1, #warns)
+    assert.is_truthy(warns[1].message:find("player/gold"))
   end)
 
   it("does not warn when behavior reads actor's own state path", function()

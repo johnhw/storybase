@@ -2551,7 +2551,7 @@ local function parse_actor_decl(p, doc)
 
   p:match("NEWLINE")
 
-  local state_path, perceives, inbox_type, behavior, priority = nil, {}, nil, nil, 0
+  local state_path, perceives, inbox_type, behavior, priority = nil, nil, nil, nil, 0
 
   if not p:at("INDENT") then
     return ast.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, tpos)
@@ -2572,6 +2572,7 @@ local function parse_actor_decl(p, doc)
         end
       elseif bt.value == "perceives" then
         p:adv()
+        perceives = {}   -- declaration present; list may still be empty
         if p:at("OP", "[") then
           p:adv()
           while not p:at("OP", "]") and not p:at("EOF") and not p:at("NEWLINE") do

@@ -510,7 +510,7 @@ end
 function M.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, pos)
   return M.node(M.K.ACTOR_DECL, {
     name = name, state_path = state_path,
-    perceives = perceives or {},
+    perceives = perceives,  -- nil means not declared; {} means declared-but-empty
     inbox_type = inbox_type,
     behavior = behavior,
     priority = priority or 0,

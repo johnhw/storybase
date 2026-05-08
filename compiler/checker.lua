@@ -1135,10 +1135,10 @@ local function pass4_check_perceives(acc, program)
   -- For each actor, check its behavior fn
   for _, node in ipairs(program.decls) do
     if node.kind == k.ACTOR_DECL then
-      local perceives  = node.perceives or {}
+      local perceives  = node.perceives   -- nil means not declared → skip check
       local state_path = node.state_path or ""
       local bname      = node.behavior
-      if not bname or #perceives == 0 then goto next_actor end
+      if not bname or perceives == nil then goto next_actor end
       local fn = fns[bname]
       if not fn then goto next_actor end
 

@@ -1410,6 +1410,38 @@ actor guard:
     assert.equal("npcs/guard/*", node.perceives[3])
   end)
 
+  it("sets perceives to nil when perceives: field is omitted", function()
+    local src = [[
+actor bot:
+  state:    npcs/bot
+  behavior: bot-fn
+  priority: 1
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.equal(0, errs)
+    local node = tree.decls[1]
+    assert.is_nil(node.perceives)
+  end)
+
+  it("sets perceives to empty table when perceives: [] is declared", function()
+    local src = [[
+actor bot:
+  state:     npcs/bot
+  perceives: []
+  behavior:  bot-fn
+  priority:  1
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.equal(0, errs)
+    local node = tree.decls[1]
+    assert.is_not_nil(node.perceives)
+    assert.equal(0, #node.perceives)
+  end)
+
   it("attaches doc string to actor_decl", function()
     local src = [[
 "The village blacksmith."

@@ -341,10 +341,29 @@ actor captain:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `state:` | Yes | State path prefix for this actor's own state |
-| `perceives:` | Yes | List of path patterns the behavior function may read |
+| `perceives:` | No | Explicit list of path patterns the behavior fn may read (see below) |
 | `inbox:` | Yes | Typed message inbox: `List(MsgType, max)` |
 | `behavior:` | Yes | Name of the transaction function called each turn |
 | `priority:` | No | Integer; higher wins conflict resolution (default 0) |
+
+**`perceives:` is optional.** When omitted, the actor can read any state path and no
+compiler check is performed — useful during active development. When declared, the compiler
+warns if the behavior function reads a path not covered by the list (or the actor's own
+state subtree, which is always implicitly perceivable).
+
+```
+actor guard:
+  state:     npcs/guard
+  perceives: [player/location, npcs/*/alert]  # explicit contract
+  inbox:     List(GuardMsg, 4)
+  behavior:  guard-behavior
+```
+
+`perceives: []` (empty list) means the actor explicitly perceives nothing beyond its own
+state — the compiler will warn on any external reads in the behavior function.
+
+Add `perceives:` when an actor is stable and you want the compiler to enforce its
+information boundary. Leave it out during iteration.
 
 ### `schedule`
 
