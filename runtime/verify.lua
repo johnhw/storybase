@@ -2,13 +2,15 @@
 -- Verify block runner: evaluates verify declarations from the compiled game table.
 --
 -- Supported clause kinds:
---   "always"      — verify-always expr: check expr at every BFS-reachable state
---   "requires"    — requires expr: skip verify if expr is false in initial state
---   "after"       — after (fn args): assertions: apply fn, check assertions with path@before
---   "from_any_state" — not yet evaluated (deferred; treated as always-pass)
---   "when"        — not yet evaluated (deferred; treated as always-pass)
+--   "always"         — verify-always expr: check expr at every BFS-reachable state
+--   "requires"       — requires expr: filter states (see "after" semantics below)
+--   "after"          — after (fn args): assertions: apply fn, check assertions with path@before
+--                      Without requires: runs from fresh initial state only.
+--                      With requires:    runs from every BFS-reachable state where requires holds.
+--   "from_any_state" — BFS-reachable state filter with when/can-reach checks
+--   "when"           — sub-clause of from_any_state
 --
--- BFS for verify-always:
+-- BFS (used by verify-always, after+requires, from-any-state):
 --   Explores (cache_snapshot, scene_stack) pairs from the entry scene up to
 --   DEFAULT_BFS_DEPTH steps. Uses a content hash for cycle detection.
 --   Fan-out = number of visible choices at each scene.
@@ -243,6 +245,34 @@ local function bfs_states(game_table, max_depth)
 end
 
 -- ============================================================
+-- Shared helpers
+-- ============================================================
+
+--- Serialise a cache snapshot to a human-readable "{k=v, ...}" string.
+local function snap_str(cache)
+  local keys = {}
+  for k in pairs(cache) do keys[#keys+1] = k end
+  table.sort(keys)
+  local parts = {}
+  for _, k in ipairs(keys) do
+    local v = cache[k]
+    parts[#parts+1] = type(v) == "table" and ser_cache_val(k, v) or k .. "=" .. tostring(v)
+  end
+  return "{" .. table.concat(parts, ", ") .. "}"
+end
+
+--- Build a fresh state store from a cache snapshot.
+local function store_from_snap(snap, game_table)
+  local log_mod   = require("runtime.log")
+  local state_mod = require("runtime.state")
+  local s = state_mod.new(game_table.schema, log_mod.new())
+  for k, v in pairs(snap) do
+    s._cache[k] = type(v) == "table" and copy_cache_val(v) or v
+  end
+  return s
+end
+
+-- ============================================================
 -- verify-always evaluation
 -- ============================================================
 
@@ -274,24 +304,10 @@ local function run_always_check(verify_entry, game_table)
                fail_msg = "error evaluating verify-always: " .. tostring(result) }
     end
     if not result then
-      -- Build a human-readable snapshot of the failing state
-      local snap_parts = {}
-      local keys = {}
-      for k in pairs(cache_snap) do keys[#keys+1] = k end
-      table.sort(keys)
-      for _, k in ipairs(keys) do
-        local v = cache_snap[k]
-        if type(v) == "table" then
-          snap_parts[#snap_parts+1] = ser_cache_val(k, v)
-        else
-          snap_parts[#snap_parts+1] = k .. "=" .. tostring(v)
-        end
-      end
       return {
         pass                 = false,
         fail_msg             = string.format(
-          "verify-always violated at BFS state %d: {%s}",
-          i, table.concat(snap_parts, ", ")),
+          "verify-always violated at BFS state %d: %s", i, snap_str(cache_snap)),
         counterexample       = cache_snap,
         counterexample_n     = i,
         counterexample_path  = snap_item.path,
@@ -306,61 +322,84 @@ end
 -- after-check evaluation
 -- ============================================================
 
-local function run_after_check(verify_entry, game_table)
-  local requires_expr = nil
-  local after_call    = nil
-  local assertions    = {}
-
-  for _, c in ipairs(verify_entry.clauses) do
-    if c.kind == "requires" then
-      requires_expr = c.condition
-    elseif c.kind == "after" then
-      after_call = c.condition
-      assertions = c.body
-    end
-  end
-
-  if not after_call then return { pass = true } end
-
-  -- Build fresh state from defaults
-  local store = make_fresh_store(game_table)
-  local ctx   = eval.new_ctx(store, game_table.fns, "verify", game_table)
-
-  -- Check requires clause — skip (pass vacuously) if not satisfied
-  if requires_expr then
-    local ok, result = pcall(eval.eval_expr, requires_expr, ctx)
-    if not ok or not result then
-      return { pass = true, skipped = true,
-               reason = "requires not met at initial state" }
-    end
-  end
-
-  -- Snapshot state before applying the function
+--- Run one (store, before_snap) pair through the after-call and assertions.
+--- Returns a result table; pass=true means all assertions held.
+local function check_one_after(store, after_call, assertions, game_table, snap_label)
+  local ctx = eval.new_ctx(store, game_table.fns, "verify-after", game_table)
   local before_snap = clone_cache(store)
   ctx.before_snapshot = before_snap
 
-  -- Apply the function
   local call_ok, call_err = pcall(eval.eval_expr, after_call, ctx)
   if not call_ok then
     return { pass = false,
              fail_msg = "function raised error: " .. tostring(call_err) }
   end
 
-  -- Check each assertion expression with before_snapshot available
   for i, assert_expr in ipairs(assertions) do
     local ok, result = pcall(eval.eval_expr, assert_expr, ctx)
     if not ok then
       return { pass = false,
                fail_msg = string.format(
-                 "assertion %d raised error: %s", i, tostring(result)) }
+                 "assertion %d raised error at %s: %s", i, snap_label, tostring(result)) }
     end
     if not result then
       return { pass = false,
-               fail_msg = string.format("assertion %d failed", i) }
+               fail_msg = string.format(
+                 "assertion %d failed at %s: %s", i, snap_label, snap_str(before_snap)) }
     end
   end
 
   return { pass = true }
+end
+
+local function run_after_check(verify_entry, game_table)
+  local requires_expr = nil
+  local after_call    = nil
+  local assertions    = {}
+
+  for _, c in ipairs(verify_entry.clauses) do
+    if c.kind == "requires" then requires_expr = c.condition
+    elseif c.kind == "after" then after_call = c.condition; assertions = c.body
+    end
+  end
+
+  if not after_call then return { pass = true } end
+
+  -- Without requires: single fresh initial state (original behaviour).
+  if not requires_expr then
+    return check_one_after(make_fresh_store(game_table), after_call, assertions,
+                           game_table, "initial state")
+  end
+
+  -- With requires: run from every BFS-reachable state where requires holds.
+  local snapshots = bfs_states(game_table, DEFAULT_BFS_DEPTH)
+  local checked   = 0
+
+  for i, snap_item in ipairs(snapshots) do
+    local store = store_from_snap(snap_item.cache, game_table)
+    local rctx  = eval.new_ctx(store, game_table.fns, "verify-requires", game_table)
+    local ok, result = pcall(eval.eval_expr, requires_expr, rctx)
+    if not (ok and result) then goto continue end
+
+    checked = checked + 1
+    local label = string.format("BFS state %d", i)
+    local r = check_one_after(store_from_snap(snap_item.cache, game_table),
+                              after_call, assertions, game_table, label)
+    if not r.pass then
+      r.counterexample      = snap_item.cache
+      r.counterexample_n    = i
+      r.counterexample_path = snap_item.path
+      return r
+    end
+
+    ::continue::
+  end
+
+  if checked == 0 then
+    return { pass = true, skipped = true,
+             reason = "requires not met in any reachable state" }
+  end
+  return { pass = true, states_checked = checked }
 end
 
 -- ============================================================
@@ -429,24 +468,10 @@ local function run_can_reach_check(verify_entry, game_table)
 
       local ok2, result2 = pcall(eval.eval_expr, check_expr, ctx)
       if not ok2 or not result2 then
-        -- Build counterexample detail
-        local snap_parts = {}
-        local keys = {}
-        for k in pairs(snap) do keys[#keys+1] = k end
-        table.sort(keys)
-        for _, k in ipairs(keys) do
-          local v = snap[k]
-          if type(v) == "table" then
-            snap_parts[#snap_parts+1] = ser_cache_val(k, v)
-          else
-            snap_parts[#snap_parts+1] = k .. "=" .. tostring(v)
-          end
-        end
         return {
           pass                = false,
           fail_msg            = string.format(
-            "from-any-state: condition failed at BFS state %d: {%s}",
-            i, table.concat(snap_parts, ", ")),
+            "from-any-state: condition failed at BFS state %d: %s", i, snap_str(snap)),
           counterexample      = snap,
           counterexample_n    = i,
           counterexample_path = snap_item.path,
@@ -498,11 +523,16 @@ function M.run_all(game_table)
     if has_after and result.pass then
       local r = run_after_check(verify_entry, game_table)
       if not r.pass then
-        result.pass     = false
-        result.fail_msg = r.fail_msg
+        result.pass                = false
+        result.fail_msg            = r.fail_msg
+        result.counterexample      = r.counterexample
+        result.counterexample_n    = r.counterexample_n
+        result.counterexample_path = r.counterexample_path
       elseif r.skipped then
         result.skipped = true
         result.reason  = r.reason
+      else
+        result.states_checked = r.states_checked
       end
     end
 

@@ -448,3 +448,120 @@ verify "bob never in scores":
       "counterexample message should show the UMap contents")
   end)
 end)
+
+-- ============================================================
+-- after + requires: BFS-state semantics
+-- ============================================================
+
+describe("verify after + requires: checks across BFS-reachable states", function()
+
+  -- Game where gold starts at 0 but can be incremented via "Earn" choices.
+  -- After earning, gold may satisfy requires; spend must then reduce it correctly.
+  local BASE_SRC = [[
+module verify-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 0
+
+fn earn:
+  inc! world/gold 50
+
+fn spend:
+  pre:  world/gold >= 30
+  dec!  world/gold 30
+
+scene main:
+  * Earn
+    earn
+    -> main
+  * Done
+    -> main
+]]
+
+  it("passes when assertion holds in all reachable states satisfying requires", function()
+    local src = BASE_SRC .. [[
+verify "spend reduces gold by 30":
+  requires world/gold >= 30
+  after (spend):
+    world/gold = world/gold@before - 30
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.equals(1, #results)
+    assert.is_true(results[1].pass, results[1].fail_msg)
+    assert.is_truthy((results[1].states_checked or 0) > 0,
+      "should have checked at least one reachable state")
+  end)
+
+  it("fails when assertion is violated in a reachable state satisfying requires", function()
+    -- earn gives +50, but we claim spend subtracts 99 — which is wrong
+    local src = BASE_SRC .. [[
+verify "spend reduces gold by 99 (wrong)":
+  requires world/gold >= 30
+  after (spend):
+    world/gold = world/gold@before - 99
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.equals(1, #results)
+    assert.is_false(results[1].pass)
+    assert.is_truthy(results[1].fail_msg)
+    assert.is_truthy(results[1].counterexample,
+      "should provide a counterexample state")
+  end)
+
+  it("skips when requires is never satisfied in any reachable state", function()
+    -- gold starts at 0 and can only earn 50; requires >= 9000 is unreachable
+    local src = BASE_SRC .. [[
+verify "unreachable requires":
+  requires world/gold >= 9000
+  after (spend):
+    world/gold >= 0
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.equals(1, #results)
+    assert.is_true(results[1].pass)
+    assert.is_true(results[1].skipped)
+    assert.matches("requires not met", results[1].reason)
+  end)
+
+  it("without requires: still runs from fresh initial state only", function()
+    -- gold starts at 0; spend has pre: gold >= 30 so this will error from initial state
+    local src = BASE_SRC .. [[
+verify "no requires — initial state only":
+  after (earn):
+    world/gold = world/gold@before + 50
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.equals(1, #results)
+    assert.is_true(results[1].pass, results[1].fail_msg)
+    -- states_checked is nil for the single-state path
+    assert.is_nil(results[1].states_checked)
+  end)
+
+  it("fail message includes the state that violated the assertion", function()
+    local src = BASE_SRC .. [[
+verify "wrong assertion":
+  requires world/gold >= 30
+  after (spend):
+    world/gold = 9999
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+    -- fail_msg should mention the state (contains gold=...)
+    assert.is_truthy(results[1].fail_msg:find("gold"),
+      "fail_msg should mention the state key")
+  end)
+
+end)

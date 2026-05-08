@@ -382,9 +382,34 @@ Clause kinds:
 | Clause | Description |
 |--------|-------------|
 | `verify-always <cond>` | BFS: condition holds in all reachable states |
-| `after (<fn> <args>): <assertions>` | Apply a function call; check assertions on the result |
-| `requires: <cond>` | Precondition for skipping an `after` check |
+| `after (<fn> <args>): <assertions>` | Apply function; check assertions (see below) |
+| `requires: <cond>` | Filter states for `after` check (see below) |
 | `from-any-state: when <cond>: <check>` | Check `<check>` from every state where `<cond>` holds |
+
+**`after` semantics depend on whether `requires:` is present:**
+
+- **Without `requires:`** — the function is applied once from the fresh initial state.
+  Useful for basic postcondition checks.
+
+  ```
+  verify "earning gold increases balance":
+    after (earn 50):
+      world/gold = world/gold@before + 50
+  ```
+
+- **With `requires:`** — the check runs from every BFS-reachable game state where
+  `requires` holds. This is the right form for properties like "whenever the player can
+  afford something, buying it decreases gold by the right amount":
+
+  ```
+  verify "spend reduces gold by exactly 30":
+    requires: player/gold >= 30
+    after (spend 30):
+      player/gold = player/gold@before - 30
+  ```
+
+  If no reachable state satisfies `requires`, the check is skipped (vacuously passes).
+  The counterexample report includes the specific state that violated the assertion.
 
 ### `watch`
 
