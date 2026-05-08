@@ -948,6 +948,51 @@ error tests.
 
 ---
 
+## Authoring Ergonomics (AE) Fixes ✅ (2026-05-07 — second batch)
+
+### AE-3 — Time axis / state variable sync
+`time/<axis-name>` is now a read-only pseudo-path backed directly by the engine's time
+state (e.g. `time/day`, `time/tick`). Authors use `time/day` in narration and guards without
+declaring a separate `world/day` variable; `time-inc! day: 1` is the single call needed.
+`time-set!` (already implemented but undocumented) documented at the same time.
+7 tests added to `eval_spec.lua`. `time-model`, `time-inc!`, `time-set!` sections in
+`docs/reference/language.md` updated.
+
+### AE-7 — Actor `perceives:` opt-in contract
+`perceives:` is now optional. When omitted the checker skips the check entirely and the
+runtime grants full read access. When declared, the check runs as before. `perceives: []`
+still means "explicitly perceive nothing external." Root cause: `ast.actor_decl` was
+normalising nil to `{}`, making omitted and empty-list indistinguishable. Fixed in
+`compiler/ast.lua`, `compiler/parser.lua`, `compiler/checker.lua`. 4 new tests.
+`actor` section in `docs/reference/language.md` updated.
+
+### AE-8 — `verify after+requires` checks all BFS-reachable states
+When `requires:` is present alongside `after (fn):`, the check now runs from every
+BFS-reachable state where `requires` holds, not just the fresh initial state. Without
+`requires:`, original single-state behaviour is preserved. Also fixed two latent bugs in
+`run_all`: counterexample fields and `states_checked` were not forwarded from
+`run_after_check`. Extracted `snap_str()` helper shared by all three check functions.
+5 tests added to `verify_spec.lua`. `verify` section in `docs/reference/language.md`
+updated with full `after`/`requires` semantics table.
+
+### AE-9 — `print` and `log` debug builtins
+Added two builtins in `runtime/eval.lua`: `print` (varargs, space-joined, stderr/sink) and
+`log` (levelled `[DEBUG/INFO/WARN/ERROR]` with `file:line (fn): msg` location). Both
+suppressed when `ctx.game.production = true`. Output routed via `ctx.game._print_sink`.
+Source location via `ctx.call_pos` set at each `FN_CALL` dispatch. 24 tests added.
+
+### AE-10 — Pure function return value semantics documented
+Added "Return values" note to `fn` section of `docs/reference/language.md` explaining
+single-expression auto-return and multi-statement last-expression rule. Updated `return`
+statement section to cross-reference and clarify transaction function restriction.
+
+### AE-11 — Multi-segment loop variable path access documented
+Added explanation and temporal-query example to the `for` section of `language.md`. Added
+full `query-history` / `query-changes` / `query-at` section to `docs/reference/builtins.md`
+(previously entirely absent), with log-entry field table and cross-reference.
+
+---
+
 ## Previously Noted Deviations from Plan
 
 - **`types.lua` not created.** Type expression parsing is in `compiler/parser.lua`; type descriptors and state-space size computation are in `compiler/codegen.lua`. A separate file was not needed.
