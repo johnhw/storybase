@@ -56,7 +56,15 @@ literal string, making the condition evaluate identically for all entities. Fix:
 variable names and binds all unresolved ones to the entity key in the child context.
 Parent-context vars are never overridden. 6 regression tests added (query_spec).
 
-**2287 tests passing, 0 failing, 2 pending (known limitations).**
+SF-1 (zero-arg undefined function calls silently return a string) resolved 2026-05-13.
+Option A: in `runtime/eval.lua:call_fn`, when a 0-arg call falls through to the
+bare-string return, emit a dev-mode `[WARN]` (suppressed in production). Suppression
+logic lazily builds `game._known_bare_names` from: relation names, grid names, scene
+names, named types, family names, and single-segment scalar/record state paths — all
+valid non-function bare-identifier uses. Also added `pure` as a silent no-op (it is a
+purity annotation that has no runtime semantics). 10 regression tests added (eval_spec).
+
+**2297 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
@@ -204,7 +212,7 @@ Recommended order:
 These produce no error at compile or runtime, making the resulting bugs very difficult to
 locate. All five are high-priority from an authoring-experience perspective.
 
-- [ ] **SF-1 — Zero-arg undefined function calls silently return a string.**
+- [x] **SF-1 — Zero-arg undefined function calls silently return a string.** *(fixed 2026-05-13)*
   A typo in a zero-argument call — `move-too` instead of `move-to` — returns the string
   `"move-too"` instead of raising an error. State is unchanged and the game continues as if
   nothing happened. This is documented in `runtime/eval.lua:call_fn` as a "known limitation"

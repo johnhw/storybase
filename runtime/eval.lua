@@ -1925,7 +1925,8 @@ local BUILTINS = {
 call_fn = function(name, args, ctx)
   -- 0-arg fn_call nodes may actually be variable references (params, let bindings, for vars)
   if #(args or {}) == 0 then
-    if name == "nil" then return nil end  -- nil is a language literal
+    if name == "nil"  then return nil end  -- nil is a language literal
+    if name == "pure" then return name end -- pure is a purity annotation; no-op at runtime
     if ctx.vars[name] ~= nil then
       return ctx.vars[name]
     end
@@ -1975,11 +1976,57 @@ call_fn = function(name, args, ctx)
   local fn = ctx.fns and ctx.fns[name]
   if not fn then
     -- 0-arg call to an unknown name: return the name as a string.
-    -- Required for bare identifiers (relation-name, family-name, enum-value) passed
+    -- Required for bare identifiers (relation-name, family-name, grid-name) passed
     -- as arguments to builtins.  Known limitation: a typo in a 0-arg user function
     -- call silently returns a string instead of erroring; this trade-off is accepted
     -- because there is no reliable way to distinguish the two cases at eval time.
     if #(args or {}) == 0 then
+      -- SF-1: warn in dev mode when the bare name is not a known legitimate
+      -- non-function use.  Vars + builtins + bounded already dispatched above.
+      -- Suppress for relation names, family names, and grid names — these are
+      -- routinely passed as bare identifiers to builtins like adjacent?,
+      -- path-list, grid-get, etc.
+      if not (ctx.game and ctx.game.production) then
+        local game = ctx.game
+        local suppress = false
+        if game then
+          if game.relations and game.relations[name] then suppress = true end
+          if not suppress and game.grids and game.grids[name] then suppress = true end
+          if not suppress and game.scenes and game.scenes[name] then suppress = true end
+          if not suppress then
+            -- Lazily build a lookup set for: type names, family names, and
+            -- single-segment state path names (used as base in index_expr and
+            -- similar contexts where the caller does its own state lookup).
+            if not game._known_bare_names then
+              local s = {}
+              -- Type names (map or list format depending on caller)
+              for k, v in pairs((game.schema and game.schema.types) or {}) do
+                if type(k) == "string" then s[k] = true
+                elseif type(v) == "table" and v.name then s[v.name] = true end
+              end
+              -- Family names and single-segment state scalar/record paths
+              for _, st in ipairs((game.schema and game.schema.states) or {}) do
+                if st.kind == "family" then
+                  s[st.family] = true
+                elseif st.path then
+                  -- Only suppress for single-segment paths (no slash)
+                  if type(st.path) == "string" and not st.path:find("/", 1, true) then
+                    s[st.path] = true
+                  end
+                end
+              end
+              game._known_bare_names = s
+            end
+            if game._known_bare_names[name] then suppress = true end
+          end
+        end
+        if not suppress then
+          local msg = "[WARN] unknown call '" .. name ..
+                      "' returned as string — possible typo in function name\n"
+          local sink = game and game._print_sink
+          if sink then sink(msg) else io.stderr:write(msg) end
+        end
+      end
       return name
     end
     error("Undefined function: " .. tostring(name), 2)

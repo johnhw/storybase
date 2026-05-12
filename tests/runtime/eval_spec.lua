@@ -656,6 +656,123 @@ describe("Bug #11: match — no arm matches runtime warning", function()
   end)
 end)
 
+-- SF-1: zero-arg undefined function call emits a warning and returns name as string
+describe("SF-1: zero-arg unknown call warning", function()
+  -- Helper: a ctx with a game that captures warnings via _print_sink
+  local function warned_ctx(vals, extra_game)
+    local warnings = {}
+    local c = ctx(vals or {})
+    c.game = extra_game or {}
+    c.game._print_sink = function(msg) warnings[#warnings+1] = msg end
+    return c, warnings
+  end
+
+  it("emits warning when 0-arg call name is not in fns, vars, builtins, or bounded", function()
+    local c, warns = warned_ctx()
+    local node = fn_call("move-too")  -- typo: move-too vs move-to
+    local result = eval.eval_expr(node, c)
+    assert.equal("move-too", result)
+    assert.equal(1, #warns)
+    assert.truthy(warns[1]:find("WARN",     1, true))
+    assert.truthy(warns[1]:find("move-too", 1, true))
+  end)
+
+  it("does NOT warn when name is a known user function", function()
+    local c, warns = warned_ctx()
+    c.fns = { ["move-to"] = { params = {}, body = {} } }
+    local node = fn_call("move-to")
+    eval.eval_expr(node, c)
+    assert.equal(0, #warns)
+  end)
+
+  it("does NOT warn when name is in ctx.vars", function()
+    local c, warns = warned_ctx()
+    c.vars["m"] = "alice"
+    local node = fn_call("m")
+    local result = eval.eval_expr(node, c)
+    assert.equal("alice", result)
+    assert.equal(0, #warns)
+  end)
+
+  it("does NOT warn when name is a known builtin", function()
+    local c, warns = warned_ctx()
+    -- 'min' is a BUILTIN, so calling it with args won't hit the bare-string path,
+    -- but confirm no spurious warning for a no-arg call to a builtin name either
+    -- (builtins are dispatched before the bare-string path)
+    local node = { kind = "fn_call", name = "min", args = {
+      { kind = "int_lit", value = 1 },
+      { kind = "int_lit", value = 2 },
+    }}
+    eval.eval_expr(node, c)
+    assert.equal(0, #warns)
+  end)
+
+  it("does NOT warn in production mode", function()
+    local c, warns = warned_ctx(nil, { production = true })
+    local node = fn_call("move-too")
+    eval.eval_expr(node, c)
+    assert.equal(0, #warns)
+  end)
+
+  it("does NOT warn when name is a relation name in ctx.game.relations", function()
+    local c, warns = warned_ctx(nil, {
+      relations = { exits = { name = "exits", data = {} } },
+    })
+    local node = fn_call("exits")
+    local result = eval.eval_expr(node, c)
+    assert.equal("exits", result)
+    assert.equal(0, #warns)
+  end)
+
+  it("does NOT warn when name is a grid name in ctx.game.grids", function()
+    local c, warns = warned_ctx(nil, {
+      grids = { dungeon = { width = 10, height = 10 } },
+    })
+    local node = fn_call("dungeon")
+    local result = eval.eval_expr(node, c)
+    assert.equal("dungeon", result)
+    assert.equal(0, #warns)
+  end)
+
+  it("does NOT warn when name is a declared family name", function()
+    local c, warns = warned_ctx(nil, {
+      schema = {
+        states = {
+          { kind = "family", family = "npcs", var = "npc" },
+        },
+      },
+    })
+    local node = fn_call("npcs")
+    local result = eval.eval_expr(node, c)
+    assert.equal("npcs", result)
+    assert.equal(0, #warns)
+  end)
+
+  it("caches the known-bare-names set on ctx.game after first call", function()
+    local c, warns = warned_ctx(nil, {
+      schema = { states = { { kind = "family", family = "crew", var = "m" } } },
+    })
+    -- First call: builds cache
+    eval.eval_expr(fn_call("crew"), c)
+    assert.equal(0, #warns)
+    -- Second call: uses cache (no repeated scan)
+    eval.eval_expr(fn_call("crew"), c)
+    assert.equal(0, #warns)
+    assert.is_not_nil(c.game._known_bare_names)
+    assert.is_true(c.game._known_bare_names["crew"])
+  end)
+
+  it("warns without a game object (ctx.game nil)", function()
+    -- When ctx.game is nil there is no sink; warning should go to io.stderr
+    -- without crashing.  We just verify no error is raised and result is the name.
+    local c = ctx({})  -- c.game is nil
+    local node = fn_call("bad-fn-name")
+    local ok, result = pcall(eval.eval_expr, node, c)
+    assert.is_true(ok)
+    assert.equal("bad-fn-name", result)
+  end)
+end)
+
 -- ============================================================
 -- record_constructor
 -- ============================================================
