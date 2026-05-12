@@ -812,3 +812,92 @@ scene s:
     assert.is_nil(d["foo"])  -- no doc string
   end)
 end)
+
+-- ── advance_to_choices / computed-goto entry scene (Bug #13) ─────────────────
+
+local DISPATCH_SRC = [[
+module dispatch-test
+  version: 1.0
+
+type Location = cave | field
+
+state world:
+  location: Location = `cave
+
+engine-config:
+  entry-scene: main
+
+# Computed-goto dispatch scene: no choices, just a redirect
+scene main:
+  -> (match world/location:
+    `cave: cave-scene
+    _:    field-scene)
+
+scene cave-scene:
+  You are in a dark cave.
+  * Go north
+    set! world/location `field
+    -> field-scene
+  * Stay
+    -> cave-scene
+
+scene field-scene:
+  You are in a sunny field.
+  * Go south
+    set! world/location `cave
+    -> cave-scene
+]]
+
+describe("advance_to_choices (Bug #13)", function()
+  it("render() returns nav_signal for a computed-goto scene", function()
+    local g = sb.from_source(DISPATCH_SRC, "dispatch"); g:init()
+    local _, choices, nav = g:render()
+    assert.is_table(choices)
+    assert.equal(0, #choices)
+    assert.is_table(nav)
+    assert.equal("goto", nav.type)
+    assert.equal("cave-scene", nav.target)
+  end)
+
+  it("advance_to_choices() reaches a real scene after computed-goto entry", function()
+    local g = sb.from_source(DISPATCH_SRC, "dispatch"); g:init()
+    local narr, choices = g:advance_to_choices()
+    assert.is_table(choices)
+    assert.equal(2, #choices)
+    assert.equal("cave-scene", g:current_scene())
+  end)
+
+  it("advance_to_choices() collects narration from the destination scene", function()
+    local g = sb.from_source(DISPATCH_SRC, "dispatch"); g:init()
+    local narr, _ = g:advance_to_choices()
+    local texts = {}
+    for _, n in ipairs(narr) do texts[#texts+1] = n.text end
+    assert.is_true(#texts > 0)
+    assert.is_not_nil(texts[1]:find("cave"))
+  end)
+
+  it("advance_to_choices() after choose() follows computed-goto in destination", function()
+    local g = sb.from_source(DISPATCH_SRC, "dispatch"); g:init()
+    g:advance_to_choices()  -- now in cave-scene
+    assert.equal("cave-scene", g:current_scene())
+    g:choose(1)  -- Go north -> field-scene
+    local narr, choices = g:advance_to_choices()
+    assert.equal("field-scene", g:current_scene())
+    assert.equal(1, #choices)  -- field-scene has one choice: "Go south"
+  end)
+
+  it("advance_to_choices() on normal scene (no goto) returns choices unchanged", function()
+    local g = sb.from_source(SRC, "test"); g:init()
+    local narr, choices = g:advance_to_choices()
+    assert.equal(2, #choices)
+    assert.equal("main", g:current_scene())
+  end)
+
+  it("advance_to_choices() after init leaves game in state with renderable choices", function()
+    local g = sb.from_source(DISPATCH_SRC, "dispatch")
+    g:init()
+    g:advance_to_choices()
+    local _, choices2 = g:render()
+    assert.equal(2, #choices2)
+  end)
+end)

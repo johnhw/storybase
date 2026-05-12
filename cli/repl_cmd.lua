@@ -111,6 +111,7 @@ function M.run(args)
   end
 
   game:init()
+  game:advance_to_choices()  -- follow any computed-goto entry scenes
   io.stdout:write("StoryBase REPL — " .. filepath .. "\n")
   io.stdout:write("Type :help for commands, :quit to exit.\n")
   io.stdout:write("\n")
@@ -165,8 +166,8 @@ function M.run(args)
         if not ok_ch then
           io.stderr:write("error: " .. tostring(cerr) .. "\n")
         else
-          -- Show new narration after the choice
-          local narr = game:render()
+          -- Advance past any computed-goto scenes, collecting narration
+          local narr = game:advance_to_choices()
           for _, item in ipairs(narr or {}) do
             if item.kind == "say" then
               local label = item.display or item.speaker or "?"

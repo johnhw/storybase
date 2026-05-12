@@ -134,14 +134,43 @@ function M._make_game(game_table)
   -- ── Presentation ──────────────────────────────────────────
 
   --- Render the current scene.
-  --- Returns narration (list of {kind,text,...} items) and choices (list of {index, label}).
-  ---@return table, table
+  --- Returns narration (list of {kind,text,...} items), choices (list of {index, label}),
+  --- and nav_signal ({type, target}) if the scene has an unconditional goto.
+  ---@return table, table, table?
   function self:render()
     assert(self._eng, "call game:init() first")
     local scene_name = self._eng:current_scene()
     if not scene_name then return {}, {} end
-    local narr, choices = self._eng:render_scene(scene_name)
-    return narr, choices
+    local narr, choices, nav_signal = self._eng:render_scene(scene_name)
+    return narr, choices, nav_signal
+  end
+
+  --- Advance through any unconditional goto/enter scenes until reaching a scene
+  --- with displayable choices (or one with no nav signal). Returns the combined
+  --- narration and final choices. Limited to 100 hops to prevent infinite loops.
+  ---@return table, table  narration list, choices list
+  function self:advance_to_choices()
+    assert(self._eng, "call game:init() first")
+    local combined_narr = {}
+    for _ = 1, 100 do
+      local scene_name = self._eng:current_scene()
+      if not scene_name then break end
+      local narr, choices, nav_signal = self._eng:render_scene(scene_name)
+      for _, n in ipairs(narr) do combined_narr[#combined_narr + 1] = n end
+      if not nav_signal then
+        return combined_narr, choices
+      end
+      if nav_signal.type == "goto" and nav_signal.target then
+        self._eng:goto_scene(nav_signal.target)
+      elseif nav_signal.type == "enter" and nav_signal.target then
+        self._eng:enter_scene(nav_signal.target)
+      elseif nav_signal.type == "exit" then
+        self._eng:exit_scene()
+      else
+        return combined_narr, choices
+      end
+    end
+    return combined_narr, {}
   end
 
   --- Return the name of the current top-of-stack scene.

@@ -31,7 +31,14 @@ consumed a NAMED_ARG as its last token (the lexer folds `word:` into one token).
 checking `p.tokens[p.pos-1]` after `parse_expr` and setting `colon_done=true` if it was a
 NAMED_ARG. 4 regression tests added.
 
-**2266 tests passing, 0 failing, 2 pending (known limitations).**
+Bug #13 (REPL stuck on computed-goto entry scenes) resolved 2026-05-12. Added
+`game:advance_to_choices()` to `lib/storybase.lua` which follows computed gotos until
+reaching a scene with displayable choices. Modified `render()` to return `nav_signal` as
+third return value. Updated `cli/repl_cmd.lua` to call `advance_to_choices()` after
+`game:init()` and after `:choose` to prevent getting stuck in dispatch scenes. 6
+regression tests added.
+
+**2272 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
@@ -163,7 +170,7 @@ Recommended order:
   available from the `FIND_EXPR` node. Update `query.lua:M.find` to inject this binding
   for non-lambda `where` predicates. Add tests in `tests/runtime/query_spec.lua`.
 
-- [ ] **Bug #13 — REPL unusable when `entry-scene` is a computed-goto scene.**
+- [x] **Bug #13 — REPL unusable when `entry-scene` is a computed-goto scene.** *(fixed 2026-05-12)*
   The common pattern of a `main:` scene that dispatches via `-> (match player/location: ...)`
   means the REPL starts in that scene, which has no choices. `:choices` shows
   "(no choices)" and the REPL is stuck — there is no command to follow a goto.
@@ -354,11 +361,9 @@ declaration categories. All four of these allow structural errors to compile cle
   and fix the parenthesised case. May require `parse_atom` to detect `find`/`count`
   regardless of surrounding paren context.
 
-- [ ] **AE-16 — REPL gets stuck in computed-goto entry scenes.**
-  See Bug #13 above; same root cause, same fix applies to both the standalone REPL and
-  the `:choose` command within it. Tracked separately here because the REPL fix also
-  involves improving the `:scene` command to display the *effective* current scene after
-  any auto-goto rather than the scene name literally on the stack.
+- [x] **AE-16 — REPL gets stuck in computed-goto entry scenes.** *(fixed 2026-05-12 with Bug #13)*
+  Same root cause as Bug #13; fix also covers the `:choose` command which now calls
+  `game:advance_to_choices()` after each choice execution.
 
 - [ ] **AE-17 — No integer-division operator / floor division.**
   Related to AE-13 but distinct: authors writing game logic (not just narration) sometimes
