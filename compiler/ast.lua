@@ -121,6 +121,7 @@ M.E = {
   PRE_NOT_BOOL             = "PRE_NOT_BOOL",
   POST_NOT_BOOL            = "POST_NOT_BOOL",
   PATH_BEFORE_INVALID      = "PATH_BEFORE_INVALID",
+  INCOMPLETE_MATCH         = "INCOMPLETE_MATCH",
   -- Runtime / engine (structured runtime errors)
   INBOX_OVERFLOW           = "INBOX_OVERFLOW",
   SPAWN_EXISTS             = "SPAWN_EXISTS",

@@ -1661,3 +1661,99 @@ fn unchecked:
 ]])
   end)
 end)
+
+-- ============================================================
+-- Bug #11 — Incomplete match detection (INCOMPLETE_MATCH warning)
+-- ============================================================
+
+describe("checker — INCOMPLETE_MATCH warning", function()
+  it("warns when named-enum match omits a value", function()
+    check_warn([[
+type Class = warrior | mage | rogue | ranger
+
+state player/class: Class = 'warrior
+state player/damage: Int(0,100) = 0
+
+fn class-damage:
+  let dmg = match player/class:
+    'warrior: 15
+    'mage:    10
+    'rogue:   12
+  set! player/damage dmg
+]], ast.E.INCOMPLETE_MATCH)
+  end)
+
+  it("does not warn when all enum values are covered", function()
+    check_ok([[
+type Class = warrior | mage | rogue
+
+state player/class: Class = 'warrior
+state player/damage: Int(0,100) = 0
+
+fn class-damage:
+  let dmg = match player/class:
+    'warrior: 15
+    'mage:    10
+    'rogue:   12
+  set! player/damage dmg
+]])
+  end)
+
+  it("does not warn when wildcard arm is present", function()
+    check_ok([[
+type Class = warrior | mage | rogue | ranger
+
+state player/class: Class = 'warrior
+state player/damage: Int(0,100) = 0
+
+fn class-damage:
+  let dmg = match player/class:
+    'warrior: 15
+    'mage:    10
+    _: 0
+  set! player/damage dmg
+]])
+  end)
+
+  it("warns for inline enum type", function()
+    check_warn([[
+state player/dir: Enum(north, south, east, west) = 'north
+state world/step: Int(0,100) = 0
+
+fn move:
+  let d = match player/dir:
+    'north: 1
+    'south: 2
+  set! world/step d
+]], ast.E.INCOMPLETE_MATCH)
+  end)
+
+  it("does not warn for match on non-path subject", function()
+    check_ok([[
+state player/x: Int(0,100) = 0
+
+fn check:
+  let v = match (player/x + 1):
+    1: 10
+    2: 20
+]])
+  end)
+
+  it("warns inside scene choice body", function()
+    check_warn([[
+type Dir = north | south | east | west
+
+state world/dir: Dir = 'north
+state world/step: Int(0,100) = 0
+
+engine-config:
+  entry-scene: main
+
+scene main:
+  * Move
+    let d = match world/dir:
+      'north: 1
+      'south: 2
+]], ast.E.INCOMPLETE_MATCH)
+  end)
+end)

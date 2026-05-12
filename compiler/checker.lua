@@ -1872,6 +1872,115 @@ local function pass_check_speakers(acc, symtab, program)
 end
 
 -- ============================================================
+-- Pass — Incomplete match expression detection
+-- ============================================================
+-- Warn when a match expression over a named or inline enum has no wildcard '_:'
+-- arm and leaves some enum values unhandled. Only fires when the subject is a
+-- PATH_EXPR with a statically-known enum type; computed subjects are skipped.
+
+--- Walk all statements/expressions in a subtree and call fn(node) for every MATCH_EXPR.
+local function walk_match_exprs(node, fn)
+  if not node or type(node) ~= "table" or not node.kind then return end
+  if node.kind == ast.K.MATCH_EXPR then fn(node) end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
+                        "clauses", "bindings" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        walk_match_exprs(child, fn)
+        if type(child) == "table" then
+          if child.guard then walk_match_exprs(child.guard, fn) end
+          if child.body then
+            if type(child.body) == "table" and not child.body.kind then
+              for _, s in ipairs(child.body) do walk_match_exprs(s, fn) end
+            else walk_match_exprs(child.body, fn) end
+          end
+        end
+      end
+    end
+  end
+  for _, f in ipairs({ "condition", "expr", "left", "right",
+                       "base", "value", "amount", "inner_expr" }) do
+    walk_match_exprs(node[f], fn)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do walk_match_exprs(a, fn) end
+  end
+end
+
+local function pass_check_match_completeness(acc, symtab, program)
+  local k        = ast.K
+  local path_map = build_path_type_map(program, symtab)
+
+  local function check_one(node)
+    -- Collect covered values and check for wildcard
+    local has_wildcard = false
+    local covered      = {}
+    for _, arm in ipairs(node.arms or {}) do
+      if arm.pattern == "_" then has_wildcard = true; break end
+      if type(arm.pattern) == "table" and arm.pattern.kind == k.SYMBOL_LIT then
+        covered[arm.pattern.name] = true
+      end
+    end
+    if has_wildcard then return end
+
+    -- Only check PATH_EXPR subjects (static type available)
+    local subj = node.expr
+    if not subj or subj.kind ~= k.PATH_EXPR then return end
+    local texpr = lookup_path_type(subj, path_map)
+    if not texpr then return end
+
+    -- Resolve to enum values
+    local enum_values
+    if texpr.kind == k.TYPE_ENUM_INLINE then
+      enum_values = texpr.values
+    elseif texpr.kind == k.TYPE_NAMED and texpr.resolved then
+      local decl = texpr.resolved
+      if decl.kind == k.TYPE_ENUM then
+        enum_values = decl.values
+      elseif decl.kind == k.TYPE_ALIAS and decl.type_expr
+          and decl.type_expr.kind == k.TYPE_ENUM_INLINE then
+        enum_values = decl.type_expr.values
+      end
+    end
+    if not enum_values then return end
+
+    local missing = {}
+    for _, v in ipairs(enum_values) do
+      if not covered[v] then missing[#missing + 1] = v end
+    end
+    if #missing == 0 then return end
+
+    local path_str    = table.concat(subj.segments or {}, "/")
+    local missing_str = table.concat(missing, ", ")
+    table.insert(acc.diags, ast.warning(
+      ast.E.INCOMPLETE_MATCH,
+      "match on '" .. path_str .. "': unhandled values '" .. missing_str ..
+        "' — add arms or a wildcard '_:' arm",
+      node.pos))
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_match_exprs(stmt, check_one)
+      end
+    elseif decl.kind == k.SCENE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_match_exprs(stmt, check_one)
+      end
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then walk_match_exprs(choice.guard, check_one) end
+        for _, stmt in ipairs(choice.body or {}) do
+          walk_match_exprs(stmt, check_one)
+        end
+      end
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -1913,6 +2022,7 @@ function M.check(ast_root, filename)
   pass7_check_contracts(acc, symtab, ast_root)
   pass_recursive_scenes(acc, ast_root)
   pass_check_speakers(acc, symtab, ast_root)
+  pass_check_match_completeness(acc, symtab, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

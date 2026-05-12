@@ -592,6 +592,70 @@ describe("eval: match_expr", function()
   end)
 end)
 
+-- Bug #11: match without wildcard emits a runtime warning and returns nil
+describe("Bug #11: match — no arm matches runtime warning", function()
+  local function match_expr(subj, arms_tbl)
+    local arms = {}
+    for _, a in ipairs(arms_tbl) do
+      arms[#arms+1] = { kind="match_arm", pattern=a[1], body=a[2] }
+    end
+    return { kind="match_expr", expr=subj, arms=arms }
+  end
+
+  it("emits warning to _print_sink when no arm matches and no wildcard", function()
+    local warnings = {}
+    local c = ctx({})
+    c.game = { _print_sink = function(msg) warnings[#warnings+1] = msg end }
+    local node = match_expr(sym_lit("ranger"), {
+      { sym_lit("warrior"), int_lit(15) },
+      { sym_lit("mage"),    int_lit(10) },
+    })
+    local result = eval.eval_expr(node, c)
+    assert.is_nil(result)
+    assert.equal(1, #warnings)
+    assert.truthy(warnings[1]:find("WARN", 1, true))
+    assert.truthy(warnings[1]:find("ranger", 1, true))
+  end)
+
+  it("does NOT emit warning when wildcard arm is present", function()
+    local warnings = {}
+    local c = ctx({})
+    c.game = { _print_sink = function(msg) warnings[#warnings+1] = msg end }
+    local node = match_expr(sym_lit("ranger"), {
+      { sym_lit("warrior"), int_lit(15) },
+      { "_",                int_lit(0)  },
+    })
+    local result = eval.eval_expr(node, c)
+    assert.equal(0, result)
+    assert.equal(0, #warnings)
+  end)
+
+  it("does NOT emit warning in production mode", function()
+    local warnings = {}
+    local c = ctx({})
+    c.game = { production = true,
+               _print_sink = function(msg) warnings[#warnings+1] = msg end }
+    local node = match_expr(sym_lit("ranger"), {
+      { sym_lit("warrior"), int_lit(15) },
+    })
+    eval.eval_expr(node, c)
+    assert.equal(0, #warnings)
+  end)
+
+  it("does NOT emit warning when all arms match (subject matched)", function()
+    local warnings = {}
+    local c = ctx({})
+    c.game = { _print_sink = function(msg) warnings[#warnings+1] = msg end }
+    local node = match_expr(sym_lit("warrior"), {
+      { sym_lit("warrior"), int_lit(15) },
+      { sym_lit("mage"),    int_lit(10) },
+    })
+    local result = eval.eval_expr(node, c)
+    assert.equal(15, result)
+    assert.equal(0, #warnings)
+  end)
+end)
+
 -- ============================================================
 -- record_constructor
 -- ============================================================

@@ -712,3 +712,112 @@ describe("find: connected-to clause", function()
     assert.same({ "cave", "forest" }, result)
   end)
 end)
+
+-- ============================================================
+-- Bug #12: non-lambda where: condition with variable names
+-- ============================================================
+
+describe("Bug #12: find where: non-lambda with alternate variable name", function()
+  -- Build a ctx with a compiled game that has a members family
+  local function make_members_ctx(members)
+    local src = [[
+type MemberStatus = available | injured
+
+type MemberInfo:
+  status:    MemberStatus
+  skill:     Int(1, 10)
+
+state members/{m}: MemberInfo
+]]
+    local gt, diags = compiler.compile(src, "members-test")
+    assert.is_false(diags:has_errors())
+    local l = log_mod.new()
+    local s = state_mod.new(gt.schema, l)
+    s:init_defaults()
+    for key, fields in pairs(members) do
+      s:spawn("members", key, fields)
+    end
+    local c = eval_mod.new_ctx(s, gt.fns, "test")
+    c.game = gt
+    return c
+  end
+
+  it("non-lambda condition with family name as variable works (baseline)", function()
+    local c = make_members_ctx({
+      alice = { status = "available", skill = 5 },
+      bob   = { status = "injured",   skill = 3 },
+    })
+    -- find members where: members/{members}/status = 'available
+    local cond = binop("=",
+      { kind = "interp_path", segments = { "members", { interp = "members" }, "status" } },
+      { kind = "symbol_lit", name = "available" })
+    local result = query.find(c, "members", {{ kind = "where", condition = cond }})
+    assert.same({ "alice" }, result)
+  end)
+
+  it("Bug #12: non-lambda condition with alternate variable name filters correctly", function()
+    -- Previously broken: {m} was not the family name "members", so {m} was unbound
+    -- and all or no entities passed regardless of their actual status.
+    local c = make_members_ctx({
+      alice = { status = "available", skill = 5 },
+      bob   = { status = "injured",   skill = 3 },
+      carol = { status = "available", skill = 7 },
+    })
+    -- find members where: members/{m}/status = 'available  (m ≠ "members")
+    local cond = binop("=",
+      { kind = "interp_path", segments = { "members", { interp = "m" }, "status" } },
+      { kind = "symbol_lit", name = "available" })
+    local result = query.find(c, "members", {{ kind = "where", condition = cond }})
+    table.sort(result)
+    assert.same({ "alice", "carol" }, result)
+  end)
+
+  it("Bug #12: alternate var name returns correct count", function()
+    local c = make_members_ctx({
+      alice = { status = "available", skill = 5 },
+      bob   = { status = "injured",   skill = 3 },
+      carol = { status = "available", skill = 7 },
+    })
+    local cond = binop("=",
+      { kind = "interp_path", segments = { "members", { interp = "x" }, "status" } },
+      { kind = "symbol_lit", name = "available" })
+    local result = query.find(c, "members", {
+      { kind = "where", condition = cond },
+      { kind = "count" },
+    })
+    assert.equal(2, result)
+  end)
+
+  it("does not rebind vars already bound in parent context", function()
+    -- If 'e' is already bound in the parent ctx (e.g. from an outer for-loop),
+    -- we must NOT override it with the entity key.
+    local c = make_members_ctx({
+      alice = { status = "available", skill = 5 },
+      bob   = { status = "injured",   skill = 3 },
+    })
+    -- Pre-bind 'e' in the parent ctx to an unrelated value
+    c.vars["e"] = "some-other-value"
+    -- Condition uses {e} — should remain bound to "some-other-value", not entity key
+    local cond = binop("=",
+      { kind = "interp_path", segments = { "members", { interp = "e" }, "status" } },
+      { kind = "symbol_lit", name = "available" })
+    -- Since c.vars["e"] = "some-other-value", path is members/some-other-value/status → nil
+    -- So no entities should pass
+    local result = query.find(c, "members", {{ kind = "where", condition = cond }})
+    assert.same({}, result)
+  end)
+
+  it("lambda form still works as before", function()
+    local c = make_members_ctx({
+      alice = { status = "available", skill = 5 },
+      bob   = { status = "injured",   skill = 3 },
+    })
+    -- find members where: fn(m): members/{m}/status = 'available
+    local lambda_body = binop("=",
+      { kind = "interp_path", segments = { "members", { interp = "m" }, "status" } },
+      { kind = "symbol_lit", name = "available" })
+    local cond = { kind = "lambda_expr", params = { "m" }, body = lambda_body }
+    local result = query.find(c, "members", {{ kind = "where", condition = cond }})
+    assert.same({ "alice" }, result)
+  end)
+end)

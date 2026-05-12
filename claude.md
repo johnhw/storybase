@@ -16,6 +16,8 @@
 `busted tests/`
 Runs ~1292 tests in a few seconds. Covers compiler, runtime, library API, and CLI unit tests.
 
+**IMPORTANT: HTTP/debug test failures must always be ignored** unless you have specifically made changes to the HTTP server or web debugger code. These failures are transient (network/port timing issues) and are not indicative of real bugs. Never spend time debugging HTTP test failures unless the http/debug subsystem was directly modified.
+
 ### CLI integration tests (run before commits that touch the CLI or demo files)
 `busted tests/cli/cli_integration_spec.lua`
 ~77 tests covering every CLI subcommand against all test*.sb and demo*.sb files.

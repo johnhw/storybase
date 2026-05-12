@@ -65,7 +65,8 @@
       "Bash(grep -n \"\\(\\\\`\\\\|= \\\\`\\\\|,\\\\`\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/compiler/parser_spec.lua)",
       "Bash(grep -v \"-- \\\\|#\\\\|:$\")",
       "Bash(grep -Pn \"\\\\\\([\\\\`]|= [\\\\`]|,[\\\\`]\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/runtime/debug_spec.lua)",
-      "Bash(xargs sed *)"
+      "Bash(xargs sed *)",
+      "Bash(grep -n \"\\\\`\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/test04_control_flow.sb)"
     ]
   }
 }

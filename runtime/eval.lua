@@ -703,6 +703,14 @@ eval_match = function(node, ctx)
       end
     end
   end
+  -- No arm matched and no wildcard — emit a dev-mode warning
+  if not (ctx.game and ctx.game.production) then
+    local subj_str = (type(subject) == "string") and ("'" .. subject) or tostring(subject)
+    local msg = "[WARN] match: unhandled value " .. subj_str ..
+                " — add arms for this value or a wildcard '_:' arm\n"
+    local sink = ctx.game and ctx.game._print_sink
+    if sink then sink(msg) else io.stderr:write(msg) end
+  end
   return nil
 end
 

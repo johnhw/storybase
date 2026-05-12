@@ -44,6 +44,40 @@ local function effective_rel(rel, rel_name, cache)
 end
 
 -- ============================================================
+-- find query helpers
+-- ============================================================
+
+--- Walk an expression node and collect all single-segment interp variable names
+--- referenced in INTERP_PATH segments (e.g. {e} in enemies/{e}/status → "e").
+--- Path-like variables (containing "/") are state-path lookups and are skipped.
+--- Does NOT descend into LAMBDA_EXPR bodies (lambdas bind their own parameters).
+local function collect_interp_vars(node, into)
+  if not node or type(node) ~= "table" then return end
+  if node.kind == "lambda_expr" then return end
+  if node.kind == "interp_path" then
+    for _, seg in ipairs(node.segments or {}) do
+      if type(seg) == "table" and seg.interp and not seg.interp:find("/", 1, true) then
+        into[seg.interp] = true
+      end
+    end
+    return
+  end
+  for _, field in ipairs({"left","right","expr","condition","value","inner_expr","path"}) do
+    collect_interp_vars(node[field], into)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do collect_interp_vars(a, into) end
+  end
+  if type(node.body) == "table" then
+    if node.body.kind then
+      collect_interp_vars(node.body, into)
+    else
+      for _, s in ipairs(node.body) do collect_interp_vars(s, into) end
+    end
+  end
+end
+
+-- ============================================================
 -- find query
 -- ============================================================
 
@@ -82,8 +116,16 @@ function M.find(ctx, family, clauses)
     end
   end
 
-  -- Filter: evaluate where conditions with var bound to each key
+  -- Filter: evaluate where conditions with var bound to each key.
+  -- Pre-scan all where conditions for interpolation variables so that non-lambda
+  -- conditions can use any variable name (not only the family name) as the entity
+  -- variable. All unbound single-segment interp vars found in conditions are bound
+  -- to the current entity key alongside the family name itself.
   local var_name = family  -- e.g. "npc" in "find npc" (family name is the var binding)
+  local where_vars = { [var_name] = true }  -- vars to bind per-entity
+  for _, clause in ipairs(where_conditions) do
+    collect_interp_vars(clause.condition, where_vars)
+  end
 
   -- Pre-evaluate relation filters (src values don't change per-key)
   -- Each entry: {kind, relation, hops?, src_val?, path_val?}
@@ -111,7 +153,15 @@ function M.find(ctx, family, clauses)
 
   local results = {}
   for _, key in ipairs(keys) do
-    local child = eval_mod.child_ctx_vars(ctx, { [var_name] = key })
+    -- Bind all detected where-condition vars to the current entity key,
+    -- but do not override variables already bound in the parent context.
+    local bindings = {}
+    for v in pairs(where_vars) do
+      if ctx.vars[v] == nil then
+        bindings[v] = key
+      end
+    end
+    local child = eval_mod.child_ctx_vars(ctx, bindings)
     local passes = true
 
     if #where_conditions > 0 then

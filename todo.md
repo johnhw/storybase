@@ -38,19 +38,36 @@ third return value. Updated `cli/repl_cmd.lua` to call `advance_to_choices()` af
 `game:init()` and after `:choose` to prevent getting stuck in dispatch scenes. 6
 regression tests added.
 
-**2272 tests passing, 0 failing, 2 pending (known limitations).**
+Bug #11 (match without wildcard silently returns nil) resolved 2026-05-13.
+Two-layer fix: (A) runtime warning emitted to `_print_sink` / stderr (suppressed in
+production mode) when `eval_match` falls through with no matching arm; (B) new checker
+pass `pass_check_match_completeness` that walks fn/scene bodies for MATCH_EXPR nodes
+whose subject is a typed PATH_EXPR over a named or inline enum, and emits
+`INCOMPLETE_MATCH` warning when not all enum values have arms and no wildcard is present.
+Added `INCOMPLETE_MATCH` to `ast.E`. 9 regression tests added (4 eval_spec, 6
+checker_spec counting both pass and no-warn cases).
+
+Bug #12 (non-lambda `find where:` predicate with variable name ≠ family name) resolved
+2026-05-13. Root cause: `query.lua:M.find` bound only `[family] = key` in the child
+context; if the condition used a different interpolation variable (e.g. `{m}` in
+`find members where: members/{m}/...`), that variable was unbound and fell back to the
+literal string, making the condition evaluate identically for all entities. Fix:
+`collect_interp_vars` pre-scans all where-condition AST nodes for single-segment interp
+variable names and binds all unresolved ones to the entity key in the child context.
+Parent-context vars are never overridden. 6 regression tests added (query_spec).
+
+**2287 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
 ## What to work on next
 
 Recommended order:
-1. **Critical bugs first** (Bug #8, Bug #9) — data loss and internal crashes.
-2. **Silent-failure hazards** (SF-1 through SF-5) — invisible correctness problems.
-3. **Compile-time validation** (AV-1 through AV-4) — improve checker so authoring
+1. **Silent-failure hazards** (SF-1 through SF-5) — invisible correctness problems.
+2. **Compile-time validation** (AV-1 through AV-4) — improve checker so authoring
    errors surface at `storybase check` instead of at runtime.
-4. **Ergonomics** (AE-13 through AE-17) — quality-of-life improvements.
-5. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
+3. **Ergonomics** (AE-13 through AE-17) — quality-of-life improvements.
+4. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
 
 ---
 
@@ -110,8 +127,8 @@ Recommended order:
   4 regression tests added (single-binding bare-ident case, expression-ending-with-ident
   case, path/expr case that already worked, multi-binding case).
 
-- [ ] **Bug #11 — `match` without wildcard silently returns `nil`; downstream `set!` silently
-  unsets the path.**
+- [x] **Bug #11 — `match` without wildcard silently returns `nil`; downstream `set!` silently
+  unsets the path.** *(fixed 2026-05-13)*
   When a `match` expression has no `_:` wildcard arm and the subject matches no arm, the
   expression returns `nil` with no warning. If the result is then stored with `set!`, the
   target path is silently unset — it disappears from state and shows as blank in narration.
@@ -144,7 +161,7 @@ Recommended order:
   Recommended: **B** (checker warning). Add `INCOMPLETE_MATCH` to `ast.E`, emit in
   `pass2_check` for MATCH_EXPR over named enum types.
 
-- [ ] **Bug #12 — Non-lambda `find where:` predicate returns all entities unfiltered.**
+- [x] **Bug #12 — Non-lambda `find where:` predicate returns all entities unfiltered.** *(fixed 2026-05-13)*
   When a plain expression (not a lambda) is passed to `where:` in a `find`/`count`
   expression, the condition is not applied per-entity — all members of the family are
   returned regardless. Only the lambda form correctly binds the entity variable:
