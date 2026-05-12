@@ -1481,7 +1481,12 @@ local function parse_let_value(p)
     local nt = p:adv()
     return ast.fn_call(nt.value, {}, nt.pos), true
   end
-  return parse_expr(p), false
+  local expr = parse_expr(p)
+  -- If parse_expr consumed a NAMED_ARG as its last token (e.g. `amount - defense:`),
+  -- the lexer folded the colon into that token, so the let-body colon is already gone.
+  local last = p.tokens[p.pos - 1]
+  local colon_done = last ~= nil and last.kind == "NAMED_ARG"
+  return expr, colon_done
 end
 
 local function parse_let_stmt(p)

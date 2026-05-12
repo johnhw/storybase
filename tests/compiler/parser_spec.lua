@@ -2055,3 +2055,68 @@ scene s:
     assert.equal("narrator", spk.name)
   end)
 end)
+
+-- ── Bug #10 regression: let x = expr: scoped-body form ───────────────────────
+
+describe("parser — let scoped-body form (Bug #10)", function()
+  it("parses let x = bare-ident: body (NAMED_ARG colon consumed by lexer)", function()
+    -- 'amount:' lexes as NAMED_ARG("amount"); fix detects this and sets colon_done
+    local stmts, diags = fn_body([[
+let dmg = amount:
+  set! player/health 0]])
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors, "expected no parse errors")
+    local ls = stmts[1]
+    assert.equal(ast.K.LET_STMT, ls.kind)
+    assert.equal(1, #ls.bindings)
+    assert.equal("dmg", ls.bindings[1].name)
+    assert.equal(1, #ls.body, "expected one stmt in let body")
+  end)
+
+  it("parses let x = expr - ident: body (expression ending with bare IDENT colon)", function()
+    -- 'defense:' lexes as NAMED_ARG("defense"); parse_expr consumes it as last token
+    local stmts, diags = fn_body([[
+let dmg = base - defense:
+  set! player/health dmg]])
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors, "expected no parse errors")
+    local ls = stmts[1]
+    assert.equal(ast.K.LET_STMT, ls.kind)
+    assert.equal("dmg", ls.bindings[1].name)
+    assert.equal(1, #ls.body, "expected one stmt in let body")
+  end)
+
+  it("parses let x = path/expr: body (PATH token, colon as OP — always worked)", function()
+    -- 'player/defense:' lexes as PATH + OP(":"), so colon is separate — existing path
+    local stmts, diags = fn_body([[
+let dmg = player/defense:
+  set! player/health dmg]])
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors, "expected no parse errors")
+    local ls = stmts[1]
+    assert.equal(ast.K.LET_STMT, ls.kind)
+    assert.equal("dmg", ls.bindings[1].name)
+    assert.equal(1, #ls.body)
+  end)
+
+  it("parses multi-binding let with colon on last binding (NAMED_ARG case)", function()
+    -- last binding 'y = amount:' where 'amount:' is NAMED_ARG
+    -- first binding must be on same line as 'let'; further bindings in INDENT block
+    local stmts, diags = fn_body([[
+let x = 10
+  y = amount:
+    set! player/health y]])
+    local errors = {}
+    for _, d in ipairs(diags) do if d.level == "error" then errors[#errors+1] = d end end
+    assert.equal(0, #errors, "expected no parse errors")
+    local ls = stmts[1]
+    assert.equal(ast.K.LET_STMT, ls.kind)
+    assert.equal(2, #ls.bindings)
+    assert.equal("x", ls.bindings[1].name)
+    assert.equal("y", ls.bindings[2].name)
+    assert.equal(1, #ls.body)
+  end)
+end)

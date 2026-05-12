@@ -25,7 +25,13 @@ lacked a forward declaration so `parse_match_expr` saw the global (nil) instead 
 local. Fixed with a forward declaration + secondary eol double-consume fix. 8 regression
 tests added.
 
-**2262 tests passing, 0 failing, 2 pending (known limitations).**
+Bug #10 (`let x = expr:` scoped-body form) resolved 2026-05-12. Root cause: `parse_let_value`
+called `parse_expr` and returned `colon_done=false` even when `parse_expr` internally
+consumed a NAMED_ARG as its last token (the lexer folds `word:` into one token). Fixed by
+checking `p.tokens[p.pos-1]` after `parse_expr` and setting `colon_done=true` if it was a
+NAMED_ARG. 4 regression tests added.
+
+**2266 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
@@ -85,37 +91,17 @@ Recommended order:
 
 ## Major Bugs (wrong behaviour, not crash)
 
-- [ ] **Bug #10 — `let x = expr:` scoped-body form is broken.**
-  The spec documents `let x = value: body` as a scoped binding form. It silently misfires:
-  when the binding value ends with a bare identifier (the common case), the lexer tokenises
-  `identifier:` as a single `NAMED_ARG` token, consuming the colon. The parser then never
-  sees the colon and falls into the multi-binding continuation loop, misidentifying the first
-  statement of the intended body as a binding name and emitting a confusing
-  "expected '=' in let binding continuation" error pointing at the wrong token.
+- [x] **Bug #10 — `let x = expr:` scoped-body form is broken.** *(fixed 2026-05-12)*
+  The spec documents `let x = value: body` as a scoped binding form. When the binding
+  value ended with a bare identifier, the lexer tokenised `identifier:` as a single
+  `NAMED_ARG` token, consuming the colon. The parser never saw the `:` and fell into the
+  multi-binding continuation loop, emitting a confusing error.
 
-  Example that fails:
-  ```
-  fn take-damage amount:
-    let dmg = amount - player/defense:
-      dec! player/health dmg      # error points here, at "player/defense"
-  ```
-  Multi-binding form with `:` on the last binding has the same problem.
-
-  **Root cause:** `compiler/lexer.lua` tokenises `word:` as `NAMED_ARG("word")` eagerly,
-  before the parser can distinguish a let-body colon from a named-argument colon.
-  `compiler/parser.lua:parse_let_value` calls `parse_expr` which, encountering `defense:`
-  as a NAMED_ARG, converts it to `fn_call("defense", [])` and silently consumes the colon.
-
-  **Options:**
-  - **A (preferred):** After `parse_expr` in `parse_let_value`, check whether the last
-    token consumed was a NAMED_ARG; if so, set `colon_done = true` (the colon is already
-    gone). This preserves exact spec semantics and is a small change.
-  - **B:** Change the lexer to emit `IDENT` + `COLON` as two tokens when the identifier
-    appears as the RHS of a `let` binding (requires context in the lexer — fragile).
-  - **C:** Document that the `:` form is not supported and always use the no-colon form
-    (`let x = expr` on its own line). This is what all 21 demos already do.
-
-  Add regression tests for single-binding and multi-binding let-with-body.
+  **Fix (Option A):** In `compiler/parser.lua:parse_let_value`, after calling `parse_expr`,
+  check `p.tokens[p.pos - 1]`. If the last consumed token was a `NAMED_ARG`, set
+  `colon_done = true` — the colon was already consumed by the lexer as part of that token.
+  4 regression tests added (single-binding bare-ident case, expression-ending-with-ident
+  case, path/expr case that already worked, multi-binding case).
 
 - [ ] **Bug #11 — `match` without wildcard silently returns `nil`; downstream `set!` silently
   unsets the path.**
