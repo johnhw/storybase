@@ -100,6 +100,37 @@ local function lookup_type(idx, path)
 end
 
 -- ============================================================
+-- SF-2: Invalid enum value detection helpers
+-- ============================================================
+
+--- Resolve a compiled type_desc to the set of valid enum symbol values.
+--- Returns a table {value=true, ...} if the type is an enum, or nil otherwise.
+--- Handles inline enums (tag="enum"), named enum references (tag="named"),
+--- and alias chains (kind="alias" in schema.types).
+local function get_enum_values(type_desc, schema)
+  if not type_desc or not schema then return nil end
+  if type_desc.tag == "enum" then
+    local set = {}
+    for _, v in ipairs(type_desc.values or {}) do set[v] = true end
+    return set
+  end
+  if type_desc.tag == "named" then
+    for _, t in ipairs(schema.types or {}) do
+      if t.name == type_desc.name then
+        if t.kind == "enum" then
+          local set = {}
+          for _, v in ipairs(t.values or {}) do set[v] = true end
+          return set
+        elseif t.kind == "alias" and t.type_desc then
+          return get_enum_values(t.type_desc, schema)
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- ============================================================
 -- SF-3: Undeclared path write detection (dev mode only)
 -- ============================================================
 
@@ -110,6 +141,26 @@ local function warn_undeclared(store, path, op)
   if lookup_type(store._type_index, path) == nil then
     local msg = "[WARN] " .. op .. " to undeclared path '" .. path ..
                 "' — not found in state schema\n"
+    local sink = store._print_sink
+    if sink then sink(msg) else io.stderr:write(msg) end
+  end
+end
+
+local function warn_invalid_enum(store, path, value)
+  if store._production then return end
+  if not store._schema_has_states then return end
+  if type(value) ~= "string" then return end
+  if path:sub(1, 2) == "__" then return end
+  local td = lookup_type(store._type_index, path)
+  if not td then return end  -- undeclared path — SF-3 already warned
+  local enum_vals = get_enum_values(td, store._schema)
+  if enum_vals and not enum_vals[value] then
+    local valid = {}
+    for v in pairs(enum_vals) do valid[#valid + 1] = "'" .. v end
+    table.sort(valid)
+    local msg = "[WARN] set! of invalid enum value '" .. value ..
+                "' on path '" .. path .. "'" ..
+                " (expected one of: " .. table.concat(valid, ", ") .. ")\n"
     local sink = store._print_sink
     if sink then sink(msg) else io.stderr:write(msg) end
   end
@@ -365,6 +416,7 @@ function M.new(schema, log)
   ---@param fn    string?  calling function name
   function store:set(path, value, fn)
     warn_undeclared(self, path, "set!")
+    warn_invalid_enum(self, path, value)
     local old = self._cache[path]
     self._cache[path] = value
     _log_entry(self, path, old, value, fn)

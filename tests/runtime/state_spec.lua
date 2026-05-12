@@ -658,6 +658,122 @@ describe("state store: path_list returns deterministic sorted order (Bug #7 regr
 end)
 
 -- ============================================================
+-- SF-2: Invalid enum value write detection (runtime, dev mode)
+-- ============================================================
+
+describe("SF-2: invalid enum value write warning", function()
+  local function make_enum_schema()
+    return {
+      types = {
+        { kind = "enum", name = "Status", values = { "alive", "dead" } },
+        { kind = "alias", name = "Dir",
+          type_desc = { tag = "enum", values = { "north", "south", "east", "west" } } },
+        { kind = "record", name = "NpcRec",
+          fields = {
+            { name = "status", type_desc = { tag = "named", name = "Status" } },
+            { name = "score",  type_desc = { tag = "int", min = 0, max = 100 } },
+          } },
+      },
+      states = {
+        { kind = "scalar", path = "player/status",
+          type_desc = { tag = "named", name = "Status" } },
+        { kind = "scalar", path = "player/dir",
+          type_desc = { tag = "named", name = "Dir" } },
+        { kind = "scalar", path = "world/score",
+          type_desc = { tag = "int" } },
+        { kind = "scalar", path = "world/note",
+          type_desc = { tag = "string" } },
+        { kind = "scalar", path = "player/direction",
+          type_desc = { tag = "enum", values = { "up", "down" } } },
+        { kind = "family", family = "npcs",
+          var = "npc",
+          type_desc = { tag = "named", name = "NpcRec",
+            fields = {
+              { name = "status", type_desc = { tag = "named", name = "Status" } },
+              { name = "score",  type_desc = { tag = "int" } },
+            } },
+          max = 10 },
+      },
+    }
+  end
+
+  local function make_enum_store()
+    local l = log_mod.new()
+    local s = state_mod.new(make_enum_schema(), l)
+    return s
+  end
+
+  it("emits warning for invalid enum symbol on named-enum path", function()
+    local s = make_enum_store()
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("player/status", "zombie", "test")
+    assert.equal(1, #warns)
+    assert.is_truthy(warns[1]:find("zombie"))
+    assert.is_truthy(warns[1]:find("player/status"))
+  end)
+
+  it("does not warn for valid enum symbol on named-enum path", function()
+    local s = make_enum_store()
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("player/status", "alive", "test")
+    assert.equal(0, #warns)
+  end)
+
+  it("emits warning for invalid symbol on alias-to-inline-enum path", function()
+    local s = make_enum_store()
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("player/dir", "up", "test")  -- "up" not in {north,south,east,west}
+    assert.equal(1, #warns)
+  end)
+
+  it("emits warning for invalid symbol on inline-enum path", function()
+    local s = make_enum_store()
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("player/direction", "left", "test")  -- "left" not in {up,down}
+    assert.equal(1, #warns)
+  end)
+
+  it("does not warn for non-string values (numeric, boolean)", function()
+    local s = make_enum_store()
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("world/score", 42, "test")
+    s:set("world/score", false, "test")
+    assert.equal(0, #warns)
+  end)
+
+  it("does not warn for string writes to non-enum typed paths", function()
+    local s = make_enum_store()
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("world/note", "hello", "test")
+    assert.equal(0, #warns)
+  end)
+
+  it("production mode suppresses enum warning", function()
+    local s = make_enum_store()
+    s._production = true
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("player/status", "zombie", "test")
+    assert.equal(0, #warns)
+  end)
+
+  it("warning message lists valid values", function()
+    local s = make_enum_store()
+    local warns = {}
+    s._print_sink = function(m) warns[#warns+1] = m end
+    s:set("player/status", "zombie", "test")
+    assert.is_truthy(warns[1]:find("alive"))
+    assert.is_truthy(warns[1]:find("dead"))
+  end)
+end)
+
+-- ============================================================
 -- SF-3: Undeclared state path write detection (runtime, dev mode)
 -- ============================================================
 

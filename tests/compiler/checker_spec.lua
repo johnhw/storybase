@@ -1842,3 +1842,101 @@ scene main:
 ]], ast.E.UNDEFINED_PATH)
   end)
 end)
+
+-- ============================================================
+-- SF-2 — Invalid enum value write detection (checker pass)
+-- ============================================================
+
+describe("checker — INVALID_ENUM_VALUE warning (SF-2)", function()
+  it("warns when set! assigns a symbol not in a named enum type", function()
+    check_warn([[
+type Status = alive | dead
+
+state player/status: Status = `alive
+
+fn bad-write:
+  set! player/status `zombie
+]], ast.E.INVALID_ENUM_VALUE)
+  end)
+
+  it("does not warn when symbol is a valid named enum member", function()
+    check_ok([[
+type Status = alive | dead
+
+state player/status: Status = `alive
+
+fn good-write:
+  set! player/status `dead
+]])
+  end)
+
+  it("warns for invalid symbol on an inline enum path", function()
+    check_warn([[
+state player/dir: Enum(north, south, east, west) = `north
+
+fn bad-dir:
+  set! player/dir `up
+]], ast.E.INVALID_ENUM_VALUE)
+  end)
+
+  it("does not warn for valid symbol on inline enum", function()
+    check_ok([[
+state player/dir: Enum(north, south, east, west) = `north
+
+fn good-dir:
+  set! player/dir `south
+]])
+  end)
+
+  it("warns for invalid symbol on family member enum field", function()
+    check_warn([[
+type Status = alive | dead
+type NpcRec:
+  status: Status
+
+state npcs/{npc}: NpcRec max: 4
+
+fn kill:
+  set! npcs/guard/status `zombie
+]], ast.E.INVALID_ENUM_VALUE)
+  end)
+
+  it("does not warn for INTERP_PATH enum writes (runtime check only)", function()
+    check_ok([[
+type Status = alive | dead
+type NpcRec:
+  status: Status
+
+state npcs/{npc}: NpcRec max: 4
+
+fn update:
+  set! npcs/{npc}/status `zombie
+]])
+  end)
+
+  it("does not warn when set! assigns non-symbol value to enum path", function()
+    check_ok([[
+type Status = alive | dead
+
+state player/status: Status = `alive
+
+fn clear:
+  set! player/status nil
+]])
+  end)
+
+  it("warns inside a scene choice body", function()
+    check_warn([[
+type Phase = intro | mid | end
+
+state world/phase: Phase = `intro
+
+engine-config:
+  entry-scene: main
+
+scene main:
+  * Skip ahead
+    set! world/phase `finale
+]], ast.E.INVALID_ENUM_VALUE)
+  end)
+end)

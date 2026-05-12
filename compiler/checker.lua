@@ -1861,43 +1861,8 @@ local function check_speakers_in_body(acc, symtab, body)
 end
 
 -- ============================================================
--- Pass — Undefined state path detection (SF-3)
+-- Shared mutation walker (used by SF-2 and SF-3 passes)
 -- ============================================================
--- Warn when a mutation statement targets a static PATH_EXPR not declared in
--- the state schema. INTERP_PATH expressions cannot be checked statically and
--- are always skipped. INDEX_EXPR / SLICE_EXPR paths are unwrapped to their
--- base before checking.
-
---- Return true if the PATH_EXPR node refers to a declared state path.
-local function is_mut_path_declared(path_node, path_map, symtab)
-  if not path_node then return true end
-  local k = ast.K
-  -- Unwrap indexed / sliced access to the base path
-  if path_node.kind == k.INDEX_EXPR or path_node.kind == k.SLICE_EXPR then
-    path_node = path_node.base
-    if not path_node then return true end
-  end
-  if path_node.kind ~= k.PATH_EXPR then return true end  -- INTERP_PATH: skip
-  local segs = path_node.segments or {}
-  if #segs == 0 then return true end
-  for _, s in ipairs(segs) do
-    if type(s) ~= "string" then return true end  -- interpolated segment: skip
-  end
-
-  if #segs == 1 then
-    local p = segs[1]
-    return path_map[p] ~= nil or symtab.families[p] ~= nil
-  end
-
-  if #segs == 2 then
-    local p = table.concat(segs, "/")
-    if path_map[p] then return true end
-    return symtab.families[segs[1]] ~= nil
-  end
-
-  -- 3+ segments: wildcard lookup handles family/key/field patterns
-  return lookup_path_type(path_node, path_map) ~= nil
-end
 
 local MUT_PATH_KINDS = {
   [ast.K.SET_MUT]        = true, [ast.K.INC_MUT]        = true,
@@ -1934,6 +1899,135 @@ local function walk_mut_with_path(node, fn)
                        "value", "amount", "inner_expr" }) do
     walk_mut_with_path(node[f], fn)
   end
+end
+
+-- ============================================================
+-- Pass — Invalid enum value write detection (SF-2)
+-- ============================================================
+-- Warn when a SET_MUT assigns a SYMBOL_LIT to a path whose declared type
+-- is a named or inline enum and the symbol is not a member of that enum.
+-- Only fires for static PATH_EXPR paths; INTERP_PATH is covered by the
+-- runtime warning in state.lua.
+
+--- Resolve a checker-AST type_expr to the set of valid enum values.
+--- Returns {value=true,...} for enum types, nil for everything else.
+local function get_enum_values_checker(texpr, symtab)
+  if not texpr then return nil end
+  local k = ast.K
+  if texpr.kind == k.TYPE_ENUM_INLINE then
+    local set = {}
+    for _, v in ipairs(texpr.values or {}) do set[v] = true end
+    return set
+  end
+  if texpr.kind == k.TYPE_NAMED then
+    local decl = symtab.types[texpr.name]
+    if decl then
+      if decl.kind == k.TYPE_ENUM then
+        local set = {}
+        for _, v in ipairs(decl.values or {}) do set[v] = true end
+        return set
+      elseif decl.kind == k.TYPE_ALIAS and decl.type_expr then
+        return get_enum_values_checker(decl.type_expr, symtab)
+      end
+    end
+  end
+  return nil
+end
+
+local function pass_check_invalid_enum_writes(acc, symtab, program)
+  local k        = ast.K
+  local path_map = build_path_type_map(program, symtab)
+
+  local function check_set(node)
+    if node.kind ~= k.SET_MUT then return end
+    local path_node = node.path
+    if not path_node then return end
+    -- Unwrap INDEX_EXPR to the base list path (index writes are not enum-typed)
+    if path_node.kind == k.INDEX_EXPR then return end
+    if path_node.kind ~= k.PATH_EXPR then return end  -- INTERP_PATH: runtime catches it
+    local val_node = node.value
+    if not val_node or val_node.kind ~= k.SYMBOL_LIT then return end
+    local sym_name = val_node.name
+    local texpr = lookup_path_type(path_node, path_map)
+    if not texpr then return end  -- undeclared path — SF-3 already handles this
+    local enum_vals = get_enum_values_checker(texpr, symtab)
+    if enum_vals and not enum_vals[sym_name] then
+      local path_str = table.concat(path_node.segments or {}, "/")
+      local valid = {}
+      for v in pairs(enum_vals) do valid[#valid + 1] = "'" .. v end
+      table.sort(valid)
+      table.insert(acc.diags, ast.warning(
+        ast.E.INVALID_ENUM_VALUE,
+        "'" .. sym_name .. "' is not a valid value for '" .. path_str ..
+          "' (expected one of: " .. table.concat(valid, ", ") .. ")",
+        val_node.pos))
+    end
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_set)
+      end
+    elseif decl.kind == k.SCENE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_set)
+      end
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then walk_mut_with_path(choice.guard, check_set) end
+        for _, stmt in ipairs(choice.body or {}) do
+          walk_mut_with_path(stmt, check_set)
+        end
+      end
+    elseif decl.kind == k.SCHEDULE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_set)
+      end
+    elseif decl.kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_set)
+      end
+    end
+  end
+end
+
+-- ============================================================
+-- Pass — Undefined state path detection (SF-3)
+-- ============================================================
+-- Warn when a mutation statement targets a static PATH_EXPR not declared in
+-- the state schema. INTERP_PATH expressions cannot be checked statically and
+-- are always skipped. INDEX_EXPR / SLICE_EXPR paths are unwrapped to their
+-- base before checking.
+
+--- Return true if the PATH_EXPR node refers to a declared state path.
+local function is_mut_path_declared(path_node, path_map, symtab)
+  if not path_node then return true end
+  local k = ast.K
+  -- Unwrap indexed / sliced access to the base path
+  if path_node.kind == k.INDEX_EXPR or path_node.kind == k.SLICE_EXPR then
+    path_node = path_node.base
+    if not path_node then return true end
+  end
+  if path_node.kind ~= k.PATH_EXPR then return true end  -- INTERP_PATH: skip
+  local segs = path_node.segments or {}
+  if #segs == 0 then return true end
+  for _, s in ipairs(segs) do
+    if type(s) ~= "string" then return true end  -- interpolated segment: skip
+  end
+
+  if #segs == 1 then
+    local p = segs[1]
+    return path_map[p] ~= nil or symtab.families[p] ~= nil
+  end
+
+  if #segs == 2 then
+    local p = table.concat(segs, "/")
+    if path_map[p] then return true end
+    return symtab.families[segs[1]] ~= nil
+  end
+
+  -- 3+ segments: wildcard lookup handles family/key/field patterns
+  return lookup_path_type(path_node, path_map) ~= nil
 end
 
 local function pass_check_undefined_paths(acc, symtab, program)
@@ -2149,6 +2243,7 @@ function M.check(ast_root, filename)
   pass_check_speakers(acc, symtab, ast_root)
   pass_check_match_completeness(acc, symtab, ast_root)
   pass_check_undefined_paths(acc, symtab, ast_root)
+  pass_check_invalid_enum_writes(acc, symtab, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

@@ -64,6 +64,20 @@ names, named types, family names, and single-segment scalar/record state paths �
 valid non-function bare-identifier uses. Also added `pure` as a silent no-op (it is a
 purity annotation that has no runtime semantics). 10 regression tests added (eval_spec).
 
+SF-2 (invalid enum values assigned without error) resolved 2026-05-13.
+Option C (A+B combined): (A) `runtime/state.lua` — `get_enum_values(type_desc, schema)`
+resolves inline enums (`tag="enum"`), named enum references (`tag="named"`), and alias
+chains; `warn_invalid_enum(store, path, value)` called from `store:set` emits dev-mode
+`[WARN]` when a string value is not in the resolved enum values set. Handles family
+member field paths via `lookup_type`. Suppressed in production mode.
+(B) `compiler/checker.lua` — new `pass_check_invalid_enum_writes` pass; walks SET_MUT
+nodes with SYMBOL_LIT values on static PATH_EXPR paths; resolves the path type via
+`build_path_type_map`; resolves inline enums, named enums, and TYPE_ALIAS chains via
+`get_enum_values_checker`; emits `INVALID_ENUM_VALUE` warning. INTERP_PATH paths skipped
+(covered by runtime check). `MUT_PATH_KINDS` and `walk_mut_with_path` refactored to a
+shared helper section used by both SF-2 and SF-3 passes.
+16 regression tests added (8 state_spec runtime, 8 checker_spec compile-time).
+
 SF-3 (writes to undefined state paths silently no-op) resolved 2026-05-13.
 Option C (A + B): (A) `runtime/state.lua` — `warn_undeclared` helper added before
 every mutation method (set, inc, dec, add, remove, clear, push, pop); checks path via
@@ -78,14 +92,14 @@ nodes in fn/scene/schedule/hook bodies; for static PATH_EXPR paths checks agains
 INTERP_PATH (dynamic) and INDEX_EXPR/SLICE_EXPR by unwrapping to base.
 16 regression tests added (8 state_spec for runtime, 8 checker_spec for compile-time).
 
-**2313 tests passing, 0 failing, 2 pending (known limitations).**
+**2329 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
 ## What to work on next
 
 Recommended order:
-1. **Silent-failure hazards** (SF-2, SF-4, SF-5) — SF-1 and SF-3 resolved.
+1. **Silent-failure hazards** (SF-4, SF-5) — SF-1, SF-2, SF-3 resolved.
 2. **Compile-time validation** (AV-1 through AV-4) — improve checker so authoring
    errors surface at `storybase check` instead of at runtime.
 3. **Ergonomics** (AE-13 through AE-17) — quality-of-life improvements.
@@ -248,7 +262,7 @@ locate. All five are high-priority from an authoring-experience perspective.
 
   Recommended: **A** (dev-mode runtime warning). Small change to `eval.lua`.
 
-- [ ] **SF-2 — Invalid enum values assigned without error.**
+- [x] **SF-2 — Invalid enum values assigned without error.** *(fixed 2026-05-13)*
   `set! player/status \`zombie` succeeds silently when `Status = alive | dead`. The
   illegal value is stored in state and displayed. No compile-time or runtime check exists.
 
