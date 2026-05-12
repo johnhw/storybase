@@ -69,9 +69,10 @@ end
 -- Expression / type / statement formatters (forward declarations)
 -- ============================================================
 
-local fmt_expr   -- forward declaration (defined below)
-local fmt_type   -- forward declaration (defined below)
-local fmt_stmts  -- forward declaration (defined below)
+local fmt_expr    -- forward declaration (defined below)
+local fmt_type    -- forward declaration (defined below)
+local fmt_stmts   -- forward declaration (defined below)
+local fmt_pattern -- forward declaration (defined below)
 
 -- ============================================================
 -- Helpers
@@ -96,6 +97,18 @@ local function render_text_segments(segments)
     end
   end
   return table.concat(parts)
+end
+
+--- Emit a narration text that may contain embedded newlines (from multiline strings).
+--- Each logical line is emitted on its own buf line with current indentation.
+local function emit_narration_text(buf, text)
+  if text:find("\n", 1, true) then
+    for ln in text:gmatch("[^\n]+") do
+      buf.line(ln)
+    end
+  else
+    buf.line(text)
+  end
 end
 
 -- ============================================================
@@ -141,9 +154,9 @@ fmt_type = function(node)
       fmt_type(node.key or node.key_type), fmt_type(node.val or node.val_type))
   end
   if k == K.TYPE_ENUM_INLINE then
-    local vals = {}
-    for _, v in ipairs(node.values or {}) do vals[#vals + 1] = "`" .. v end
-    return table.concat(vals, " | ")
+    -- Use Enum(...) form: unambiguous in type-expression position.
+    -- The val1 | val2 form is ambiguous (parser reads | as OR operator).
+    return "Enum(" .. table.concat(node.values or {}, ", ") .. ")"
   end
   if k == K.TYPE_FN then
     local params = {}
@@ -241,14 +254,14 @@ fmt_expr = function(node)
   if k == K.MATCH_EXPR then
     local arms = {}
     for _, arm in ipairs(node.arms or {}) do
-      arms[#arms + 1] = fmt_expr(arm.pattern) .. " -> " .. fmt_expr(arm.body)
+      arms[#arms + 1] = fmt_pattern(arm.pattern) .. " -> " .. fmt_expr(arm.body)
     end
     return "match " .. fmt_expr(node.expr or node.subject) .. " { "
            .. table.concat(arms, " | ") .. " }"
   end
 
   if k == K.INDEX_EXPR then
-    return fmt_expr(node.table_expr) .. "[" .. fmt_expr(node.index) .. "]"
+    return fmt_expr(node.base or node.table_expr) .. "[" .. fmt_expr(node.index) .. "]"
   end
 
   if k == K.SET_LIT then
@@ -297,11 +310,16 @@ fmt_expr = function(node)
     local parts = { "find " .. fam }
     for _, cl in ipairs(node.clauses or {}) do
       if cl.kind == "where" then
-        parts[#parts + 1] = "where: " .. fmt_expr(cl.condition)
+        parts[#parts + 1] = "where: " .. fmt_expr(cl.condition or cl.expr)
       elseif cl.kind == "order_by" then
-        parts[#parts + 1] = "order-by: " .. fmt_expr(cl.expr)
+        -- AST: cl.path = expr, cl.dir = "asc"/"desc" (optional)
+        local path_s = cl.path and fmt_expr(cl.path) or fmt_expr(cl.expr)
+        local dir_s  = (cl.dir and cl.dir ~= "asc") and (" " .. cl.dir) or ""
+        parts[#parts + 1] = "order-by: " .. path_s .. dir_s
       elseif cl.kind == "limit" then
-        parts[#parts + 1] = "limit: " .. fmt_expr(cl.expr)
+        -- AST: cl.value = number or cl.expr = expr
+        local lim = cl.value ~= nil and tostring(cl.value) or fmt_expr(cl.expr)
+        parts[#parts + 1] = "limit: " .. lim
       elseif cl.kind == "count" then
         parts[1] = "count " .. fam
       end
@@ -310,11 +328,20 @@ fmt_expr = function(node)
   end
 
   if k == K.RECORD_CONSTRUCTOR then
+    local type_name = node.type_name or "?"
     local fields = {}
     for _, f in ipairs(node.fields or {}) do
       fields[#fields + 1] = f.name .. ": " .. fmt_expr(f.value)
     end
-    return (node.type_name or "?") .. "(" .. table.concat(fields, ", ") .. ")"
+    -- PATH-qualified variant names (contain '/') use outer-paren form: (Type/Var field: val)
+    -- Simple type names use suffix-paren form:  TypeName(field: val, ...)
+    if type_name:find("/", 1, true) then
+      if #fields == 0 then return "(" .. type_name .. ")" end
+      return "(" .. type_name .. " " .. table.concat(fields, " ") .. ")"
+    else
+      if #fields == 0 then return type_name end
+      return type_name .. "(" .. table.concat(fields, ", ") .. ")"
+    end
   end
 
   if k == K.PATH_AT_BEFORE then
@@ -330,12 +357,31 @@ fmt_expr = function(node)
   end
 
   if k == K.SLICE_EXPR then
-    local lo = node.lo ~= nil and fmt_expr(node.lo) or ""
-    local hi = node.hi ~= nil and fmt_expr(node.hi) or ""
-    return fmt_expr(node.table_expr) .. "[" .. lo .. ":" .. hi .. "]"
+    local lo = (node.from or node.lo) ~= nil and fmt_expr(node.from or node.lo) or ""
+    local hi = (node.to   or node.hi) ~= nil and fmt_expr(node.to   or node.hi) or ""
+    return fmt_expr(node.base or node.table_expr) .. "[" .. lo .. ":" .. hi .. "]"
   end
 
   return "?"
+end
+
+--- Format a match arm pattern.
+--- Variant destructuring patterns use `TypeName {field1, field2}` syntax.
+--- All other patterns delegate to fmt_expr.
+fmt_pattern = function(node)
+  if not node then return "_" end
+  if type(node) == "string" then return node end
+  local K = ast.K
+  if node.kind == K.RECORD_CONSTRUCTOR then
+    local type_name = node.type_name or "?"
+    local fields = {}
+    for _, f in ipairs(node.fields or {}) do
+      fields[#fields + 1] = f.name or "?"
+    end
+    if #fields == 0 then return type_name end
+    return type_name .. " {" .. table.concat(fields, ", ") .. "}"
+  end
+  return fmt_expr(node)
 end
 
 -- ============================================================
@@ -392,32 +438,58 @@ local function fmt_stmt(buf, node, is_fn)
   elseif k == K.TIME_INC_MUT then
     local axes = {}
     for _, entry in ipairs(node.axes or {}) do
-      axes[#axes + 1] = entry.axis .. ": " .. tostring(entry.value)
+      local v = type(entry.value) == "table" and fmt_expr(entry.value) or tostring(entry.value)
+      axes[#axes + 1] = entry.axis .. ": " .. v
     end
     buf.line("time-inc! " .. table.concat(axes, " "))
   elseif k == K.TIME_SET_MUT then
     local axes = {}
     for _, entry in ipairs(node.axes or {}) do
-      axes[#axes + 1] = entry.axis .. ": " .. tostring(entry.value)
+      local v = type(entry.value) == "table" and fmt_expr(entry.value) or tostring(entry.value)
+      axes[#axes + 1] = entry.axis .. ": " .. v
     end
     buf.line("time-set! " .. table.concat(axes, " "))
 
   -- Undo
   elseif k == K.UNDO_MUT then
-    if node.steps and node.steps ~= 1 then
-      buf.line("undo! steps: " .. tostring(node.steps))
+    if node.steps then
+      local steps_s = type(node.steps) == "table" and fmt_expr(node.steps) or tostring(node.steps)
+      if steps_s ~= "1" then
+        buf.line("undo! steps: " .. steps_s)
+      else
+        buf.line("undo!")
+      end
     else
       buf.line("undo!")
     end
 
   -- Scene navigation (sigil forms in choice/fn bodies)
   elseif k == K.SCENE_GOTO then
-    -- target can be a string or an expr (computed goto)
-    local tgt = type(node.target) == "string" and node.target or fmt_expr(node.target)
-    buf.line("-> " .. tgt)
+    -- target can be a string or an expr (computed goto wrapped in parens)
+    if type(node.target) == "string" then
+      buf.line("-> " .. node.target)
+    elseif node.target and node.target.kind == K.MATCH_EXPR then
+      -- Multi-line match in computed goto: -> (match expr:\n  arm: body\n  last-arm: body)
+      local mt = node.target
+      local arms = mt.arms or {}
+      buf.ind(); buf.emit("-> (match " .. fmt_expr(mt.expr or mt.subject) .. ":"); buf.nl()
+      buf.push()
+      for i, arm in ipairs(arms) do
+        local is_last = (i == #arms)
+        local pat_s  = fmt_pattern(arm.pattern)
+        local body_s = fmt_expr(arm.body)
+        buf.line(pat_s .. ": " .. body_s .. (is_last and ")" or ""))
+      end
+      buf.pop()
+    else
+      buf.line("-> (" .. fmt_expr(node.target) .. ")")
+    end
   elseif k == K.SCENE_ENTER then
-    local tgt = type(node.target) == "string" and node.target or fmt_expr(node.target)
-    buf.line("=> " .. tgt)
+    if type(node.target) == "string" then
+      buf.line("=> " .. node.target)
+    else
+      buf.line("=> (" .. fmt_expr(node.target) .. ")")
+    end
   elseif k == K.SCENE_EXIT then
     buf.line("<-")
 
@@ -442,7 +514,7 @@ local function fmt_stmt(buf, node, is_fn)
     buf.push()
     for _, t in ipairs(node.then_body or {}) do
       if type(t) == "table" and t.kind == "narration_line" then
-        buf.line(render_text_segments(t.text or ""))
+        emit_narration_text(buf, render_text_segments(t.text or ""))
       elseif type(t) == "table" and t.kind == "cond_narration" then
         buf.ind()
         buf.emit("[" .. fmt_expr(t.condition or t.cond) .. "] ")
@@ -460,7 +532,7 @@ local function fmt_stmt(buf, node, is_fn)
       buf.push()
       for _, t in ipairs(node.else_body) do
         if type(t) == "table" and t.kind == "narration_line" then
-          buf.line(render_text_segments(t.text or ""))
+          emit_narration_text(buf, render_text_segments(t.text or ""))
         elseif type(t) == "table" and t.kind == "cond_narration" then
           buf.ind()
           buf.emit("[" .. fmt_expr(t.condition or t.cond) .. "] ")
@@ -484,7 +556,32 @@ local function fmt_stmt(buf, node, is_fn)
   elseif k == K.LET_STMT then
     for _, b in ipairs(node.bindings or {}) do
       if type(b) == "table" and b.name then
-        buf.line("let " .. b.name .. " = " .. fmt_expr(b.expr))
+        local bexpr = b.expr
+        if bexpr and bexpr.kind == K.COUNTERFACTUAL_EXPR then
+          -- counterfactual is a block expression; emit multi-line let
+          -- simulate=true → "counterfactual simulate: true do:", false → "counterfactual do:"
+          local header = "let " .. b.name .. " = counterfactual "
+          if bexpr.simulate then
+            header = header .. "simulate: true do:"
+          else
+            header = header .. "do:"
+          end
+          buf.ind(); buf.emit(header); buf.nl()
+          buf.push()
+          fmt_stmts(buf, bexpr.transitions, is_fn)
+          buf.pop()
+        else
+          local expr_s = fmt_expr(bexpr)
+          -- Wrap fn-calls with named-arg arguments in () to prevent let-continuation ambiguity
+          if bexpr and bexpr.kind == K.FN_CALL and bexpr.args and #bexpr.args > 0 then
+            local has_named = false
+            for _, a in ipairs(bexpr.args) do
+              if type(a) == "table" and a.kind == K.NAMED_ARG then has_named = true; break end
+            end
+            if has_named then expr_s = "(" .. expr_s .. ")" end
+          end
+          buf.line("let " .. b.name .. " = " .. expr_s)
+        end
       end
     end
     fmt_stmts(buf, node.body, is_fn)
@@ -508,7 +605,8 @@ local function fmt_stmt(buf, node, is_fn)
     end
     buf.pop()
   elseif k == K.WHILE_STMT then
-    buf.ind(); buf.emit("while " .. fmt_expr(node.cond) .. ":"); buf.nl()
+    local while_cond = node.condition or node.cond
+    buf.ind(); buf.emit("while " .. fmt_expr(while_cond) .. ":"); buf.nl()
     buf.push()
     fmt_stmts(buf, node.body, is_fn)
     buf.pop()
@@ -562,7 +660,13 @@ local function fmt_stmt(buf, node, is_fn)
     end
     buf.pop()
   elseif k == K.EXPR_STMT then
-    buf.line(fmt_expr(node.expr))
+    -- Block-form expressions (match, cond) wrapped in expr_stmt must use their block form.
+    local inner = node.expr
+    if inner and (inner.kind == K.MATCH_EXPR or inner.kind == K.COND_EXPR) then
+      fmt_stmt(buf, inner, is_fn)
+    else
+      buf.line(fmt_expr(inner))
+    end
   elseif k == K.PASS_STMT then
     buf.line("pass")
   elseif k == K.RETURN_STMT then
@@ -596,7 +700,7 @@ local function fmt_stmt(buf, node, is_fn)
     if node.args then s = s .. " " .. fmt_expr(node.args) end
     buf.line(s)
   elseif k == K.NARRATION_LINE then
-    buf.line(render_text_segments(node.text or ""))
+    emit_narration_text(buf, render_text_segments(node.text or ""))
   elseif k == K.SAY_STMT then
     local is_sym = node.speaker and node.speaker.kind == K.SYMBOL_LIT
     local spk_name = is_sym and node.speaker.name or nil
@@ -612,7 +716,7 @@ local function fmt_stmt(buf, node, is_fn)
       else
         buf.line("say " .. spk .. ":")
         buf.push()
-        for _, ln in ipairs(lines) do buf.line(render_text_segments(ln)) end
+        for _, ln in ipairs(lines) do emit_narration_text(buf, render_text_segments(ln)) end
         buf.pop()
       end
     else
@@ -638,13 +742,13 @@ local function fmt_stmt(buf, node, is_fn)
         else
           buf.line("say " .. spk .. ":")
           buf.push()
-          for _, ln in ipairs(lines) do buf.line(render_text_segments(ln)) end
+          for _, ln in ipairs(lines) do emit_narration_text(buf, render_text_segments(ln)) end
           buf.pop()
         end
       end
     end
   elseif k == K.MATCH_ARM then
-    local pat_s = fmt_expr(node.pattern)
+    local pat_s = fmt_pattern(node.pattern)
     if type(node.body) == "table" and node.body.kind then
       -- Single expression body: emit inline
       buf.line(pat_s .. ": " .. fmt_expr(node.body))
@@ -656,13 +760,54 @@ local function fmt_stmt(buf, node, is_fn)
     end
   elseif k == K.COND_ARM then
     local cond = node.condition or node.cond
-    if type(node.body) == "table" and node.body.kind then
-      buf.line("[" .. fmt_expr(cond) .. "]: " .. fmt_expr(node.body))
+    -- Condition is either: string "_" (wildcard), list_lit (source used [expr]:),
+    -- or any expression (source used bare expr:).
+    -- Unwrap single-element list_lit to avoid double-bracketing [[cond]]:
+    local cond_s
+    if type(cond) == "string" then
+      cond_s = cond  -- wildcard "_" or bare string
+    elseif cond and cond.kind == K.LIST_LIT then
+      local elems = cond.elements or {}
+      if #elems == 1 then
+        cond_s = fmt_expr(elems[1])
+      elseif #elems == 0 then
+        cond_s = "_"
+      else
+        -- Multi-element list is genuine: pass through fmt_expr
+        cond_s = fmt_expr(cond)
+      end
     else
-      buf.ind(); buf.emit("[" .. fmt_expr(cond) .. "]:"); buf.nl()
+      cond_s = fmt_expr(cond)
+    end
+    if type(node.body) == "table" and node.body.kind then
+      buf.line("[" .. cond_s .. "]: " .. fmt_expr(node.body))
+    else
+      buf.ind(); buf.emit("[" .. cond_s .. "]:"); buf.nl()
       buf.push()
       fmt_stmts(buf, node.body)
       buf.pop()
+    end
+  elseif node.op then
+    -- Migration operations: {op="add"|"drop"|"rename"|"rename-enum"|"transform", ...}
+    local op = node.op
+    if op == "add" then
+      buf.line("add " .. (node.path or "?") .. " = " .. fmt_expr(node.value))
+    elseif op == "drop" then
+      buf.line("drop " .. (node.path or "?"))
+    elseif op == "rename" then
+      buf.line("rename " .. (node.old_path or "?") .. " -> " .. (node.new_path or "?"))
+    elseif op == "rename-enum" then
+      buf.line("rename-enum " .. (node.path or "?")
+               .. " `" .. (node.old_sym or "?") .. " -> `" .. (node.new_sym or "?"))
+    elseif op == "transform" then
+      buf.ind(); buf.emit("transform " .. (node.path or "?") .. ":"); buf.nl()
+      if node.expr then
+        buf.push()
+        buf.line("fn old: " .. fmt_expr(node.expr))
+        buf.pop()
+      end
+    else
+      buf.line("-- (migration-op:" .. op .. ")")
     end
   else
     -- Fallback: emit a comment placeholder
@@ -728,15 +873,18 @@ local function fmt_decl(buf, decl)
     buf.pop()
 
   elseif k == K.TIME_MODEL then
-    buf.line("time-model:")
+    -- AST: axes = list of strings, wrap = list of strings/numbers
+    buf.ind(); buf.emit("time-model:"); buf.nl()
     buf.push()
-    for _, axis in ipairs(decl.axes or {}) do
-      local s = "axis " .. (axis.name or "?")
-      if axis.max ~= nil then s = s .. " max: " .. tostring(axis.max) end
-      buf.line(s)
+    local axes = decl.axes or {}
+    local wrap  = decl.wrap  or {}
+    if #axes > 0 then
+      buf.line("axes: [" .. table.concat(axes, ", ") .. "]")
     end
-    if decl.default_axis then
-      buf.line("default: " .. decl.default_axis)
+    if #wrap > 0 then
+      local ws = {}
+      for _, w in ipairs(wrap) do ws[#ws + 1] = tostring(w) end
+      buf.line("wrap: [" .. table.concat(ws, ", ") .. "]")
     end
     buf.pop()
 
@@ -756,24 +904,29 @@ local function fmt_decl(buf, decl)
       buf.line("with " .. w)
     end
     for _, f in ipairs(decl.fields or {}) do
-      local s = (f.name or "?") .. ": " .. fmt_type(f.type_expr)
-      if f.default ~= nil then s = s .. " = " .. fmt_expr(f.default) end
-      buf.line(s)
-    end
-    buf.pop()
-
-  elseif k == K.TYPE_VARIANT then
-    buf.ind(); buf.emit("type " .. (decl.name or "?")); buf.nl()
-    buf.push()
-    for _, branch in ipairs(decl.branches or {}) do
-      buf.ind(); buf.emit("| " .. (branch.tag or "?") .. ":"); buf.nl()
-      buf.push()
-      for _, f in ipairs(branch.fields or {}) do
+      if f.kind == "with_mixin" then
+        buf.line("with " .. (f.type_name or f.name or "?"))
+      else
         local s = (f.name or "?") .. ": " .. fmt_type(f.type_expr)
         if f.default ~= nil then s = s .. " = " .. fmt_expr(f.default) end
         buf.line(s)
       end
-      buf.pop()
+    end
+    buf.pop()
+
+  elseif k == K.TYPE_VARIANT then
+    buf.ind(); buf.emit("type " .. (decl.name or "?") .. ":"); buf.nl()
+    buf.push()
+    for _, branch in ipairs(decl.branches or {}) do
+      -- Fields are inline: | branch-name: field1: type1 field2: type2
+      local bname = branch.name or branch.tag or "?"
+      local parts = { "| " .. bname .. ":" }
+      for _, f in ipairs(branch.fields or {}) do
+        local fs = " " .. (f.name or "?") .. ": " .. fmt_type(f.type_expr)
+        if f.default ~= nil then fs = fs .. " = " .. fmt_expr(f.default) end
+        parts[#parts + 1] = fs
+      end
+      buf.line(table.concat(parts))
     end
     buf.pop()
 
@@ -801,9 +954,29 @@ local function fmt_decl(buf, decl)
     buf.nl()
 
   elseif k == K.RELATION_DECL then
-    local s = "relation " .. (decl.name or "?")
-    if decl.data_type then s = s .. " data: " .. fmt_type(decl.data_type) end
-    buf.line(s)
+    local header = "relation " .. (decl.name or "?")
+                   .. ": " .. (decl.from_type or "?")
+                   .. " -> " .. fmt_type(decl.to_type_expr)
+    if decl.initial_data and #decl.initial_data > 0 then
+      buf.ind(); buf.emit(header .. ":"); buf.nl()
+      buf.push()
+      local K2 = ast.K
+      for _, entry in ipairs(decl.initial_data) do
+        local key_s = (entry.key and entry.key.kind == K2.SYMBOL_LIT)
+                      and ("`" .. (entry.key.name or "?"))
+                      or  (entry.key and entry.key.name or "?")
+        local vals = {}
+        for _, v in ipairs(entry.values or {}) do
+          vals[#vals + 1] = (v.kind == K2.SYMBOL_LIT)
+                            and ("`" .. (v.name or "?"))
+                            or  (v.name or "?")
+        end
+        buf.line(key_s .. ": {" .. table.concat(vals, ", ") .. "}")
+      end
+      buf.pop()
+    else
+      buf.line(header)
+    end
 
   elseif k == K.FN_DECL then
     -- Params are plain strings (param names), emitted on the fn header line.
@@ -858,9 +1031,9 @@ local function fmt_decl(buf, decl)
       elseif type(item) == "table" then
         local ik = item.kind
         if ik == "narration_line" then
-          buf.line(render_text_segments(item.text or ""))
+          emit_narration_text(buf, render_text_segments(item.text or ""))
         elseif ik == "narration" or ik == "text" then
-          buf.line(render_text_segments(item.text or ""))
+          emit_narration_text(buf, render_text_segments(item.text or ""))
         elseif ik == "cond_narration" then
           -- [condition] Narration text
           buf.ind()
@@ -875,7 +1048,7 @@ local function fmt_decl(buf, decl)
               if type(t) == "string" then
                 buf.line(t)
               elseif type(t) == "table" and t.kind == "narration_line" then
-                buf.line(render_text_segments(t.text or ""))
+                emit_narration_text(buf, render_text_segments(t.text or ""))
               else
                 fmt_stmt(buf, t)
               end
@@ -889,7 +1062,7 @@ local function fmt_decl(buf, decl)
               if type(t) == "string" then
                 buf.line(t)
               elseif type(t) == "table" and t.kind == "narration_line" then
-                buf.line(render_text_segments(t.text or ""))
+                emit_narration_text(buf, render_text_segments(t.text or ""))
               else
                 fmt_stmt(buf, t)
               end
@@ -909,7 +1082,7 @@ local function fmt_decl(buf, decl)
           buf.push()
           for _, t in ipairs(item.body or {}) do
             if type(t) == "table" and t.kind == "narration_line" then
-              buf.line(render_text_segments(t.text or ""))
+              emit_narration_text(buf, render_text_segments(t.text or ""))
             else
               fmt_stmt(buf, t)
             end
@@ -995,7 +1168,12 @@ local function fmt_decl(buf, decl)
       elseif ck == "requires" then
         buf.line("requires: " .. fmt_expr(clause.condition))
       elseif ck == "when" then
-        buf.line("when " .. fmt_expr(clause.condition) .. ":")
+        buf.ind(); buf.emit("when " .. fmt_expr(clause.condition) .. ":"); buf.nl()
+        if clause.body and #clause.body > 0 then
+          buf.push()
+          fmt_stmts(buf, clause.body)
+          buf.pop()
+        end
       else
         buf.line("-- (clause:" .. tostring(ck) .. ")")
       end
@@ -1022,23 +1200,24 @@ local function fmt_decl(buf, decl)
     buf.pop()
 
   elseif k == K.MIGRATION_DECL then
+    local from_v = decl.from_ver or decl.from_version or "?"
+    local to_v   = decl.to_ver   or decl.to_version   or "?"
     buf.ind()
-    buf.emit("migration " .. tostring(decl.from_version or "?")
-             .. " -> " .. tostring(decl.to_version or "?") .. ":")
+    buf.emit("migration " .. tostring(from_v) .. " -> " .. tostring(to_v) .. ":")
     buf.nl()
     buf.push()
-    fmt_stmts(buf, decl.body)
+    fmt_stmts(buf, decl.ops or decl.body)
     buf.pop()
 
   elseif k == K.DEFGRID_DECL then
-    buf.ind()
-    buf.emit("defgrid " .. (decl.name or "?"))
-    if decl.width and decl.height then
-      buf.emit(string.format(" %d %d", decl.width, decl.height))
-    end
-    buf.emit(":"); buf.nl()
-    -- grid rows
+    -- Parser format: defgrid name:\n  dimensions: W x H\n  cell-type: T\n  default: V
+    buf.ind(); buf.emit("defgrid " .. (decl.name or "?") .. ":"); buf.nl()
     buf.push()
+    if decl.width and decl.height then
+      buf.line(string.format("dimensions: %d x %d", decl.width, decl.height))
+    end
+    if decl.cell_type then buf.line("cell-type: " .. decl.cell_type) end
+    if decl.default_val ~= nil then buf.line("default: " .. tostring(decl.default_val)) end
     for _, row in ipairs(decl.rows or {}) do
       buf.line(row)
     end
@@ -1048,15 +1227,34 @@ local function fmt_decl(buf, decl)
     buf.line("tag " .. (decl.name or "?"))
 
   elseif k == K.HOOK_DECL then
-    buf.ind()
-    buf.emit("hook " .. (decl.tag or "?") .. ":")
-    buf.nl()
-    buf.push()
-    if decl.when == "pre" then buf.line("pre:") end
-    if decl.when == "post" then buf.line("post:") end
-    buf.push()
-    fmt_stmts(buf, decl.body)
-    buf.pop(); buf.pop()
+    local tgt = decl.target or decl.tag or "?"
+    local hk  = decl.hook_kind or decl.when
+    if hk == "fn_after" then
+      buf.ind(); buf.emit("hook after: " .. tgt .. ":"); buf.nl()
+      buf.push()
+      fmt_stmts(buf, decl.body)
+      buf.pop()
+    elseif hk == "fn_before" then
+      buf.ind(); buf.emit("hook before: " .. tgt .. ":"); buf.nl()
+      buf.push()
+      fmt_stmts(buf, decl.body)
+      buf.pop()
+    elseif hk == "tag_pre" then
+      buf.ind(); buf.emit("hook " .. tgt .. ":"); buf.nl()
+      buf.push()
+      buf.line("pre:")
+      buf.push()
+      fmt_stmts(buf, decl.body)
+      buf.pop(); buf.pop()
+    else
+      -- tag_post (default)
+      buf.ind(); buf.emit("hook " .. tgt .. ":"); buf.nl()
+      buf.push()
+      buf.line("post:")
+      buf.push()
+      fmt_stmts(buf, decl.body)
+      buf.pop(); buf.pop()
+    end
 
   else
     -- Unknown declaration kind: emit a comment so we don't silently lose it
@@ -1090,6 +1288,32 @@ local function format_ast(ast_root)
     out = out .. "\n"
   end
   return out
+end
+
+-- ============================================================
+-- Public API for testing / programmatic use
+-- ============================================================
+
+local function has_errors(diag_list)
+  for _, d in ipairs(diag_list or {}) do
+    if d.level == "error" then return true end
+  end
+  return false
+end
+
+--- Format a source string and return the canonical formatted output.
+---@param src string       StoryBase source
+---@param filename string? optional filename for diagnostics
+---@return string?, string?  formatted source, or nil + error message
+function M.format_string(src, filename)
+  filename = filename or "<string>"
+  local lexer_m  = require("compiler.lexer")
+  local parser_m = require("compiler.parser")
+  local tokens, ld = lexer_m.tokenize(src, filename)
+  if not tokens or has_errors(ld) then return nil, "lex errors" end
+  local ast_root, pd = parser_m.parse(tokens, filename)
+  if not ast_root or has_errors(pd) then return nil, "parse errors" end
+  return format_ast(ast_root)
 end
 
 -- ============================================================
@@ -1150,14 +1374,6 @@ function M.run(args)
 
   local lexer  = require("compiler.lexer")
   local parser = require("compiler.parser")
-
-  -- Helper: count errors in a plain diag array
-  local function has_errors(diag_list)
-    for _, d in ipairs(diag_list or {}) do
-      if d.level == "error" then return true end
-    end
-    return false
-  end
 
   local tokens, ld = lexer.tokenize(source, filepath)
   if not tokens or has_errors(ld) then
