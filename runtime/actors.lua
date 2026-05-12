@@ -159,6 +159,12 @@ function M.new(state, log)
     end
     self._actors[#self._actors + 1] = actor_def
     table.sort(self._actors, function(a, b) return a.priority > b.priority end)
+    -- Mark inbox path as declared so SF-3 doesn't warn on engine-internal inbox writes.
+    -- deliver_messages writes to inbox_path for any actor with pending messages.
+    if self._state and self._state._type_index then
+      local inbox_path = (actor_def.state_path or actor_def.name) .. "/inbox"
+      self._state._type_index[inbox_path] = true
+    end
   end
 
   -- ── Message sending ────────────────────────────────────────

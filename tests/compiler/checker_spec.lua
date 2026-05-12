@@ -1757,3 +1757,88 @@ scene main:
 ]], ast.E.INCOMPLETE_MATCH)
   end)
 end)
+
+-- ============================================================
+-- SF-3 — Undefined state path write detection (checker pass)
+-- ============================================================
+
+describe("checker — UNDEFINED_PATH warning (SF-3)", function()
+  it("warns when set! targets a path not in the schema", function()
+    check_warn([[
+state player/health: Int(0,100) = 0
+
+fn bad-write:
+  set! player/nonexistent 42
+]], ast.E.UNDEFINED_PATH)
+  end)
+
+  it("does not warn when set! targets a declared scalar path", function()
+    check_ok([[
+state player/health: Int(0,100) = 0
+
+fn good-write:
+  set! player/health 50
+]])
+  end)
+
+  it("does not warn when set! targets a declared record field path", function()
+    check_ok([[
+state player:
+  health: Int(0,100) = 0
+  gold: Int(0,999) = 0
+
+fn heal:
+  set! player/health 100
+]])
+  end)
+
+  it("does not warn for inc! on a declared record field", function()
+    check_ok([[
+state world:
+  score: Int(0,9999) = 0
+
+fn add-score:
+  inc! world/score 10
+]])
+  end)
+
+  it("warns when inc! targets an undeclared path", function()
+    check_warn([[
+state world/score: Int(0,9999) = 0
+
+fn bad-inc:
+  inc! world/nonexistent 1
+]], ast.E.UNDEFINED_PATH)
+  end)
+
+  it("does not warn for INTERP_PATH mutations (checked at runtime only)", function()
+    check_ok([[
+state npcs/{npc}: Int(0,100) max: 10
+
+fn update-npc:
+  set! npcs/{npc}/status 42
+]])
+  end)
+
+  it("does not warn for family member paths (npcs/key)", function()
+    check_ok([[
+state npcs/{npc}: Int(0,100) max: 10
+
+fn touch-npc:
+  set! npcs/guard 50
+]])
+  end)
+
+  it("warns inside scene choice body", function()
+    check_warn([[
+state world/score: Int(0,100) = 0
+
+engine-config:
+  entry-scene: main
+
+scene main:
+  * Cheat
+    set! world/no-such-path 999
+]], ast.E.UNDEFINED_PATH)
+  end)
+end)

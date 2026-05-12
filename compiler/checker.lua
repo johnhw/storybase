@@ -1860,6 +1860,131 @@ local function check_speakers_in_body(acc, symtab, body)
   end
 end
 
+-- ============================================================
+-- Pass — Undefined state path detection (SF-3)
+-- ============================================================
+-- Warn when a mutation statement targets a static PATH_EXPR not declared in
+-- the state schema. INTERP_PATH expressions cannot be checked statically and
+-- are always skipped. INDEX_EXPR / SLICE_EXPR paths are unwrapped to their
+-- base before checking.
+
+--- Return true if the PATH_EXPR node refers to a declared state path.
+local function is_mut_path_declared(path_node, path_map, symtab)
+  if not path_node then return true end
+  local k = ast.K
+  -- Unwrap indexed / sliced access to the base path
+  if path_node.kind == k.INDEX_EXPR or path_node.kind == k.SLICE_EXPR then
+    path_node = path_node.base
+    if not path_node then return true end
+  end
+  if path_node.kind ~= k.PATH_EXPR then return true end  -- INTERP_PATH: skip
+  local segs = path_node.segments or {}
+  if #segs == 0 then return true end
+  for _, s in ipairs(segs) do
+    if type(s) ~= "string" then return true end  -- interpolated segment: skip
+  end
+
+  if #segs == 1 then
+    local p = segs[1]
+    return path_map[p] ~= nil or symtab.families[p] ~= nil
+  end
+
+  if #segs == 2 then
+    local p = table.concat(segs, "/")
+    if path_map[p] then return true end
+    return symtab.families[segs[1]] ~= nil
+  end
+
+  -- 3+ segments: wildcard lookup handles family/key/field patterns
+  return lookup_path_type(path_node, path_map) ~= nil
+end
+
+local MUT_PATH_KINDS = {
+  [ast.K.SET_MUT]        = true, [ast.K.INC_MUT]        = true,
+  [ast.K.DEC_MUT]        = true, [ast.K.ADD_MUT]        = true,
+  [ast.K.REMOVE_MUT]     = true, [ast.K.CLEAR_MUT]      = true,
+  [ast.K.PUSH_MUT]       = true, [ast.K.POP_MUT]        = true,
+  [ast.K.MAP_SET_MUT]    = true, [ast.K.MAP_DELETE_MUT] = true,
+}
+
+local function walk_mut_with_path(node, fn)
+  if not node or type(node) ~= "table" or not node.kind then return end
+  if MUT_PATH_KINDS[node.kind] then fn(node) end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
+                        "clauses", "bindings" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        walk_mut_with_path(child, fn)
+        if type(child) == "table" then
+          if child.guard then walk_mut_with_path(child.guard, fn) end
+          if child.body then
+            if type(child.body) == "table" and not child.body.kind then
+              for _, s in ipairs(child.body) do walk_mut_with_path(s, fn) end
+            else
+              walk_mut_with_path(child.body, fn)
+            end
+          end
+        end
+      end
+    end
+  end
+  for _, f in ipairs({ "condition", "expr", "left", "right", "base",
+                       "value", "amount", "inner_expr" }) do
+    walk_mut_with_path(node[f], fn)
+  end
+end
+
+local function pass_check_undefined_paths(acc, symtab, program)
+  local k        = ast.K
+  local path_map = build_path_type_map(program, symtab)
+
+  local function check_one(node)
+    local path_node = node.path
+    if not path_node then return end
+    if not is_mut_path_declared(path_node, path_map, symtab) then
+      -- Unwrap INDEX_EXPR for error reporting
+      local report_node = path_node
+      if report_node.kind == k.INDEX_EXPR or report_node.kind == k.SLICE_EXPR then
+        report_node = report_node.base or report_node
+      end
+      local pstr = table.concat(report_node.segments or {}, "/")
+      table.insert(acc.diags, ast.warning(
+        ast.E.UNDEFINED_PATH,
+        "'" .. pstr .. "' is not a declared state path",
+        report_node.pos,
+        "check the state schema or fix the path spelling"))
+    end
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_one)
+      end
+    elseif decl.kind == k.SCENE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_one)
+      end
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then walk_mut_with_path(choice.guard, check_one) end
+        for _, stmt in ipairs(choice.body or {}) do
+          walk_mut_with_path(stmt, check_one)
+        end
+      end
+    elseif decl.kind == k.SCHEDULE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_one)
+      end
+    elseif decl.kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_one)
+      end
+    end
+  end
+end
+
 local function pass_check_speakers(acc, symtab, program)
   local k = ast.K
   for _, node in ipairs(program.decls) do
@@ -2023,6 +2148,7 @@ function M.check(ast_root, filename)
   pass_recursive_scenes(acc, ast_root)
   pass_check_speakers(acc, symtab, ast_root)
   pass_check_match_completeness(acc, symtab, ast_root)
+  pass_check_undefined_paths(acc, symtab, ast_root)
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

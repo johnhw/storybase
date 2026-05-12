@@ -41,6 +41,13 @@ local function make_schema()
       { kind = "family", family = "party", var = "m",
         type_desc = { tag = "named", name = "Member" },
         max = 4 },
+      -- Extra paths used by mutation unit tests below
+      { kind = "scalar", path = "tags",
+        type_desc = { tag = "set", inner = { tag = "symbol" } } },
+      { kind = "scalar", path = "history",
+        type_desc = { tag = "list", inner = { tag = "string" } } },
+      { kind = "scalar", path = "unknown/counter",
+        type_desc = { tag = "int" } },
     },
   }
 end
@@ -647,6 +654,108 @@ describe("state store: path_list returns deterministic sorted order (Bug #7 regr
     s:set("crew/mike/hp", 30, "f")
     local keys = s:path_list("crew")
     assert.same({ "alice", "mike", "zara" }, keys)
+  end)
+end)
+
+-- ============================================================
+-- SF-3: Undeclared state path write detection (runtime, dev mode)
+-- ============================================================
+
+describe("SF-3: undeclared path write warning", function()
+  local function make_sf3_schema()
+    return {
+      types = {},
+      states = {
+        { kind = "scalar", path = "world/score",
+          type_desc = { tag = "int", min = 0, max = 999 } },
+        { kind = "record", path = "player",
+          fields = {
+            { name = "health", type_desc = { tag = "int", min = 0, max = 100 } },
+          } },
+        { kind = "family", family = "npcs",
+          var = "npc",
+          type_desc = {
+            tag    = "named",
+            name   = "NpcType",
+            fields = { { name = "status", type_desc = { tag = "symbol" } } },
+          },
+          max = 10 },
+      },
+    }
+  end
+
+  local function make_sf3_store()
+    local l = log_mod.new()
+    local s = state_mod.new(make_sf3_schema(), l)
+    return s, l
+  end
+
+  it("set! emits warning to _print_sink for undeclared path", function()
+    local s = make_sf3_store()
+    local warnings = {}
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:set("player/nonexistent", 42, "test")
+    assert.equal(1, #warnings)
+    assert.is_truthy(warnings[1]:find("player/nonexistent"))
+    assert.is_truthy(warnings[1]:find("set!"))
+  end)
+
+  it("inc! emits warning for undeclared path", function()
+    local s = make_sf3_store()
+    local warnings = {}
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:inc("player/nonexistent", 1, "test")
+    assert.equal(1, #warnings)
+  end)
+
+  it("declared scalar path does not warn", function()
+    local s = make_sf3_store()
+    local warnings = {}
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:set("world/score", 10, "test")
+    assert.equal(0, #warnings)
+  end)
+
+  it("declared record field path does not warn", function()
+    local s = make_sf3_store()
+    local warnings = {}
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:set("player/health", 50, "test")
+    assert.equal(0, #warnings)
+  end)
+
+  it("family member path (npcs/key) does not warn", function()
+    local s = make_sf3_store()
+    local warnings = {}
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:set("npcs/guard", true, "test")
+    assert.equal(0, #warnings)
+  end)
+
+  it("production mode suppresses warning", function()
+    local s = make_sf3_store()
+    local warnings = {}
+    s._production = true
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:set("player/nonexistent", 42, "test")
+    assert.equal(0, #warnings)
+  end)
+
+  it("empty-schema store never warns (no declarations to check against)", function()
+    local l = log_mod.new()
+    local s = state_mod.new({ types = {}, states = {}, relations = {} }, l)
+    local warnings = {}
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:set("any/path", 99, "test")
+    assert.equal(0, #warnings)
+  end)
+
+  it("engine-internal __ prefix paths never warn", function()
+    local s = make_sf3_store()
+    local warnings = {}
+    s._print_sink = function(msg) warnings[#warnings + 1] = msg end
+    s:set("__rel/edges/a", {}, "test")
+    assert.equal(0, #warnings)
   end)
 end)
 

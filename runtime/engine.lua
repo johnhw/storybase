@@ -109,6 +109,15 @@ function M.new(game_table, opts)
 
   local log    = log_mod.new()
   local store  = state_mod.new(game_table.schema, log)
+  store._production = game_table.production or false
+  store._print_sink = game_table._print_sink
+  -- Register actor inbox paths so SF-3 doesn't warn on engine-internal writes.
+  -- deliver_messages writes to inbox_path for any actor with pending messages,
+  -- regardless of whether inbox_type is declared.
+  for _, actor_def in pairs(game_table.actors or {}) do
+    local inbox_path = (actor_def.state_path or actor_def.name) .. "/inbox"
+    store._type_index[inbox_path] = true
+  end
   local rng    = random_mod.new(opts.seed, log)
   local actors = actors_mod.new(store, log)
   local sched  = sched_mod.new(store, log)

@@ -64,14 +64,28 @@ names, named types, family names, and single-segment scalar/record state paths �
 valid non-function bare-identifier uses. Also added `pure` as a silent no-op (it is a
 purity annotation that has no runtime semantics). 10 regression tests added (eval_spec).
 
-**2297 tests passing, 0 failing, 2 pending (known limitations).**
+SF-3 (writes to undefined state paths silently no-op) resolved 2026-05-13.
+Option C (A + B): (A) `runtime/state.lua` — `warn_undeclared` helper added before
+every mutation method (set, inc, dec, add, remove, clear, push, pop); checks path via
+`lookup_type(_type_index, path)` in dev mode and emits warning. Guards: production flag,
+`_schema_has_states` sentinel (cached before actor inbox registrations to avoid false
+positives when actors add paths to an otherwise-empty type_index), `__` prefix paths
+(engine-internal like `__rel/edges/`). Engine propagates `_production` and `_print_sink`
+to store; `actors.lua:register` adds inbox paths to `_type_index` to exempt them.
+(B) `compiler/checker.lua` — new `pass_check_undefined_paths` pass walks all mutation
+nodes in fn/scene/schedule/hook bodies; for static PATH_EXPR paths checks against
+`build_path_type_map` and `symtab.families`; emits `UNDEFINED_PATH` warning; skips
+INTERP_PATH (dynamic) and INDEX_EXPR/SLICE_EXPR by unwrapping to base.
+16 regression tests added (8 state_spec for runtime, 8 checker_spec for compile-time).
+
+**2313 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
 ## What to work on next
 
 Recommended order:
-1. **Silent-failure hazards** (SF-1 through SF-5) — invisible correctness problems.
+1. **Silent-failure hazards** (SF-2, SF-4, SF-5) — SF-1 and SF-3 resolved.
 2. **Compile-time validation** (AV-1 through AV-4) — improve checker so authoring
    errors surface at `storybase check` instead of at runtime.
 3. **Ergonomics** (AE-13 through AE-17) — quality-of-life improvements.
@@ -250,7 +264,7 @@ locate. All five are high-priority from an authoring-experience perspective.
 
   Recommended: **A** first (cheap, catches all cases), then **B** to move detection earlier.
 
-- [ ] **SF-3 — Writes to undefined state paths silently no-op.**
+- [x] **SF-3 — Writes to undefined state paths silently no-op.** *(fixed 2026-05-13)*
   `set! player/nonexistent-field 5` compiles cleanly and does nothing at runtime — no log
   entry, no error, no warning. The same applies to `inc!`, `dec!`, `add!`, etc.
 

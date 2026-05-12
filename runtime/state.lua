@@ -100,6 +100,22 @@ local function lookup_type(idx, path)
 end
 
 -- ============================================================
+-- SF-3: Undeclared path write detection (dev mode only)
+-- ============================================================
+
+local function warn_undeclared(store, path, op)
+  if store._production then return end
+  if not store._schema_has_states then return end  -- empty schema: no declarations to check
+  if path:sub(1, 2) == "__" then return end  -- engine-internal prefix (e.g. __rel/*)
+  if lookup_type(store._type_index, path) == nil then
+    local msg = "[WARN] " .. op .. " to undeclared path '" .. path ..
+                "' — not found in state schema\n"
+    local sink = store._print_sink
+    if sink then sink(msg) else io.stderr:write(msg) end
+  end
+end
+
+-- ============================================================
 -- Default value resolver (module-level; used by init_defaults and spawn)
 -- ============================================================
 
@@ -162,13 +178,16 @@ function M.new(schema, log)
   end
 
   local store = {
-    _cache        = {},
-    _schema       = schema or {},
-    _type_index   = type_index,
-    _log          = log,
-    _time         = init_time,   -- current engine time (e.g. {day=0, hour=0, tick=0})
-    _time_wrap    = time_wrap,   -- axis → wrap_at (nil = no wrap)
-    _checkpoints  = {},          -- stack of {seq, cache, time} snapshots for undo!
+    _cache              = {},
+    _schema             = schema or {},
+    _type_index         = type_index,
+    _schema_has_states  = next(type_index) ~= nil,  -- cached before actor inbox additions
+    _log                = log,
+    _time               = init_time,   -- current engine time (e.g. {day=0, hour=0, tick=0})
+    _time_wrap          = time_wrap,   -- axis → wrap_at (nil = no wrap)
+    _checkpoints        = {},          -- stack of {seq, cache, time} snapshots for undo!
+    _production         = false,       -- set by engine to suppress SF-3 dev warnings
+    _print_sink         = nil,         -- set by engine to redirect warnings
   }
 
   -- ── Read ───────────────────────────────────────────────────
@@ -345,6 +364,7 @@ function M.new(schema, log)
   ---@param value any
   ---@param fn    string?  calling function name
   function store:set(path, value, fn)
+    warn_undeclared(self, path, "set!")
     local old = self._cache[path]
     self._cache[path] = value
     _log_entry(self, path, old, value, fn)
@@ -355,6 +375,7 @@ function M.new(schema, log)
   ---@param amount number
   ---@param fn     string?
   function store:inc(path, amount, fn)
+    warn_undeclared(self, path, "inc!")
     local old     = self._cache[path] or 0
     local attempted = old + (amount or 0)
     local new_val   = attempted
@@ -375,6 +396,7 @@ function M.new(schema, log)
   ---@param amount number
   ---@param fn     string?
   function store:dec(path, amount, fn)
+    warn_undeclared(self, path, "dec!")
     local old     = self._cache[path] or 0
     local attempted = old - (amount or 0)
     local new_val   = attempted
@@ -397,6 +419,7 @@ function M.new(schema, log)
   ---@param value any
   ---@param fn    string?
   function store:add(path, value, fn)
+    warn_undeclared(self, path, "add!")
     local set = self._cache[path]
     if type(set) ~= "table" then set = {} end
     -- Check for duplicate
@@ -420,6 +443,7 @@ function M.new(schema, log)
   ---@param value any
   ---@param fn    string?
   function store:remove(path, value, fn)
+    warn_undeclared(self, path, "remove!")
     local set = self._cache[path]
     if type(set) ~= "table" then return end
     local new_set = {}
@@ -435,6 +459,7 @@ function M.new(schema, log)
   ---@param path string
   ---@param fn   string?
   function store:clear(path, fn)
+    warn_undeclared(self, path, "clear!")
     local old = self._cache[path]
     self._cache[path] = {}
     _log_entry(self, path, old, {}, fn)
@@ -445,6 +470,7 @@ function M.new(schema, log)
   ---@param value any
   ---@param fn    string?
   function store:push(path, value, fn)
+    warn_undeclared(self, path, "push!")
     local list = self._cache[path]
     if type(list) ~= "table" then list = {} end
     local td = lookup_type(self._type_index, path)
@@ -464,6 +490,7 @@ function M.new(schema, log)
   ---@param fn   string?
   ---@return any  the removed element
   function store:pop(path, fn)
+    warn_undeclared(self, path, "pop!")
     local list = self._cache[path]
     if type(list) ~= "table" or #list == 0 then
       error("LIST_EMPTY: List at " .. path .. " is empty")
