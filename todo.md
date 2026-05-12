@@ -20,7 +20,12 @@ formatter field-name/structure bugs found by the new tests. Known remaining form
 limitations: whitespace normalization in aligned narration (demo11), unhandled macro_decl
 nodes (demo15 spellwright).
 
-**2254 tests passing, 0 failing, 2 pending (known limitations).**
+Bug #9 (parser crash on nil match arm) resolved 2026-05-12. Root cause: `MUTATION_TABLE`
+lacked a forward declaration so `parse_match_expr` saw the global (nil) instead of the
+local. Fixed with a forward declaration + secondary eol double-consume fix. 8 regression
+tests added.
+
+**2262 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
@@ -57,25 +62,24 @@ Recommended order:
   for testing, and fixed ~18 additional field-name/structure bugs discovered by the new
   test bank (`tests/cli/format_spec.lua`, 169 tests).
 
-- [ ] **Bug #9 — Parser internal error on `nil` as a match arm value.**
-  Writing `_: nil` (or any arm whose value is the `nil` literal) in a `match` expression
-  causes `attempt to index a nil value (global 'MUTATION_TABLE')` — a raw Lua stack trace,
-  not a user error. Reproduction:
-  ```
-  fn example:
-    match player/status:
-      `alive: 1
-      _:      nil
-  ```
+- [x] **Bug #9 — Parser internal error on `nil` as a match arm value.** *(fixed 2026-05-12)*
+  Writing `_: nil` (or any arm whose value started with an IDENT token) in an inline
+  `match` arm caused `attempt to index a nil value (global 'MUTATION_TABLE')`.
 
-  **Root cause:** `compiler/parser.lua` match-arm body parsing calls into a branch that
-  attempts to look up the parsed node kind in `MUTATION_TABLE`; `nil` literal produces a
-  node whose kind is absent from that table, so indexing fails.  Locate
-  `MUTATION_TABLE` in `parser.lua` and find where it is indexed without a nil-guard.
+  **Root cause:** `MUTATION_TABLE` was declared as a `local` at line 1828 in
+  `compiler/parser.lua`, but `parse_match_expr` was defined at line 1226. Without a
+  forward declaration, `MUTATION_TABLE` inside the function resolved to the global
+  (nil), crashing on any IDENT-valued arm body.
 
-  **Fix:** Add a nil-guard before the `MUTATION_TABLE` lookup; if the node is a `NIL_LIT`
-  (or whatever the nil literal kind is), treat it as a plain expression arm body, not a
-  statement. Add a regression test.
+  **Fix:** Added `local MUTATION_TABLE` forward declaration before `parse_match_expr`
+  and changed the assignment from `local MUTATION_TABLE = {` to `MUTATION_TABLE = {`.
+  Also fixed a secondary double-skip bug: mutation handlers call `skip_to_eol()`
+  internally (consuming the NEWLINE), so the match arm code was double-consuming it
+  and eating the next arm. Fixed with `eol_consumed` flag.
+
+  `nil` arm values correctly return Lua nil at runtime via the existing
+  `call_fn("nil")` → `nil` special-case in `eval.lua`.
+  8 regression tests added (4 parser, 4 runtime).
 
 ---
 

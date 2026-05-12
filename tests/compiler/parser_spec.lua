@@ -1290,6 +1290,91 @@ fn check msg:
   end)
 end)
 
+-- ── Bug #9 regression: nil literal in match arm ──────────────────────────────
+
+describe("parser — Bug #9: nil literal in match arm (regression)", function()
+  it("parses '_: nil' inline arm without crash or error", function()
+    local src = [[
+fn example:
+  match player/status:
+    `alive: 1
+    _: nil
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local fn = tree.decls[1]
+    assert.are.equal(ast.K.FN_DECL, fn.kind)
+    local match = fn.body[1].expr
+    assert.are.equal(ast.K.MATCH_EXPR, match.kind)
+    assert.are.equal(2, #match.arms)
+    local wildcard_arm = match.arms[2]
+    assert.are.equal("_", wildcard_arm.pattern)
+    assert.are.equal(ast.K.FN_CALL, wildcard_arm.body.kind)
+    assert.are.equal("nil", wildcard_arm.body.name)
+  end)
+
+  it("parses bare identifier as match arm body without crash", function()
+    -- Any IDENT arm body triggered the same crash as nil; test a non-nil ident too
+    local src = [[
+fn example:
+  match player/status:
+    `alive: score
+    _: default-score
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local fn = tree.decls[1]
+    local match = fn.body[1].expr
+    assert.are.equal(ast.K.MATCH_EXPR, match.kind)
+    assert.are.equal(2, #match.arms)
+    assert.are.equal(ast.K.FN_CALL, match.arms[1].body.kind)
+    assert.are.equal("score", match.arms[1].body.name)
+    assert.are.equal(ast.K.FN_CALL, match.arms[2].body.kind)
+    assert.are.equal("default-score", match.arms[2].body.name)
+  end)
+
+  it("parses nil arm in multi-arm match", function()
+    local src = [[
+fn classify:
+  match player/health:
+    100: `full
+    0:   `dead
+    _:   nil
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local fn = tree.decls[1]
+    local match = fn.body[1].expr
+    assert.are.equal(3, #match.arms)
+    assert.are.equal("_", match.arms[3].pattern)
+    assert.are.equal("nil", match.arms[3].body.name)
+  end)
+
+  it("mutation primitive in match arm still works after fix", function()
+    -- Regression guard: MUTATION_TABLE forward ref fix must not break set! in match arms
+    local src = [[
+fn update msg:
+  match msg:
+    `attack: set! player/health 0
+    _: pass
+]]
+    local tree, diags = parse(src)
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local fn = tree.decls[1]
+    local match = fn.body[1].expr
+    assert.are.equal(2, #match.arms)
+    assert.are.equal(ast.K.SET_MUT, match.arms[1].body[1].kind)
+  end)
+end)
+
 describe("parser — variant record constructor in parens", function()
   it("parses (Type/variant field: val) as record constructor", function()
     local src = [[

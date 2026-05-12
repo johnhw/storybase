@@ -872,6 +872,9 @@ end
 
 -- Forward declarations (mutual recursion)
 local parse_expr, parse_stmt, parse_body_items, parse_narration_text
+-- Forward-declared so parse_match_expr (defined before the table) captures
+-- the same upvalue slot that is filled at the MUTATION_TABLE = {...} assignment.
+local MUTATION_TABLE
 
 -- ── Atom (no application argument collection) ──────────────────────────────
 -- Used for collecting function-call arguments so we don't recurse infinitely.
@@ -1307,15 +1310,21 @@ local function parse_match_expr(p)
         if p:at("INDENT") then body = parse_body_items(p, false) end
       else
         -- pass and mutation primitives are statements, not expressions
+        local eol_consumed = false
         if p:at("KEYWORD", "pass") then
           local spos = p:cur().pos; p:adv(); body = { ast.pass_stmt(spos) }
         elseif p:at("IDENT") and MUTATION_TABLE[p:cur().value] then
           body = { parse_stmt(p) }
+          -- Mutation handlers call skip_to_eol() internally, which consumes
+          -- the NEWLINE.  Avoid consuming it again below.
+          eol_consumed = true
         else
           body = parse_expr(p)
         end
-        if not p:at("OP", ")") and not p:at("NEWLINE") then p:skip_to_eol() end
-        p:match("NEWLINE")
+        if not eol_consumed then
+          if not p:at("OP", ")") and not p:at("NEWLINE") then p:skip_to_eol() end
+          p:match("NEWLINE")
+        end
       end
       table.insert(arms, ast.match_arm(pattern, nil, body, apos))
     end
@@ -1825,7 +1834,7 @@ end
 
 -- ── Mutation primitives ──────────────────────────────────────────────────────
 
-local MUTATION_TABLE = {
+MUTATION_TABLE = {
   ["set!"]     = function(p, pos)
     local path = parse_mut_path(p); local val = parse_expr(p)
     p:skip_to_eol(); return ast.set_mut(path, val, pos)

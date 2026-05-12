@@ -552,6 +552,44 @@ describe("eval: match_expr", function()
     })
     assert.equal("seven", eval.eval_expr(node, c))
   end)
+
+  -- Bug #9 regression: nil literal as match arm body
+  it("Bug #9: '_: nil' arm evaluates to Lua nil (not crash)", function()
+    local c = ctx({})
+    local node = match_expr(str_lit("dead"), {
+      { str_lit("alive"), int_lit(1)                           },
+      { "_",              fn_call("nil")                       },
+    })
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+
+  it("Bug #9: '_: nil' wildcard is not taken when an earlier arm matches", function()
+    local c = ctx({})
+    local node = match_expr(str_lit("alive"), {
+      { str_lit("alive"), int_lit(42)   },
+      { "_",              fn_call("nil") },
+    })
+    assert.equal(42, eval.eval_expr(node, c))
+  end)
+
+  it("Bug #9: nil arm works with symbol subjects", function()
+    local c = ctx({})
+    local node = match_expr(sym_lit("unknown"), {
+      { sym_lit("known"),   str_lit("yes")  },
+      { "_",                fn_call("nil")  },
+    })
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
+
+  it("Bug #9: nil arm works with integer subjects", function()
+    local c = ctx({})
+    local node = match_expr(int_lit(99), {
+      { int_lit(1),  str_lit("one")  },
+      { int_lit(2),  str_lit("two")  },
+      { "_",         fn_call("nil")  },
+    })
+    assert.is_nil(eval.eval_expr(node, c))
+  end)
 end)
 
 -- ============================================================
