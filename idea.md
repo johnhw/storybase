@@ -969,22 +969,22 @@ query-history player/health  from: 5 ticks ago  to: now
 
 ```
 find npc
-  where    npcs/{npc}/disposition = `hostile
-  within   3 hops of exits from player/location
-  order-by npcs/{npc}/health asc
-  limit    5
+  where:    npcs/{npc}/disposition = `hostile
+  within    3 hops of exits from player/location
+  order-by: npcs/{npc}/health asc
+  limit:    5
 ```
 
-Clauses (all optional; multiple `where` clauses are ANDed):
+Clauses (all optional; multiple `where:` clauses are ANDed):
 
 | Clause | Description |
 |--------|-------------|
-| `where <condition>` | State filter |
-| `or-where <condition>` | Disjunction with previous `where` |
+| `where: <condition>` | State filter; `{npc}` is bound to each entity key |
+| `or-where: <condition>` | Disjunction with previous `where:` group |
 | `within N hops of <rel> from <src>` | Reachability filter via a relation |
 | `connected-to <path> via <relation>` | Any-hop adjacency |
-| `order-by <path> asc\|desc` | Sort result list |
-| `limit N` | Cap the result list |
+| `order-by: <path> asc\|desc` | Sort result list |
+| `limit: N` | Cap the result list |
 | `count` | Return an integer instead of a list |
 
 `find` is a pure expression. The result type is `List(SymbolOf(Family), limit)` or `Int` for `count`.
@@ -1309,7 +1309,7 @@ can-reach? (in-state alt) player/status = `dead  depth: 20
 
 find npc
   in-state: alt
-  where     npcs/{npc}/disposition = `hostile
+  where:    npcs/{npc}/disposition = `hostile
 ```
 
 ### 21.3 Semantics
@@ -1438,6 +1438,10 @@ Macros expand before type-checking. A macro body may not expand other macros def
 | `max`         | `Int Int → Int`        |                              |
 | `abs`         | `Int → Int`            |                              |
 | `clamp`       | `Int Int Int → Int`    | `clamp val lo hi`            |
+| `int-div`     | `Int Int → Int`        | floor integer quotient       |
+| `mod`         | `Int Int → Int`        | floor-division remainder (sign matches divisor) |
+| `floor`       | `Float → Int`          | round toward −∞              |
+| `ceil`        | `Float → Int`          | round toward +∞              |
 | `not`         | `Bool → Bool`          |                              |
 | `and`         | `Bool Bool → Bool`     | short-circuit                |
 | `or`          | `Bool Bool → Bool`     | short-circuit                |
@@ -1622,8 +1626,8 @@ fn can-afford? price:
 
 fn hostile-nearby?:
   (find npc
-    where  npcs/{npc}/location = player/location
-    and    npcs/{npc}/disposition = `hostile
+    where: npcs/{npc}/location = player/location
+    where: npcs/{npc}/disposition = `hostile
     count) > 0
 
 fn base-damage:

@@ -445,32 +445,12 @@ declaration categories. All four of these allow structural errors to compile cle
 
 ## Spec / Documentation Divergence
 
-- [ ] **SD-1 — `find` block syntax in spec uses bare `where` keyword; implementation
-  requires `where:` NAMED_ARG and lambda.**
-  The spec (§15.2) shows:
-  ```
-  find npc
-    where    npcs/{npc}/disposition = `hostile
-    order-by npcs/{npc}/health asc
-    limit    5
-  ```
-  The actual parser requires:
-  ```
-  find npcs
-    where:   fn(npc): npcs/{npc}/disposition = `hostile
-    order-by: npcs/{npc}/health
-    limit:   5
-  ```
-  An author following the spec literally will get no parse error (clauses are silently
-  skipped) but the filter won't work.
-
-  **Options:**
-  - **A:** Fix Bug #12 (non-lambda `where:` expression form) so that `where: condition`
-    (without lambda) correctly binds the entity variable and filters. Then update spec to
-    use `where:` (with colon) to match the lexer. Demos and documentation updated together.
-  - **B:** Add the no-colon `where`/`order-by`/`limit` keyword form to the parser as
-    synonyms for the NAMED_ARG form. More parser complexity but closer to spec text.
-  - **C:** Update the spec to reflect the actual syntax (`where:`, lambda required).
-    Lowest code cost; breaks the nice spec example but at least authors are not misled.
-
-  Recommended: **A** (fix Bug #12) + update spec §15.2 to use `where:` syntax.
+- [x] **SD-1 — `find` block syntax in spec uses bare `where` keyword; implementation
+  requires `where:` NAMED_ARG.** *(fixed 2026-05-13, Option A)*
+  Updated `idea.md` to match the actual parser syntax:
+  - §15.2 example and clause table: `where:`, `order-by:`, `limit:` (with colons)
+  - §15.2 note: non-lambda `where: condition` correctly binds entity variable (Bug #12 fix)
+  - §21.2 counterfactual example: `where:` with colon
+  - §25 hostile-nearby? example: two `where:` clauses (AND-ed) instead of bare `where...and`
+  - §24 stdlib table: added `int-div`, `mod`, `floor`, `ceil`
+  No code changes; Bug #12 already handled the runtime fix.
