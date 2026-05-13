@@ -31,6 +31,10 @@ local function new_symtab()
     families  = {},  -- family_name → STATE_FAMILY node
     grids     = {},  -- name → DEFGRID_DECL node
     speakers  = {},  -- name → SPEAKER_DECL node
+    fns       = {},  -- name → FN_DECL node (AV-1)
+    bounded   = {},  -- name → BOUNDED_DECL node (AV-1)
+    macros    = {},  -- name → MACRO_DECL node (AV-1)
+    actors    = {},  -- name → ACTOR_DECL node (AV-1)
   }
 end
 
@@ -170,9 +174,22 @@ local function pass1_collect(acc, symtab, program)
       else
         symtab.speakers[name] = node
       end
-    end
+
+    elseif kind == k.FN_DECL then
+      if node.name then symtab.fns[node.name] = node end
+
+    elseif kind == k.BOUNDED_DECL then
+      if node.name then symtab.bounded[node.name] = node end
+
+    elseif kind == k.MACRO_DECL then
+      if node.name then symtab.macros[node.name] = node end
+
+    elseif kind == k.ACTOR_DECL then
+      if node.name then symtab.actors[node.name] = node end
+
     -- MODULE_DECL, IMPORT_DECL, SCHEMA_VERSION, ENGINE_CONFIG, TIME_MODEL
     -- are informational and need no symbol registration.
+    end
   end
 end
 
@@ -616,6 +633,44 @@ local MUTATION_NAMES = {
   ["unrelate!"] = true, ["send!"] = true, ["undo!"] = true,
   ["time-inc!"] = true, ["goto-scene!"] = true,
   ["enter-scene!"] = true, ["exit-scene!"] = true,
+}
+
+-- Built-in function names known to the checker (must match BUILTINS in runtime/eval.lua).
+local CHECKER_BUILTIN_FNS = {
+  ["path-list"]=true, ["min"]=true, ["max"]=true,
+  ["count-where"]=true, ["any?"]=true, ["all?"]=true,
+  ["random-int"]=true, ["random-bool"]=true, ["random-enum"]=true,
+  ["random-choice"]=true, ["random-weighted"]=true,
+  ["tostring"]=true, ["print"]=true, ["log"]=true, ["str"]=true,
+  ["abs"]=true, ["clamp"]=true, ["int-to-str"]=true, ["str-to-int"]=true,
+  ["size"]=true, ["count"]=true, ["empty?"]=true,
+  ["contains?"]=true, ["not-in?"]=true, ["union"]=true,
+  ["intersect"]=true, ["difference"]=true,
+  ["list-get"]=true, ["list-size"]=true,
+  ["map-get"]=true, ["map-size"]=true, ["map-keys"]=true,
+  ["map-values"]=true, ["map-contains-key?"]=true, ["map-merge"]=true,
+  ["map-set"]=true, ["map-delete"]=true,
+  ["ulist-size"]=true, ["ulist-get"]=true, ["ulist-first"]=true,
+  ["ulist-last"]=true, ["ulist-index-of"]=true, ["ulist-contains?"]=true,
+  ["ulist-append"]=true, ["ulist-prepend"]=true, ["ulist-remove-at"]=true,
+  ["ulist-remove"]=true, ["ulist-concat"]=true, ["ulist-slice"]=true,
+  ["ulist-reverse"]=true, ["ulist-map"]=true, ["ulist-filter"]=true,
+  ["adjacent?"]=true, ["reachable?"]=true, ["shortest-path"]=true,
+  ["reachable-set"]=true, ["inverse-adjacent?"]=true, ["path-exists?"]=true,
+  ["query-at"]=true, ["query-history"]=true, ["query-changes"]=true,
+  ["can-reach?"]=true, ["find-path"]=true, ["verify-always"]=true,
+  ["probability"]=true, ["optimal-path"]=true, ["find-counterexample"]=true,
+  ["grid-get"]=true, ["grid-set!"]=true, ["grid-width"]=true,
+  ["grid-height"]=true, ["within-range?"]=true, ["visible-from?"]=true,
+  ["path-to"]=true, ["occupied-by"]=true,
+  -- Additional mutation forms that may appear as FN_CALL
+  ["map-set!"]=true, ["map-delete!"]=true, ["schedule!"]=true,
+  ["cancel-schedule!"]=true, ["time-set!"]=true, ["checkpoint!"]=true,
+  ["engine/emit"]=true, ["engine/checkpoint!"]=true,
+  -- Special names
+  ["pure"]=true, ["nil"]=true,
+  -- Hook context variables injected by the runtime
+  ["changes"]=true,
 }
 
 --- Return true if a node subtree contains any mutation primitive.
@@ -1188,15 +1243,41 @@ end
 
 --- Build a flat map  path-string → type_expr node  for all declared state fields.
 --- Handles STATE_SCALAR, STATE_RECORD (inline), and STATE_FAMILY.
---- For STATE_SCALAR whose type resolves to a TYPE_RECORD, expands sub-fields.
+--- For STATE_SCALAR whose type resolves to a TYPE_RECORD, expands sub-fields
+--- including fields inherited via WITH_MIXIN.
 local function build_path_type_map(program, symtab_data)
   local map = {}
   local k   = ast.K
+  local types = symtab_data and symtab_data.types or {}
 
-  local function expand_record_fields(prefix, fields)
+  -- Recursively expand record fields (including mixin fields) into the map.
+  local function expand_record_fields(prefix, fields, depth)
+    depth = depth or 0
+    if depth > 8 then return end  -- prevent infinite recursion on cyclic mixins
     for _, field in ipairs(fields or {}) do
       if field.kind == k.RECORD_FIELD then
         map[prefix .. "/" .. field.name] = field.type_expr
+      elseif field.kind == k.WITH_MIXIN then
+        local mixin_decl = types[field.type_name]
+        if mixin_decl and mixin_decl.kind == k.TYPE_RECORD then
+          expand_record_fields(prefix, mixin_decl.fields, depth + 1)
+        end
+      end
+    end
+  end
+
+  -- Same as expand_record_fields but uses "family/*/field" keys for family types.
+  local function expand_family_fields(family, fields, depth)
+    depth = depth or 0
+    if depth > 8 then return end
+    for _, field in ipairs(fields or {}) do
+      if field.kind == k.RECORD_FIELD then
+        map[family .. "/*/" .. field.name] = field.type_expr
+      elseif field.kind == k.WITH_MIXIN then
+        local mixin_decl = types[field.type_name]
+        if mixin_decl and mixin_decl.kind == k.TYPE_RECORD then
+          expand_family_fields(family, mixin_decl.fields, depth + 1)
+        end
       end
     end
   end
@@ -1215,6 +1296,7 @@ local function build_path_type_map(program, symtab_data)
 
     elseif node.kind == k.STATE_RECORD then
       local p = path_key(node.path)
+      map[p] = node  -- mark root as a known state path so first-segment checks work
       expand_record_fields(p, node.fields)
 
     elseif node.kind == k.STATE_FAMILY then
@@ -1225,12 +1307,7 @@ local function build_path_type_map(program, symtab_data)
         if texpr.kind == k.TYPE_NAMED and texpr.resolved then
           local res = texpr.resolved
           if res.kind == k.TYPE_RECORD then
-            for _, field in ipairs(res.fields or {}) do
-              if field.kind == k.RECORD_FIELD then
-                -- Store under wildcard pattern "family/*/fieldname"
-                map[family .. "/*/" .. field.name] = field.type_expr
-              end
-            end
+            expand_family_fields(family, res.fields)
           end
         end
       end
@@ -1938,11 +2015,25 @@ local function pass_check_invalid_enum_writes(acc, symtab, program)
   local k        = ast.K
   local path_map = build_path_type_map(program, symtab)
 
+  -- Resolve inner enum values for a Set/UList type (for ADD_MUT / REMOVE_MUT checks).
+  local function get_set_inner_enum_values(texpr)
+    if not texpr then return nil end
+    local k2 = ast.K
+    if texpr.kind == k2.TYPE_SET or texpr.kind == k2.TYPE_ULIST then
+      return get_enum_values_checker(texpr.inner, symtab)
+    end
+    if texpr.kind == k2.TYPE_NAMED then
+      local decl = symtab.types[texpr.name]
+      if decl and decl.kind == k2.TYPE_ALIAS and decl.type_expr then
+        return get_set_inner_enum_values(decl.type_expr)
+      end
+    end
+    return nil
+  end
+
   local function check_set(node)
-    if node.kind ~= k.SET_MUT then return end
     local path_node = node.path
     if not path_node then return end
-    -- Unwrap INDEX_EXPR to the base list path (index writes are not enum-typed)
     if path_node.kind == k.INDEX_EXPR then return end
     if path_node.kind ~= k.PATH_EXPR then return end  -- INTERP_PATH: runtime catches it
     local val_node = node.value
@@ -1950,9 +2041,18 @@ local function pass_check_invalid_enum_writes(acc, symtab, program)
     local sym_name = val_node.name
     local texpr = lookup_path_type(path_node, path_map)
     if not texpr then return end  -- undeclared path — SF-3 already handles this
-    local enum_vals = get_enum_values_checker(texpr, symtab)
+    local path_str = table.concat(path_node.segments or {}, "/")
+
+    local enum_vals
+    if node.kind == k.SET_MUT then
+      -- Direct enum assignment: check the path type directly
+      enum_vals = get_enum_values_checker(texpr, symtab)
+    elseif node.kind == k.ADD_MUT or node.kind == k.REMOVE_MUT then
+      -- Adding/removing from a Set: check the Set's inner enum type (AV-3)
+      enum_vals = get_set_inner_enum_values(texpr)
+    end
+
     if enum_vals and not enum_vals[sym_name] then
-      local path_str = table.concat(path_node.segments or {}, "/")
       local valid = {}
       for v in pairs(enum_vals) do valid[#valid + 1] = "'" .. v end
       table.sort(valid)
@@ -2200,6 +2300,456 @@ local function pass_check_match_completeness(acc, symtab, program)
 end
 
 -- ============================================================
+-- Pass — Undefined function call detection (AV-1)
+-- ============================================================
+-- Warn when a FN_CALL names a function not declared in symtab.fns, symtab.bounded,
+-- CHECKER_BUILTIN_FNS, or MUTATION_NAMES. Scope-tracked so lambda params, let
+-- bindings (including sequential), for-loop vars, fn params, and variant field
+-- destructuring bindings do not generate false positives.
+
+-- Forward declaration for mutual recursion between walk_fn_calls and walk_body_seq.
+local walk_body_seq
+
+--- Walk all FN_CALL nodes in a subtree, calling fn(call_node, scope).
+--- scope: {name=true,...} of names currently in scope.
+--- Uses walk_body_seq for all statement-list bodies so sequential let bindings,
+--- for-loop vars, and variant field destructuring are tracked correctly.
+local function walk_fn_calls(node, scope, fn)
+  if not node or type(node) ~= "table" or not node.kind then return end
+  local k = ast.K
+
+  if node.kind == k.FN_CALL then
+    fn(node, scope)
+    for _, a in ipairs(node.args or {}) do walk_fn_calls(a, scope, fn) end
+    return
+  end
+
+  if node.kind == k.LAMBDA_EXPR then
+    local ns = {}; for n, v in pairs(scope) do ns[n] = v end
+    for _, p in ipairs(node.params or {}) do
+      if type(p) == "string" then ns[p] = true
+      elseif type(p) == "table" and p.name then ns[p.name] = true end
+    end
+    if type(node.body) == "table" and not node.body.kind then
+      walk_body_seq(node.body, ns, fn)
+    elseif node.body then
+      walk_fn_calls(node.body, ns, fn)
+    end
+    return
+  end
+
+  if node.kind == k.LET_STMT then
+    -- Walk RHS of each binding; add names to a local scope copy.
+    local ns = {}; for n, v in pairs(scope) do ns[n] = v end
+    for _, b in ipairs(node.bindings or {}) do
+      if b.kind == k.LET_BINDING then
+        walk_fn_calls(b.expr, ns, fn)
+        if b.name then ns[b.name] = true end
+      end
+    end
+    -- Scoped form (non-empty body): bindings visible inside body only.
+    if #(node.body or {}) > 0 then
+      walk_body_seq(node.body, ns, fn)
+    end
+    -- Sequential form (empty body): binding propagation is the caller's job
+    -- (walk_body_seq accumulates it into its running scope).
+    return
+  end
+
+  if node.kind == k.FOR_STMT then
+    local ns = {}; for n, v in pairs(scope) do ns[n] = v end
+    walk_fn_calls(node.iter, scope, fn)
+    if node.var then ns[node.var] = true end
+    walk_body_seq(node.body     or {}, ns,    fn)
+    walk_body_seq(node.else_body or {}, scope, fn)
+    return
+  end
+
+  if node.kind == k.WHEN_STMT then
+    walk_fn_calls(node.condition, scope, fn)
+    walk_body_seq(node.body or {}, scope, fn)
+    return
+  end
+
+  if node.kind == k.IF_EXPR then
+    walk_fn_calls(node.condition, scope, fn)
+    walk_body_seq(node.then_body or {}, scope, fn)
+    if type(node.else_body) == "table" and not node.else_body.kind then
+      walk_body_seq(node.else_body, scope, fn)
+    elseif node.else_body then
+      walk_fn_calls(node.else_body, scope, fn)
+    end
+    return
+  end
+
+  if node.kind == k.WHILE_STMT then
+    walk_fn_calls(node.condition, scope, fn)
+    walk_body_seq(node.body or {}, scope, fn)
+    return
+  end
+
+  if node.kind == k.MATCH_EXPR then
+    walk_fn_calls(node.expr, scope, fn)
+    for _, arm in ipairs(node.arms or {}) do
+      local arm_scope = {}; for n, v in pairs(scope) do arm_scope[n] = v end
+      -- Variant field destructuring: extract binding names from RECORD_CONSTRUCTOR pattern
+      if type(arm.pattern) == "table" and arm.pattern.kind == k.RECORD_CONSTRUCTOR then
+        for _, field in ipairs(arm.pattern.fields or {}) do
+          if field.kind == k.NAMED_ARG and field.name then
+            arm_scope[field.name] = true
+          end
+        end
+      end
+      if type(arm.body) == "table" and not arm.body.kind then
+        walk_body_seq(arm.body, arm_scope, fn)
+      elseif arm.body then
+        walk_fn_calls(arm.body, arm_scope, fn)
+      end
+    end
+    return
+  end
+
+  if node.kind == k.COND_EXPR then
+    for _, arm in ipairs(node.arms or {}) do
+      if arm.condition ~= "_" then walk_fn_calls(arm.condition, scope, fn) end
+      if type(arm.body) == "table" and not arm.body.kind then
+        walk_body_seq(arm.body, scope, fn)
+      elseif arm.body then
+        walk_fn_calls(arm.body, scope, fn)
+      end
+    end
+    return
+  end
+
+  -- Generic recursion for all other node kinds.
+  local LIST_FIELDS = { "choices", "clauses", "elements", "entries", "text", "label" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do walk_fn_calls(child, scope, fn) end
+    end
+  end
+  for _, f in ipairs({ "condition", "guard", "expr", "left", "right", "base",
+                       "value", "amount", "inner_expr", "iter", "index",
+                       "from", "to", "path", "msg", "state_expr" }) do
+    walk_fn_calls(node[f], scope, fn)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do walk_fn_calls(a, scope, fn) end
+  end
+  if type(node.axes) == "table" then
+    for _, axis in ipairs(node.axes) do walk_fn_calls(axis.value, scope, fn) end
+  end
+end
+
+--- Walk a list of statements with sequential scope propagation.
+--- Sequential `let x = val` (empty body) accumulates x into scope for
+--- all subsequent siblings. All other statements are delegated to walk_fn_calls.
+walk_body_seq = function(stmts, scope, fn)  -- assigned to upvalue declared above
+  local k = ast.K
+  local cur = {}; for n, v in pairs(scope) do cur[n] = v end
+  for _, stmt in ipairs(stmts or {}) do
+    if not stmt or type(stmt) ~= "table" then
+    elseif stmt.kind == k.LET_STMT and #(stmt.body or {}) == 0 then
+      -- Sequential let: walk RHS then add binding to cur
+      for _, b in ipairs(stmt.bindings or {}) do
+        if b.kind == k.LET_BINDING then
+          walk_fn_calls(b.expr, cur, fn)
+          if b.name then cur[b.name] = true end
+        end
+      end
+    else
+      walk_fn_calls(stmt, cur, fn)
+    end
+  end
+end
+
+local function pass_check_undefined_fns(acc, symtab, program)
+  local k = ast.K
+  local path_map = build_path_type_map(program, symtab)
+
+  -- Names valid as zero-arg "bare" uses (relations, scenes, families, etc.)
+  local bare_valid = {}
+  for name in pairs(symtab.relations) do bare_valid[name] = true end
+  for name in pairs(symtab.scenes)    do bare_valid[name] = true end
+  for name in pairs(symtab.families)  do bare_valid[name] = true end
+  for name in pairs(symtab.grids)     do bare_valid[name] = true end
+  for name in pairs(symtab.types)     do bare_valid[name] = true end
+  for name in pairs(symtab.actors)    do bare_valid[name] = true end
+  for name in pairs(symtab.fns)       do bare_valid[name] = true end
+  for name in pairs(symtab.bounded)   do bare_valid[name] = true end
+  for name in pairs(symtab.macros)    do bare_valid[name] = true end
+  for path in pairs(path_map) do
+    if not path:find("/", 1, true) then bare_valid[path] = true end
+  end
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.SCHEDULE_DECL and node.name then
+      bare_valid[node.name] = true
+    end
+  end
+
+  local function is_valid_call(name, nargs, scope)
+    if CHECKER_BUILTIN_FNS[name] then return true end
+    if MUTATION_NAMES[name] then return true end
+    if symtab.fns[name] then return true end
+    if symtab.bounded[name] then return true end
+    if symtab.macros[name] then return true end
+    if scope[name] then return true end
+    if nargs == 0 and bare_valid[name] then return true end
+    return false
+  end
+
+  local function check_call(node, scope)
+    local name  = node.name
+    local nargs = #(node.args or {})
+    if is_valid_call(name, nargs, scope) then return end
+    table.insert(acc.diags, ast.warning(
+      ast.E.UNDEFINED_FN,
+      "'" .. name .. "' is not a declared function or built-in",
+      node.pos,
+      "check the function name spelling or add a declaration"))
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      local scope = {}
+      for _, p in ipairs(decl.params or {}) do
+        if type(p) == "table" and p.name then scope[p.name] = true
+        elseif type(p) == "string" then scope[p] = true end
+      end
+      walk_body_seq(decl.body or {}, scope, check_call)
+      for _, e in ipairs(decl.pre  or {}) do walk_fn_calls(e, scope, check_call) end
+      for _, e in ipairs(decl.post or {}) do walk_fn_calls(e, scope, check_call) end
+    elseif decl.kind == k.SCENE_DECL then
+      local scope = {}
+      walk_body_seq(decl.body or {}, scope, check_call)
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then walk_fn_calls(choice.guard, scope, check_call) end
+        walk_body_seq(choice.body or {}, scope, check_call)
+      end
+    elseif decl.kind == k.SCHEDULE_DECL then
+      walk_body_seq(decl.body or {}, {}, check_call)
+    elseif decl.kind == k.HOOK_DECL then
+      walk_body_seq(decl.body or {}, {}, check_call)
+    end
+  end
+end
+
+-- ============================================================
+-- Pass — Undefined scene transition target detection (AV-2)
+-- ============================================================
+-- Warn when a SCENE_GOTO or SCENE_ENTER names a scene not in symtab.scenes.
+-- Computed goto targets (expr node) are skipped — only string literals are checked.
+-- Also validates the entry-scene in engine-config.
+
+--- Walk all SCENE_GOTO and SCENE_ENTER nodes in a subtree.
+local function walk_nav_targets(node, fn)
+  if not node or type(node) ~= "table" or not node.kind then return end
+  local k = ast.K
+  if node.kind == k.SCENE_GOTO or node.kind == k.SCENE_ENTER then fn(node) end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
+                        "clauses", "bindings" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do
+        walk_nav_targets(child, fn)
+        if type(child) == "table" then
+          if child.guard then walk_nav_targets(child.guard, fn) end
+          if child.body then
+            if type(child.body) == "table" and not child.body.kind then
+              for _, s in ipairs(child.body) do walk_nav_targets(s, fn) end
+            else walk_nav_targets(child.body, fn) end
+          end
+        end
+      end
+    end
+  end
+  for _, f in ipairs({ "condition", "expr", "left", "right", "base",
+                       "value", "amount", "inner_expr" }) do
+    walk_nav_targets(node[f], fn)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do walk_nav_targets(a, fn) end
+  end
+end
+
+local function pass_check_scene_targets(acc, symtab, program)
+  local k = ast.K
+
+  -- Check engine-config entry-scene
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.ENGINE_CONFIG then
+      for _, pair in ipairs(node.keys or {}) do
+        if pair.key == "entry-scene" and type(pair.value) == "string" then
+          if not symtab.scenes[pair.value] then
+            table.insert(acc.diags, ast.warning(
+              ast.E.UNDEFINED_SCENE,
+              "entry-scene '" .. pair.value .. "' is not a declared scene",
+              node.pos))
+          end
+        end
+      end
+    end
+  end
+
+  local function check_nav(node)
+    if type(node.target) ~= "string" then return end  -- computed goto: skip
+    local target = node.target
+    if target == "?" then return end  -- parse error placeholder
+    if not symtab.scenes[target] then
+      local arrow = (node.kind == k.SCENE_GOTO) and "->" or "=>"
+      table.insert(acc.diags, ast.warning(
+        ast.E.UNDEFINED_SCENE,
+        arrow .. " '" .. target .. "' is not a declared scene",
+        node.pos))
+    end
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
+    elseif decl.kind == k.SCENE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then walk_nav_targets(choice.guard, check_nav) end
+        for _, stmt in ipairs(choice.body or {}) do walk_nav_targets(stmt, check_nav) end
+      end
+    elseif decl.kind == k.SCHEDULE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
+    elseif decl.kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
+    end
+  end
+end
+
+-- ============================================================
+-- Pass — Undefined read path detection (AV-4)
+-- ============================================================
+-- Warn when a PATH_EXPR appears in a read (expression) position and is not a
+-- declared state path. Complements SF-3 (write-path check).
+-- Conservative: only checks paths whose first segment is a known state root or
+-- family, to avoid false positives from for-loop variable field accesses.
+-- Skips: INTERP_PATH, wildcard/pattern paths, engine-internal paths, actor inboxes.
+
+--- Return true if the path is checkable and matches a declared state path.
+--- Return nil to skip (can't determine: local variable, engine path, etc.).
+local function is_read_path_ok(path_node, path_map, symtab)
+  local segs = path_node.segments or {}
+  if #segs == 0 then return nil end
+  -- Skip paths with pattern segments (wildcard, alternation, negation)
+  for _, s in ipairs(segs) do
+    if type(s) == "string" and (s == "*" or s == "**" or
+        s:sub(1,1) == "!" or s:sub(1,1) == "(") then
+      return nil
+    end
+  end
+  local first = segs[1]
+  -- Skip engine-internal paths
+  if first == "engine" then return nil end
+  -- Skip actor inbox paths: "state_path/inbox" registered dynamically at runtime.
+  -- state_path may be a single name ("garrison") or multi-segment ("npcs/blacksmith").
+  local segs_str = table.concat(segs, "/")
+  for _, actor in pairs(symtab.actors) do
+    local sp = actor.state_path or actor.name or ""
+    if segs_str == sp .. "/inbox" then return nil end
+  end
+  -- Conservative: only check paths where the first segment is a declared state
+  -- root or family (to avoid false positives from for-loop variable accesses like
+  -- `entry/time/day` where `entry` is a loop variable, not a state path).
+  local first_is_state = path_map[first] ~= nil or symtab.families[first] ~= nil
+  if not first_is_state then
+    -- Also treat first segment as a state root if any path_map key uses it as prefix.
+    -- This catches `player/wrong-field` when `state player/health` is declared.
+    local prefix = first .. "/"
+    for key in pairs(path_map) do
+      if key:sub(1, #prefix) == prefix then first_is_state = true; break end
+    end
+  end
+  if not first_is_state then return nil end
+  return is_mut_path_declared(path_node, path_map, symtab) or false
+end
+
+--- Walk PATH_EXPR nodes in read (expression) positions.
+--- Skips the .path field of mutation nodes (SF-3 covers those).
+local function walk_read_path_exprs(node, fn)
+  if not node or type(node) ~= "table" or not node.kind then return end
+  local k = ast.K
+  -- For mutation nodes: skip .path (SF-3 handles it), only recurse into value/amount/key
+  if MUT_PATH_KINDS[node.kind] then
+    walk_read_path_exprs(node.value,  fn)
+    walk_read_path_exprs(node.amount, fn)
+    walk_read_path_exprs(node.key,    fn)
+    return
+  end
+  if node.kind == k.PATH_EXPR then fn(node); return end
+  if node.kind == k.INTERP_PATH then return end
+  -- Generic: walk each child
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
+                        "clauses", "bindings", "elements", "entries", "text", "label" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      for _, child in ipairs(v) do walk_read_path_exprs(child, fn) end
+    end
+  end
+  for _, f in ipairs({ "condition", "guard", "expr", "left", "right", "base",
+                       "value", "amount", "inner_expr", "iter",
+                       "index", "from", "to", "path", "msg", "state_expr" }) do
+    walk_read_path_exprs(node[f], fn)
+  end
+  if type(node.args) == "table" then
+    for _, a in ipairs(node.args) do walk_read_path_exprs(a, fn) end
+  end
+  if type(node.axes) == "table" then
+    for _, axis in ipairs(node.axes) do walk_read_path_exprs(axis.value, fn) end
+  end
+  if type(node.lines) == "table" then
+    for _, line in ipairs(node.lines) do
+      if type(line) == "table" then
+        for _, item in ipairs(line) do walk_read_path_exprs(item, fn) end
+      end
+    end
+  end
+end
+
+local function pass_check_undefined_read_paths(acc, symtab, program)
+  local k        = ast.K
+  local path_map = build_path_type_map(program, symtab)
+
+  local function check_read_path(path_node)
+    local result = is_read_path_ok(path_node, path_map, symtab)
+    if result == nil then return end  -- skip: conservative guard
+    if not result then
+      local pstr = table.concat(path_node.segments or {}, "/")
+      table.insert(acc.diags, ast.warning(
+        ast.E.UNDEFINED_PATH,
+        "'" .. pstr .. "' is not a declared state path",
+        path_node.pos,
+        "check the state schema or fix the path spelling"))
+    end
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
+      for _, e in ipairs(decl.pre  or {}) do walk_read_path_exprs(e, check_read_path) end
+      for _, e in ipairs(decl.post or {}) do walk_read_path_exprs(e, check_read_path) end
+    elseif decl.kind == k.SCENE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then walk_read_path_exprs(choice.guard, check_read_path) end
+        for _, stmt in ipairs(choice.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
+      end
+    elseif decl.kind == k.SCHEDULE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
+    elseif decl.kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -2244,6 +2794,9 @@ function M.check(ast_root, filename)
   pass_check_match_completeness(acc, symtab, ast_root)
   pass_check_undefined_paths(acc, symtab, ast_root)
   pass_check_invalid_enum_writes(acc, symtab, ast_root)
+  pass_check_undefined_fns(acc, symtab, ast_root)        -- AV-1
+  pass_check_scene_targets(acc, symtab, ast_root)        -- AV-2
+  pass_check_undefined_read_paths(acc, symtab, ast_root) -- AV-4
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

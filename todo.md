@@ -92,7 +92,22 @@ nodes in fn/scene/schedule/hook bodies; for static PATH_EXPR paths checks agains
 INTERP_PATH (dynamic) and INDEX_EXPR/SLICE_EXPR by unwrapping to base.
 16 regression tests added (8 state_spec for runtime, 8 checker_spec for compile-time).
 
-**2329 tests passing, 0 failing, 2 pending (known limitations).**
+All four compile-time validation gaps (AV-1 through AV-4) resolved 2026-05-13.
+
+AV-1: `pass_check_undefined_fns` walks all FN_CALL nodes with full scope tracking
+(sequential let bindings, scoped let forms, lambda params, for-loop vars, variant
+field destructuring). CHECKER_BUILTIN_FNS table mirrors eval.lua BUILTINS.
+AV-2: `pass_check_scene_targets` checks all SCENE_GOTO/SCENE_ENTER string literal
+targets and engine-config entry-scene against declared scenes.
+AV-3: Extended `pass_check_invalid_enum_writes` to cover ADD_MUT/REMOVE_MUT on
+Set(Enum) paths by unwrapping the Set inner type.
+AV-4: `pass_check_undefined_read_paths` checks PATH_EXPR nodes in read (expression)
+positions using a conservative guard (only when first segment is a known state root
+or prefix) to avoid false positives from for-loop variable field accesses.
+Also fixed `build_path_type_map` to expand WITH_MIXIN fields recursively.
+23 new regression tests added (checker_spec). Zero false positives on all demos.
+
+**2352 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
@@ -100,10 +115,8 @@ INTERP_PATH (dynamic) and INDEX_EXPR/SLICE_EXPR by unwrapping to base.
 
 Recommended order:
 1. **Silent-failure hazards** (SF-4, SF-5) — SF-1, SF-2, SF-3 resolved.
-2. **Compile-time validation** (AV-1 through AV-4) — improve checker so authoring
-   errors surface at `storybase check` instead of at runtime.
-3. **Ergonomics** (AE-13 through AE-17) — quality-of-life improvements.
-4. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
+2. **Ergonomics** (AE-13 through AE-17) — quality-of-life improvements.
+3. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
 
 ---
 
@@ -342,20 +355,20 @@ locate. All five are high-priority from an authoring-experience perspective.
 The checker validates types and structure but does not cross-validate names across
 declaration categories. All four of these allow structural errors to compile cleanly.
 
-- [ ] **AV-1 — Undefined function calls pass the checker.**
+- [x] **AV-1 — Undefined function calls pass the checker.** *(fixed 2026-05-13)*
   `fn example:` calling `undefined-fn arg` compiles without error. The checker does not
   resolve function names against the declared function table. Add a pass that walks all
   `FN_CALL` nodes and reports `UNDEFINED_FN` for names not in `symtab.fns`, `BUILTINS`,
   `symtab.bounded`, or a set of built-in operator names (`min`, `max`, `str`, etc.).
   Zero-arg calls are ambiguous (see SF-1) and should be warned separately.
 
-- [ ] **AV-2 — Undefined scene transition targets pass the checker.**
+- [x] **AV-2 — Undefined scene transition targets pass the checker.** *(fixed 2026-05-13)*
   `-> undefined-scene` and `=> undefined-scene` compile cleanly. Add a check in pass 2:
   for `SCENE_GOTO` and `SCENE_ENTER` nodes whose target is a string literal (not a computed
   expression), verify the target name exists in `symtab.scenes`. Emit `UNDEFINED_SCENE`.
   Also verify that `entry-scene` in `engine-config` names a declared scene.
 
-- [ ] **AV-3 — Invalid enum literal values pass the checker.**
+- [x] **AV-3 — Invalid enum literal values pass the checker.** *(fixed 2026-05-13)*
   `set! player/status \`zombie` (where `Status = alive | dead`) compiles cleanly. In pass 2,
   when a `SET_MUT` or `ADD_MUT` assigns a `SYMBOL_LIT` to a path whose declared type is a
   named enum (resolvable via `symtab.states` → `symtab.types`), check that the symbol is a
@@ -363,7 +376,7 @@ declaration categories. All four of these allow structural errors to compile cle
   (`npcs/{npc}/status`) cannot be checked statically but the runtime check in SF-2 covers
   those.
 
-- [ ] **AV-4 — Reads/writes to undeclared state paths pass the checker.**
+- [x] **AV-4 — Reads/writes to undeclared state paths pass the checker.** *(fixed 2026-05-13)*
   `player/nonexistent-field` in any read or write position compiles cleanly. In pass 2,
   for every `PATH_EXPR` and `INTERP_PATH` node, resolve the path prefix against
   `symtab.states` and `symtab.families`. If no declared state covers this path, emit

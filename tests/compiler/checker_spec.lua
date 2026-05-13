@@ -1939,4 +1939,287 @@ scene main:
     set! world/phase `finale
 ]], ast.E.INVALID_ENUM_VALUE)
   end)
+
+  it("warns for invalid symbol in add! on a Set(enum) path (AV-3)", function()
+    check_warn([[
+type Color = red | green | blue
+
+state player/colors: Set(Color, 3)
+
+fn bad-add:
+  add! player/colors `purple
+]], ast.E.INVALID_ENUM_VALUE)
+  end)
+
+  it("does not warn for valid symbol in add! on Set(enum) path (AV-3)", function()
+    check_ok([[
+type Color = red | green | blue
+
+state player/colors: Set(Color, 3)
+
+fn good-add:
+  add! player/colors `red
+]])
+  end)
+
+  it("warns for invalid symbol in remove! on a Set(named enum) path (AV-3)", function()
+    check_warn([[
+type Tag = active | passive | hidden
+
+state player/tags: Set(Tag, 5)
+
+fn bad-remove:
+  remove! player/tags `unknown
+]], ast.E.INVALID_ENUM_VALUE)
+  end)
+end)
+
+-- ============================================================
+-- AV-1 — Undefined function call detection (checker pass)
+-- ============================================================
+
+describe("checker — UNDEFINED_FN warning (AV-1)", function()
+  it("warns when a multi-arg function call names an undeclared function", function()
+    check_warn([[
+state player/health: Int(0,100) = 50
+
+fn example:
+  set! player/health (undefined-fn player/health)
+]], ast.E.UNDEFINED_FN)
+  end)
+
+  it("does not warn for a declared user function call", function()
+    check_ok([[
+state player/health: Int(0,100) = 50
+
+fn clamp-health:
+  set! player/health 100
+
+fn example:
+  clamp-health
+]])
+  end)
+
+  it("does not warn for a builtin function call", function()
+    check_ok([[
+state player/health: Int(0,100) = 50
+
+fn example:
+  set! player/health (clamp player/health 0 100)
+]])
+  end)
+
+  it("does not warn for a let-bound name used as argument (sequential let)", function()
+    check_ok([[
+state player/health: Int(0,100) = 50
+
+fn example:
+  let base = player/health
+  let capped = clamp base 0 100
+  set! player/health capped
+]])
+  end)
+
+  it("does not warn for a lambda parameter used in body", function()
+    check_ok([[
+state npcs/{npc}: Int(0,100) max: 10
+
+fn example:
+  let alive-count = count-where (path-list npcs) fn(k): npcs/{k} > 0
+  set! npcs/guard alive-count
+]])
+  end)
+
+  it("does not warn for a for-loop variable used in body", function()
+    check_ok([[
+state npcs/{npc}: Int(0,100) max: 10
+
+fn example:
+  for k in (path-list npcs):
+    set! npcs/{k} 100
+]])
+  end)
+
+  it("does not warn for variant field destructuring bindings", function()
+    check_ok([[
+type Msg:
+  | trade-offer: amount: Int(0,100)
+
+state world/score: Int(0,9999) = 0
+
+fn handle msg:
+  match msg:
+    trade-offer {amount}:
+      inc! world/score amount
+    _: pass
+]])
+  end)
+
+  it("does not warn for bounded declaration calls", function()
+    check_ok([[
+state player/health: Int(0,100) = 50
+
+bounded heal-amount:
+  returns-type: Int(0,50)
+  distribution: uniform 5 20
+  reads: []
+
+fn example:
+  inc! player/health heal-amount
+]])
+  end)
+end)
+
+-- ============================================================
+-- AV-2 — Undefined scene transition target detection (checker pass)
+-- ============================================================
+
+describe("checker — UNDEFINED_SCENE warning (AV-2)", function()
+  it("warns when -> targets a nonexistent scene", function()
+    check_warn([[
+engine-config:
+  entry-scene: main
+
+scene main:
+  * Go
+    -> ghost-town
+]], ast.E.UNDEFINED_SCENE)
+  end)
+
+  it("does not warn when -> targets a declared scene", function()
+    check_ok([[
+engine-config:
+  entry-scene: main
+
+scene main:
+  * Go
+    -> village
+
+scene village:
+  * Back
+    -> main
+]])
+  end)
+
+  it("warns for undefined entry-scene in engine-config", function()
+    check_warn([[
+engine-config:
+  entry-scene: nonexistent
+]], ast.E.UNDEFINED_SCENE)
+  end)
+
+  it("does not warn for valid entry-scene in engine-config", function()
+    check_ok([[
+engine-config:
+  entry-scene: start
+
+scene start:
+  * Begin
+    -> start
+]])
+  end)
+
+  it("does not warn for computed goto targets (runtime check only)", function()
+    check_ok([[
+type SceneId = start | forest
+
+engine-config:
+  entry-scene: start
+
+state player/location: SceneId = `start
+
+scene start:
+  * Go
+    -> (match player/location: `start: forest  `forest: start)
+
+scene forest:
+  * Back
+    -> start
+]])
+  end)
+
+  it("warns when => targets a nonexistent scene", function()
+    check_warn([[
+engine-config:
+  entry-scene: main
+
+scene main:
+  * Push
+    => ghost-scene
+]], ast.E.UNDEFINED_SCENE)
+  end)
+end)
+
+-- ============================================================
+-- AV-4 — Undefined read path detection (checker pass)
+-- ============================================================
+
+describe("checker — UNDEFINED_PATH read paths (AV-4)", function()
+  it("warns when a declared state root is read with wrong field name", function()
+    check_warn([[
+state player:
+  health: Int(0,100) = 50
+
+fn example:
+  when player/helth > 0:
+    pass
+]], ast.E.UNDEFINED_PATH)
+  end)
+
+  it("does not warn when a declared record field is read correctly", function()
+    check_ok([[
+state player:
+  health: Int(0,100) = 50
+
+fn example:
+  when player/health > 0:
+    pass
+]])
+  end)
+
+  it("does not warn for INTERP_PATH reads (checked at runtime only)", function()
+    check_ok([[
+state npcs/{npc}: Int(0,100) max: 10
+
+fn example k:
+  when npcs/{k} > 0:
+    pass
+]])
+  end)
+
+  it("does not warn for wildcard paths in query contexts", function()
+    check_ok([[
+state player:
+  gold: Int(0,999) = 0
+
+scene ledger:
+  for entry in (query-history player/gold):
+    pass
+  * Done
+]])
+  end)
+
+  it("does not warn for for-loop variable field accesses", function()
+    check_ok([[
+state player:
+  gold: Int(0,999) = 0
+
+scene ledger:
+  for entry in (query-history player/gold):
+    when entry/new > 50:
+      pass
+  * Done
+]])
+  end)
+
+  it("warns for a read path with correct root but wrong field (in narration)", function()
+    check_warn([[
+state player:
+  health: Int(0,100) = 50
+
+scene info:
+  HP: {player/helth}
+  * Ok
+]], ast.E.UNDEFINED_PATH)
+  end)
 end)
