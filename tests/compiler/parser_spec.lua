@@ -1654,6 +1654,67 @@ describe("parser — find expression", function()
     assert.is_true(has_limit)
     assert.is_true(has_count)
   end)
+
+  -- AE-15: find expression inside parens (paren arg to set!/fn call)
+  it("parses find inside parens — single-line (AE-15)", function()
+    local body = parse_fn_body("  let x = (find npcs where: npcs/alive count)\n")
+    assert.equal(1, #body)
+    local let_node = body[1]
+    assert.equal(ast.K.LET_STMT, let_node.kind)
+    local find_node = let_node.bindings[1].expr  -- let_binding has name + expr
+    assert.equal(ast.K.FIND_EXPR, find_node.kind)
+    assert.equal("npcs", find_node.family)
+    local has_where, has_count = false, false
+    for _, c in ipairs(find_node.clauses) do
+      if c.kind == "where" then has_where = true end
+      if c.kind == "count" then has_count = true end
+    end
+    assert.is_true(has_where, "expected where clause")
+    assert.is_true(has_count, "expected count clause")
+  end)
+
+  it("parses find inside parens — multi-line continuation (AE-15)", function()
+    local body = parse_fn_body(
+      "  let x = (find npcs\n" ..
+      "    where: npcs/alive\n" ..
+      "    count)\n"
+    )
+    assert.equal(1, #body)
+    local let_node = body[1]
+    assert.equal(ast.K.LET_STMT, let_node.kind)
+    local find_node = let_node.bindings[1].expr
+    assert.equal(ast.K.FIND_EXPR, find_node.kind)
+    assert.equal("npcs", find_node.family)
+    local has_where, has_count = false, false
+    for _, c in ipairs(find_node.clauses) do
+      if c.kind == "where" then has_where = true end
+      if c.kind == "count" then has_count = true end
+    end
+    assert.is_true(has_where, "expected where clause from continuation lines")
+    assert.is_true(has_count, "expected count clause from continuation lines")
+  end)
+
+  it("parses find inside parens — multi-clause continuation (AE-15)", function()
+    local body = parse_fn_body(
+      "  let x = (find npcs\n" ..
+      "    where: fn(n): npcs/n/alive\n" ..
+      "    limit: 3\n" ..
+      "    count)\n"
+    )
+    assert.equal(1, #body)
+    local let_node = body[1]
+    local find_node = let_node.bindings[1].expr
+    assert.equal(ast.K.FIND_EXPR, find_node.kind)
+    local has_where, has_limit, has_count = false, false, false
+    for _, c in ipairs(find_node.clauses) do
+      if c.kind == "where" then has_where = true end
+      if c.kind == "limit" then has_limit = true; assert.equal(3, c.value) end
+      if c.kind == "count" then has_count = true end
+    end
+    assert.is_true(has_where, "expected where clause")
+    assert.is_true(has_limit, "expected limit clause")
+    assert.is_true(has_count, "expected count clause")
+  end)
 end)
 
 -- ── schedule! mutation parsing ──────────────────────────────────────────────

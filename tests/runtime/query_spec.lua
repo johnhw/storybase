@@ -821,3 +821,90 @@ state members/{m}: MemberInfo
     assert.same({ "alice" }, result)
   end)
 end)
+
+-- ============================================================
+-- AE-15: find inside parens as set! argument
+-- ============================================================
+
+describe("AE-15: find inside parens as set! / fn argument", function()
+  local engine_mod = require("runtime.engine")
+
+  local function make_game(src)
+    local gt, diags = compiler.compile(src, "ae15-test")
+    assert.is_false(diags:has_errors(), diags:has_errors() and diags.list[1].message)
+    return gt
+  end
+
+  it("single-line (find...) parens as set! argument evaluates correctly", function()
+    local gt = make_game([[
+engine-config:
+  entry-scene: main
+state members/{m}: Bool = true
+state world/alive: Int(0, 100) = 0
+fn refresh:
+  set! world/alive (find members where: fn(m): members/{m} count)
+scene main:
+  [Go] -> main
+]])
+    local eng = engine_mod.new(gt, {})
+    eng:init()
+    eng._state:spawn("members", "alice", true)
+    eng._state:spawn("members", "bob",   true)
+    eng._state:spawn("members", "carl",  false)
+    eng._state:set("members/carl", false)
+    local ctx = eng:make_ctx("test")
+    local eval_mod2 = require("runtime.eval")
+    eval_mod2.call_fn("refresh", {}, ctx)
+    assert.equal(2, eng._state:get("world/alive"))
+  end)
+
+  it("multi-line (find ... continuation) parens as set! argument evaluates correctly (AE-15)", function()
+    local gt = make_game([[
+engine-config:
+  entry-scene: main
+state members/{m}: Bool = true
+state world/alive: Int(0, 100) = 0
+fn refresh:
+  set! world/alive (find members
+    where: fn(m): members/{m}
+    count)
+scene main:
+  [Go] -> main
+]])
+    local eng = engine_mod.new(gt, {})
+    eng:init()
+    eng._state:spawn("members", "alice", true)
+    eng._state:spawn("members", "bob",   true)
+    eng._state:spawn("members", "carl",  false)
+    eng._state:set("members/carl", false)
+    local ctx = eng:make_ctx("test")
+    local eval_mod2 = require("runtime.eval")
+    eval_mod2.call_fn("refresh", {}, ctx)
+    assert.equal(2, eng._state:get("world/alive"))
+  end)
+
+  it("multi-line (find ... where+limit+count) parens evaluates correctly (AE-15)", function()
+    local gt = make_game([[
+engine-config:
+  entry-scene: main
+state members/{m}: Bool = true
+state world/result: Int(0, 100) = 0
+fn refresh:
+  set! world/result (find members
+    where: fn(m): members/{m}
+    limit: 2
+    count)
+scene main:
+  [Go] -> main
+]])
+    local eng = engine_mod.new(gt, {})
+    eng:init()
+    eng._state:spawn("members", "alice", true)
+    eng._state:spawn("members", "bob",   true)
+    eng._state:spawn("members", "carl",  true)
+    local ctx = eng:make_ctx("test")
+    local eval_mod2 = require("runtime.eval")
+    eval_mod2.call_fn("refresh", {}, ctx)
+    assert.equal(2, eng._state:get("world/result"))
+  end)
+end)

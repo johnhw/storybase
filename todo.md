@@ -94,6 +94,11 @@ INTERP_PATH (dynamic) and INDEX_EXPR/SLICE_EXPR by unwrapping to base.
 
 All four compile-time validation gaps (AV-1 through AV-4) resolved 2026-05-13.
 
+AE-15 (multi-line find inside parens) resolved 2026-05-13. Root cause: lexer emits no
+INDENT/DEDENT inside `()`, so the parser's NEWLINE+INDENT detect path was never taken
+for paren-context multi-line finds. Fix: added newline-skipping clause continuation path
+in `compiler/parser.lua:parse_find_clauses_inline`. 6 regression tests added.
+
 AV-1: `pass_check_undefined_fns` walks all FN_CALL nodes with full scope tracking
 (sequential let bindings, scoped let forms, lambda params, for-loop vars, variant
 field destructuring). CHECKER_BUILTIN_FNS table mirrors eval.lua BUILTINS.
@@ -107,15 +112,15 @@ or prefix) to avoid false positives from for-loop variable field accesses.
 Also fixed `build_path_type_map` to expand WITH_MIXIN fields recursively.
 23 new regression tests added (checker_spec). Zero false positives on all demos.
 
-**2352 tests passing, 0 failing, 2 pending (known limitations).**
+**2372 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
 ## What to work on next
 
 Recommended order:
-1. **Silent-failure hazards** (SF-4, SF-5) — SF-1, SF-2, SF-3 resolved.
-2. **Ergonomics** (AE-13 through AE-17) — quality-of-life improvements.
+1. **Silent-failure hazards** (SF-5) — SF-1 through SF-4 resolved.
+2. **Ergonomics** (AE-17) — AE-13 through AE-16 resolved; only AE-17 (int-div) remains.
 3. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
 
 ---
@@ -300,20 +305,13 @@ locate. All five are high-priority from an authoring-experience perspective.
   family paths). If not, emit a warning in dev mode. The schema paths are available from
   `store._schema.states`. Add a dev-mode flag check so production builds are unaffected.
 
-- [ ] **SF-4 — Transitions to undefined scenes silently end the game.**
-  `-> ghost-town` when `ghost-town` is not declared causes the engine to navigate to an
-  empty scene, which has no choices, so the engine returns "done" (game over) with no
-  explanation.
-
-  **Fix:** In `runtime/engine.lua:goto_scene` (and `enter_scene`, `exit_scene`), check
-  whether the target name exists in `self._scenes`. If not, emit a runtime error (in dev
-  mode) or at minimum a `log` warning. A missing scene is never intentional and should
-  never be silent.
-
-  Also fix in the checker: in `compiler/checker.lua`, during pass 2, when a `SCENE_GOTO`
-  or `SCENE_ENTER` node targets a string literal scene name, verify it exists in
-  `symtab.scenes`. Emit `UNDEFINED_SCENE` error. (Computed gotos cannot be checked
-  statically.)
+- [x] **SF-4 — Transitions to undefined scenes silently end the game.** *(fixed 2026-05-13)*
+  `-> ghost-town` when `ghost-town` is not declared now emits `[WARN] goto undefined scene: 'ghost-town'`
+  in dev mode. Same for `=>` (enter_scene). Both `goto_scene` and `enter_scene` in
+  `runtime/engine.lua` check `self._scenes[name]` and emit via `_print_sink` (or stderr
+  when no sink is set). Warning suppressed when `production = true`.
+  Checker-side (AV-2) was already resolved 2026-05-13.
+  7 regression tests added (engine_spec).
 
 - [ ] **SF-5 — `set!` on a `let`-bound variable silently misfires.**
   `let i = 0; set! i (i + 1)` writes to a state PATH named `"i"` (which likely doesn't
@@ -388,44 +386,41 @@ declaration categories. All four of these allow structural errors to compile cle
 
 ## Authoring Ergonomics
 
-- [ ] **AE-13 — Integer division yields floats in narration.**
+- [x] **AE-13 — Integer division yields floats in narration.** *(fixed 2026-05-13)*
   `player/health / 2` evaluates to `50.0` (Lua number division), which renders as "50.0"
   in narration. This looks unprofessional in game output.
 
-  **Options:**
-  - **A:** Add an `int-div` builtin (`int-div a b` → `math.floor(a/b)`).
-  - **B:** Add a `floor` builtin (maps to `math.floor`).
-  - **C:** When rendering an inline expression (`{expr}`) in narration, if the result is a
-    Lua number with no fractional part, format it as an integer (no ".0"). This is purely
-    presentational and does not change semantics.
-  - **D:** Overload `/` to perform integer division when both operands are `Int` typed.
-    This is a language-semantic change and may surprise authors who need float results.
+  **Fix applied (Option C):** `val_to_display` in `runtime/eval.lua` now checks whether a
+  float value has no fractional part and formats it with `%d` (no ".0"). Purely
+  presentational; semantics unchanged. 3 regression tests added to `eval_spec.lua`.
 
-  Recommended: **C** first (trivial, fixes the display everywhere) plus **A** for cases
-  where authors explicitly want integer quotients in logic.
-
-- [ ] **AE-14 — Compiler warnings repeat on every `storybase run`.**
+- [x] **AE-14 — Compiler warnings repeat on every `storybase run`.** *(fixed 2026-05-13)*
   Warnings from the compile pass (e.g. `WRITE_UNTYPED_VAR`, `SUPERFICIAL_IN_COND`) are
   printed every time `storybase run` is invoked. During development this makes output very
   noisy and obscures actual game output.
 
-  **Fix:** In `cli/main.lua` run subcommand, suppress warning output when warnings are not
-  errors (i.e. `check passed (N warnings)`). Optionally accept a `--warn` flag to re-enable
-  them. Errors still print unconditionally.
+  **Fix applied:** Added `--quiet` flag to `storybase run`. When set, warnings are suppressed
+  on stderr; errors still print unconditionally. `quiet` added to `BOOL_FLAGS`; both short
+  and long help text updated. 4 regression tests added to `cli_integration_spec.lua`.
 
-- [ ] **AE-15 — `find` result cannot be used inline as a `set!` argument.**
-  `set! world/count (find enemies where: fn(e): ... count)` fails at parse time. The `find`
-  block form cannot be nested inside a parenthesised argument position. Authors must wrap
-  the query in a dedicated function.
+- [x] **AE-15 — `find` result cannot be used inline as a `set!` argument.** *(fixed 2026-05-13)*
+  Single-line `(find family where: fn(e): cond count)` already worked. The bug was
+  specifically with **multi-line** find inside parens:
+  ```
+  set! world/count (find enemies
+    where: fn(e): enemies/{e}/alive
+    count)
+  ```
+  Inside `()` the lexer emits NEWLINE tokens between continuation lines but no INDENT/DEDENT.
+  The parser's find handler saw NEWLINE → no INDENT → undid the NEWLINE consume, leaving
+  the where:/count clauses unparsed and returning `find enemies` with no clauses.
 
-  **Root cause:** `parse_atom` handles `find`/`count` only when they appear at the start of
-  an expression; when inside `()`, the argument-list parser consumes `e` (the family name)
-  as the single argument and expects `)`, not the `where:` clause.
-
-  **Fix:** The inline `find` form (all clauses on one line, using NAMED_ARG syntax) already
-  works when not inside `()`. Investigate why `(find family where: fn(k): cond count)` fails
-  and fix the parenthesised case. May require `parse_atom` to detect `find`/`count`
-  regardless of surrounding paren context.
+  **Fix:** In `compiler/parser.lua`, in the "NEWLINE, no INDENT" else branch of the find
+  handler: instead of always undoing, skip newlines and check whether the next token is a
+  valid find clause (NAMED_ARG or `count`). If yes, call `parse_find_clauses_inline(true)`
+  which skips newlines between clause iterations. If no clauses found, still restore position.
+  The `newline_skip` parameter was added to `parse_find_clauses_inline()`.
+  6 regression tests added (3 parser_spec, 3 query_spec runtime).
 
 - [x] **AE-16 — REPL gets stuck in computed-goto entry scenes.** *(fixed 2026-05-12 with Bug #13)*
   Same root cause as Bug #13; fix also covers the `:choose` command which now calls

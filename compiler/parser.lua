@@ -994,8 +994,9 @@ local function parse_atom(p)
     if is_count_form then
       clauses[#clauses+1] = { kind = "count" }
     end
-    -- Parse inline clauses (same line) or indented block
-    local function parse_find_clauses_inline()
+    -- Parse inline clauses (same line) or indented block.
+    -- newline_skip: when true, skip newlines between clauses (paren continuation context).
+    local function parse_find_clauses_inline(newline_skip)
       while p:at("NAMED_ARG") do
         local na = p:adv()
         if na.value == "where" then
@@ -1020,7 +1021,9 @@ local function parse_atom(p)
           clauses[#clauses+1] = { kind = "in_state", state_expr = state_expr }
         end
         -- unknown NAMED_ARG: skip
+        if newline_skip then p:skip_newlines() end
       end
+      if newline_skip then p:skip_newlines() end
       -- bare "count" IDENT
       if p:at("IDENT", "count") then
         p:adv()
@@ -1108,8 +1111,14 @@ local function parse_atom(p)
         end
         if p:at("DEDENT") then p:adv() end
       else
-        -- No indent block, undo the NEWLINE consume
-        p.pos = saved_pos
+        -- No INDENT after NEWLINE: inside parens the lexer never emits INDENT/DEDENT.
+        -- Check whether continuation lines hold find clauses; if so, parse them.
+        p:skip_newlines()
+        if p:at("NAMED_ARG") or p:at("IDENT", "count") then
+          parse_find_clauses_inline(true)  -- true = skip newlines between clauses
+        else
+          p.pos = saved_pos  -- nothing found; restore NEWLINE for caller
+        end
       end
     else
       parse_find_clauses_inline()
