@@ -643,6 +643,7 @@ local CHECKER_BUILTIN_FNS = {
   ["random-choice"]=true, ["random-weighted"]=true,
   ["tostring"]=true, ["print"]=true, ["log"]=true, ["str"]=true,
   ["abs"]=true, ["clamp"]=true, ["int-to-str"]=true, ["str-to-int"]=true,
+  ["int-div"]=true, ["floor"]=true, ["ceil"]=true, ["mod"]=true,
   ["size"]=true, ["count"]=true, ["empty?"]=true,
   ["contains?"]=true, ["not-in?"]=true, ["union"]=true,
   ["intersect"]=true, ["difference"]=true,

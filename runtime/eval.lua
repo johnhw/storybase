@@ -1020,6 +1020,26 @@ local BUILTINS = {
     if n then return math.floor(n) end
     return nil  -- Option(Int) — nil means "not a valid integer"
   end,
+  -- int-div a b: floor division (integer quotient); floor/ceil: rounding builtins
+  -- mod a b: floor-division remainder (Python sign convention: sign matches divisor)
+  ["int-div"] = function(args, ctx)
+    local a = eval_expr(args[1], ctx) or 0
+    local b = eval_expr(args[2], ctx) or 1
+    return math.floor(a / b)
+  end,
+  ["floor"] = function(args, ctx)
+    local n = eval_expr(args[1], ctx) or 0
+    return math.floor(n)
+  end,
+  ["ceil"] = function(args, ctx)
+    local n = eval_expr(args[1], ctx) or 0
+    return math.ceil(n)
+  end,
+  ["mod"] = function(args, ctx)
+    local a = eval_expr(args[1], ctx) or 0
+    local b = eval_expr(args[2], ctx) or 1
+    return a % b  -- Lua % is floor-division remainder (same sign convention as Python)
+  end,
   -- ── Collection stdlib ────────────────────────────────────────────────────────
   ["size"] = function(args, ctx)
     local v = eval_expr(args[1], ctx)
@@ -2589,8 +2609,12 @@ end
 
 --- Convert any value to a display string for narration/template interpolation.
 --- Lists (sequential tables) are joined with ", ".
+--- Numbers with no fractional part are rendered without ".0" (presentational only).
 local function val_to_display(val)
   if val == nil then return "" end
+  if type(val) == "number" and math.type(val) == "float" and val == math.floor(val) then
+    return string.format("%d", val)
+  end
   if type(val) == "table" then
     -- Sequential list: join with ", "
     if #val > 0 or next(val) == nil then

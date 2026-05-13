@@ -1179,6 +1179,28 @@ describe("eval: render_text", function()
     local text = { "HP: ", { kind="inline_expr", expr=path("player", "hp") } }
     assert.equal("HP: 42", eval.render_text(text, c))
   end)
+
+  -- AE-13: float values with no fractional part render without ".0"
+  it("renders a whole-number float without .0 (AE-13)", function()
+    local c = ctx({})
+    -- 50.0 is a float (result of division) with no fractional part
+    local text = { "Damage: ", { kind="inline_expr", expr={ kind="binary_op", op="/", left=int_lit(100), right=int_lit(2) } } }
+    assert.equal("Damage: 50", eval.render_text(text, c))
+  end)
+
+  it("renders a float with fractional part normally", function()
+    local c = ctx({})
+    local text = { "Val: ", { kind="inline_expr", expr={ kind="binary_op", op="/", left=int_lit(1), right=int_lit(3) } } }
+    local result = eval.render_text(text, c)
+    -- 0.333... should not be rendered as an integer
+    assert.is_true(result:find("%.") ~= nil, "expected decimal point in " .. result)
+  end)
+
+  it("renders a true integer literal without .0", function()
+    local c = ctx({})
+    local text = { "Count: ", { kind="inline_expr", expr=int_lit(7) } }
+    assert.equal("Count: 7", eval.render_text(text, c))
+  end)
 end)
 
 -- ============================================================
@@ -2472,6 +2494,55 @@ describe("stdlib: numeric builtins", function()
   it("str-to-int returns nil for invalid string", function()
     local c = ctx({})
     assert.is_nil(eval.eval_expr(fn_call("str-to-int", str_lit("abc")), c))
+  end)
+
+  -- AE-17: int-div, floor, ceil, mod
+  it("int-div returns floor quotient for positive operands", function()
+    local c = ctx({})
+    assert.equal(2, eval.eval_expr(fn_call("int-div", int_lit(7), int_lit(3)), c))
+    assert.equal(3, eval.eval_expr(fn_call("int-div", int_lit(9), int_lit(3)), c))
+    assert.equal(0, eval.eval_expr(fn_call("int-div", int_lit(1), int_lit(5)), c))
+  end)
+
+  it("int-div uses floor (rounds toward -inf) for negative operands", function()
+    local c = ctx({})
+    assert.equal(-3, eval.eval_expr(fn_call("int-div", int_lit(-7), int_lit(3)), c))
+    assert.equal(-3, eval.eval_expr(fn_call("int-div", int_lit(7), int_lit(-3)), c))
+    assert.equal(2,  eval.eval_expr(fn_call("int-div", int_lit(-7), int_lit(-3)), c))
+  end)
+
+  it("floor rounds down to nearest integer", function()
+    local c = ctx({})
+    assert.equal(3,  eval.eval_expr(fn_call("floor", { kind="float_lit", value=3.7 }), c))
+    assert.equal(-4, eval.eval_expr(fn_call("floor", { kind="float_lit", value=-3.2 }), c))
+    assert.equal(5,  eval.eval_expr(fn_call("floor", int_lit(5)), c))
+  end)
+
+  it("ceil rounds up to nearest integer", function()
+    local c = ctx({})
+    assert.equal(4,  eval.eval_expr(fn_call("ceil", { kind="float_lit", value=3.2 }), c))
+    assert.equal(-3, eval.eval_expr(fn_call("ceil", { kind="float_lit", value=-3.7 }), c))
+    assert.equal(5,  eval.eval_expr(fn_call("ceil", int_lit(5)), c))
+  end)
+
+  it("mod returns floor-division remainder (Python sign convention)", function()
+    local c = ctx({})
+    -- sign of result matches sign of divisor (b)
+    assert.equal(1,  eval.eval_expr(fn_call("mod", int_lit(7),  int_lit(3)),  c))
+    assert.equal(2,  eval.eval_expr(fn_call("mod", int_lit(-7), int_lit(3)),  c))
+    assert.equal(-2, eval.eval_expr(fn_call("mod", int_lit(7),  int_lit(-3)), c))
+    assert.equal(-1, eval.eval_expr(fn_call("mod", int_lit(-7), int_lit(-3)), c))
+  end)
+
+  it("int-div and mod satisfy: a = (int-div a b) * b + (mod a b)", function()
+    local c = ctx({})
+    local cases = { {7,3}, {-7,3}, {7,-3}, {-7,-3}, {10,4}, {-10,4} }
+    for _, pair in ipairs(cases) do
+      local a, b = pair[1], pair[2]
+      local q = eval.eval_expr(fn_call("int-div", int_lit(a), int_lit(b)), c)
+      local r = eval.eval_expr(fn_call("mod",     int_lit(a), int_lit(b)), c)
+      assert.equal(a, q * b + r, string.format("%d = (%d)*%d + %d", a, q, b, r))
+    end
   end)
 end)
 

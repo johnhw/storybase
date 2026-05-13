@@ -99,6 +99,10 @@ INDENT/DEDENT inside `()`, so the parser's NEWLINE+INDENT detect path was never 
 for paren-context multi-line finds. Fix: added newline-skipping clause continuation path
 in `compiler/parser.lua:parse_find_clauses_inline`. 6 regression tests added.
 
+AE-17 (integer division / floor / ceil / remainder) resolved 2026-05-13. Added `int-div`,
+`floor`, `ceil`, `mod` builtins. `mod` uses floor-division remainder (Python sign
+convention). 11 regression tests added.
+
 AV-1: `pass_check_undefined_fns` walks all FN_CALL nodes with full scope tracking
 (sequential let bindings, scoped let forms, lambda params, for-loop vars, variant
 field destructuring). CHECKER_BUILTIN_FNS table mirrors eval.lua BUILTINS.
@@ -112,7 +116,7 @@ or prefix) to avoid false positives from for-loop variable field accesses.
 Also fixed `build_path_type_map` to expand WITH_MIXIN fields recursively.
 23 new regression tests added (checker_spec). Zero false positives on all demos.
 
-**2372 tests passing, 0 failing, 2 pending (known limitations).**
+**2383 tests passing, 0 failing, 2 pending (known limitations).**
 
 ---
 
@@ -120,8 +124,8 @@ Also fixed `build_path_type_map` to expand WITH_MIXIN fields recursively.
 
 Recommended order:
 1. **Silent-failure hazards** (SF-5) — SF-1 through SF-4 resolved.
-2. **Ergonomics** (AE-17) — AE-13 through AE-16 resolved; only AE-17 (int-div) remains.
-3. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
+2. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
+3. All AE issues (AE-13 through AE-17) are now resolved.
 
 ---
 
@@ -426,14 +430,16 @@ declaration categories. All four of these allow structural errors to compile cle
   Same root cause as Bug #13; fix also covers the `:choose` command which now calls
   `game:advance_to_choices()` after each choice execution.
 
-- [ ] **AE-17 — No integer-division operator / floor division.**
-  Related to AE-13 but distinct: authors writing game logic (not just narration) sometimes
-  need integer quotients, e.g. `damage / 2` in an `inc!` expression. A `floor` or `int-div`
-  builtin would let them write `set! player/damage (int-div raw-damage 2)` cleanly. Tracked
-  separately from AE-13 which covers the narration-display aspect.
+- [x] **AE-17 — No integer-division operator / floor division.** *(fixed 2026-05-13)*
+  Added four arithmetic builtins to `runtime/eval.lua` and `compiler/checker.lua`:
+  - `int-div a b` → `math.floor(a / b)` (floor integer quotient)
+  - `floor n` → `math.floor(n)` (round toward −∞)
+  - `ceil n` → `math.ceil(n)` (round toward +∞)
+  - `mod a b` → `a % b` (floor-division remainder; sign matches divisor — same as Python)
 
-  **Fix:** Add `int-div a b` to `BUILTINS` in `runtime/eval.lua` returning
-  `math.floor(a / b)`. Add `floor n` as an alias. Document in spec §24.
+  `mod` uses Lua's `%` operator which is already floor-division remainder (Python sign
+  convention): `-7 mod 3 = 2`, `7 mod -3 = -2`.
+  11 regression tests added (eval_spec).
 
 ---
 
