@@ -694,6 +694,23 @@ local function emit_verifies(decls)
   return verifies
 end
 
+--- Emit the tests list: [{label, setup, run, expect}]
+--- Raw AST nodes are preserved for evaluation by runtime/tests.lua.
+local function emit_tests(decls)
+  local tests = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.TEST_DECL then
+      tests[#tests+1] = {
+        label  = node.label,
+        setup  = node.setup  or {},
+        run    = node.run    or {},
+        expect = node.expect or {},
+      }
+    end
+  end
+  return tests
+end
+
 --- Emit the watches list: [{kind, path/condition, label}]
 local function emit_watches(decls)
   local watches = {}
@@ -896,6 +913,7 @@ function M.emit(typed_ast, opts)
     -- In production builds, strip debug-only content
     verifies   = opts.production and {} or emit_verifies(decls),
     watches    = opts.production and {} or emit_watches(decls),
+    tests      = opts.production and {} or emit_tests(decls),
     migrations = emit_migrations(decls),
     bounded    = emit_bounded(decls),
     grids      = emit_grids(decls),

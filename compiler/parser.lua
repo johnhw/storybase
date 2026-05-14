@@ -3122,6 +3122,69 @@ local function parse_verify_decl(p, doc)
   return ast.verify_decl(label, clauses, doc, tpos)
 end
 
+--- Parse a `test "label": setup:/run:/expect:` declaration.
+--- Handles both `test "label":` (IDENT form) and `test:` (NAMED_ARG form).
+local function parse_test_decl(p, _doc)
+  local tpos = p:cur().pos
+  local is_named_arg = p:cur().kind == "NAMED_ARG"
+  p:adv()  -- consume IDENT("test") or NAMED_ARG("test:")
+
+  local label = nil
+  if not is_named_arg then
+    if p:at("STRING") then label = p:adv().value end
+    p:expect("OP", ":", "expected ':' after test label")
+  end
+  p:match("NEWLINE")
+
+  local setup  = {}
+  local run    = {}
+  local expect = {}
+
+  if not p:at("INDENT") then
+    return ast.test_decl(label, setup, run, expect, tpos)
+  end
+  p:adv()  -- consume INDENT
+
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    local ct = p:cur()
+    local section = (ct.kind == "NAMED_ARG") and ct.value
+
+    if section == "setup" then
+      p:adv(); p:skip_to_eol()
+      if p:at("INDENT") then
+        setup = parse_body_items(p, false)
+      end
+
+    elseif section == "run" then
+      p:adv(); p:skip_to_eol()
+      if p:at("INDENT") then
+        run = parse_body_items(p, false)
+      end
+
+    elseif section == "expect" then
+      p:adv(); p:skip_to_eol()
+      if p:at("INDENT") then
+        p:adv()
+        while not p:at("DEDENT") and not p:at("EOF") do
+          p:skip_newlines()
+          if p:at("DEDENT") or p:at("EOF") then break end
+          local ae = parse_expr(p); p:skip_to_eol()
+          if ae then expect[#expect+1] = ae end
+        end
+        if p:at("DEDENT") then p:adv() end
+      end
+
+    else
+      p:skip_to_eol()
+    end
+  end
+
+  if p:at("DEDENT") then p:adv() end
+  return ast.test_decl(label, setup, run, expect, tpos)
+end
+
 --- Parse `watch path "label"` and `watch-when cond "label"` declarations.
 local function parse_watch_decl(p, doc)
   local tpos = p:cur().pos
@@ -3394,6 +3457,7 @@ local function parse_decl(p, doc)
     if     t.value == "schema-version" then return parse_schema_version(p, doc)
     elseif t.value == "engine-config"  then return parse_engine_config(p, doc)
     elseif t.value == "time-model"     then return parse_time_model(p, doc)
+    elseif t.value == "test"           then return parse_test_decl(p, doc)
     else
       p:emit_err(ast.E.BAD_DECLARATION,
         "unexpected named argument '" .. t.value .. "' at top level", t.pos)
@@ -3404,6 +3468,7 @@ local function parse_decl(p, doc)
   elseif t.kind == "IDENT" then
     if     t.value == "migration" then return parse_migration_decl(p, doc)
     elseif t.value == "defgrid"   then return parse_defgrid_decl(p, doc)
+    elseif t.value == "test"      then return parse_test_decl(p, doc)
     end
     -- unknown top-level identifier — skip
     p:emit_err(ast.E.UNEXPECTED_TOKEN,

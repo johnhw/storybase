@@ -10,52 +10,29 @@ All eight implementation phases complete. Language review passes 1 and 2 complet
 Demos 01–21 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
-resolved. All critical and major bugs (#1–#13) resolved.
+resolved. All critical and major bugs (#1–#13) resolved. The 2026-05-14 codebase
+audit backlog (§A3–§A9, §A11–§A16) has fully landed. §C1 (`test` blocks) complete.
 
-**2540 successes / 0 failures / 2 pending (known limitations).**
+**2571 successes / 0 failures / 2 pending (known limitations).**
 
 The core language and runtime are feature-complete against the V1.0 specification.
-
-A codebase review on 2026-05-14 surfaced a fresh backlog of small bugs, footguns,
-and hygiene items — §A3 through §A16 below. As of the end of 2026-05-14 most
-of that backlog has landed: §A3, §A4, §A5, §A6, §A7, §A8, §A9, §A11, §A12, §A13,
-§A14, §A15, and §A16 are all done (see [completed.md](completed.md)). The only
-remaining item is §A10 (`--serve` debug-eval exposure).
 
 ---
 
 ## What to work on next
 
-**Confirmed bugs (small, high-leverage):**
-- ~~§A3~~ — Duplicate `fn` declarations. **Done 2026-05-14.**
-- ~~§A4~~ — `spawn!` / `despawn!` into undeclared family. **Done 2026-05-14.**
-- ~~§A5~~ — Global Lua RNG state. **Done 2026-05-14.**
-- ~~§A6~~ — `%.14g` truncates doubles + breaks on Inf/NaN. **Done 2026-05-14.**
-- ~~§A7~~ — `verify` swallows `requires:` evaluation errors. **Done 2026-05-14.**
-- ~~§A8~~ — `runtime/debug.lua` emits invalid JSON for ±Infinity. **Done 2026-05-14.**
-
 **Security-adjacent (do before any production `--serve` use):**
 - §A10 — `--serve` exposes arbitrary code execution via the debug `eval` command.
-- ~~§A11~~ — `--ui <name>` accepts arbitrary module paths. **Done 2026-05-14.**
 
-**Hygiene (5–15 minutes each):**
-- ~~§A13~~ — Stray `*.lua.tmp.PID.MS` files. **Done 2026-05-14.**
-- ~~§A14~~ — Dead `runtime/counterfactual.lua` stub. **Done 2026-05-14.**
-- ~~§A15~~ — `code_map.md` line-count annotations. **Done 2026-05-14.**
-
-**Lower-priority polish:**
+**Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
 - §A2 — Inelegance #7 — BFS expansion duplication (deferred; documented).
-- ~~§A9~~ — Reversibility check transitive. **Done 2026-05-14.**
-- ~~§A12~~ — BFS state hash deterministic for Float values. **Done 2026-05-14.**
-- ~~§A16~~ — Test-coverage gaps for `compiler/types`, `compiler/compiler`, and
-  the four CLI commands. **Done 2026-05-14.**
 
 **Future Features and Extensions (large):** Roadmap below. Suggested ordering for
 impact:
 
 1. §B1 — State-graph explorer + §B4 coverage report
-2. §C1 — `test` blocks and §C2 fuzz mode
+2. ~~§C1 — `test` blocks~~ **DONE** — §C2 fuzz mode
 3. §D1 — LLM-bounded handler standard module
 4. §B2 — Counterexample minimisation
 5. §E1–E3 — `quest` / `dialog` / `inventory` built-in patterns
@@ -104,61 +81,6 @@ different data payload (priority / path / probability / cost) and queue mechanis
 callback strategy and add more complexity than it removes. Revisit if a sixth variant
 is needed or if a perf hot-spot emerges.
 
-### A3. Duplicate `fn` declarations silently shadow ✅ Done 2026-05-14
-
-Resolved by extending `pass1_collect` in `compiler/checker.lua:178-225` to emit
-`DUPLICATE_NAME` for FN, BOUNDED, MACRO, and ACTOR declarations, matching the
-existing pattern for SCENE, TYPE, STATE, and RELATION. See
-[completed.md](completed.md) for full write-up. New tests in
-`tests/compiler/checker_spec.lua` (3 tests).
-
-### A4. `spawn!` / `despawn!` into undeclared family passes checker ✅ Done 2026-05-14
-
-Resolved by adding `pass_check_undefined_families` to `compiler/checker.lua`. The
-new pass walks every fn / scene / schedule / hook body looking for `SPAWN_MUT`
-or `DESPAWN_MUT` nodes and verifies `node.family` is in `symtab.families`,
-emitting `UNDEFINED_FAMILY` (an error code that was already defined in
-`compiler/ast.lua` but unused). See [completed.md](completed.md). New tests in
-`tests/compiler/checker_spec.lua` (5 tests).
-
-### A5. `runtime/random.lua` mutates the global Lua RNG state ✅ Done 2026-05-14
-
-Resolved by replacing `runtime/random.lua` with a per-instance PCG32 generator and
-removing all `math.random` fallbacks across `runtime/eval.lua`, `runtime/search.lua`,
-`cli/cli_cmd.lua`, and `cli/repl_cmd.lua`. See [completed.md](completed.md) for full
-write-up. New tests: `tests/runtime/random_spec.lua`.
-
-### A6. `%.14g` truncates doubles + breaks on Inf/NaN in save formats ✅ Done 2026-05-14
-
-Resolved by adding `M.fmt_number` to `runtime/log.lua` (handles NaN, ±Infinity,
-integers ≤ 2^53, and other floats via `%.17g`) and replacing all six `%.14g` call
-sites. See [completed.md](completed.md) for full write-up. New tests:
-`tests/runtime/fmt_number_spec.lua`.
-
-### A7. `verify` swallows `requires:` evaluation errors ✅ Done 2026-05-14
-
-Resolved by distinguishing pcall error from false-result in `runtime/verify.lua`
-for three clauses: `requires:` (line 381), `when:` (line 447), and `from-any-state`
-condition (line 469). Errors now surface as `{pass=false, fail_msg="requires
-clause errored: ..."}` instead of being silently treated as "skip". See
-[completed.md](completed.md). New tests in `tests/runtime/verify_spec.lua` (3 tests).
-
-### A8. `runtime/debug.lua` emits invalid JSON for ±Infinity ✅ Done 2026-05-14
-
-Resolved by extending the NaN check in `runtime/debug.lua:1414` to also catch
-`math.huge` and `-math.huge`. All three now emit JSON `null`. See
-[completed.md](completed.md). New tests in `tests/runtime/debug_spec.lua` (4 tests).
-
-### A9. Reversibility annotation not transitive ✅ Done 2026-05-14
-
-Resolved by extending `pass3c_check_reversible` to do a DFS over the call graph
-with cycle detection. For every fn, the pass first records its direct
-irreversible witness (if any) and its list of user-fn callees; then for each
-`[reversible]`-tagged fn it traces forward until either a witness is reached
-(error, with a chain like `'foo' → 'bar' → 'baz' contains 'clear!'`) or all
-paths come up clean. See [completed.md](completed.md). New tests in
-`tests/compiler/checker_spec.lua` (5 tests).
-
 ### A10. `--serve` exposes arbitrary code execution via the debug `eval` command
 
 `runtime/debug.lua`'s `POST /command` endpoint accepts an `eval` command that compiles
@@ -175,95 +97,6 @@ not acceptable for any `--serve` deployment.
 
 **Files to touch:** `runtime/debug.lua` (socket bind, command dispatch),
 `cli/main.lua` (flag parsing + defaults), `tests/runtime/debug_http_spec.lua`.
-
-### A11. `--ui <name>` accepts arbitrary module paths ✅ Done 2026-05-14
-
-Resolved by adding an `ALLOWED_UI_DRIVERS = { plain = true, ansi = true }`
-whitelist check in `cli/main.lua`'s `cmd_run` before the `require` call. Driver
-names outside the whitelist are rejected with `unknown UI driver` before any
-module loading occurs, blocking path-traversal attempts like `--ui ../../foo`
-and unrelated module loads like `--ui os`. The post-require error branch was
-kept (now reporting "failed to load") for unexpected runtime breakage in the
-driver modules themselves. New tests in `tests/cli/drivers_spec.lua` (5 tests).
-
-### A12. BFS state hash non-deterministic for Float values ✅ Done 2026-05-14
-
-Resolved by introducing a `fmt_hash_val` helper in `runtime/search.lua` that
-formats `number` values with `%.17g` before concatenation, leaving other types
-on plain `tostring`. This also collapses `1` vs `1.0` to a single hash bucket
-so semantically-equal states no longer inflate the BFS frontier. `hash_state`
-is now exposed as `M._hash_state` for testing. See [completed.md](completed.md).
-New tests in `tests/runtime/search_spec.lua` (5 tests).
-
-### A13. 37 stray `*.lua.tmp.PID.MS` files in repo ✅ Done 2026-05-14
-
-Resolved: added `*.tmp.*` to `.gitignore`, `git rm --cached`'d all 31 tracked
-tmp files, and `rm`'d the 47 working copies (count had grown since the audit).
-See [completed.md](completed.md).
-
-### A14. `runtime/counterfactual.lua` is a dead 6-line stub ✅ Done 2026-05-14
-
-Resolved: deleted the file and removed it from `cli/bundle_cmd.lua`'s
-`BUNDLE_MODULES` list (which had referenced it as `"runtime.counterfactual"`
-and silently failed to load it in bundled output). Also removed the section
-from `code_map.md`. See [completed.md](completed.md).
-
-### A15. `code_map.md` line-count annotations are stale ✅ Done 2026-05-14
-
-Resolved: refreshed all 32 stale line-count annotations against current source
-file sizes. See [completed.md](completed.md).
-
-### A16. Missing test coverage ✅ Done 2026-05-14
-
-Resolved by adding six new spec files and extending three existing ones,
-covering every gap listed in the audit. Two bugs surfaced during test
-writing and were fixed alongside:
-
-- `compiler/types.lua:53` — operator-precedence bug in the `list` case
-  (`(ty.elem_size or 0 + 1) ^ max` parsed as `(elem_size or 1) ^ max`).
-  Fixed to `((ty.elem_size or 0) + 1) ^ max`.
-- `cli/migrate_cmd.lua:92,94` — `has_errors` was an implicit global, which
-  could leak between `M.run` calls in the same process. Made local.
-
-New files:
-
-- `tests/compiler/types_spec.lua` (30 tests) — full coverage of
-  `state_space_size` across all kinds.
-- `tests/compiler/compiler_spec.lua` (16 tests) — pipeline orchestrator
-  short-circuit behaviour, `parse_and_check`, `compile_file` /
-  `parse_and_check_file` file errors, `opts.production` pass-through,
-  import cycle / missing-file resolution.
-- `tests/cli/check_cmd_spec.lua` (6 tests) — clean / missing / syntax /
-  semantic / multi-error paths.
-- `tests/cli/repl_cmd_spec.lua` (16 tests) — drives the REPL with a
-  mocked `io.stdin` and captured stdout/stderr; covers `:help`, `:quit`,
-  `:scene`, `:state`, `:choices`, fn invocation, save/load round-trip,
-  unknown command, blank lines, expression eval.
-- `tests/cli/migrate_cmd_spec.lua` (11 tests) — usage errors, compile
-  failure, no-migrations short-circuit, version-match short-circuit,
-  successful migration, `--out` flag, corrupt save, missing save, and a
-  regression guarding the `has_errors`-global bug.
-- `tests/cli/verify_cmd_spec.lua` (7 tests) — usage / file errors,
-  compilation failure, no verify blocks, passing verify, failing verify,
-  summary counts.
-
-Extensions:
-
-- `tests/runtime/scheduler_spec.lua` (+4 tests) — multi-axis `at:`
-  (both axes must reach targets), multi-axis at: deregister,
-  multi-axis `every:`, and cancel-during-tick (sibling cancel +
-  log-entry emission + unknown-schedule no-op).
-- `tests/runtime/migrate_spec.lua` (+4 tests) — non-atomic mid-chain
-  failure (documents that earlier migrations have already mutated the
-  cache when a later block is missing), missing-version chain stop,
-  defaulted save-version-1 happy path, defaulted save-version match.
-- `tests/lib/storybase_spec.lua` (+15 tests) — save/load error paths
-  (unwritable, missing directory, missing file, corrupt Lua, returns nil,
-  round-trip), `register_bounded` handler error / wrong-type / nil /
-  unregistered, `on("mutation")` event delivery (set! / inc!, fn name in
-  payload, multiple listeners, raising listener does not block others).
-
-Suite total: **2512 successes / 0 failures / 2 pending** (was 2401).
 
 ---
 
@@ -383,7 +216,7 @@ produces a navigable site with one page per declaration kind plus a home page.
 
 ## C. Higher-Order Tests Beyond `verify`
 
-### C1. `test` blocks (lighter sibling of `verify`)
+### C1. `test` blocks (lighter sibling of `verify`) — **COMPLETE**
 
 **Goal:** `verify-always` is BFS-heavy. Add a lighter mechanism for scripted assertions
 that authors will actually use day-to-day.

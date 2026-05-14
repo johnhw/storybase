@@ -1,0 +1,133 @@
+# demo02_merchant_tests.sb
+# Test suite for demo02_merchant.sb written using test blocks.
+#
+# Run with:  storybase test demos/demo02_merchant_tests.sb
+
+import "demo02_merchant.sb"
+
+# ─────────────────────────────────────────────────────────
+# Tests: buy functions
+# ─────────────────────────────────────────────────────────
+
+test "buy-herbs deducts herb price from gold":
+  setup:
+    set! merchant/gold 100
+    set! market/herb-price 8
+    set! merchant/item `empty
+  run:
+    buy-herbs
+  expect:
+    merchant/gold = 92
+    merchant/item = `herbs
+
+test "buy-iron deducts iron price from gold":
+  setup:
+    set! merchant/gold 100
+    set! market/iron-price 15
+    set! merchant/item `empty
+  run:
+    buy-iron
+  expect:
+    merchant/gold = 85
+    merchant/item = `iron
+
+test "buy-silk deducts silk price from gold":
+  setup:
+    set! merchant/gold 100
+    set! market/silk-price 30
+    set! merchant/item `empty
+  run:
+    buy-silk
+  expect:
+    merchant/gold = 70
+    merchant/item = `silk
+
+# ─────────────────────────────────────────────────────────
+# Tests: sell functions (base price, no bonus)
+# ─────────────────────────────────────────────────────────
+
+test "sell-herbs pays double herb price":
+  setup:
+    set! merchant/gold 0
+    set! market/herb-price 8
+    set! market/sell-bonus 0
+    set! merchant/item `herbs
+  run:
+    sell-herbs
+  expect:
+    merchant/gold = 16
+    merchant/item = `empty
+
+test "sell-iron pays double iron price":
+  setup:
+    set! merchant/gold 0
+    set! market/iron-price 15
+    set! market/sell-bonus 0
+    set! merchant/item `iron
+  run:
+    sell-iron
+  expect:
+    merchant/gold = 30
+    merchant/item = `empty
+
+test "sell-silk pays double silk price":
+  setup:
+    set! merchant/gold 0
+    set! market/silk-price 30
+    set! market/sell-bonus 0
+    set! merchant/item `silk
+  run:
+    sell-silk
+  expect:
+    merchant/gold = 60
+    merchant/item = `empty
+
+# ─────────────────────────────────────────────────────────
+# Tests: sell bonus
+# ─────────────────────────────────────────────────────────
+
+test "sell-herbs with port bonus":
+  setup:
+    set! merchant/gold 0
+    set! market/herb-price 10
+    set! market/sell-bonus 5
+    set! merchant/item `herbs
+  run:
+    sell-herbs
+  expect:
+    merchant/gold = 25
+
+test "sell-iron with port bonus":
+  setup:
+    set! merchant/gold 50
+    set! market/iron-price 15
+    set! market/sell-bonus 5
+    set! merchant/item `iron
+  run:
+    sell-iron
+  expect:
+    merchant/gold = 85
+
+# ─────────────────────────────────────────────────────────
+# Tests: round-trip (buy then sell)
+# ─────────────────────────────────────────────────────────
+
+test "buy and sell silk at port yields profit":
+  setup:
+    set! merchant/gold 100
+    set! market/silk-price 30
+    set! market/sell-bonus 5
+    set! merchant/item `empty
+  run:
+    buy-silk
+  expect:
+    merchant/gold = 70
+    merchant/item = `silk
+
+test "default gold is 100":
+  expect:
+    merchant/gold = 100
+
+test "default item is empty":
+  expect:
+    merchant/item = `empty

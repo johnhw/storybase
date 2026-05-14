@@ -43,6 +43,7 @@ STATE_SCALAR, STATE_RECORD, STATE_FAMILY
 RELATION_DECL, FN_DECL, ACTOR_DECL, SCHEDULE_DECL
 BOUNDED_DECL, VERIFY_DECL, WATCH_DECL, WATCH_WHEN_DECL
 SCENE_DECL, MACRO_DECL, MIGRATION_DECL, DEFGRID_DECL
+TEST_DECL
 ```
 
 **Type expression kinds:**
@@ -154,6 +155,7 @@ game_table = {
   schedules  = { [name] = {name, trigger, body} },
   verifies   = [ {label, clauses=[{kind, condition, body}]} ],  -- empty in production builds
   watches    = [ {label, path_or_cond, kind} ],                 -- empty in production builds
+  tests      = [ {label, setup=[stmts], run=[stmts], expect=[exprs]} ],  -- empty in production builds
   migrations = [ {from_version, body} ],
   bounded    = { [name] = {reads, body} },
   production = bool,  -- true if compiled with opts.production
@@ -344,6 +346,20 @@ BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 **Cycle detection:** content hash of `cache + stack` via local `hash_cache`  
 **Note:** `probability` does NOT use cycle dedup (all paths must be counted separately)  
 **Time budget:** `budget` in seconds (nil = no limit); clock checked every `BUDGET_CHECK_N=50` iterations
+
+---
+
+### `runtime/tests.lua` (72 lines)
+Test block runner (lighter sibling of verify.lua).
+
+- `M.run_all(game_table)` → `[{label, pass, fail_msg?}]`
+
+Each test runs in a fresh state initialised to game defaults:
+1. Apply `setup` mutation statements
+2. Execute `run` function-call statements
+3. Evaluate each `expect` boolean expression; fail on first false result
+
+Stripped from production builds (`game_table.tests = {}` when `opts.production`).
 
 ---
 
@@ -546,6 +562,10 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - Meta-commands: `:state <path>`, `:scene`, `:choices`, `:choose N`, `:tick`, `:save`, `:load`, `:help`, `:quit`
 - Evaluates pure expressions and calls transaction functions interactively
 
+### `cli/test_cmd.lua` (58 lines)
+- `M.run(args)` — compile + `tests_mod.run_all` + pretty-print results
+- Returns 0 if all pass, 1 if any fail or on compile error
+
 ### `cli/verify_cmd.lua` (85 lines)
 - `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
 
@@ -654,6 +674,9 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/drivers_spec.lua` | UI drivers: plain render/prompt/notify, ansi color escapes, --ui driver injection via engine.new (18 tests) |
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, multi-axis at:/every:, cancel-during-tick, end-to-end pipeline (22 tests) |
 | `tests/compiler/types_spec.lua` | compiler/types.lua state_space_size arithmetic (bool/int/enum/symbol/option/set/list/record/variant) (30 tests) |
+| `tests/compiler/test_decl_spec.lua` | TEST_DECL parser (label forms, sections, multiple blocks, 'test' as ident); codegen (game_table.tests, production strip) (14 tests) |
+| `tests/runtime/tests_spec.lua` | runtime/tests.lua: basic pass/fail, setup/run sections, multiple expects, fresh-state isolation, multiple tests (19 tests) |
+| `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
 | `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |
 | `tests/cli/check_cmd_spec.lua` | `storybase check` subcommand unit tests: clean / missing / syntax / semantic / multi-error paths (6 tests) |
 | `tests/cli/repl_cmd_spec.lua` | `storybase repl` subcommand unit tests via mocked stdio: meta-commands, fn invocation, save/load round-trip (16 tests) |
@@ -710,6 +733,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo19_signal_tower.sb` | debug server showcase: 10× `watch` (live path values in browser), 5× `watch-when` (positive-edge conditional alerts), `engine-config debug-port`, `verify-always` invariants (beacon/visibility safety enforced by BFS, 448 states), `after (fn): @before` postcondition verify; storm-extinguishes-beacon game logic; serves as the subject for `debug_demo19_spec.lua` |
 | `demo20_harrow_house.sb` | time-model (`period` axis, wrap: 8), actor + schedule driving NPC spawn/despawn, static + dynamic relations (house-exits room graph, room-items), `bounded` computation (dialog-intent classifier with `??` fallback), `Set(KnowledgeFlag)` accumulation driving phase transitions, `hook after:` for room-discovery flags, `verify` invariants (phase monotone, rapport bounds, ending prereqs); three-phase arc (prosaic → uneasy → revelation) |
 | `demo21_merchants_reckoning.sb` | `query-history path` (full ledger via `for` loop), `query-changes path last-n: N` (last 3 locations), `query-at path time: {axis: val}` (gold at named day via `fn gold-on-day d:`), wildcard `query-history player/*` (broad audit); `time-model` single `day` axis, `time-inc! day: 1`; `for…else:` over query results in scene bodies; multi-segment path access `{entry/time/day}` in loop narration; `verify-always`, `after (earn-gold 30)` post-condition verify |
+| `demo02_merchant_tests.sb` | Test suite for demo02_merchant.sb: 11 test blocks covering buy/sell fns, port bonus, round-trip, and defaults; uses `import`, `setup:`/`run:`/`expect:` sections |
 
 ---
 

@@ -8,6 +8,7 @@
 --   compile <file>             Compile a .sb file; report errors and warnings
 --   run     <file>             Compile and run a game interactively
 --   verify  <file>             Run all verify blocks in a .sb file
+--   test    <file>             Run all test blocks in a .sb file
 --   migrate <save.log>         Apply outstanding schema migrations to a save log
 --   extract-symbols <file>     Scan symbol literals; suggest type declarations
 --   compact <save.log>         Emit snapshot + delta log for faster replay
@@ -44,6 +45,7 @@ Commands:
   format  <file>              Pretty-print a .sb file in canonical style
   repl    <file>              Load and explore a .sb file interactively
   verify  <file>              Run all verify blocks in a .sb file
+  test    <file>              Run all test blocks in a .sb file
   migrate <save.log>          Apply outstanding schema migrations to a save log
   extract-symbols <file>      Scan symbol literals; suggest type declarations
   compact <game.sb> <save.log> Emit snapshot + delta log for faster replay
@@ -354,6 +356,17 @@ local function cmd_verify(args)
   return verify_cmd.run(args) or 0
 end
 
+-- ── Command: test ─────────────────────────────────────────────
+
+local function cmd_test(args)
+  local ok, test_cmd = pcall(require, "cli.test_cmd")
+  if not ok then
+    io.stderr:write("error: could not load test command: " .. tostring(test_cmd) .. "\n")
+    return 1
+  end
+  return test_cmd.run(args) or 0
+end
+
 -- ── Command: migrate ──────────────────────────────────────────
 
 local function cmd_migrate(args)
@@ -599,6 +612,7 @@ local COMMANDS = {
   ["format"]          = cmd_format,
   ["repl"]            = cmd_repl,
   ["verify"]          = cmd_verify,
+  ["test"]            = cmd_test,
   ["migrate"]         = cmd_migrate,
   ["extract-symbols"] = cmd_extract_symbols,
   ["compact"]         = cmd_compact,

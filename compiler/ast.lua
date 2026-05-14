@@ -201,6 +201,7 @@ M.K.MIGRATION_DECL      = "migration_decl"
 M.K.DEFGRID_DECL        = "defgrid_decl"
 M.K.TAG_DECL            = "tag_decl"   -- tag name
 M.K.HOOK_DECL           = "hook_decl"  -- hook tag_name: pre:/post: body
+M.K.TEST_DECL           = "test_decl"  -- test "label": setup/run/expect
 
 -- ── Type expressions ──────────────────────────────────────────
 M.K.TYPE_BOOL           = "type_bool"
@@ -342,6 +343,7 @@ local DECL_KINDS = {
   [M.K.MIGRATION_DECL] = true, [M.K.DEFGRID_DECL]    = true,
   [M.K.TAG_DECL]       = true, [M.K.HOOK_DECL]       = true,
   [M.K.SPEAKER_DECL]   = true,
+  [M.K.TEST_DECL]      = true,
 }
 
 local MUT_KINDS = {
@@ -581,6 +583,20 @@ end
 ---   cell_type   string   Name of the enum/type used for cell values
 ---   default_val string?  Default cell value (symbol string, optional)
 ---   doc         string?  Documentation string
+--- test_decl: a named test block with setup/run/expect sections.
+---   label   string?  Optional test name
+---   setup   table    List of AST statement nodes (setup mutations)
+---   run     table    List of AST statement nodes (invocations under test)
+---   expect  table    List of AST expression nodes (assertions)
+function M.test_decl(label, setup, run, expect, pos)
+  return M.node(M.K.TEST_DECL, {
+    label  = label,
+    setup  = setup  or {},
+    run    = run    or {},
+    expect = expect or {},
+  }, pos)
+end
+
 function M.defgrid_decl(name, width, height, cell_type, default_val, doc, pos)
   return M.node(M.K.DEFGRID_DECL, {
     name        = name,
