@@ -82,22 +82,10 @@ different data payload (priority / path / probability / cost) and queue mechanis
 callback strategy and add more complexity than it removes. Revisit if a sixth variant
 is needed or if a perf hot-spot emerges.
 
-### A10. `--serve` exposes arbitrary code execution via the debug `eval` command
+### ~~A10. `--serve` exposes arbitrary code execution via the debug `eval` command~~ **DONE**
 
-`runtime/debug.lua`'s `POST /command` endpoint accepts an `eval` command that compiles
-and runs arbitrary StoryBase source against the live game. With `--serve`, the HTTP
-listener binds to `0.0.0.0:7374` (the default in `cli/main.lua`), so anyone on the
-host's network can execute code. Acceptable for `--debug` on a developer machine,
-not acceptable for any `--serve` deployment.
-
-**Recommended fix:**
-1. Bind `--serve` (and `--debug`) to `127.0.0.1` by default. Add `--bind <addr>` to
-   opt in to broader exposure.
-2. Gate the `eval` command behind a `--debug` flag (or a separate `--allow-eval`).
-   `--serve` should serve a game, not provide a REPL.
-
-**Files to touch:** `runtime/debug.lua` (socket bind, command dispatch),
-`cli/main.lua` (flag parsing + defaults), `tests/runtime/debug_http_spec.lua`.
+**FIXED (commit a8ab009):** Sockets now bind `127.0.0.1` by default; `--bind <addr>`
+opts into broader exposure. `eval` command blocked in serve mode.
 
 ---
 
