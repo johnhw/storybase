@@ -1125,6 +1125,235 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
 end
 
 -- ============================================================
+-- State-graph expansion (for the browser debug UI Graph tab)
+-- ============================================================
+
+--- Perform a full BFS expansion and return the complete reachable state graph.
+---
+--- Returns:
+---   nodes      — list of {id, scene, depth, terminal, cache_summary, cache}
+---   edges      — list of {from, to, label, choice_index}
+---   truncated  — true if max_nodes or budget was hit before exhausting the frontier
+---   node_count, edge_count
+---
+--- opts:
+---   depth     (default 6)    — max BFS depth
+---   max_nodes (default 2000) — cap on total nodes
+---   budget    (default 10)   — wall-clock seconds
+---
+---@return table
+function M.expand_graph(game_table, initial_cache, initial_stack, opts)
+  opts = opts or {}
+  local depth     = opts.depth     or 6
+  local max_nodes = opts.max_nodes or 2000
+  local budget    = opts.budget    or 10
+
+  local engine_mod = require("runtime.engine")
+  local io_sink    = { write = function() end }
+  local start_time = os.clock()
+
+  local nodes_list = {}
+  local edges      = {}
+  local seen       = {}   -- hash → node id string
+  local id_counter = 0
+  local truncated  = false
+
+  -- Short human-readable summary: up to 6 non-internal paths.
+  local function make_summary(cache)
+    local keys = {}
+    for k in pairs(cache) do
+      if not k:match("^__") then keys[#keys + 1] = k end
+    end
+    table.sort(keys)
+    local parts = {}
+    for i, k in ipairs(keys) do
+      if i > 6 then parts[#parts + 1] = "..."; break end
+      local v  = cache[k]
+      local vs = type(v) == "table" and "{...}" or tostring(v)
+      if #vs > 14 then vs = vs:sub(1, 14) .. "..." end
+      parts[#parts + 1] = k .. "=" .. vs
+    end
+    return table.concat(parts, "\n")
+  end
+
+  -- Public cache: strip internal __ keys (time axes, scheduler state, grid cells).
+  local function public_cache(cache)
+    local out = {}
+    for k, v in pairs(cache) do
+      if not k:match("^__") then
+        if type(v) == "table" then
+          local copy = {}
+          for tk, tv in pairs(v) do copy[tk] = tv end
+          out[k] = copy
+        else
+          out[k] = v
+        end
+      end
+    end
+    return out
+  end
+
+  local function new_id()
+    id_counter = id_counter + 1
+    return "n" .. tostring(id_counter)
+  end
+
+  -- Add the initial node (always id = "n1").
+  local initial_hash  = hash_state(initial_cache, initial_stack)
+  local initial_scene = initial_stack[#initial_stack] or "?"
+  local init_id       = new_id()
+  seen[initial_hash]  = init_id
+  nodes_list[#nodes_list + 1] = {
+    id            = init_id,
+    scene         = initial_scene,
+    depth         = 0,
+    terminal      = false,
+    cache_summary = make_summary(initial_cache),
+    cache         = public_cache(initial_cache),
+  }
+
+  local queue = { { cache = clone_flat(initial_cache), stack = initial_stack, d = 0 } }
+  local head  = 1
+
+  while head <= #queue do
+    if (os.clock() - start_time) >= budget then truncated = true; break end
+
+    local item = queue[head]; head = head + 1
+
+    if item.d >= depth then goto next_eg_item end
+
+    local from_hash  = hash_state(item.cache, item.stack)
+    local from_id    = seen[from_hash]
+    if not from_id then goto next_eg_item end
+
+    local from_node  = nil
+    for _, nd in ipairs(nodes_list) do
+      if nd.id == from_id then from_node = nd; break end
+    end
+
+    local scene_name = item.stack[#item.stack]
+    if not scene_name then goto next_eg_item end
+
+    local eng = engine_mod.new(game_table, { io_out = io_sink })
+    eng:register_actors_schedules()
+    eng._in_bfs = true
+    restore_engine(eng, item.cache, item.stack)
+
+    local ok_r, choices_or_err = pcall(function()
+      local _, choices = eng:render_scene(scene_name)
+      return choices
+    end)
+    if not ok_r then
+      if from_node then from_node.terminal = true end
+      goto next_eg_item
+    end
+    local choices = choices_or_err or {}
+
+    if #choices == 0 then
+      if from_node then from_node.terminal = true end
+      goto next_eg_item
+    end
+
+    local b_combos = bounded_outcome_combos(game_table.bounded)
+
+    for _, ch in ipairs(choices) do
+      local randoms  = trace_random_calls(game_table, engine_mod, io_sink,
+                                          item.cache, item.stack, scene_name, ch.index)
+      local r_combos = random_outcome_combos(randoms)
+
+      for _, outcome_map in ipairs(b_combos) do
+        local saved_b = game_table._bounded_handlers
+        if next(outcome_map) ~= nil then
+          local new_bh = {}
+          for k, v in pairs(saved_b or {}) do new_bh[k] = v end
+          for bname, bval in pairs(outcome_map) do
+            local bval_cap = bval
+            new_bh[bname] = function() return bval_cap end
+          end
+          game_table._bounded_handlers = new_bh
+        end
+
+        for _, r_seq in ipairs(r_combos) do
+          local saved_r = game_table._random_inject
+          if r_seq ~= nil then
+            local qv = {}
+            for _, v in ipairs(r_seq) do qv[#qv + 1] = v end
+            game_table._random_inject = function(lo, hi)
+              local v = table.remove(qv, 1)
+              return v ~= nil and v or _fallback_rng:int(lo, hi)
+            end
+          end
+
+          local eng2 = engine_mod.new(game_table, { io_out = io_sink })
+          eng2:register_actors_schedules()
+          eng2._in_bfs = true
+          restore_engine(eng2, item.cache, item.stack)
+
+          local ok2, sig = pcall(function()
+            return eng2:do_choice(scene_name, ch.index)
+          end)
+          game_table._random_inject = saved_r
+
+          if ok2 then
+            pcall(function() eng2:post_action() end)
+
+            local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
+            local new_stack = {}
+            for _, s in ipairs(eng2._scene_stack) do new_stack[#new_stack + 1] = s end
+            apply_signal(new_stack, sig)
+
+            if #new_stack > 0 then
+              local new_hash  = hash_state(new_cache, new_stack)
+              local new_scene = new_stack[#new_stack]
+
+              local to_id = seen[new_hash]
+              if not to_id then
+                if #nodes_list >= max_nodes then
+                  truncated = true
+                else
+                  to_id = new_id()
+                  seen[new_hash] = to_id
+                  nodes_list[#nodes_list + 1] = {
+                    id            = to_id,
+                    scene         = new_scene,
+                    depth         = item.d + 1,
+                    terminal      = false,
+                    cache_summary = make_summary(new_cache),
+                    cache         = public_cache(new_cache),
+                  }
+                  queue[#queue + 1] = { cache = new_cache, stack = new_stack, d = item.d + 1 }
+                end
+              end
+
+              if to_id then
+                edges[#edges + 1] = {
+                  from         = from_id,
+                  to           = to_id,
+                  label        = ch.label or "",
+                  choice_index = ch.index,
+                }
+              end
+            end
+          end
+        end  -- r_seq loop
+
+        game_table._bounded_handlers = saved_b
+      end  -- outcome_map loop
+    end  -- choices loop
+
+    ::next_eg_item::
+  end
+
+  return {
+    nodes      = nodes_list,
+    edges      = edges,
+    truncated  = truncated,
+    node_count = #nodes_list,
+    edge_count = #edges,
+  }
+end
+
+-- ============================================================
 -- Legacy object-based API (stub, kept for compatibility)
 -- ============================================================
 

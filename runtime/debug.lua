@@ -82,6 +82,19 @@ header h1{font-size:13px;color:#ff7b72;letter-spacing:2px;text-transform:upperca
 .tlb{display:flex;justify-content:space-between;font-size:10px;color:#8b949e;margin-top:2px}
 .we{padding:2px 10px;border-bottom:1px solid #21262d;font-size:11px;line-height:1.5}
 .wel{color:#d2a8ff}.wep{color:#ffa657}.wem{color:#8b949e;font-size:10px;margin-left:4px}
+.tab-bar{display:flex;gap:0;padding:0;background:#161b22;border-bottom:1px solid #30363d;flex-shrink:0}
+.tab{padding:5px 16px;background:transparent;border:none;border-bottom:2px solid transparent;color:#8b949e;cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1px;text-transform:uppercase}
+.tab:hover{color:#c9d1d9}.tab.active{color:#c9d1d9;border-bottom-color:#388bfd}
+#panels-view{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#graph-view{flex:1;display:none;flex-direction:column;overflow:hidden}
+#graph-ctrl{padding:6px 12px;background:#161b22;border-bottom:1px solid #30363d;display:flex;gap:8px;align-items:center;flex-shrink:0;flex-wrap:wrap}
+#cy{flex:1;background:#0d1117;min-height:0}
+#graph-info{padding:8px 12px;background:#0d1117;border-top:1px solid #30363d;font-size:11px;min-height:50px;max-height:160px;overflow-y:auto;flex-shrink:0;color:#8b949e}
+#graph-info pre{font-size:10px;color:#c9d1d9;margin-top:4px;white-space:pre-wrap;line-height:1.5}
+.gbtn{padding:3px 10px;background:#21262d;border:1px solid #30363d;color:#c9d1d9;cursor:pointer;font-family:inherit;font-size:11px;border-radius:3px}
+.gbtn:hover{background:#388bfd22;border-color:#388bfd;color:#79c0ff}
+.gbtn.active{background:#388bfd33;border-color:#388bfd;color:#79c0ff}
+.depth-row{display:flex;gap:3px;align-items:center;font-size:11px;color:#8b949e}
 </style>
 </head>
 <body>
@@ -97,25 +110,45 @@ header h1{font-size:13px;color:#ff7b72;letter-spacing:2px;text-transform:upperca
     <div id="transcript"></div>
     <div id="choices-bar"></div>
   </div>
-  <div id="debug-panels">
-    <div class="dp" style="flex:1.5">
-      <div class="ptitle">State</div>
-      <div class="dpb" id="state-panel"></div>
+  <div id="debug-panels" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+    <div class="tab-bar">
+      <button class="tab active" onclick="switchTab('panels',this)">Monitor</button>
+      <button class="tab" onclick="switchTab('graph',this)">Graph</button>
     </div>
-    <div class="dp" style="flex:1.2">
-      <div class="ptitle">Mutations</div>
-      <div class="dpb" id="mut-panel"></div>
-    </div>
-    <div class="dp" style="flex:0 0 auto">
-      <div class="ptitle">Timeline</div>
-      <div class="tl">
-        <input type="range" id="tslider" min="0" max="0" value="0">
-        <div class="tlb"><span>0</span><span id="tmaxlbl">0</span></div>
+    <div id="panels-view">
+      <div class="dp" style="flex:1.5">
+        <div class="ptitle">State</div>
+        <div class="dpb" id="state-panel"></div>
+      </div>
+      <div class="dp" style="flex:1.2">
+        <div class="ptitle">Mutations</div>
+        <div class="dpb" id="mut-panel"></div>
+      </div>
+      <div class="dp" style="flex:0 0 auto">
+        <div class="ptitle">Timeline</div>
+        <div class="tl">
+          <input type="range" id="tslider" min="0" max="0" value="0">
+          <div class="tlb"><span>0</span><span id="tmaxlbl">0</span></div>
+        </div>
+      </div>
+      <div class="dp" style="flex:0.8">
+        <div class="ptitle">Watches</div>
+        <div class="dpb" id="watch-panel"></div>
       </div>
     </div>
-    <div class="dp" style="flex:0.8">
-      <div class="ptitle">Watches</div>
-      <div class="dpb" id="watch-panel"></div>
+    <div id="graph-view">
+      <div id="graph-ctrl">
+        <div class="depth-row">Depth:
+          <button class="gbtn active" onclick="setGDepth(3,this)">3</button>
+          <button class="gbtn" onclick="setGDepth(4,this)">4</button>
+          <button class="gbtn" onclick="setGDepth(5,this)">5</button>
+          <button class="gbtn" onclick="setGDepth(6,this)">6</button>
+        </div>
+        <button class="gbtn" onclick="loadGraph()">Load Graph</button>
+        <span id="graph-status" style="color:#8b949e;font-size:11px"></span>
+      </div>
+      <div id="cy"></div>
+      <div id="graph-info">Click a node to inspect its state snapshot.</div>
     </div>
   </div>
 </div>
@@ -318,6 +351,83 @@ async function init(){
   await loadScene();
 }
 init();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3/dist/cytoscape.min.js"></script>
+<script>
+var _gDepth=3,_cy=null,_gCurrentId='n1';
+function switchTab(v,btn){
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
+  btn.classList.add('active');
+  var pv=document.getElementById('panels-view');
+  var gv=document.getElementById('graph-view');
+  if(v==='panels'){pv.style.display='flex';gv.style.display='none';}
+  else{pv.style.display='none';gv.style.display='flex';}
+}
+function setGDepth(d,btn){
+  _gDepth=d;
+  document.querySelectorAll('#graph-ctrl .gbtn[onclick^="setGDepth"]').forEach(function(b){b.classList.remove('active');});
+  btn.classList.add('active');
+}
+async function loadGraph(){
+  var st=document.getElementById('graph-status');
+  st.textContent='Loading…';
+  var r=await api({cmd:'get-state-graph',depth:_gDepth,max_nodes:2000});
+  if(r.error){st.textContent='Error: '+r.error;return;}
+  _gCurrentId=r.current_node_id||'n1';
+  st.textContent=r.node_count+' nodes, '+r.edge_count+' edges'+(r.truncated?' (truncated)':'');
+  renderGraph(r);
+}
+function renderGraph(data){
+  var container=document.getElementById('cy');
+  if(typeof cytoscape==='undefined'){
+    container.innerHTML='<div style="padding:20px;color:#8b949e;line-height:1.7">cytoscape.js not loaded.<br>The Graph tab requires an internet connection to load its layout library.</div>';
+    return;
+  }
+  var nodes=data.nodes||[],edges=data.edges||[];
+  var elements=[];
+  nodes.forEach(function(n){
+    elements.push({data:{id:n.id,label:n.scene,depth:n.depth,terminal:!!n.terminal,summary:n.cache_summary||'',cache:n.cache||{}}});
+  });
+  edges.forEach(function(e,i){
+    elements.push({data:{id:'e'+i,source:String(e.from),target:String(e.to),label:e.label||''}});
+  });
+  if(_cy){_cy.destroy();_cy=null;}
+  _cy=cytoscape({
+    container:container,
+    elements:elements,
+    style:[
+      {selector:'node',style:{
+        'label':'data(label)',
+        'background-color':'#21262d','border-color':'#30363d','border-width':1,
+        'color':'#c9d1d9','font-size':'10px',
+        'text-valign':'center','text-halign':'center',
+        'width':70,'height':26,'shape':'roundrectangle'
+      }},
+      {selector:'node[?terminal]',style:{'background-color':'#0d2a10','border-color':'#56d364','border-width':2}},
+      {selector:'node.current-node',style:{'background-color':'#0d1f3a','border-color':'#388bfd','border-width':2,'color':'#79c0ff'}},
+      {selector:'node:selected',style:{'border-color':'#ffa657','border-width':2}},
+      {selector:'edge',style:{
+        'curve-style':'bezier','target-arrow-shape':'triangle',
+        'line-color':'#30363d','target-arrow-color':'#30363d','width':1,
+        'label':'data(label)','font-size':'9px','color':'#8b949e','text-rotation':'autorotate',
+        'text-margin-y':-6
+      }}
+    ],
+    layout:{name:'cose',animate:false,nodeRepulsion:3000,gravity:0.3,numIter:200,initialTemp:200,coolingFactor:0.95,minTemp:1}
+  });
+  if(_gCurrentId)_cy.$('#'+_gCurrentId).addClass('current-node');
+  _cy.on('tap','node',function(evt){
+    var d=evt.target.data();
+    var cache=d.cache||{};
+    var keys=Object.keys(cache).sort();
+    var rows=keys.map(function(k){return k+' = '+JSON.stringify(cache[k]);}).join('\n');
+    var info=document.getElementById('graph-info');
+    info.innerHTML='<b style="color:#c9d1d9">'+d.label+'</b>'
+      +(d.terminal?' <span style="color:#56d364;font-size:10px">[terminal]</span>':'')
+      +' depth='+d.depth
+      +'<pre>'+(rows||'(no state)')+'\n</pre>';
+  });
+}
 </script>
 </body>
 </html>
@@ -1053,6 +1163,27 @@ function M.new(engine, opts)
         end
       end
       return { watches = result }
+
+    elseif cmd == "get-state-graph" then
+      if not eng then return { error = "no engine" } end
+      local search_mod = require("runtime.search")
+      local depth     = tonumber(payload.depth)     or 6
+      local max_nodes = tonumber(payload.max_nodes) or 2000
+      local budget    = tonumber(payload.budget)    or 10
+
+      -- Build current full cache (includes scheduler/time state needed for BFS).
+      local full_cache = search_mod.clone_cache(eng._state, eng._scheduler, eng._game)
+      local stack = {}
+      for _, s in ipairs(eng._scene_stack or {}) do stack[#stack + 1] = s end
+
+      local result = search_mod.expand_graph(eng._game, full_cache, stack, {
+        depth     = depth,
+        max_nodes = max_nodes,
+        budget    = budget,
+      })
+      -- The initial node is always the current game state (n1).
+      result.current_node_id = "n1"
+      return result
 
     else
       return { error = "unknown command: " .. tostring(cmd) }

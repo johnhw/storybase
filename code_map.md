@@ -340,6 +340,7 @@ BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 - `M.find_path(game_table, cache, stack, condition_fn, depth, budget?)` → `[{scene, label, index}, ...]` | nil
 - `M.probability(game_table, cache, stack, condition_fn, depth, threshold)` → float 0..1
 - `M.optimal_path(game_table, cache, stack, condition_fn, depth, cost_fn)` → path | nil  (Dijkstra)
+- `M.expand_graph(game_table, cache, stack, opts)` → `{nodes, edges, truncated, node_count, edge_count}` — full BFS expansion for the Graph tab; opts: `depth` (6), `max_nodes` (2000), `budget` (10s); nodes have `{id="nN", scene, depth, terminal, cache_summary, cache}`; edges have `{from, to, label, choice_index}`
 - `M.new(state, game, opts)` → search object (alternative stateful API, less used)
 
 **BFS node:** `{stack=[], cache={}, depth=N}`  
@@ -462,7 +463,8 @@ srv:handle_command(cmd, payload)     -- dispatch incoming command
 
 **HTTP routes:** `GET /` → HTML UI, `GET /events` → SSE stream, `POST /command` → JSON API, `OPTIONS *` → CORS preflight
 **Built-in events:** `mutation`, `scene-change`, `clamp-event`, `spawn-event`, `despawn-event`, `message-sent`, `schedule-fired`, `fn-call`, `reload`, `watch-fired`
-**Commands (TCP + HTTP):** `get-state`, `get-scene`, `do-choice`, `get-tick`, `get-mode`, `get-schema`, `eval`, `get-log`, `time-travel`, `set-breakpoint`, `clear-breakpoint`, `reload`
+**Commands (TCP + HTTP):** `get-state`, `get-scene`, `do-choice`, `get-tick`, `get-mode`, `get-schema`, `eval`, `get-log`, `time-travel`, `set-breakpoint`, `clear-breakpoint`, `reload`, `get-state-graph`, `get-watches`
+**`get-state-graph` payload:** `{depth?, max_nodes?, budget?}` → `{nodes, edges, node_count, edge_count, truncated, current_node_id}`; uses `M.expand_graph` from `runtime/search.lua`
 **HTTP server state:** `_http_socket`, `_http_clients`, `_sse_clients`, `_serve_mode`
 **Hot reload schema migration:** `reload` command validates Int range, enum values, adds new fields, drops removed fields atomically
 
