@@ -498,3 +498,159 @@ scene main:
   end)
 
 end)
+
+-- ── multi-axis triggers (every: / at: across more than one time axis) ────────
+
+--- Build a state store with day & hour axes (proper string axis names).
+local function make_multi_axis_state()
+  local schema = {
+    states = {},
+    engine_config = {},
+    time_model = {
+      axes = { "day", "hour" },
+    },
+  }
+  local log   = log_mod.new()
+  local store = state_mod.new(schema, log)
+  store:init_defaults()
+  return store, log
+end
+
+--- Set absolute time on an axis via inc_time math (because set_time silently
+--- no-ops on undeclared axes, and the existing time_model schema used here
+--- doesn't necessarily pre-populate _time correctly for set_time's guard).
+local function force_set_time(store, axis, value)
+  local cur = (store:get_time())[axis] or 0
+  store:inc_time(axis, value - cur)
+end
+
+describe("scheduler: multi-axis at:", function()
+
+  it("at: [day: +2, hour: +3] requires both axes to reach their targets", function()
+    local store, log = make_multi_axis_state()
+    local sched = sched_mod.new(store, log)
+    sched:register("alarm", {
+      at = {
+        { axis = "day",  value = 2 },
+        { axis = "hour", value = 3 },
+      }
+    }, {})
+
+    -- day=1, hour=5: hour ready but day not → must not fire
+    force_set_time(store, "day", 1); force_set_time(store, "hour", 5)
+    sched:tick({})
+    assert.equal(0, count_fires(log, "alarm"),
+      "schedule must not fire when not all axes have reached their targets")
+
+    -- day=2, hour=0: day ready but hour not → must not fire
+    force_set_time(store, "day", 2); force_set_time(store, "hour", 0)
+    sched:tick({})
+    assert.equal(0, count_fires(log, "alarm"),
+      "schedule must not fire until BOTH axes reach their targets")
+
+    -- day=2, hour=3: both ready → fires once
+    force_set_time(store, "hour", 3)
+    sched:tick({})
+    assert.equal(1, count_fires(log, "alarm"),
+      "schedule fires once both axis thresholds are met")
+
+    -- Subsequent ticks must not re-fire (at: triggers fire once)
+    sched:tick({}); sched:tick({})
+    assert.equal(1, count_fires(log, "alarm"),
+      "at: trigger fires only once")
+  end)
+
+  it("at:-only multi-axis schedule deregisters after firing", function()
+    local store, log = make_multi_axis_state()
+    local sched = sched_mod.new(store, log)
+    sched:register("once", {
+      at = {
+        { axis = "day",  value = 1 },
+        { axis = "hour", value = 2 },
+      }
+    }, {})
+
+    force_set_time(store, "day", 1); force_set_time(store, "hour", 2)
+    sched:tick({})
+    assert.is_nil(sched._static["once"],
+      "multi-axis at:-only schedule deregisters after firing")
+  end)
+end)
+
+describe("scheduler: multi-axis every:", function()
+
+  it("every: [day: 2, hour: 3] fires only when both axes have advanced", function()
+    local store, log = make_multi_axis_state()
+    local sched = sched_mod.new(store, log)
+    sched:register("rhythm", {
+      every = {
+        { axis = "day",  value = 2 },
+        { axis = "hour", value = 3 },
+      }
+    }, {})
+
+    -- After init: day must reach 2, hour must reach 3
+    force_set_time(store, "day", 2); force_set_time(store, "hour", 0)
+    sched:tick({})
+    assert.equal(0, count_fires(log, "rhythm"),
+      "must not fire while hour is below its threshold")
+
+    force_set_time(store, "hour", 3)
+    sched:tick({})
+    assert.equal(1, count_fires(log, "rhythm"),
+      "fires when both thresholds met")
+
+    -- Next thresholds are now day=4, hour=6.  hour=3 again must not fire.
+    sched:tick({})
+    assert.equal(1, count_fires(log, "rhythm"),
+      "must not re-fire until both axes advance past new thresholds")
+  end)
+end)
+
+-- ── cancel during tick: a schedule body cancels another schedule ────────────
+
+describe("scheduler: cancel during tick", function()
+
+  it("a body can cancel a sibling schedule mid-tick without crashing", function()
+    local store, log = make_state()
+    local sched = sched_mod.new(store, log)
+
+    sched:register("first",  { at = {{ axis = "tick", value = 1 }} }, {})
+    sched:register("victim", { at = {{ axis = "tick", value = 2 }} }, {})
+
+    store:inc_time("tick", 1)
+    sched:tick({})
+    assert.equal(1, count_fires(log, "first"),
+      "first schedule fires at tick=1")
+
+    -- Cancel victim BEFORE it would fire (simulating a body that
+    -- cancels a sibling on a prior tick).
+    sched:cancel("victim")
+
+    store:inc_time("tick", 1)
+    sched:tick({})
+    assert.equal(0, count_fires(log, "victim"),
+      "victim must not fire after being cancelled")
+  end)
+
+  it("cancelling a non-existent schedule silently no-ops", function()
+    local store, log = make_state()
+    local sched = sched_mod.new(store, log)
+    assert.has_no.errors(function() sched:cancel("never-registered") end)
+  end)
+
+  it("cancelling a schedule emits a cancel_schedule log entry", function()
+    local store, log = make_state()
+    local sched = sched_mod.new(store, log)
+    sched:register("x", { every = {{ axis = "tick", value = 1 }} }, {})
+    sched:cancel("x")
+    local found = false
+    for _, e in ipairs(log:entries()) do
+      if e.kind == "cancel_schedule" and e.schedule_name == "x" then
+        found = true; break
+      end
+    end
+    assert.is_true(found, "expected cancel_schedule log entry for x")
+    assert.is_nil(sched._static["x"])
+  end)
+end)

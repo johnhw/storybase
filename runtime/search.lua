@@ -12,6 +12,13 @@
 
 local M = {}
 
+-- Module-level fallback PCG used only when the BFS random-injection queue is
+-- exhausted (a rare defensive path). Seeded once per process so BFS results
+-- remain reproducible across calls within the same process without touching
+-- Lua's global math.random state.
+local _random_mod = require("runtime.random")
+local _fallback_rng = _random_mod.new(0x5BFE6C09)  -- arbitrary fixed seed
+
 -- ============================================================
 -- Binary min-heap (used by optimal_path)
 -- ============================================================
@@ -134,6 +141,20 @@ local function clone_cache(store, scheduler, game_table)
   return snap
 end
 
+-- Render a single state cache value as a stable hash component.
+-- Numbers are formatted with %.17g so that:
+--   (a) floats hash deterministically across Lua versions and platforms
+--       (default tostring() uses %.14g and the precision is not guaranteed);
+--   (b) integer-valued floats and integers hash the same — semantically equal
+--       states never inflate the BFS frontier just because a path was stored
+--       once as 1 and once as 1.0.
+-- Other types fall back to tostring, which is already stable for booleans,
+-- strings, and symbols.
+local function fmt_hash_val(v)
+  if type(v) == "number" then return string.format("%.17g", v) end
+  return tostring(v)
+end
+
 --- Build a deterministic hash string for a (cache, stack) state.
 local function hash_state(cache, stack)
   local keys = {}
@@ -146,7 +167,7 @@ local function hash_state(cache, stack)
       if #v > 0 then
         -- Array-like (Set, UList): iterate in order
         local items = {}
-        for _, item in ipairs(v) do items[#items + 1] = tostring(item) end
+        for _, item in ipairs(v) do items[#items + 1] = fmt_hash_val(item) end
         parts[#parts + 1] = k .. "=[" .. table.concat(items, ",") .. "]"
       else
         -- Hash-keyed (UMap): sort keys for determinism
@@ -154,11 +175,13 @@ local function hash_state(cache, stack)
         for sk in pairs(v) do subkeys[#subkeys + 1] = sk end
         table.sort(subkeys)
         local items = {}
-        for _, sk in ipairs(subkeys) do items[#items + 1] = tostring(sk) .. ":" .. tostring(v[sk]) end
+        for _, sk in ipairs(subkeys) do
+          items[#items + 1] = fmt_hash_val(sk) .. ":" .. fmt_hash_val(v[sk])
+        end
         parts[#parts + 1] = k .. "={" .. table.concat(items, ",") .. "}"
       end
     else
-      parts[#parts + 1] = k .. "=" .. tostring(v)
+      parts[#parts + 1] = k .. "=" .. fmt_hash_val(v)
     end
   end
   parts[#parts + 1] = "||" .. table.concat(stack or {}, "/")
@@ -533,7 +556,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
             for _, v in ipairs(r_seq) do queue_vals[#queue_vals + 1] = v end
             game_table._random_inject = function(lo, hi)
               local v = table.remove(queue_vals, 1)
-              return v ~= nil and v or math.random(lo, hi)
+              return v ~= nil and v or _fallback_rng:int(lo, hi)
             end
           end
 
@@ -705,7 +728,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
             for _, v in ipairs(r_seq2) do queue_vals2[#queue_vals2 + 1] = v end
             game_table._random_inject = function(lo, hi)
               local v = table.remove(queue_vals2, 1)
-              return v ~= nil and v or math.random(lo, hi)
+              return v ~= nil and v or _fallback_rng:int(lo, hi)
             end
           end
 
@@ -1129,5 +1152,8 @@ end
 --- Exported for use by eval.lua builtins (counterfactual, can-reach?, etc.)
 --- Equivalent to clone_cache but accessible outside this module.
 M.clone_cache = clone_cache
+
+-- Exposed for testing only; not part of the stable public API.
+M._hash_state = hash_state
 
 return M

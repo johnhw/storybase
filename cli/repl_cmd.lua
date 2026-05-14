@@ -116,10 +116,9 @@ function M.run(args)
   io.stdout:write("Type :help for commands, :quit to exit.\n")
   io.stdout:write("\n")
 
-  -- If --seed was given, we already seeded in load; note it.
-  if flags["seed"] then
-    math.randomseed(tonumber(flags["seed"]) or 0)
-  end
+  -- --seed is accepted but not yet plumbed through lib/storybase.lua to the
+  -- engine RNG; this is tracked separately. We do not touch the global Lua
+  -- RNG here (all randomness goes through per-engine PCG instances).
 
   -- ── REPL loop ────────────────────────────────────────────────
   while true do

@@ -50,7 +50,7 @@ function M.state_space_size(ty)
   end
   if k == "list" then
     -- (|T| + 1)^max  (each slot can be absent or one of |T| values)
-    return (ty.elem_size or 0 + 1) ^ (ty.max or 0)
+    return ((ty.elem_size or 0) + 1) ^ (ty.max or 0)
   end
   if k == "record"  then return ty.product_size or 1 end
   if k == "variant" then return ty.sum_size or 1 end

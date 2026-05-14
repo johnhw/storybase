@@ -318,3 +318,102 @@ scene main:
     assert.equals(100, cache["npcs/blacksmith/health"])
   end)
 end)
+
+-- ============================================================
+-- Mid-chain failure / atomicity behaviour
+-- ============================================================
+
+describe("migration chain — mid-chain failure", function()
+  -- This documents current behaviour: migrate() is NOT atomic.  If a
+  -- migration block is missing partway through the chain, prior
+  -- migrations have already been applied to the cache.  Callers that
+  -- need atomicity must snapshot the cache themselves.
+
+  it("leaves partial mutations after a missing intermediate block (non-atomic)", function()
+    local cache = { ["player/hp"] = 75, ["player/notes"] = "old" }
+    local migrations = {
+      -- 1→2 renames hp → health; 3→4 drops notes; 2→3 is MISSING.
+      { from_ver = 1, to_ver = 2, ops = {
+          { op = "rename", old_path = "player/hp", new_path = "player/health" }
+      }},
+      { from_ver = 3, to_ver = 4, ops = {
+          { op = "drop", path = "player/notes" }
+      }},
+    }
+    local diags = migrate_mod.migrate(cache, migrations, 1, 4, nil)
+    -- Returns the MIGRATION_MISSING error
+    assert.is_true(#(diags.errors or {}) > 0)
+    local has_missing = false
+    for _, e in ipairs(diags.errors or {}) do
+      if e.code == "MIGRATION_MISSING" then has_missing = true; break end
+    end
+    assert.is_true(has_missing,
+      "expected MIGRATION_MISSING error in diags")
+
+    -- Document non-atomic behaviour: rename from 1→2 was already applied
+    -- before the 2→3 failure was discovered.
+    assert.equals(75, cache["player/health"],
+      "rename from 1→2 was applied before mid-chain failure")
+    assert.is_nil(cache["player/hp"],
+      "old path is gone after the 1→2 rename")
+    -- The 3→4 drop must NOT have run (we stopped at 2→3 missing)
+    assert.equals("old", cache["player/notes"],
+      "post-failure migrations are NOT applied")
+  end)
+
+  it("stops the chain at the first missing block (does not skip past)", function()
+    -- Even if a later block exists, we must not skip to it.
+    local cache = { ["x"] = 1 }
+    local migrations = {
+      -- Only 3→4 is present; 1→2 and 2→3 are missing.
+      { from_ver = 3, to_ver = 4, ops = {
+          { op = "add", path = "skip-marker", value = nil }
+      }},
+    }
+    local diags = migrate_mod.migrate(cache, migrations, 1, 4, nil)
+    assert.is_true(#(diags.errors or {}) > 0)
+    -- The 3→4 ops must not have been applied (we never reached v3).
+    assert.is_nil(cache["skip-marker"],
+      "must not apply 3→4 ops when 1→2 is missing")
+  end)
+end)
+
+-- ============================================================
+-- Missing / nil schema-version handling
+-- ============================================================
+
+describe("migration — save with missing schema-version", function()
+  -- The CLI (cli/migrate_cmd.lua) defaults save_version to 1 when the save
+  -- file omits schema_version. The runtime helper itself does not
+  -- second-guess: it relies on the caller to pass a number.
+
+  it("treats save_version=1 (CLI default for missing schema-version) like a v1 save", function()
+    -- Reproduce what the CLI does: it reads save.schema_version or 1.
+    local cache = { ["player/score"] = 42 }
+    local migrations = {
+      { from_ver = 1, to_ver = 2, ops = {
+          { op = "rename", old_path = "player/score", new_path = "player/points" }
+      }},
+    }
+    local default_save_version = nil
+    local save_version = default_save_version or 1
+    local diags = migrate_mod.migrate(cache, migrations, save_version, 2, nil)
+    assert.equals(0, #(diags.errors or {}))
+    assert.equals(42, cache["player/points"])
+    assert.is_nil(cache["player/score"])
+  end)
+
+  it("when save_version equals game_version and is the (defaulted) value 1, no migration runs", function()
+    local cache = { ["player/score"] = 99 }
+    local migrations = {
+      -- A 1→2 migration that would dump the score if it ran
+      { from_ver = 1, to_ver = 2, ops = {
+          { op = "drop", path = "player/score" }
+      }},
+    }
+    -- Both at v1 (default-for-missing == game version): no-op
+    local diags = migrate_mod.migrate(cache, migrations, 1, 1, nil)
+    assert.equals(0, #(diags.errors or {}))
+    assert.equals(99, cache["player/score"], "no migration must run at same version")
+  end)
+end)

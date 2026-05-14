@@ -5,6 +5,403 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## A16 — Test-coverage backlog ✅ (2026-05-14)
+
+**2512 successes / 0 failures (non-HTTP) / 2 pending.** +111 new tests across
+six new spec files and three extensions. Two bugs uncovered during test writing
+were fixed alongside.
+
+### Bugs fixed during test creation
+
+1. **`compiler/types.lua:53` — operator-precedence bug in the `list` case.**
+   `(ty.elem_size or 0 + 1) ^ (ty.max or 0)` was parsed by Lua as
+   `(ty.elem_size or 1) ^ max` because `or` binds looser than `+`. The
+   intent was `((elem_size or 0) + 1) ^ max` so each list slot can be absent
+   or one of |T| values. With `elem_size=3` the buggy form gave `3^max`
+   instead of `4^max`. The function had no callers (the production state-space
+   sizer lives in `codegen.lua`), so this was a latent bug. Fixed to
+   `((ty.elem_size or 0) + 1) ^ (ty.max or 0)`. Detected by `tests/compiler/types_spec.lua`.
+
+2. **`cli/migrate_cmd.lua:92,94` — `has_errors` was an implicit global.**
+   The variable was assigned without `local`, so it leaked across `M.run`
+   calls in the same process. A failed migration would set the global to
+   `true`, making the *next* run incorrectly report "Migration failed" even
+   without any actual errors. Made `local has_errors = false` before the
+   accumulator loop. Regression test in `tests/cli/migrate_cmd_spec.lua`.
+
+### New spec files
+
+- **`tests/compiler/types_spec.lua` (30 tests).** Covers `is_discrete` /
+  `is_superficial` and `state_space_size` across all kinds: nil, bool, int
+  (inclusive range, single point, spanning zero, inverted bounds), enum
+  (with empty / missing values), symbol / symbol_of (bounded + unbounded),
+  option (None adds one to inner), set (combinatorial sum with max clamped
+  to |T|), list (the fixed `(|T|+1)^max` formula), record (product_size),
+  variant (sum_size), missing-field defaults.
+
+- **`tests/compiler/compiler_spec.lua` (16 tests).** Pipeline orchestrator
+  contract: happy-path compile, short-circuit on lex/parse/check errors,
+  `parse_and_check` success/parse-failure/check-failure, `compile_file` /
+  `parse_and_check_file` happy path and FILE_NOT_FOUND, `opts.production`
+  pass-through (verify blocks stripped), import resolver error paths
+  (missing target file, cycle detection, absolute-path resolution).
+  Macro expansion and basic import are already covered in
+  `import_spec.lua` and `macro_spec.lua`.
+
+- **`tests/cli/check_cmd_spec.lua` (6 tests).** Drives `check_cmd.M.run`
+  with captured stdout/stderr. Exits 1 on: no input file, missing file,
+  syntax error, semantic error (invalid enum default). Exits 0 with
+  `check passed` and Types/State-paths summary on clean source. Multi-error
+  summary line.
+
+- **`tests/cli/repl_cmd_spec.lua` (16 tests).** Drives the interactive REPL
+  with a fake `io.stdin` (queue of canned lines) and captured stdout/stderr,
+  so the loop can be unit-tested without a TTY. Covers: usage error
+  (no file), missing file, banner + EOF, `:help`, `:quit` / `:q`, `:scene`,
+  `:state`, `:choices`, unknown command, fn invocation, save/load
+  round-trip with mutation, `:tick`, empty lines (no errors), bare
+  expression eval.
+
+- **`tests/cli/migrate_cmd_spec.lua` (11 tests).** Usage errors, compilation
+  failure paths (bad game / missing game), no-migrations short-circuit,
+  save-already-at-game-version short-circuit, successful migration with
+  generated output file, `--out` custom destination, corrupt save (lua
+  parse error), missing save file, and a regression test guarding the
+  `has_errors`-global bug above (a successful run after a failed run
+  still reports success).
+
+- **`tests/cli/verify_cmd_spec.lua` (7 tests).** No input file, missing
+  file, compilation failure, no verify blocks (clean exit), passing
+  verify with PASS line, failing verify with FAIL + label, summary
+  counts when one passes and one fails.
+
+### Extensions to existing specs
+
+- **`tests/runtime/scheduler_spec.lua` (+4 tests).** Multi-axis triggers
+  finally covered: `at: [day: +2, hour: +3]` requires *both* axes to
+  reach their targets (not either-or), multi-axis at-only schedule
+  deregisters after firing, multi-axis `every:` advances thresholds for
+  *all* axes after each fire. Plus cancel-during-tick: a sibling cancel
+  is honoured on the subsequent tick, `cancel_schedule` log entry is
+  emitted, cancelling an unknown schedule is a silent no-op.
+  Added `force_set_time` helper because the existing helper's axis-table
+  representation made `set_time` silently no-op (the schema's
+  `axes = {{name="tick",max=...}}` form keys `_time` by table, not by
+  string).
+
+- **`tests/runtime/migrate_spec.lua` (+4 tests).** Documents that
+  `migrate()` is *not* atomic: a missing 2→3 block in a 1→4 chain leaves
+  the 1→2 mutations applied to the cache. Also documents that the chain
+  stops at the first missing block (does not skip forward to a later
+  block that does exist). And: the CLI's "save without `schema_version`
+  defaults to 1" convention is exercised both for the v1→v2 happy path
+  and for the same-version no-op path.
+
+- **`tests/lib/storybase_spec.lua` (+15 tests).** Save/load error paths:
+  unwritable path (`/proc/...`, tolerant if running as root), missing
+  parent directory, missing file on load, file that isn't valid Lua,
+  file that returns nil, full round-trip. `register_bounded` handler
+  error / wrong-type / nil returns / unregistered — engine must not
+  crash. `on("mutation")` event delivery: set! and inc! both fire
+  events with `{path, old, new, fn}` payload, fn name is preserved,
+  multiple listeners all fire, a raising listener does not block
+  later ones.
+
+### Files touched
+
+Code (bug fixes):
+
+- `compiler/types.lua` (list-case precedence fix, 1 line).
+- `cli/migrate_cmd.lua` (`has_errors` made local, 1 line).
+
+New tests:
+
+- `tests/compiler/types_spec.lua` — 30 tests.
+- `tests/compiler/compiler_spec.lua` — 16 tests.
+- `tests/cli/check_cmd_spec.lua` — 6 tests.
+- `tests/cli/repl_cmd_spec.lua` — 16 tests.
+- `tests/cli/migrate_cmd_spec.lua` — 11 tests.
+- `tests/cli/verify_cmd_spec.lua` — 7 tests.
+
+Extended tests:
+
+- `tests/runtime/scheduler_spec.lua` (+4).
+- `tests/runtime/migrate_spec.lua` (+4).
+- `tests/lib/storybase_spec.lua` (+15).
+
+Backlog (`todo.md`) updated to mark §A16 complete. Only §A10/§A11
+(security-adjacent) plus the deferred §A1/§A2 polish items remain in
+the audit backlog.
+
+---
+
+## A4 + A9 + A12 + A13 + A14 + A15 — Checker family/reversible, search hash, repo hygiene ✅ (2026-05-14)
+
+**2401 successes / 0 failures (non-HTTP) / 2 pending.** 15 new tests added.
+
+### A4 — UNDEFINED_FAMILY on spawn!/despawn! into undeclared family
+
+**Root cause:** `compiler/checker.lua`'s pass1 collected `state foo/{...}` families
+into `symtab.families` but no later pass validated that `SPAWN_MUT.family` or
+`DESPAWN_MUT.family` referenced a known family. `spawn! ghosts ...` with no matching
+`state ghosts/{...}` declaration compiled clean; runtime then materialised an
+unmodelled family with no schema and no type guarantees.
+
+**Fix:** new `pass_check_undefined_families` registered after the other AV passes.
+It walks every fn / scene / schedule / hook body (including scene choice bodies and
+nested conditional bodies via a local recursive walker), and for each `SPAWN_MUT`
+or `DESPAWN_MUT` node verifies `node.family ∈ symtab.families`. Emits
+`ast.E.UNDEFINED_FAMILY` (a code that was already defined but unused) with a hint
+showing the declaration template:
+`note: declare it with: state ghosts/{key}: TypeName`.
+
+**Files touched:** `compiler/checker.lua` (new pass + registration).
+
+**Tests added:** `tests/compiler/checker_spec.lua` — 5 tests: bare spawn into
+undeclared family, despawn into undeclared family, accepts well-declared family,
+detects spawn buried inside `when:` body, detects spawn inside scene choice body.
+
+### A9 — Reversibility check follows function calls transitively
+
+**Root cause:** `pass3c_check_reversible` walked the body of a `[reversible]`-
+tagged fn looking for direct irreversible mutations (`clear!`, `send!`,
+`time-inc!`, etc.) but did not follow `FN_CALL` nodes into the callee's body.
+A reversible fn calling a helper that did `clear!` passed the check silently,
+defeating the whole point of the annotation.
+
+**Fix:** rewrote the pass to do a DFS over the call graph with cycle detection
+and memoisation:
+- For each user fn, precompute `direct_witness[fn]` (first irreversible
+  mutation in its own body) and `calls_out[fn]` (list of user fns it directly
+  calls).
+- `trace(fn_name, on_stack)` returns a chain `[{caller, calls?, witness?}, ...]`
+  when an irreversible mutation is reachable, or `nil` if the fn is clean.
+  Cycles are handled by an `on_stack` set; cyclic visits return `nil` locally
+  but do not memoise so a different DFS root still computes the right answer.
+- Error message expands when the chain is longer than 1:
+  `fn 'A' is tagged [reversible] but transitively reaches 'clear!' via 'A' → 'B', 'B' → 'C'`.
+  The position is the irreversible mutation itself, not the reversible fn decl.
+
+**Files touched:** `compiler/checker.lua` (new `collect_fn_calls_local` helper
+plus rewritten `pass3c_check_reversible`).
+
+**Tests added:** `tests/compiler/checker_spec.lua` — 5 tests: one-hop transitive
+(asserts the "→" arrow appears in the message), two-hop chain (asserts both hops
+appear), clean helper still passes, recursion through a reversible-clean cycle
+doesn't crash or false-positive, error attributed to the irreversible call site
+(not the caller).
+
+### A12 — BFS state hash deterministic for Float values
+
+**Root cause:** `runtime/search.lua`'s `hash_state` used `tostring(v)` to render
+each cache value. Lua's default `tostring` for floats uses `%.14g`-style
+precision, which is platform/locale-influenced and only gives 14 significant
+digits. Two semantically-equal states could hash differently across runs. A
+second subtlety: `tostring(1)` is `"1"` but `tostring(1.0)` is `"1.0"`, so a
+path stored once as int and once as float counted as two distinct BFS nodes.
+
+**Fix:** new local `fmt_hash_val(v)` helper that formats `type(v) == "number"`
+with `%.17g` (round-trip-safe for IEEE 754 doubles, and emits integer-valued
+floats as `"1"` — same string as integers). Other types fall through to
+`tostring`. Routed all four `tostring(v)` call sites inside `hash_state` (scalar,
+array items, UMap keys, UMap values) through the helper. Exposed `hash_state`
+as `M._hash_state` for tests.
+
+**Files touched:** `runtime/search.lua` (helper + 4 call sites + test export).
+
+**Tests added:** `tests/runtime/search_spec.lua` — 5 tests: int and
+integer-valued float hash equally, identical cache hashes idempotently, distinct
+floats hash differently, near-equal doubles (via `math.nextafter`) still hash
+differently, UMap hashing is order-independent.
+
+### A13 — Cleaned up 47 stray `*.lua.tmp.PID.MS` files
+
+**Root cause:** unknown tool (likely an editor's atomic-write staging) created
+files named `<basename>.<ext>.tmp.<PID>.<MILLIS>` next to canonical files. 31 of
+them were tracked in git; the rest showed as untracked. The existing
+`.gitignore` pattern `*.tmp` matched only files literally ending in `.tmp`, not
+`.tmp.PID.MS`.
+
+**Fix:**
+- Added `*.tmp.*` to `.gitignore` (catches all variants going forward).
+- `git ls-files | grep -E "\.tmp\.[0-9]+\.[0-9]+$" | xargs git rm --cached`
+  unstaged the 31 tracked tmp files (working-tree copies preserved at first).
+- `find . -regex '\./.*\.tmp\.[0-9]+\.[0-9]+$' -type f` then deleted all 47
+  working copies.
+- Spot-checked diffs against canonical files first to confirm none held unique
+  in-flight work — they were stale older-snapshot dumps.
+
+**Files touched:** `.gitignore`, 47 deleted `*.tmp.*` files.
+
+### A14 — Deleted dead `runtime/counterfactual.lua` stub
+
+**Root cause:** `runtime/counterfactual.lua` had been reduced to a 6-line
+`return {}` placeholder ("counterfactual is implemented inline in eval.lua").
+Nothing in the codebase required it, but it was still listed in
+`cli/bundle_cmd.lua`'s `BUNDLE_MODULES`. With the file deleted, the bundle
+command silently emitted broken `package.preload["runtime.counterfactual"]`
+entries until its own tests failed.
+
+**Fix:**
+- Deleted `runtime/counterfactual.lua`.
+- Removed `"runtime.counterfactual"` from `cli/bundle_cmd.lua` `BUNDLE_MODULES`.
+- Removed the now-empty section from `code_map.md`.
+
+**Files touched:** `runtime/counterfactual.lua` (deleted), `cli/bundle_cmd.lua`,
+`code_map.md`.
+
+### A15 — Refreshed `code_map.md` line-count annotations
+
+Updated 32 stale line-count annotations in `code_map.md`. The biggest drifts
+were `compiler/checker.lua` (540 → 2922), `compiler/parser.lua` (2564 → 3479),
+`runtime/eval.lua` (~1420 → 2696), and `cli/format_cmd.lua` (~850 → 1427).
+
+**Files touched:** `code_map.md`.
+
+---
+
+## A3 + A7 + A8 — Checker duplicate-decl, verify error-surface, JSON Infinity ✅ (2026-05-14)
+
+**2386 successes / 0 failures (non-HTTP) / 2 pending.** 10 new tests added.
+
+### A3 — Duplicate FN / BOUNDED / MACRO / ACTOR declarations
+
+**Root cause:** `pass1_collect` in `compiler/checker.lua` registered each `FN_DECL`,
+`BOUNDED_DECL`, `MACRO_DECL`, and `ACTOR_DECL` into `symtab` with a bare assignment
+— no `DUPLICATE_NAME` check, unlike `SCENE_DECL`, `TYPE_*`, `STATE_*`, and
+`RELATION_DECL`. Two `fn foo:` declarations in the same file silently shadowed each
+other; codegen picked whichever ran last.
+
+**Fix:** wrapped each of the four bare assignments at lines 178-188 with the same
+"look up, emit DUPLICATE_NAME with previous-line note, else assign" pattern that
+`SCENE_DECL` already uses. The existing `ast.E.DUPLICATE_NAME` code suffices.
+
+**Files touched:** `compiler/checker.lua` (4 declaration kinds).
+
+**Tests added:** `tests/compiler/checker_spec.lua` — 3 tests: duplicate fns error
+with `DUPLICATE_NAME` and a previous-line note, duplicate actors error similarly
+even with distinct state paths, distinct fn names still compile cleanly.
+
+### A7 — `verify` surfaces evaluation errors instead of swallowing them
+
+**Root cause:** `runtime/verify.lua` used `pcall(eval.eval_expr, ...)` in three
+places (`requires:` at line 381, `when:` at line 447, `from-any-state` condition at
+line 469) and treated `not ok or not result` identically. A typo or
+referenced-but-renamed path in a `requires:` clause caused `ok=false`, which then
+hit the same code path as a legitimate `result=false` — the assertion was silently
+skipped, the verify reported as `skipped: requires not met in any reachable state`.
+Authors lost the safety net without noticing.
+
+**Fix:** at each site, split the error path from the false path:
+- `not ok` → return `{pass=false, fail_msg="<clause> clause errored at BFS state N: <err>", counterexample = snap, ...}`.
+- `not result` → keep existing behaviour (skip for `requires`/`when`; fail with
+  "condition failed" for `from-any-state`).
+
+The `from-any-state` failure message now also distinguishes "errored" from "failed".
+
+**Files touched:** `runtime/verify.lua` (three pcall sites).
+
+**Tests added:** `tests/runtime/verify_spec.lua` — 3 tests using a monkey-patched
+`eval.eval_expr` that raises on the first call with a chosen `fn_name`
+(`verify-requires`, `verify-when`, `verify-from-any`). Each asserts the result is
+`pass=false` with a `fail_msg` containing the expected "X clause errored" / "condition
+errored" prefix, and that `skipped` is *not* set.
+
+### A8 — `runtime/debug.lua` emits invalid JSON for ±Infinity
+
+**Root cause:** `M.encode_json` at `runtime/debug.lua:1414` caught NaN (`v ~= v`)
+and returned `"null"`, but `math.huge` and `-math.huge` fell through to
+`tostring(v)` which yields `"inf"` / `"-inf"` — not valid JSON. Browser SSE
+clients silently dropped the affected events.
+
+**Fix:** widened the special-value guard to `v ~= v or v == math.huge or v == -math.huge`;
+all three now serialise as JSON `null`.
+
+**Files touched:** `runtime/debug.lua` (one branch).
+
+**Tests added:** `tests/runtime/debug_spec.lua` — 4 tests: NaN, +Infinity, and
+-Infinity each encode as `"null"` at top level; a nested `{rate = math.huge}` object
+produces `"rate":null` and contains no bare `inf` substring anywhere in the output.
+
+---
+
+## A5 + A6 — Per-instance PCG RNG and shared number formatter ✅ (2026-05-14)
+
+**2376 successes / 0 failures (non-HTTP) / 2 pending.** 21 new tests added.
+
+### A5 — Replace global Lua RNG with per-instance PCG32
+
+**Root cause:** `runtime/random.lua` called `math.randomseed(seed or os.time())` and
+all draws went through `math.random(...)`. This mutates Lua's *global* RNG state, so
+two engines coexisting in one process clobbered each other's stream. The `os.time()`
+fallback also gave two `M.new(nil)` calls in the same second identical seeds.
+
+**Fix:**
+- Rewrote `runtime/random.lua` as a per-instance PCG32 (XSH-RR variant, O'Neill 2014)
+  with `_state` and `_inc` fields on each rng object. Multiplications wrap via Lua
+  5.4's 64-bit integer arithmetic.
+- New API: `rng:uniform()`, `rng:save_state()`, `rng:load_state()`, `rng:set_provider(fn)`
+  (for test injection / future LLM-style determinism stubs), `rng:seed(s)`. Existing
+  methods (`bool`, `int`, `enum`, `choice`, `weighted`) kept their signatures.
+- Default seed mixes `os.time()` with `os.clock()` to avoid the same-second collision.
+
+**Removed all global RNG use from production code:**
+- `runtime/eval.lua` — six `math.random` fallbacks in the `random-*` builtins removed.
+  `M.new_ctx` now allocates a fresh per-ctx PCG so eval can always rely on `ctx.rng`;
+  engine-driven contexts overwrite this with the engine's logged RNG.
+- `runtime/search.lua` — two `math.random(lo, hi)` fallbacks in the BFS injection
+  paths replaced with a module-level fixed-seed PCG (only fires when the injection
+  queue is exhausted, a rare defensive path; reproducible per process).
+- `cli/cli_cmd.lua` — `math.randomseed(opts.seed)` was a no-op (seed never reached
+  the engine); now passes `seed = opts.seed` through to `engine_mod.new`.
+- `cli/repl_cmd.lua` — dead `math.randomseed(seed)` removed (REPL routes through
+  `lib/storybase.lua` which doesn't yet plumb seed; tracked separately).
+
+**Verification:** `grep -rn "math\.random" compiler/ runtime/ cli/ lib/` returns
+matches only inside comments. Test helpers under `tests/fuzz/` and
+`tests/cli/format_spec.lua` still use `math.random` for fixture generation —
+acceptable since fixtures don't need replay determinism and tests run sequentially.
+
+**Files touched:** `runtime/random.lua` (rewrite), `runtime/eval.lua` (fallbacks
+removed, new_ctx now allocates rng), `runtime/search.lua` (fallback PCG),
+`cli/cli_cmd.lua` (seed plumbing), `cli/repl_cmd.lua` (dead code removed).
+
+**Tests added:** `tests/runtime/random_spec.lua` — 14 tests covering:
+no global state mutation, identical streams from identical seeds, independence under
+interleaved draws, save_state / load_state round-trip, uniform distribution, range
+coverage, provider interception, log integration, seed() reset.
+
+### A6 — Shared number formatter (replaces `%.14g` everywhere)
+
+**Root cause:** `runtime/log.lua` and `cli/cli_cmd.lua` both used `string.format("%.14g", v)`
+for serialising numbers to Lua source. Two issues: (1) `%.14g` loses precision —
+IEEE 754 doubles need `%.17g` for exact round-trip; (2) it emits the literal strings
+`"inf"` / `"nan"` for special values, both of which fail to `load()`.
+`cli/bundle_cmd.lua` already had a correct local implementation.
+
+**Fix:** added `M.fmt_number(v)` to `runtime/log.lua` handling:
+- `NaN` → `"(0/0)"`
+- `+Infinity` → `"math.huge"`
+- `-Infinity` → `"-math.huge"`
+- Integer ≤ 2^53 → `"%d"` (no decimal, no scientific notation)
+- Other floats → `"%.17g"` (round-trip-safe)
+
+**Replaced all six call sites:** four in `runtime/log.lua` (`ser_val` plus three
+inline number-formatting branches in the path/state serialiser) and three in
+`cli/cli_cmd.lua` (`ser_cache`, `ser_grids`).
+
+**Verification:** `grep -rn "%.14g" compiler/ runtime/ cli/ lib/` returns only the
+comment in `runtime/log.lua` that documents the fix.
+
+**Files touched:** `runtime/log.lua` (new helper + 4 call sites),
+`cli/cli_cmd.lua` (3 call sites + require).
+
+**Tests added:** `tests/runtime/fmt_number_spec.lua` — 7 tests covering integers,
+large integers, float round-trip precision, NaN, ±Infinity, and the 2^53 integer
+boundary.
+
+---
+
 ## UI Driver Layer ✅ (2026-05-02)
 
 **2025 tests passing, 0 failing.**
@@ -990,6 +1387,177 @@ statement section to cross-reference and clarify transaction function restrictio
 Added explanation and temporal-query example to the `for` section of `language.md`. Added
 full `query-history` / `query-changes` / `query-at` section to `docs/reference/builtins.md`
 (previously entirely absent), with log-entry field table and cross-reference.
+
+---
+
+## Author Experience Pass — Critical & Major Bug Fixes (2026-05-12)
+
+### Bug #8 — Formatter dropped relation static data — FIXED
+`storybase format --write` on a file containing a `relation` with a static data block emitted
+only the bare `relation name` header; all initial edges were silently lost. **Fix:**
+`cli/format_cmd.lua` RELATION_DECL handler now emits `from_type`, `to_type_expr`, and
+`initial_data` edges. Exported `M.format_string` for testing. Comprehensive formatter test
+bank added (`tests/cli/format_spec.lua`, 169 tests), which uncovered ~18 additional
+field-name/structure bugs in `fmt_expr`/`fmt_type`/`fmt_decl` — all fixed. Known remaining
+limitations: whitespace normalization in aligned narration (demo11), unhandled macro_decl
+nodes (demo15 spellwright).
+
+### Bug #9 — Parser internal error on `nil` as a match arm value — FIXED
+Writing `_: nil` (or any arm whose value started with an IDENT token) in an inline `match`
+arm caused `attempt to index a nil value (global 'MUTATION_TABLE')`. **Root cause:**
+`MUTATION_TABLE` was declared as a `local` at line 1828 in `compiler/parser.lua`, but
+`parse_match_expr` was defined at line 1226 — without a forward declaration the function
+resolved the global (nil). **Fix:** Added `local MUTATION_TABLE` forward declaration and an
+`eol_consumed` flag for a secondary double-NEWLINE-consume bug in mutation handlers.
+8 regression tests (4 parser, 4 runtime).
+
+### Bug #10 — `let x = expr:` scoped-body form was broken — FIXED
+When the binding value ended with a bare identifier, the lexer tokenised `identifier:` as a
+single `NAMED_ARG` token, consuming the colon. The parser never saw the `:` and fell into
+the multi-binding continuation loop. **Fix (Option A):** `compiler/parser.lua:parse_let_value`
+now checks `p.tokens[p.pos - 1]` after `parse_expr`; if the last consumed token was a
+`NAMED_ARG`, `colon_done = true`. 4 regression tests.
+
+### Bug #13 / AE-16 — REPL stuck on computed-goto entry scenes — FIXED
+A `main:` scene dispatching via `-> (match player/location: ...)` left the REPL in a scene
+with no choices and no way to advance. **Fix:** Added `game:advance_to_choices()` to
+`lib/storybase.lua` which follows computed gotos until a scene with displayable choices is
+reached. `render()` returns `nav_signal` as third return value. `cli/repl_cmd.lua` calls
+`advance_to_choices()` after `game:init()` and after `:choose`. 6 regression tests.
+
+---
+
+## Match Completeness + Find Predicate Binding (2026-05-13)
+
+### Bug #11 — `match` without wildcard silently returned `nil` — FIXED
+A `match` expression with no `_:` wildcard returned `nil` when the subject matched no arm.
+Downstream `set!` then silently unset the path. **Fix (Option C, A+B):**
+(A) Runtime — `eval_match` falls through with a dev-mode `[WARN]` to `_print_sink` / stderr
+(suppressed in production).
+(B) Checker — new `pass_check_match_completeness` walks fn/scene bodies for MATCH_EXPR over
+typed PATH_EXPR enum subjects; emits `INCOMPLETE_MATCH` when not all enum values have arms
+and no wildcard. Added `INCOMPLETE_MATCH` to `ast.E`. 9 regression tests.
+
+### Bug #12 — Non-lambda `find where:` predicate returned all entities unfiltered — FIXED
+`find enemies where: enemies/{e}/status = \`alive` returned every entity. Only the lambda
+form `where: fn(e): ...` worked. **Root cause:** `runtime/query.lua:M.find` bound only
+`[family] = key` in the child context; if the condition used a different interpolation
+variable (e.g. `{m}` in `where: members/{m}/...`), that variable was unbound. **Fix:**
+`collect_interp_vars` pre-scans where-condition AST nodes for single-segment interp
+variable names and binds all unresolved ones to the entity key. Parent-context vars are
+never overridden. 6 regression tests (query_spec).
+
+---
+
+## Silent-Failure Hazard Fixes — SF-1 through SF-4 (2026-05-13)
+
+### SF-1 — Zero-arg undefined function calls silently returned a string — FIXED
+A typo like `move-too` returned the bare string `"move-too"` instead of raising an error.
+**Fix (Option A):** In `runtime/eval.lua:call_fn`, when a 0-arg call falls through to the
+bare-string return, emit a dev-mode `[WARN]`. Suppression logic lazily builds
+`game._known_bare_names` from: relation names, grid names, scene names, named types, family
+names, and single-segment scalar/record state paths. `pure` added as a silent no-op.
+10 regression tests (eval_spec).
+
+### SF-2 — Invalid enum values assigned without error — FIXED
+`set! player/status \`zombie` succeeded silently when `Status = alive | dead`.
+**Fix (Option C, A+B):**
+(A) `runtime/state.lua` — `get_enum_values(type_desc, schema)` resolves inline enums
+(`tag="enum"`), named enum references (`tag="named"`), and alias chains; `warn_invalid_enum`
+called from `store:set` emits a dev-mode `[WARN]`. Handles family member field paths via
+`lookup_type`. Suppressed in production.
+(B) `compiler/checker.lua` — new `pass_check_invalid_enum_writes`; walks SET_MUT nodes with
+SYMBOL_LIT values on static PATH_EXPR paths; resolves the path type via `build_path_type_map`;
+resolves inline enums, named enums, and TYPE_ALIAS chains via `get_enum_values_checker`;
+emits `INVALID_ENUM_VALUE`. INTERP_PATH paths skipped (runtime covers those). `MUT_PATH_KINDS`
+and `walk_mut_with_path` refactored into a shared helper used by SF-2 and SF-3.
+16 regression tests.
+
+### SF-3 — Writes to undefined state paths silently no-op — FIXED
+`set! player/nonexistent-field 5` compiled cleanly and did nothing at runtime.
+**Fix (A+B):**
+(A) `runtime/state.lua` — `warn_undeclared` helper added before every mutation method (set,
+inc, dec, add, remove, clear, push, pop); checks path via `lookup_type(_type_index, path)`
+in dev mode. Guards: production flag, `_schema_has_states` sentinel, `__` prefix paths
+(engine-internal). Engine propagates `_production` and `_print_sink`. `actors.lua:register`
+adds inbox paths to `_type_index` to avoid false positives.
+(B) `compiler/checker.lua` — new `pass_check_undefined_paths` walks all mutation nodes; for
+static PATH_EXPR paths checks against `build_path_type_map` and `symtab.families`; emits
+`UNDEFINED_PATH`. Skips INTERP_PATH (dynamic) and INDEX_EXPR/SLICE_EXPR (unwrap to base).
+16 regression tests.
+
+### SF-4 — Transitions to undefined scenes silently ended the game — FIXED
+`-> ghost-town` (when `ghost-town` is not declared) now emits `[WARN] goto undefined scene:
+'ghost-town'` in dev mode. Same for `=>` (enter_scene). Both `goto_scene` and `enter_scene`
+in `runtime/engine.lua` check `self._scenes[name]` and emit via `_print_sink` or stderr.
+Suppressed in production. Checker-side covered by AV-2. 7 regression tests (engine_spec).
+
+---
+
+## Compile-Time Validation Gap Fixes — AV-1 through AV-4 (2026-05-13)
+
+### AV-1 — Undefined function calls now caught at compile time
+`pass_check_undefined_fns` walks all FN_CALL nodes with full scope tracking (sequential
+let bindings, scoped let forms, lambda params, for-loop vars, variant field destructuring).
+`CHECKER_BUILTIN_FNS` table mirrors `eval.lua` `BUILTINS`.
+
+### AV-2 — Undefined scene transition targets now caught at compile time
+`pass_check_scene_targets` checks all SCENE_GOTO/SCENE_ENTER string-literal targets and
+`engine-config entry-scene` against declared scenes.
+
+### AV-3 — Invalid enum literal values now caught at compile time
+Extended `pass_check_invalid_enum_writes` (SF-2's pass) to cover ADD_MUT/REMOVE_MUT on
+Set(Enum) paths by unwrapping the Set inner type.
+
+### AV-4 — Reads/writes to undeclared state paths now caught at compile time
+`pass_check_undefined_read_paths` checks PATH_EXPR nodes in read (expression) positions
+using a conservative guard (only when first segment is a known state root or prefix) to
+avoid false positives from for-loop variable field accesses. Also fixed
+`build_path_type_map` to expand WITH_MIXIN fields recursively. 23 new regression tests
+(checker_spec); zero false positives on all demos.
+
+---
+
+## Authoring Ergonomics — Third Batch (2026-05-13)
+
+### AE-13 — Integer division yielded floats in narration — FIXED
+`val_to_display` in `runtime/eval.lua` now checks whether a float value has no fractional
+part and formats it with `%d` (no ".0"). Purely presentational; semantics unchanged.
+3 regression tests.
+
+### AE-14 — Compiler warnings repeated on every `run` — FIXED
+Added `--quiet` flag to `storybase run`. When set, warnings are suppressed on stderr;
+errors still print unconditionally. `quiet` added to `BOOL_FLAGS`; help text updated.
+4 regression tests.
+
+### AE-15 — Multi-line `find` inside parens lost clauses — FIXED
+Inside `()` the lexer emits NEWLINE tokens between continuation lines but no
+INDENT/DEDENT. The parser's find handler saw NEWLINE → no INDENT → undid the consume.
+**Fix:** `compiler/parser.lua:parse_find_clauses_inline` — added newline-skipping clause
+continuation path (`newline_skip` parameter). 6 regression tests (3 parser, 3 query).
+
+### AE-17 — Added integer division / floor / ceil / mod builtins
+Added to `runtime/eval.lua` and `compiler/checker.lua`:
+- `int-div a b` → `math.floor(a / b)` (floor integer quotient)
+- `floor n` → `math.floor(n)` (round toward −∞)
+- `ceil n` → `math.ceil(n)` (round toward +∞)
+- `mod a b` → `a % b` (floor-division remainder; sign matches divisor — same as Python)
+11 regression tests.
+
+---
+
+## Spec / Documentation Divergence — SD-1 (2026-05-13)
+
+Updated `idea.md` to match the actual parser syntax:
+- §15.2 example and clause table use `where:`, `order-by:`, `limit:` (with colons)
+- §15.2 note clarifies non-lambda `where: condition` correctly binds entity variable
+- §21.2 counterfactual example: `where:` with colon
+- §25 hostile-nearby? example: two `where:` clauses (AND-ed) instead of bare `where...and`
+- §24 stdlib table: added `int-div`, `mod`, `floor`, `ceil`
+
+No code changes; Bug #12 already handled the runtime fix.
+
+**Test totals at end of pass: 2383 passing, 0 failing, 2 pending (known limitations).**
 
 ---
 

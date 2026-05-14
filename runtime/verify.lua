@@ -379,7 +379,22 @@ local function run_after_check(verify_entry, game_table)
     local store = store_from_snap(snap_item.cache, game_table)
     local rctx  = eval.new_ctx(store, game_table.fns, "verify-requires", game_table)
     local ok, result = pcall(eval.eval_expr, requires_expr, rctx)
-    if not (ok and result) then goto continue end
+
+    -- Distinguish "requires errored" from "requires is false in this state".
+    -- An evaluation error (typo in the requires expression, reference to a
+    -- removed path) used to be silently treated as `not met` — the assertion
+    -- was never run and the block was reported as skipped. Now we fail loudly.
+    if not ok then
+      return {
+        pass     = false,
+        fail_msg = string.format(
+          "requires clause errored at BFS state %d: %s", i, tostring(result)),
+        counterexample      = snap_item.cache,
+        counterexample_n    = i,
+        counterexample_path = snap_item.path,
+      }
+    end
+    if not result then goto continue end
 
     checked = checked + 1
     local label = string.format("BFS state %d", i)
@@ -445,7 +460,19 @@ local function run_can_reach_check(verify_entry, game_table)
       for k, v in pairs(snap) do fs._cache[k] = v end
       local wctx = eval.new_ctx(fs, game_table.fns, "verify-when", game_table)
       local ok, result = pcall(eval.eval_expr, when_cond, wctx)
-      if not ok or not result then
+      -- Same fix as for `requires:`: an evaluation error in the `when:` filter
+      -- is a real bug, not a "this snapshot doesn't apply" signal. Surface it.
+      if not ok then
+        return {
+          pass     = false,
+          fail_msg = string.format(
+            "when clause errored at BFS state %d: %s", i, tostring(result)),
+          counterexample      = snap,
+          counterexample_n    = i,
+          counterexample_path = snap_item.path,
+        }
+      end
+      if not result then
         goto continue_snap
       end
     end
@@ -467,7 +494,18 @@ local function run_can_reach_check(verify_entry, game_table)
       ctx.scene_stack = entry and { entry } or {}
 
       local ok2, result2 = pcall(eval.eval_expr, check_expr, ctx)
-      if not ok2 or not result2 then
+      if not ok2 then
+        return {
+          pass                = false,
+          fail_msg            = string.format(
+            "from-any-state: condition errored at BFS state %d: %s",
+            i, tostring(result2)),
+          counterexample      = snap,
+          counterexample_n    = i,
+          counterexample_path = snap_item.path,
+        }
+      end
+      if not result2 then
         return {
           pass                = false,
           fail_msg            = string.format(

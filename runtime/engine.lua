@@ -171,6 +171,11 @@ function M.new(game_table, opts)
   --- Replace the top-of-stack with a new scene name (goto).
   ---@param name string
   function eng:goto_scene(name)
+    if not self._game.production and not self._scenes[name] then
+      local sink = self._game._print_sink
+      local msg = "[WARN] goto undefined scene: '" .. tostring(name) .. "'\n"
+      if sink then sink(msg) else io.stderr:write(msg) end
+    end
     local from = self._scene_stack[#self._scene_stack]
     if #self._scene_stack == 0 then
       self._scene_stack[1] = name
@@ -188,6 +193,11 @@ function M.new(game_table, opts)
   --- Push caller; transition to new scene (enter).
   ---@param name string
   function eng:enter_scene(name)
+    if not self._game.production and not self._scenes[name] then
+      local sink = self._game._print_sink
+      local msg = "[WARN] enter undefined scene: '" .. tostring(name) .. "'\n"
+      if sink then sink(msg) else io.stderr:write(msg) end
+    end
     self:push_scene(name)
     if self._debug then
       local tick = self._state and self._state._time and self._state._time.tick or 0

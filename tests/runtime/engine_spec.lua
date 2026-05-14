@@ -1028,3 +1028,101 @@ scene main:
   end)
 
 end)
+
+-- ============================================================
+-- SF-4: transitions to undefined scenes emit a warning
+-- ============================================================
+
+describe("SF-4: undefined scene transition warning", function()
+
+  local function make_minimal_game(extra_scenes, production)
+    local scenes = { main = { body = {} } }
+    for k, v in pairs(extra_scenes or {}) do scenes[k] = v end
+    local warns = {}
+    local gt = {
+      production  = production or false,
+      _print_sink = function(m) warns[#warns+1] = m end,
+      schema      = { engine_config = {}, states = {}, types = {}, relations = {} },
+      fns         = {},
+      scenes      = scenes,
+      verifies    = {},
+      watches     = {},
+    }
+    return gt, warns
+  end
+
+  it("goto_scene warns for unknown target in dev mode", function()
+    local gt, warns = make_minimal_game()
+    local eng = engine_mod.new(gt)
+    eng:push_scene("main")
+    eng:goto_scene("ghost-town")
+    assert.equal(1, #warns)
+    assert.is_truthy(warns[1]:find("ghost%-town"))
+  end)
+
+  it("enter_scene warns for unknown target in dev mode", function()
+    local gt, warns = make_minimal_game()
+    local eng = engine_mod.new(gt)
+    eng:push_scene("main")
+    eng:enter_scene("ghost-town")
+    assert.equal(1, #warns)
+    assert.is_truthy(warns[1]:find("ghost%-town"))
+  end)
+
+  it("goto_scene does not warn for a known scene", function()
+    local gt, warns = make_minimal_game({ town = { body = {} } })
+    local eng = engine_mod.new(gt)
+    eng:push_scene("main")
+    eng:goto_scene("town")
+    assert.equal(0, #warns)
+  end)
+
+  it("enter_scene does not warn for a known scene", function()
+    local gt, warns = make_minimal_game({ town = { body = {} } })
+    local eng = engine_mod.new(gt)
+    eng:push_scene("main")
+    eng:enter_scene("town")
+    assert.equal(0, #warns)
+  end)
+
+  it("goto_scene suppresses warning in production mode", function()
+    local gt, warns = make_minimal_game(nil, true)
+    local eng = engine_mod.new(gt)
+    eng:push_scene("main")
+    eng:goto_scene("ghost-town")
+    assert.equal(0, #warns)
+  end)
+
+  it("enter_scene suppresses warning in production mode", function()
+    local gt, warns = make_minimal_game(nil, true)
+    local eng = engine_mod.new(gt)
+    eng:push_scene("main")
+    eng:enter_scene("ghost-town")
+    assert.equal(0, #warns)
+  end)
+
+  it("step() emits warning when choice body navigates to undefined scene", function()
+    local src = [[
+module sf4-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+scene main:
+  * Go
+    -> nowhere
+]]
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+    local warns = {}
+    gt._print_sink = function(m) warns[#warns+1] = m end
+    local eng = engine_mod.new(gt, {
+      io_out = { write = function() end },
+      io_in  = make_input({"1"}),
+    })
+    eng:init()
+    eng:step()
+    assert.equal(1, #warns)
+    assert.is_truthy(warns[1]:find("nowhere"))
+  end)
+
+end)

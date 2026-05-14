@@ -1411,7 +1411,10 @@ function M.encode_json(v)
   elseif t == "boolean" then
     return v and "true" or "false"
   elseif t == "number" then
-    if v ~= v then return "null" end  -- NaN
+    -- JSON has no representation for NaN or ±Infinity. Lua's tostring(math.huge)
+    -- produces "inf"/"-inf"/"nan" — not valid JSON; browser SSE clients silently
+    -- drop the event. Map all three to JSON null.
+    if v ~= v or v == math.huge or v == -math.huge then return "null" end
     return tostring(v)
   elseif t == "string" then
     -- Escape special characters

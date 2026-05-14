@@ -41,7 +41,6 @@ local BUNDLE_MODULES = {
   "runtime.actors",
   "runtime.scheduler",
   "runtime.eval",
-  "runtime.counterfactual",
   "runtime.verify",
   "runtime.migrate",
   "runtime.engine",

@@ -21,7 +21,7 @@ Entry points: `compiler/compiler.lua` — `M.compile(source, file)` / `M.compile
 
 ## compiler/
 
-### `compiler/ast.lua` (877 lines)
+### `compiler/ast.lua` (1007 lines)
 AST node constructors and constants. Import as `local ast = require("compiler.ast")`.
 
 **Constants:**
@@ -76,14 +76,14 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/lexer.lua` (490 lines)
+### `compiler/lexer.lua` (530 lines)
 - `M.tokenize(source, filename)` → `{tokens=[], errors=[]}`
 - Handles INDENT/DEDENT pre-pass, all token types, NAMED_ARG (`foo:`), COMPUTED_GOTO, PATH tokens (`a/b/c`)
 - Token shape: `{type=STRING, value=ANY, line=N, col=N}`
 
 ---
 
-### `compiler/parser.lua` (2564 lines)
+### `compiler/parser.lua` (3479 lines)
 - `M.parse(tokens, filename)` → `(ast_root, diags[])`
 - Recursive descent; parser state `p` carries cursor + error accumulator
 - Key parse functions (all local): `parse_decl`, `parse_expr`, `parse_primary`, `parse_stmt`, `parse_type_expr`, `parse_scene_body`
@@ -91,7 +91,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/checker.lua` (540 lines)
+### `compiler/checker.lua` (2922 lines)
 - `M.check(ast_root, filename)` → `(typed_ast, diags[])`
 - Attaches `ast_root.symtab = {types={}, states={}, relations={}}` for codegen
 - Four passes (all local):
@@ -103,7 +103,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/codegen.lua` (~650 lines)
+### `compiler/codegen.lua` (910 lines)
 - `M.emit(typed_ast, opts?)` → `(game_table, diags[])`
 - `opts.production = true` → strips verifies and watches from game_table; sets `game_table.production = true`
 - Produces the **game_table** structure (see below)
@@ -118,7 +118,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/compiler.lua` (~245 lines)
+### `compiler/compiler.lua` (672 lines)
 - `M.compile(source, filename, opts?)` → `(game_table, diags)`
 - `M.compile_file(filepath, opts?)` → `(game_table, diags)`
 - `M.parse_and_check(source, filename)` → `(typed_ast, diags)` — stops before codegen; returns AST with `.decls`
@@ -164,7 +164,7 @@ game_table = {
 
 ## runtime/
 
-### `runtime/state.lua` (578 lines)
+### `runtime/state.lua` (722 lines)
 Path-keyed flat store backed by the transaction log.
 
 - `M.new(schema, log)` → store
@@ -202,7 +202,7 @@ store:init_defaults()            -- apply schema defaults to cache
 
 ---
 
-### `runtime/eval.lua` (~1420 lines)
+### `runtime/eval.lua` (2696 lines)
 Expression and statement evaluator. All evaluation goes through here.
 
 - `M.new_ctx(state, fns, fn_name, game)` → ctx
@@ -290,7 +290,7 @@ occupied-by      grid-name family-name x y → key | nil
 
 ---
 
-### `runtime/engine.lua` (~530 lines)
+### `runtime/engine.lua` (800 lines)
 Game loop coordinator.
 
 - `M.new(game_table, opts)` → eng  (opts: `io_out`, `io_in`, `seed`, `debug_server`, `driver`)
@@ -331,7 +331,7 @@ eng:inp()                     → string  -- read from io_in
 
 ---
 
-### `runtime/search.lua` (~540 lines)
+### `runtime/search.lua` (1140 lines)
 BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 
 - `M.can_reach(game_table, cache, stack, condition_fn, depth, budget?)` → `(bool|nil, timed_out_bool)` — returns `nil` (not `false`) on budget timeout so callers can distinguish "not reachable" from "unknown"
@@ -347,7 +347,7 @@ BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 
 ---
 
-### `runtime/verify.lua` (464 lines)
+### `runtime/verify.lua` (594 lines)
 Verify block runner (offline model-checker).
 
 - `M.run_all(game_table)` → `[{label, pass, fail_msg?, skipped?, reason?, states_checked?, counterexample?, counterexample_n?}]`
@@ -363,7 +363,7 @@ Verify block runner (offline model-checker).
 
 ---
 
-### `runtime/actors.lua` (~330 lines)
+### `runtime/actors.lua` (364 lines)
 Actor registry and behavior runner.
 
 - `M.new(state, log)` → registry
@@ -384,7 +384,7 @@ registry:clear_inboxes()
 
 ---
 
-### `runtime/log.lua` (246 lines)
+### `runtime/log.lua` (428 lines)
 Transaction log. Ground truth for all state changes.
 
 - `M.new()` → log
@@ -410,7 +410,7 @@ log:serialise()                      → string
 
 ---
 
-### `runtime/debug.lua` (~1390 lines)
+### `runtime/debug.lua` (1577 lines)
 Debug server: watches, NDJSON TCP transport, HTTP/SSE browser UI, event emission.
 
 - `M.new(engine, opts)` → srv  (opts: `port` default 7777)
@@ -445,7 +445,7 @@ srv:handle_command(cmd, payload)     -- dispatch incoming command
 
 ---
 
-### `runtime/scheduler.lua` (~160 lines)
+### `runtime/scheduler.lua` (260 lines)
 Time-triggered event scheduler.
 
 - `M.new(state, log)` → sched
@@ -460,7 +460,7 @@ sched:cancel(name)                   -- cancel schedule; logs kind="cancel_sched
 
 ---
 
-### `runtime/tilegrid.lua` (~260 lines)
+### `runtime/tilegrid.lua` (363 lines)
 Optional tile grid extension algorithms. Required by eval.lua grid builtins.
 
 - `M.new(width, height, default_value)` → flat 1-indexed cell array (size = w×h)
@@ -478,13 +478,7 @@ Optional tile grid extension algorithms. Required by eval.lua grid builtins.
 
 ---
 
-### `runtime/counterfactual.lua` (60 lines)
-- `M.create(live_state, log, from_tick, transitions, simulate, depth, max_depth)` → counterfactual state
-- Branches a copy of state at `from_tick`, replays `transitions`, optionally runs actor+scheduler (`simulate=true`)
-
----
-
-### `runtime/query.lua` (~250 lines)
+### `runtime/query.lua` (386 lines)
 Relation and family queries. `where:` clauses support both expressions and lambda predicates (lambda is called with the entity key).
 
 - `M.find(ctx, family, clauses)` → `[key, ...]`  (family member filter)
@@ -496,7 +490,7 @@ Relation and family queries. `where:` clauses support both expressions and lambd
 
 ---
 
-### `runtime/random.lua` (89 lines)
+### `runtime/random.lua` (217 lines)
 Seeded RNG backed by log.
 
 - `M.new(seed, log)` → rng
@@ -520,7 +514,7 @@ rng:weighted(weights, list) → value
 
 ## cli/
 
-### `cli/main.lua` (~570 lines)
+### `cli/main.lua` (642 lines)
 - `M.main(argv)` — top-level dispatcher
 - Subcommands: `check`, `compile`, `run`, `format`, `repl`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
 - Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` / `--serve` / `--ui <name>` for `run`; `--production` for `compile`/`run`
@@ -538,30 +532,30 @@ Plain-text UI driver (default). Renders narration as `"Speaker: text"` or bare t
 ### `cli/drivers/ansi.lua`
 ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true-color (`\27[38;2;R;G;Bm`) to speaker labels using their `color:` hex field; bold choice indices; dim prompt text.
 
-### `cli/check_cmd.lua` (~115 lines)
+### `cli/check_cmd.lua` (135 lines)
 - `M.run(args)` — run lexer → parser → checker (no codegen); print errors/warnings with source context
 - Faster feedback than `compile`; exits 0 on success (warnings allowed), 1 on errors
 
-### `cli/format_cmd.lua` (~850 lines)
+### `cli/format_cmd.lua` (1427 lines)
 - `M.run(args)` — parse AST and emit canonical indented output
 - Flags: `--check` (compare only, exit 1 if differs), `--write` (rewrite in-place with .bak backup)
 - Default: write formatted source to stdout
 
-### `cli/repl_cmd.lua` (~175 lines)
+### `cli/repl_cmd.lua` (257 lines)
 - `M.run(args)` — load a .sb file and start an interactive expression REPL
 - Meta-commands: `:state <path>`, `:scene`, `:choices`, `:choose N`, `:tick`, `:save`, `:load`, `:help`, `:quit`
 - Evaluates pure expressions and calls transaction functions interactively
 
-### `cli/verify_cmd.lua` (79 lines)
+### `cli/verify_cmd.lua` (85 lines)
 - `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
 
-### `cli/migrate_cmd.lua` (145 lines)
+### `cli/migrate_cmd.lua` (141 lines)
 - `M.run(args)` — load save file, run migrations, write output
 
-### `cli/extract_cmd.lua` (~220 lines)
+### `cli/extract_cmd.lua` (220 lines)
 - `M.run(args)` — walk typed AST (via `parse_and_check_file`), collect SYMBOL_LIT nodes grouped by SET_MUT target path, output candidate `type Name = val | val` declarations
 
-### `cli/bundle_cmd.lua` (~290 lines)
+### `cli/bundle_cmd.lua` (395 lines)
 - `M.run(args)` — compile a .sb file and emit a single self-contained Lua file
 - Embeds 14 runtime modules as `package.preload` entries (compiler excluded)
 - `serialize(val)` — recursive Lua-value-to-source-literal serialiser (handles NaN/±Inf, cycles detection, sequence vs map tables)
@@ -570,7 +564,7 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - Bundled game accepts: `--seed N`, `--save <path>`, `--load <path>` at runtime
 - Flags: `--output <path>` (default: same dir as .sb with .lua extension), `--production`
 
-### `cli/lsp.lua` (~340 lines)
+### `cli/lsp.lua` (509 lines)
 Language Server Protocol server. Communicates over stdio using JSON-RPC 2.0.
 - `M.run()` — main loop; reads messages from stdin, dispatches handlers, writes responses to stdout
 - `M.build_syms(typed_ast)` → `{[name]=sym}` — extract flat symbol map from typed AST + symtab; each entry has `{kind, pos, doc, detail}`
@@ -586,11 +580,11 @@ Language Server Protocol server. Communicates over stdio using JSON-RPC 2.0.
 
 **Symbol kinds collected:** `type`, `state`, `relation`, `scene`, `grid`, `fn`, `actor`, `schedule`, `bounded`, `macro`
 
-### `cli/compact_cmd.lua` (~115 lines)
+### `cli/compact_cmd.lua` (146 lines)
 - `M.run(args)` — replay save log into fresh state, write compact save with one entry per path
 - Usage: `storybase compact <game.sb> <save.log> [--out <out.log>]`
 
-### `cli/cli_cmd.lua` (~340 lines)
+### `cli/cli_cmd.lua` (583 lines)
 Single-step scripting mode for `storybase run --cli save.sbd`.
 - `M.run(game_table, save_path, opts)` — main entry point; reads `opts.input` as a choice index (or `q`/`quit`/`exit`), executes one step, writes save, emits JSON to `opts.output`
 - Save format: `save.sbd` Lua chunk (scene stack, log, state snapshot, checkpoint stack) + `save.sbd.snap` for fast replay
@@ -601,7 +595,7 @@ Single-step scripting mode for `storybase run --cli save.sbd`.
 
 ## lib/
 
-### `lib/storybase.lua` (~420 lines)
+### `lib/storybase.lua` (574 lines)
 Public Lua API for embedding StoryBase in another Lua program.
 - `M.load(filepath)` → game object (compiles from file)
 - `M.from_source(source, filename?)` → game object (compiles from string)
@@ -658,7 +652,13 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/lsp_spec.lua` | LSP server unit tests: build_syms (types/states/fns/actors/docs), word_at (word extraction, paths, hyphens), make_lsp_diags (severity, positions), integration with real parse+check (43 tests) |
 | `tests/cli/cli_cmd_spec.lua` | `--cli` single-step mode: fresh start, state persistence, reset, quit, error handling, game completion, checkpoint+undo (demo08), state fields, subprocess integration (35 tests) |
 | `tests/cli/drivers_spec.lua` | UI drivers: plain render/prompt/notify, ansi color escapes, --ui driver injection via engine.new (18 tests) |
-| `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, end-to-end pipeline |
+| `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, multi-axis at:/every:, cancel-during-tick, end-to-end pipeline (22 tests) |
+| `tests/compiler/types_spec.lua` | compiler/types.lua state_space_size arithmetic (bool/int/enum/symbol/option/set/list/record/variant) (30 tests) |
+| `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |
+| `tests/cli/check_cmd_spec.lua` | `storybase check` subcommand unit tests: clean / missing / syntax / semantic / multi-error paths (6 tests) |
+| `tests/cli/repl_cmd_spec.lua` | `storybase repl` subcommand unit tests via mocked stdio: meta-commands, fn invocation, save/load round-trip (16 tests) |
+| `tests/cli/migrate_cmd_spec.lua` | `storybase migrate` subcommand unit tests: usage, compile fail, no-migrations, version match, success, --out, corrupt save, missing save (11 tests) |
+| `tests/cli/verify_cmd_spec.lua` | `storybase verify` subcommand unit tests: usage, compile fail, no verify blocks, PASS, FAIL, summary (7 tests) |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
 | `tests/fuzz/log_fuzz_spec.lua` | Property test: log serialise/deserialise round-trip; replay determinism |

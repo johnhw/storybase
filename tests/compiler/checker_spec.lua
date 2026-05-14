@@ -169,6 +169,127 @@ describe("checker pass 1 — scene collection and SceneId", function()
 end)
 
 -- ============================================================
+-- Pass 1 — Duplicate FN / BOUNDED / MACRO / ACTOR detection
+-- ============================================================
+
+describe("checker pass 1 — duplicate fn/bounded/macro/actor", function()
+
+  it("emits DUPLICATE_NAME for two fns with the same name", function()
+    local src = [[
+state x: Int(0,100) = 0
+fn foo:
+  set! x 1
+fn foo:
+  set! x 99
+]]
+    local d = check_err(src, ast.E.DUPLICATE_NAME)
+    assert.is_truthy(d.message:find("fn 'foo'"))
+    assert.is_truthy(d.note and d.note:find("previous declaration at line"))
+  end)
+
+  it("emits DUPLICATE_NAME for two actors with the same name", function()
+    -- Two actors with identical names must collide even when state paths differ.
+    local src = [[
+state npcs/guard/hp: Int(0,100) = 100
+state npcs/scout/hp: Int(0,100) = 100
+actor sentinel:
+  state:     npcs/guard
+  priority:  10
+  perceives: []
+actor sentinel:
+  state:     npcs/scout
+  priority:  5
+  perceives: []
+]]
+    local d = check_err(src, ast.E.DUPLICATE_NAME)
+    assert.is_truthy(d.message:find("actor 'sentinel'"))
+  end)
+
+  it("does not emit DUPLICATE_NAME for distinct fn names", function()
+    check_ok([[
+state x: Int(0,100) = 0
+fn foo:
+  set! x 1
+fn bar:
+  set! x 2
+]])
+  end)
+
+end)
+
+-- ============================================================
+-- A4 — UNDEFINED_FAMILY on spawn!/despawn! into undeclared family
+-- ============================================================
+
+describe("checker — spawn!/despawn! family validation (A4)", function()
+
+  it("emits UNDEFINED_FAMILY when spawn! targets an undeclared family", function()
+    local d = check_err([[
+type Foo:
+  x: Int(0,10) = 5
+state crew/{m}: Foo
+fn bad-spawn:
+  spawn! ghosts `alice Foo(x: 5)
+]], ast.E.UNDEFINED_FAMILY)
+    assert.is_truthy(d.message:find("'ghosts'"))
+    assert.is_truthy(d.message:find("spawn!"))
+  end)
+
+  it("emits UNDEFINED_FAMILY when despawn! targets an undeclared family", function()
+    local d = check_err([[
+type Foo:
+  x: Int(0,10) = 5
+state crew/{m}: Foo
+fn bad-despawn:
+  despawn! phantoms `bob
+]], ast.E.UNDEFINED_FAMILY)
+    assert.is_truthy(d.message:find("'phantoms'"))
+    assert.is_truthy(d.message:find("despawn!"))
+  end)
+
+  it("accepts spawn!/despawn! into a declared family", function()
+    check_ok([[
+type Foo:
+  x: Int(0,10) = 5
+state crew/{m}: Foo
+fn good-spawn:
+  spawn! crew `alice Foo(x: 5)
+fn good-despawn:
+  despawn! crew `alice
+]])
+  end)
+
+  it("detects spawn! buried inside conditional bodies", function()
+    -- Recursion through if/else/when bodies, not just top-level stmts.
+    local d = check_err([[
+type Foo:
+  x: Int(0,10) = 5
+state crew/{m}: Foo
+state world/flag: Bool = false
+fn nested-bad:
+  when world/flag:
+    spawn! ghosts `alice Foo(x: 5)
+]], ast.E.UNDEFINED_FAMILY)
+    assert.is_truthy(d.message:find("'ghosts'"))
+  end)
+
+  it("detects spawn! inside scene choice bodies", function()
+    local d = check_err([[
+type Foo:
+  x: Int(0,10) = 5
+state crew/{m}: Foo
+scene main:
+  "test"
+  * Make a ghost
+    spawn! ghosts `alice Foo(x: 5)
+    -> main
+]], ast.E.UNDEFINED_FAMILY)
+    assert.is_truthy(d.message:find("'ghosts'"))
+  end)
+
+end)
+
+-- ============================================================
 -- Pass 2 — Type resolution
 -- ============================================================
 
@@ -1659,6 +1780,90 @@ fn bad-send:
 fn unchecked:
   time-inc! tick:
 ]])
+  end)
+
+  -- ── A9: transitive call-graph check ───────────────────────────────────────
+
+  it("[A9] reversible fn that calls an irreversible helper is flagged", function()
+    local d = check_err([[
+state player:
+  items: Set(Bool, 5) = (set)
+]] .. BASE .. [[
+fn really-nuke:
+  clear! player/items
+fn nuke:
+  tags: [reversible]
+  really-nuke
+]], "IRREVERSIBLE_IN_REVERSIBLE")
+    -- Message must mention the transitive call chain.
+    assert.is_truthy(d.message:find("transitively reaches"),
+      "expected transitive message, got: " .. d.message)
+    assert.is_truthy(d.message:find("'nuke' → 'really%-nuke'"),
+      "expected call chain to mention 'nuke' → 'really-nuke', got: " .. d.message)
+  end)
+
+  it("[A9] reversible fn flagged when reaching irreversibility two hops away", function()
+    local d = check_err([[
+state player:
+  items: Set(Bool, 5) = (set)
+]] .. BASE .. [[
+fn level3:
+  clear! player/items
+fn level2:
+  level3
+fn level1:
+  tags: [reversible]
+  level2
+]], "IRREVERSIBLE_IN_REVERSIBLE")
+    assert.is_truthy(d.message:find("transitively reaches"))
+    -- Chain should report both hops.
+    assert.is_truthy(d.message:find("'level1' → 'level2'"))
+    assert.is_truthy(d.message:find("'level2' → 'level3'"))
+  end)
+
+  it("[A9] reversible fn calling a clean helper still passes", function()
+    check_ok([[
+state player:
+  health: Int(0,100) = 50
+]] .. BASE .. [[
+fn safe-helper:
+  inc! player/health 1
+fn safe:
+  tags: [reversible]
+  safe-helper
+]])
+  end)
+
+  it("[A9] recursion through a reversible-clean cycle does not crash or false-positive", function()
+    check_ok([[
+state player:
+  health: Int(0,100) = 50
+]] .. BASE .. [[
+fn a:
+  inc! player/health 1
+  b
+fn b:
+  dec! player/health 1
+fn entry:
+  tags: [reversible]
+  a
+]])
+  end)
+
+  it("[A9] error is attributed to the irreversible call site, not the caller", function()
+    local d = check_err([[
+state player:
+  items: Set(Bool, 5) = (set)
+]] .. BASE .. [[
+fn helper:
+  clear! player/items
+fn outer:
+  tags: [reversible]
+  helper
+]], "IRREVERSIBLE_IN_REVERSIBLE")
+    -- Position should point to the `clear!` line inside `helper`, not the
+    -- `outer` decl. The diag has line info we can verify.
+    assert.is_not_nil(d.line)
   end)
 end)
 

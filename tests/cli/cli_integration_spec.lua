@@ -276,6 +276,39 @@ describe("CLI run: error cases", function()
   end)
 end)
 
+-- ── run --quiet: AE-14 warning suppression ───────────────────────────────────
+
+describe("CLI run --quiet", function()
+  -- demo11 compiles with WRITE_UNTYPED_VAR warnings — good fixture for this test
+  local WARNED_FILE = "demos/demo11_expedition_guild.sb"
+
+  it("suppresses compiler warnings on stderr", function()
+    local rc, _, err = run_cli({"run", "--quiet", "--auto", "--steps", "1", WARNED_FILE})
+    assert.equal(0, rc)
+    assert.is_falsy(err:find("%[WARN%]") or err:find("warning"), "expected no warnings, got: " .. err)
+  end)
+
+  it("without --quiet, warnings appear on stderr", function()
+    local rc, _, err = run_cli({"run", "--auto", "--steps", "1", WARNED_FILE})
+    assert.equal(0, rc)
+    assert.is_truthy(err:find("warning"), "expected warnings without --quiet, got: " .. err)
+  end)
+
+  it("--quiet does not suppress errors (still fails on bad source)", function()
+    local p = tmpfile(".sb", "bad source @@@@")
+    local rc, _, err = run_cli({"run", "--quiet", p})
+    os.remove(p)
+    assert.equal(1, rc)
+    assert.is_truthy(err:find("Compilation failed") or err:find("cannot run"), err)
+  end)
+
+  it("help run mentions --quiet", function()
+    local rc, out, err = run_cli({"help", "run"})
+    assert.equal(0, rc)
+    assert.is_truthy((out .. err):find("--quiet"), "expected --quiet in help output")
+  end)
+end)
+
 -- ── run --auto --steps: smoke tests for all demos ────────────────────────────
 -- Step limits per demo: enough to exercise gameplay but avoid precondition
 -- failures that occur when auto-play cycles past designed guard conditions.

@@ -4,453 +4,870 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-12)
+## Current Status (2026-05-14)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–21 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
-Code review rounds 1, 2, and 3 fully resolved.
-UI driver layer complete. All twelve authoring ergonomics issues (AE-1 through AE-12) resolved.
+UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
+silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
+resolved. All critical and major bugs (#1–#13) resolved.
 
-Author experience review (2026-05-10) identified 17 open issues in five categories (bugs,
-silent failures, validation gaps, ergonomics, spec divergence). See sections below.
+**2378 successes / 0 failures / 2 pending (known limitations).**
 
-Bug #8 (formatter) resolved 2026-05-12. Comprehensive formatter test bank added
-(`tests/cli/format_spec.lua`, 169 tests). The fix resolved Bug #8 plus ~18 additional
-formatter field-name/structure bugs found by the new tests. Known remaining formatter
-limitations: whitespace normalization in aligned narration (demo11), unhandled macro_decl
-nodes (demo15 spellwright).
+The core language and runtime are feature-complete against the V1.0 specification.
 
-Bug #9 (parser crash on nil match arm) resolved 2026-05-12. Root cause: `MUTATION_TABLE`
-lacked a forward declaration so `parse_match_expr` saw the global (nil) instead of the
-local. Fixed with a forward declaration + secondary eol double-consume fix. 8 regression
-tests added.
-
-Bug #10 (`let x = expr:` scoped-body form) resolved 2026-05-12. Root cause: `parse_let_value`
-called `parse_expr` and returned `colon_done=false` even when `parse_expr` internally
-consumed a NAMED_ARG as its last token (the lexer folds `word:` into one token). Fixed by
-checking `p.tokens[p.pos-1]` after `parse_expr` and setting `colon_done=true` if it was a
-NAMED_ARG. 4 regression tests added.
-
-Bug #13 (REPL stuck on computed-goto entry scenes) resolved 2026-05-12. Added
-`game:advance_to_choices()` to `lib/storybase.lua` which follows computed gotos until
-reaching a scene with displayable choices. Modified `render()` to return `nav_signal` as
-third return value. Updated `cli/repl_cmd.lua` to call `advance_to_choices()` after
-`game:init()` and after `:choose` to prevent getting stuck in dispatch scenes. 6
-regression tests added.
-
-Bug #11 (match without wildcard silently returns nil) resolved 2026-05-13.
-Two-layer fix: (A) runtime warning emitted to `_print_sink` / stderr (suppressed in
-production mode) when `eval_match` falls through with no matching arm; (B) new checker
-pass `pass_check_match_completeness` that walks fn/scene bodies for MATCH_EXPR nodes
-whose subject is a typed PATH_EXPR over a named or inline enum, and emits
-`INCOMPLETE_MATCH` warning when not all enum values have arms and no wildcard is present.
-Added `INCOMPLETE_MATCH` to `ast.E`. 9 regression tests added (4 eval_spec, 6
-checker_spec counting both pass and no-warn cases).
-
-Bug #12 (non-lambda `find where:` predicate with variable name ≠ family name) resolved
-2026-05-13. Root cause: `query.lua:M.find` bound only `[family] = key` in the child
-context; if the condition used a different interpolation variable (e.g. `{m}` in
-`find members where: members/{m}/...`), that variable was unbound and fell back to the
-literal string, making the condition evaluate identically for all entities. Fix:
-`collect_interp_vars` pre-scans all where-condition AST nodes for single-segment interp
-variable names and binds all unresolved ones to the entity key in the child context.
-Parent-context vars are never overridden. 6 regression tests added (query_spec).
-
-SF-1 (zero-arg undefined function calls silently return a string) resolved 2026-05-13.
-Option A: in `runtime/eval.lua:call_fn`, when a 0-arg call falls through to the
-bare-string return, emit a dev-mode `[WARN]` (suppressed in production). Suppression
-logic lazily builds `game._known_bare_names` from: relation names, grid names, scene
-names, named types, family names, and single-segment scalar/record state paths — all
-valid non-function bare-identifier uses. Also added `pure` as a silent no-op (it is a
-purity annotation that has no runtime semantics). 10 regression tests added (eval_spec).
-
-SF-2 (invalid enum values assigned without error) resolved 2026-05-13.
-Option C (A+B combined): (A) `runtime/state.lua` — `get_enum_values(type_desc, schema)`
-resolves inline enums (`tag="enum"`), named enum references (`tag="named"`), and alias
-chains; `warn_invalid_enum(store, path, value)` called from `store:set` emits dev-mode
-`[WARN]` when a string value is not in the resolved enum values set. Handles family
-member field paths via `lookup_type`. Suppressed in production mode.
-(B) `compiler/checker.lua` — new `pass_check_invalid_enum_writes` pass; walks SET_MUT
-nodes with SYMBOL_LIT values on static PATH_EXPR paths; resolves the path type via
-`build_path_type_map`; resolves inline enums, named enums, and TYPE_ALIAS chains via
-`get_enum_values_checker`; emits `INVALID_ENUM_VALUE` warning. INTERP_PATH paths skipped
-(covered by runtime check). `MUT_PATH_KINDS` and `walk_mut_with_path` refactored to a
-shared helper section used by both SF-2 and SF-3 passes.
-16 regression tests added (8 state_spec runtime, 8 checker_spec compile-time).
-
-SF-3 (writes to undefined state paths silently no-op) resolved 2026-05-13.
-Option C (A + B): (A) `runtime/state.lua` — `warn_undeclared` helper added before
-every mutation method (set, inc, dec, add, remove, clear, push, pop); checks path via
-`lookup_type(_type_index, path)` in dev mode and emits warning. Guards: production flag,
-`_schema_has_states` sentinel (cached before actor inbox registrations to avoid false
-positives when actors add paths to an otherwise-empty type_index), `__` prefix paths
-(engine-internal like `__rel/edges/`). Engine propagates `_production` and `_print_sink`
-to store; `actors.lua:register` adds inbox paths to `_type_index` to exempt them.
-(B) `compiler/checker.lua` — new `pass_check_undefined_paths` pass walks all mutation
-nodes in fn/scene/schedule/hook bodies; for static PATH_EXPR paths checks against
-`build_path_type_map` and `symtab.families`; emits `UNDEFINED_PATH` warning; skips
-INTERP_PATH (dynamic) and INDEX_EXPR/SLICE_EXPR by unwrapping to base.
-16 regression tests added (8 state_spec for runtime, 8 checker_spec for compile-time).
-
-All four compile-time validation gaps (AV-1 through AV-4) resolved 2026-05-13.
-
-AE-15 (multi-line find inside parens) resolved 2026-05-13. Root cause: lexer emits no
-INDENT/DEDENT inside `()`, so the parser's NEWLINE+INDENT detect path was never taken
-for paren-context multi-line finds. Fix: added newline-skipping clause continuation path
-in `compiler/parser.lua:parse_find_clauses_inline`. 6 regression tests added.
-
-AE-17 (integer division / floor / ceil / remainder) resolved 2026-05-13. Added `int-div`,
-`floor`, `ceil`, `mod` builtins. `mod` uses floor-division remainder (Python sign
-convention). 11 regression tests added.
-
-AV-1: `pass_check_undefined_fns` walks all FN_CALL nodes with full scope tracking
-(sequential let bindings, scoped let forms, lambda params, for-loop vars, variant
-field destructuring). CHECKER_BUILTIN_FNS table mirrors eval.lua BUILTINS.
-AV-2: `pass_check_scene_targets` checks all SCENE_GOTO/SCENE_ENTER string literal
-targets and engine-config entry-scene against declared scenes.
-AV-3: Extended `pass_check_invalid_enum_writes` to cover ADD_MUT/REMOVE_MUT on
-Set(Enum) paths by unwrapping the Set inner type.
-AV-4: `pass_check_undefined_read_paths` checks PATH_EXPR nodes in read (expression)
-positions using a conservative guard (only when first segment is a known state root
-or prefix) to avoid false positives from for-loop variable field accesses.
-Also fixed `build_path_type_map` to expand WITH_MIXIN fields recursively.
-23 new regression tests added (checker_spec). Zero false positives on all demos.
-
-**2383 tests passing, 0 failing, 2 pending (known limitations).**
+A codebase review on 2026-05-14 surfaced a fresh backlog of small bugs, footguns,
+and hygiene items — §A3 through §A16 below. As of the end of 2026-05-14 most
+of that backlog has landed: §A3, §A4, §A5, §A6, §A7, §A8, §A9, §A12, §A13, §A14,
+§A15, and §A16 are all done (see [completed.md](completed.md)). The remaining
+open work is the security-adjacent pair §A10/§A11.
 
 ---
 
 ## What to work on next
 
-Recommended order:
-1. **Silent-failure hazards** (SF-5) — SF-1 through SF-4 resolved.
-2. **Spec divergence** (SD-1) — align `find` block syntax with documentation.
-3. All AE issues (AE-13 through AE-17) are now resolved.
+**Confirmed bugs (small, high-leverage):**
+- ~~§A3~~ — Duplicate `fn` declarations. **Done 2026-05-14.**
+- ~~§A4~~ — `spawn!` / `despawn!` into undeclared family. **Done 2026-05-14.**
+- ~~§A5~~ — Global Lua RNG state. **Done 2026-05-14.**
+- ~~§A6~~ — `%.14g` truncates doubles + breaks on Inf/NaN. **Done 2026-05-14.**
+- ~~§A7~~ — `verify` swallows `requires:` evaluation errors. **Done 2026-05-14.**
+- ~~§A8~~ — `runtime/debug.lua` emits invalid JSON for ±Infinity. **Done 2026-05-14.**
+
+**Security-adjacent (do before any production `--serve` use):**
+- §A10 — `--serve` exposes arbitrary code execution via the debug `eval` command.
+- §A11 — `--ui <name>` accepts arbitrary module paths.
+
+**Hygiene (5–15 minutes each):**
+- ~~§A13~~ — Stray `*.lua.tmp.PID.MS` files. **Done 2026-05-14.**
+- ~~§A14~~ — Dead `runtime/counterfactual.lua` stub. **Done 2026-05-14.**
+- ~~§A15~~ — `code_map.md` line-count annotations. **Done 2026-05-14.**
+
+**Lower-priority polish:**
+- §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
+- §A2 — Inelegance #7 — BFS expansion duplication (deferred; documented).
+- ~~§A9~~ — Reversibility check transitive. **Done 2026-05-14.**
+- ~~§A12~~ — BFS state hash deterministic for Float values. **Done 2026-05-14.**
+- ~~§A16~~ — Test-coverage gaps for `compiler/types`, `compiler/compiler`, and
+  the four CLI commands. **Done 2026-05-14.**
+
+**Future Features and Extensions (large):** Roadmap below. Suggested ordering for
+impact:
+
+1. §B1 — State-graph explorer + §B4 coverage report
+2. §C1 — `test` blocks and §C2 fuzz mode
+3. §D1 — LLM-bounded handler standard module
+4. §B2 — Counterexample minimisation
+5. §E1–E3 — `quest` / `dialog` / `inventory` built-in patterns
+6. §B5 — Auto-docs site
+7. §C3 — Temporal-logic verify
+8. §F1 — Procedural generation primitives
+9. §G1 — Web/JS compilation target
 
 ---
 
-## Remaining Open Work
+## A. Open Bug-fix / Cleanup Tasks
 
-- [ ] **Inelegance #7** — BFS expansion logic duplicated ~5×. Deferred: each BFS function
-  has a different data payload (priority/path/prob/cost) and queue mechanism
-  (FIFO/heap/yield). Extracting a shared helper would require a messy callback strategy and
-  add more complexity than it removes.
+### A1. SF-5 — `set!` on a `let`-bound variable [partially mitigated — consider closing]
 
----
+`let i = 0; set! i (i + 1)` writes to a state PATH named `"i"` (which likely doesn't
+exist), not to the local variable `i`. The local var `i` is never updated. In a `while`
+loop this produces a hidden infinite loop that hits the 10,000-iteration safety limit:
 
-## Critical Bugs (data loss / internal crash)
+```
+fn count-to-5:
+  let i = 0
+  while i < 10:       # reads local var i = 0 always
+    set! i (i + 1)    # writes to state path "i", not local var
+    when i >= 5:
+      break           # never fires
+```
 
-- [x] **Bug #8 — Formatter drops relation static data.** *(fixed 2026-05-12)*
-  `storybase format --write` on a file containing a `relation` with a static data block
-  emits only the bare `relation name` header; all initial edges are lost. Any author using
-  `--write` destroys their map graph permanently with no warning.
+There is no language mechanism to mutate a `let` binding. The workaround is to use a
+dedicated state path as the counter. This is by design, but authors coming from
+imperative languages will hit it repeatedly.
 
-  **Fix applied:** `cli/format_cmd.lua` RELATION_DECL handler now correctly emits
-  `from_type`, `to_type_expr`, and `initial_data` edges. Also exported `M.format_string`
-  for testing, and fixed ~18 additional field-name/structure bugs discovered by the new
-  test bank (`tests/cli/format_spec.lua`, 169 tests).
+**Status update 2026-05-14:** AV-4's `pass_check_undefined_paths` already emits
+`UNDEFINED_PATH` for the bare-name case, so the failure is no longer silent — authors
+see `warning [UNDEFINED_PATH]: 'i' is not a declared state path` at compile time. The
+proposed `LET_VAR_MUTATION` warning would be a clearer message, not a missing-feature
+fix. Recommendation: either close this item, or downgrade to a polish task (replace
+the generic `UNDEFINED_PATH` text with a `let`-aware message when the bare segment
+matches an enclosing `let` binding).
 
-- [x] **Bug #9 — Parser internal error on `nil` as a match arm value.** *(fixed 2026-05-12)*
-  Writing `_: nil` (or any arm whose value started with an IDENT token) in an inline
-  `match` arm caused `attempt to index a nil value (global 'MUTATION_TABLE')`.
+### A2. Inelegance #7 — BFS expansion logic duplicated ~5×
 
-  **Root cause:** `MUTATION_TABLE` was declared as a `local` at line 1828 in
-  `compiler/parser.lua`, but `parse_match_expr` was defined at line 1226. Without a
-  forward declaration, `MUTATION_TABLE` inside the function resolved to the global
-  (nil), crashing on any IDENT-valued arm body.
+`runtime/search.lua` has five BFS/Dijkstra variants (`can_reach`, `find_path`,
+`probability`, `optimal_path`, plus the verify pass internal BFS). Each has a slightly
+different data payload (priority / path / probability / cost) and queue mechanism
+(FIFO / heap / yield). **Deferred:** extracting a shared helper would require a messy
+callback strategy and add more complexity than it removes. Revisit if a sixth variant
+is needed or if a perf hot-spot emerges.
 
-  **Fix:** Added `local MUTATION_TABLE` forward declaration before `parse_match_expr`
-  and changed the assignment from `local MUTATION_TABLE = {` to `MUTATION_TABLE = {`.
-  Also fixed a secondary double-skip bug: mutation handlers call `skip_to_eol()`
-  internally (consuming the NEWLINE), so the match arm code was double-consuming it
-  and eating the next arm. Fixed with `eol_consumed` flag.
+### A3. Duplicate `fn` declarations silently shadow ✅ Done 2026-05-14
 
-  `nil` arm values correctly return Lua nil at runtime via the existing
-  `call_fn("nil")` → `nil` special-case in `eval.lua`.
-  8 regression tests added (4 parser, 4 runtime).
+Resolved by extending `pass1_collect` in `compiler/checker.lua:178-225` to emit
+`DUPLICATE_NAME` for FN, BOUNDED, MACRO, and ACTOR declarations, matching the
+existing pattern for SCENE, TYPE, STATE, and RELATION. See
+[completed.md](completed.md) for full write-up. New tests in
+`tests/compiler/checker_spec.lua` (3 tests).
 
----
+### A4. `spawn!` / `despawn!` into undeclared family passes checker ✅ Done 2026-05-14
 
-## Major Bugs (wrong behaviour, not crash)
+Resolved by adding `pass_check_undefined_families` to `compiler/checker.lua`. The
+new pass walks every fn / scene / schedule / hook body looking for `SPAWN_MUT`
+or `DESPAWN_MUT` nodes and verifies `node.family` is in `symtab.families`,
+emitting `UNDEFINED_FAMILY` (an error code that was already defined in
+`compiler/ast.lua` but unused). See [completed.md](completed.md). New tests in
+`tests/compiler/checker_spec.lua` (5 tests).
 
-- [x] **Bug #10 — `let x = expr:` scoped-body form is broken.** *(fixed 2026-05-12)*
-  The spec documents `let x = value: body` as a scoped binding form. When the binding
-  value ended with a bare identifier, the lexer tokenised `identifier:` as a single
-  `NAMED_ARG` token, consuming the colon. The parser never saw the `:` and fell into the
-  multi-binding continuation loop, emitting a confusing error.
+### A5. `runtime/random.lua` mutates the global Lua RNG state ✅ Done 2026-05-14
 
-  **Fix (Option A):** In `compiler/parser.lua:parse_let_value`, after calling `parse_expr`,
-  check `p.tokens[p.pos - 1]`. If the last consumed token was a `NAMED_ARG`, set
-  `colon_done = true` — the colon was already consumed by the lexer as part of that token.
-  4 regression tests added (single-binding bare-ident case, expression-ending-with-ident
-  case, path/expr case that already worked, multi-binding case).
+Resolved by replacing `runtime/random.lua` with a per-instance PCG32 generator and
+removing all `math.random` fallbacks across `runtime/eval.lua`, `runtime/search.lua`,
+`cli/cli_cmd.lua`, and `cli/repl_cmd.lua`. See [completed.md](completed.md) for full
+write-up. New tests: `tests/runtime/random_spec.lua`.
 
-- [x] **Bug #11 — `match` without wildcard silently returns `nil`; downstream `set!` silently
-  unsets the path.** *(fixed 2026-05-13)*
-  When a `match` expression has no `_:` wildcard arm and the subject matches no arm, the
-  expression returns `nil` with no warning. If the result is then stored with `set!`, the
-  target path is silently unset — it disappears from state and shows as blank in narration.
-  The checker does not warn on incomplete matches.
+### A6. `%.14g` truncates doubles + breaks on Inf/NaN in save formats ✅ Done 2026-05-14
 
-  Example:
-  ```
-  type Class = warrior | mage | rogue | ranger
+Resolved by adding `M.fmt_number` to `runtime/log.lua` (handles NaN, ±Infinity,
+integers ≤ 2^53, and other floats via `%.17g`) and replacing all six `%.14g` call
+sites. See [completed.md](completed.md) for full write-up. New tests:
+`tests/runtime/fmt_number_spec.lua`.
 
-  fn class-damage:
-    let dmg = match player/class:
-      `warrior: 15
-      `mage:    10
-      `rogue:   12
-      # ranger unhandled — returns nil silently
-    set! player/damage dmg   # unsets player/damage when class = `ranger
-  ```
+### A7. `verify` swallows `requires:` evaluation errors ✅ Done 2026-05-14
 
-  **Options:**
-  - **A (runtime):** In `eval_match` (`runtime/eval.lua`), after all arms fail and the
-    result would be `nil`, emit a runtime warning via `engine/emit` or `io.stderr` naming
-    the match location and subject value. Low cost.
-  - **B (checker):** In `compiler/checker.lua`, during `pass2_check`, detect `MATCH_EXPR`
-    nodes over typed enum subjects and warn `INCOMPLETE_MATCH` when no `_:` arm is present
-    and not all enum values are covered. This catches the issue at compile time.
-  - **C:** Combine A and B. Checker warns, runtime warns in dev mode.
-  - **D (spec-compatible):** Treat unhandled match as a compile error, not warning. The
-    spec is silent on this but making it an error would be safest. Possibly too strict.
+Resolved by distinguishing pcall error from false-result in `runtime/verify.lua`
+for three clauses: `requires:` (line 381), `when:` (line 447), and `from-any-state`
+condition (line 469). Errors now surface as `{pass=false, fail_msg="requires
+clause errored: ..."}` instead of being silently treated as "skip". See
+[completed.md](completed.md). New tests in `tests/runtime/verify_spec.lua` (3 tests).
 
-  Recommended: **B** (checker warning). Add `INCOMPLETE_MATCH` to `ast.E`, emit in
-  `pass2_check` for MATCH_EXPR over named enum types.
+### A8. `runtime/debug.lua` emits invalid JSON for ±Infinity ✅ Done 2026-05-14
 
-- [x] **Bug #12 — Non-lambda `find where:` predicate returns all entities unfiltered.** *(fixed 2026-05-13)*
-  When a plain expression (not a lambda) is passed to `where:` in a `find`/`count`
-  expression, the condition is not applied per-entity — all members of the family are
-  returned regardless. Only the lambda form correctly binds the entity variable:
+Resolved by extending the NaN check in `runtime/debug.lua:1414` to also catch
+`math.huge` and `-math.huge`. All three now emit JSON `null`. See
+[completed.md](completed.md). New tests in `tests/runtime/debug_spec.lua` (4 tests).
 
-  ```
-  # BROKEN — ignores the condition, returns all enemies:
-  find enemies where: enemies/{e}/status = `alive
+### A9. Reversibility annotation not transitive ✅ Done 2026-05-14
 
-  # CORRECT — filters as expected:
-  find enemies where: fn(e): enemies/{e}/status = `alive
-  ```
+Resolved by extending `pass3c_check_reversible` to do a DFS over the call graph
+with cycle detection. For every fn, the pass first records its direct
+irreversible witness (if any) and its list of user-fn callees; then for each
+`[reversible]`-tagged fn it traces forward until either a witness is reached
+(error, with a chain like `'foo' → 'bar' → 'baz' contains 'clear!'`) or all
+paths come up clean. See [completed.md](completed.md). New tests in
+`tests/compiler/checker_spec.lua` (5 tests).
 
-  The spec (§15.2) shows the non-lambda form as valid syntax with implicit variable binding.
+### A10. `--serve` exposes arbitrary code execution via the debug `eval` command
 
-  **Root cause:** In `runtime/query.lua:M.find`, the `where` clause handler checks whether
-  the condition is a lambda and, if so, calls it with the entity key. For a plain expression,
-  it evaluates the expression once (without binding the entity key variable) and uses that
-  single boolean result for all entities.
+`runtime/debug.lua`'s `POST /command` endpoint accepts an `eval` command that compiles
+and runs arbitrary StoryBase source against the live game. With `--serve`, the HTTP
+listener binds to `0.0.0.0:7374` (the default in `cli/main.lua`), so anyone on the
+host's network can execute code. Acceptable for `--debug` on a developer machine,
+not acceptable for any `--serve` deployment.
 
-  **Fix:** When the `where` condition is a plain expression node (not a lambda), evaluate it
-  once per entity inside a child context that binds the entity variable name (the family
-  variable from the `find` clause) to the current entity key. The family variable name is
-  available from the `FIND_EXPR` node. Update `query.lua:M.find` to inject this binding
-  for non-lambda `where` predicates. Add tests in `tests/runtime/query_spec.lua`.
+**Recommended fix:**
+1. Bind `--serve` (and `--debug`) to `127.0.0.1` by default. Add `--bind <addr>` to
+   opt in to broader exposure.
+2. Gate the `eval` command behind a `--debug` flag (or a separate `--allow-eval`).
+   `--serve` should serve a game, not provide a REPL.
 
-- [x] **Bug #13 — REPL unusable when `entry-scene` is a computed-goto scene.** *(fixed 2026-05-12)*
-  The common pattern of a `main:` scene that dispatches via `-> (match player/location: ...)`
-  means the REPL starts in that scene, which has no choices. `:choices` shows
-  "(no choices)" and the REPL is stuck — there is no command to follow a goto.
+**Files to touch:** `runtime/debug.lua` (socket bind, command dispatch),
+`cli/main.lua` (flag parsing + defaults), `tests/runtime/debug_http_spec.lua`.
 
-  **Fix:** In `cli/repl_cmd.lua`, after `eng:init()`, follow any unconditional navigation
-  signal produced by `eng:render_scene(entry)` — i.e., advance through computed gotos until
-  a scene with displayable choices is reached, exactly as `engine:step()` does. This is a
-  small change mirroring the existing `nav_signal` handling in `engine:step`.
+### A11. `--ui <name>` accepts arbitrary module paths
 
----
+`cli/main.lua` does `require("cli.drivers." .. ui_name)` with no whitelist. A
+crafted `--ui ../../foo` would attempt to load arbitrary Lua modules from
+`package.path`. Low impact (the attacker already has CLI access) but still wrong.
 
-## Silent Failure Hazards
+**Fix:** whitelist `{plain = true, ansi = true, narrate = true}` (extend as drivers
+land); error with the list of valid drivers otherwise.
 
-These produce no error at compile or runtime, making the resulting bugs very difficult to
-locate. All five are high-priority from an authoring-experience perspective.
+**Files to touch:** `cli/main.lua`, `tests/cli/drivers_spec.lua`.
 
-- [x] **SF-1 — Zero-arg undefined function calls silently return a string.** *(fixed 2026-05-13)*
-  A typo in a zero-argument call — `move-too` instead of `move-to` — returns the string
-  `"move-too"` instead of raising an error. State is unchanged and the game continues as if
-  nothing happened. This is documented in `runtime/eval.lua:call_fn` as a "known limitation"
-  because zero-arg calls are lexically indistinguishable from bare identifiers (variable
-  reads, relation names, enum values) passed as arguments to builtins.
+### A12. BFS state hash non-deterministic for Float values ✅ Done 2026-05-14
 
-  **Options:**
-  - **A:** After compilation, the checker knows all user-defined function names. In
-    `eval.lua:call_fn`, if `#args == 0` and the name is not in `ctx.vars`, not in
-    `BUILTINS`, not in `ctx.game.bounded`, and not in `ctx.fns`, emit a runtime warning
-    (in dev mode) before returning the string. A name in any of those tables is a valid
-    non-function use; anything else is suspicious.
-  - **B:** In `compiler/checker.lua pass2_check`, when a `FN_CALL` node with 0 args
-    appears in a statement position (not as a fn-argument), check whether the name resolves
-    to a declared function. If not, emit `UNDEFINED_FN` warning. This is a compile-time
-    catch but harder to implement (need to distinguish statement-position calls from
-    bare-identifier uses without full type inference).
-  - **C:** No fix — document the limitation clearly. Lowest cost, lowest value.
+Resolved by introducing a `fmt_hash_val` helper in `runtime/search.lua` that
+formats `number` values with `%.17g` before concatenation, leaving other types
+on plain `tostring`. This also collapses `1` vs `1.0` to a single hash bucket
+so semantically-equal states no longer inflate the BFS frontier. `hash_state`
+is now exposed as `M._hash_state` for testing. See [completed.md](completed.md).
+New tests in `tests/runtime/search_spec.lua` (5 tests).
 
-  Recommended: **A** (dev-mode runtime warning). Small change to `eval.lua`.
+### A13. 37 stray `*.lua.tmp.PID.MS` files in repo ✅ Done 2026-05-14
 
-- [x] **SF-2 — Invalid enum values assigned without error.** *(fixed 2026-05-13)*
-  `set! player/status \`zombie` succeeds silently when `Status = alive | dead`. The
-  illegal value is stored in state and displayed. No compile-time or runtime check exists.
+Resolved: added `*.tmp.*` to `.gitignore`, `git rm --cached`'d all 31 tracked
+tmp files, and `rm`'d the 47 working copies (count had grown since the audit).
+See [completed.md](completed.md).
 
-  **Options:**
-  - **A (runtime, dev mode):** In `runtime/state.lua:store:set`, when the path has a
-    declared enum type in the schema, validate the incoming value against the declared
-    values and emit a warning (or error in strict mode) if it is not a member. The schema
-    is available via `store._schema`.
-  - **B (checker):** In `compiler/checker.lua`, when a `SET_MUT` assigns a `SYMBOL_LIT`
-    to a typed path, check that the symbol is a valid member of the path's enum type. This
-    is feasible for static paths but harder for interpolated paths (`npcs/{npc}/status`).
-  - **C:** Combine A and B. Checker catches static cases; runtime catches dynamic ones.
+### A14. `runtime/counterfactual.lua` is a dead 6-line stub ✅ Done 2026-05-14
 
-  Recommended: **A** first (cheap, catches all cases), then **B** to move detection earlier.
+Resolved: deleted the file and removed it from `cli/bundle_cmd.lua`'s
+`BUNDLE_MODULES` list (which had referenced it as `"runtime.counterfactual"`
+and silently failed to load it in bundled output). Also removed the section
+from `code_map.md`. See [completed.md](completed.md).
 
-- [x] **SF-3 — Writes to undefined state paths silently no-op.** *(fixed 2026-05-13)*
-  `set! player/nonexistent-field 5` compiles cleanly and does nothing at runtime — no log
-  entry, no error, no warning. The same applies to `inc!`, `dec!`, `add!`, etc.
+### A15. `code_map.md` line-count annotations are stale ✅ Done 2026-05-14
 
-  **Fix (runtime, dev mode):** In `runtime/state.lua:store:set` (and `inc`, `dec`, etc.),
-  check whether the target path matches any declared state schema key (prefix-match for
-  family paths). If not, emit a warning in dev mode. The schema paths are available from
-  `store._schema.states`. Add a dev-mode flag check so production builds are unaffected.
+Resolved: refreshed all 32 stale line-count annotations against current source
+file sizes. See [completed.md](completed.md).
 
-- [x] **SF-4 — Transitions to undefined scenes silently end the game.** *(fixed 2026-05-13)*
-  `-> ghost-town` when `ghost-town` is not declared now emits `[WARN] goto undefined scene: 'ghost-town'`
-  in dev mode. Same for `=>` (enter_scene). Both `goto_scene` and `enter_scene` in
-  `runtime/engine.lua` check `self._scenes[name]` and emit via `_print_sink` (or stderr
-  when no sink is set). Warning suppressed when `production = true`.
-  Checker-side (AV-2) was already resolved 2026-05-13.
-  7 regression tests added (engine_spec).
+### A16. Missing test coverage ✅ Done 2026-05-14
 
-- [ ] **SF-5 — `set!` on a `let`-bound variable silently misfires.**
-  `let i = 0; set! i (i + 1)` writes to a state PATH named `"i"` (which likely doesn't
-  exist), not to the local variable `i`. The local var `i` is never updated. In a while
-  loop, this produces an infinite loop that hits the 10,000-iteration safety limit:
+Resolved by adding six new spec files and extending three existing ones,
+covering every gap listed in the audit. Two bugs surfaced during test
+writing and were fixed alongside:
 
-  ```
-  fn count-to-5:
-    let i = 0
-    while i < 10:       # reads local var i = 0 always
-      set! i (i + 1)    # writes to state path "i", not local var
-      when i >= 5:
-        break           # never fires
-  ```
+- `compiler/types.lua:53` — operator-precedence bug in the `list` case
+  (`(ty.elem_size or 0 + 1) ^ max` parsed as `(elem_size or 1) ^ max`).
+  Fixed to `((ty.elem_size or 0) + 1) ^ max`.
+- `cli/migrate_cmd.lua:92,94` — `has_errors` was an implicit global, which
+  could leak between `M.run` calls in the same process. Made local.
 
-  There is no language mechanism to mutate a `let` binding. The workaround is to use
-  a dedicated state path as the counter. This is by design, but authors coming from
-  imperative languages will hit this repeatedly.
+New files:
 
-  **Options:**
-  - **A (compile-time error/warning):** In `checker.lua`, when a `SET_MUT` node targets
-    a single-segment path (no `/`) that matches a name bound in an enclosing `let`, emit
-    a warning `LET_VAR_MUTATION` explaining that `let` bindings are immutable and `set!`
-    is writing to a state path, not the local variable.
-  - **B (runtime warning):** In `eval.lua:eval_stmt` for `SET_MUT`, before writing to
-    state, check whether the path is a bare identifier that exists in `ctx.vars`; if so,
-    emit a dev-mode warning.
-  - **C (language change):** Introduce a `mut!` or `set-local!` primitive for local
-    variable mutation. This is a larger spec/language change and should not be done without
-    explicit decision.
+- `tests/compiler/types_spec.lua` (30 tests) — full coverage of
+  `state_space_size` across all kinds.
+- `tests/compiler/compiler_spec.lua` (16 tests) — pipeline orchestrator
+  short-circuit behaviour, `parse_and_check`, `compile_file` /
+  `parse_and_check_file` file errors, `opts.production` pass-through,
+  import cycle / missing-file resolution.
+- `tests/cli/check_cmd_spec.lua` (6 tests) — clean / missing / syntax /
+  semantic / multi-error paths.
+- `tests/cli/repl_cmd_spec.lua` (16 tests) — drives the REPL with a
+  mocked `io.stdin` and captured stdout/stderr; covers `:help`, `:quit`,
+  `:scene`, `:state`, `:choices`, fn invocation, save/load round-trip,
+  unknown command, blank lines, expression eval.
+- `tests/cli/migrate_cmd_spec.lua` (11 tests) — usage errors, compile
+  failure, no-migrations short-circuit, version-match short-circuit,
+  successful migration, `--out` flag, corrupt save, missing save, and a
+  regression guarding the `has_errors`-global bug.
+- `tests/cli/verify_cmd_spec.lua` (7 tests) — usage / file errors,
+  compilation failure, no verify blocks, passing verify, failing verify,
+  summary counts.
 
-  Recommended: **A** (checker warning). Simple to implement, catches the error at compile
-  time without changing language semantics.
+Extensions:
+
+- `tests/runtime/scheduler_spec.lua` (+4 tests) — multi-axis `at:`
+  (both axes must reach targets), multi-axis at: deregister,
+  multi-axis `every:`, and cancel-during-tick (sibling cancel +
+  log-entry emission + unknown-schedule no-op).
+- `tests/runtime/migrate_spec.lua` (+4 tests) — non-atomic mid-chain
+  failure (documents that earlier migrations have already mutated the
+  cache when a later block is missing), missing-version chain stop,
+  defaulted save-version-1 happy path, defaulted save-version match.
+- `tests/lib/storybase_spec.lua` (+15 tests) — save/load error paths
+  (unwritable, missing directory, missing file, corrupt Lua, returns nil,
+  round-trip), `register_bounded` handler error / wrong-type / nil /
+  unregistered, `on("mutation")` event delivery (set! / inc!, fn name in
+  payload, multiple listeners, raising listener does not block others).
+
+Suite total: **2512 successes / 0 failures / 2 pending** (was 2401).
 
 ---
 
-## Compile-Time Validation Gaps
+## B. Authoring UX — Make the Latent Power Visible
 
-The checker validates types and structure but does not cross-validate names across
-declaration categories. All four of these allow structural errors to compile cleanly.
+The engine already computes things authors can't see. These surface them.
 
-- [x] **AV-1 — Undefined function calls pass the checker.** *(fixed 2026-05-13)*
-  `fn example:` calling `undefined-fn arg` compiles without error. The checker does not
-  resolve function names against the declared function table. Add a pass that walks all
-  `FN_CALL` nodes and reports `UNDEFINED_FN` for names not in `symtab.fns`, `BUILTINS`,
-  `symtab.bounded`, or a set of built-in operator names (`min`, `max`, `str`, etc.).
-  Zero-arg calls are ambiguous (see SF-1) and should be warned separately.
+### B1. State-graph explorer (browser debug UI)
 
-- [x] **AV-2 — Undefined scene transition targets pass the checker.** *(fixed 2026-05-13)*
-  `-> undefined-scene` and `=> undefined-scene` compile cleanly. Add a check in pass 2:
-  for `SCENE_GOTO` and `SCENE_ENTER` nodes whose target is a string literal (not a computed
-  expression), verify the target name exists in `symtab.scenes`. Emit `UNDEFINED_SCENE`.
-  Also verify that `entry-scene` in `engine-config` names a declared scene.
+**Goal:** Render the reachable state graph that `verify-always` already builds. Click a
+node → see scene name + state cache snapshot. Click an edge → see the choice that
+triggered the transition. Dead-ends, unreachable scenes, and soft-locks become
+obvious at a glance — probably the single most demonstrative feature of the
+language's premise.
 
-- [x] **AV-3 — Invalid enum literal values pass the checker.** *(fixed 2026-05-13)*
-  `set! player/status \`zombie` (where `Status = alive | dead`) compiles cleanly. In pass 2,
-  when a `SET_MUT` or `ADD_MUT` assigns a `SYMBOL_LIT` to a path whose declared type is a
-  named enum (resolvable via `symtab.states` → `symtab.types`), check that the symbol is a
-  member of that enum. Emit `INVALID_ENUM_VALUE`. Covers static paths; interpolated paths
-  (`npcs/{npc}/status`) cannot be checked statically but the runtime check in SF-2 covers
-  those.
+**Design sketch:**
+- New debug command `get-state-graph {depth: N, scene: name?}` returns nodes
+  `[{id, scene, cache_hash, cache_summary, terminal?}]` and edges
+  `[{from, to, choice_label, choice_index, fn}]`.
+- Backend uses `runtime/search.lua`'s BFS but emits the full expansion tree (not just
+  the answer to a question). Reuse `hash_cache` for node IDs.
+- Frontend renders with a force-directed layout (e.g. d3-force or cytoscape — pull in
+  as a CDN script, no build step). Embed into `HTML_UI` in `runtime/debug.lua`.
+- Highlight current state node live; pulse on `mutation` events.
 
-- [x] **AV-4 — Reads/writes to undeclared state paths pass the checker.** *(fixed 2026-05-13)*
-  `player/nonexistent-field` in any read or write position compiles cleanly. In pass 2,
-  for every `PATH_EXPR` and `INTERP_PATH` node, resolve the path prefix against
-  `symtab.states` and `symtab.families`. If no declared state covers this path, emit
-  `UNDEFINED_PATH` warning (warning not error, to allow partial schemas and forward refs
-  in multi-file games). Exclude query patterns (`*`, `**`, `|`) from the check. This is
-  the most complex of the four validation gaps; tackle after AV-1 through AV-3.
+**Files:** `runtime/search.lua` (export expansion API), `runtime/debug.lua` (new HTTP
+command + UI panel), `tests/runtime/debug_spec.lua`. Add a `graph.html` panel
+selectable from the existing UI tab strip.
+
+**Edge cases / scope:** Cap graph size (default `depth: 6`, `max-nodes: 5000`); time
+budget. For larger games, offer a "from current state, depth: 3" mode. Don't try to
+solve graph layout for `> 1000` nodes — provide a tree-view fallback.
+
+**Acceptance:** Run `--debug` on `demo08_probability_engine.sb`, open the Graph tab,
+see the full BFS expansion. Clicking a node shows its scene+cache. Identifying an
+unreachable choice in a real demo is the success criterion.
+
+### B2. Counterexample minimisation
+
+**Goal:** When a `verify-always` fails, the current counterexample is *a* failing
+state. What authors want is the *shortest action sequence* that reaches it.
+
+**Design sketch:**
+- After `verify.lua:run_all` records a `counterexample`, post-process to find the
+  minimum-length prefix path that still reaches a failing state, then apply
+  delta-debugging on the choice sequence: drop one transition at a time and re-verify
+  the failing predicate at the resulting endpoint.
+- Use the existing log/replay infrastructure to re-execute candidate shorter paths
+  deterministically.
+
+**Files:** `runtime/verify.lua` (post-process step), `cli/verify_cmd.lua` (pretty-print
+minimised path), `tests/runtime/verify_spec.lua` (new tests).
+
+**Edge cases:** Bound the shrinking work by time budget. Some verify failures are
+intrinsically long-path; in that case report "minimum length found in budget: N".
+
+**Acceptance:** A deliberately-broken demo where the counterexample path is 20 steps
+is reduced to ≤ 5 steps by the shrinker.
+
+### B3. Trace scrubber (browser debug UI)
+
+**Goal:** The debug UI already supports `time-travel`; add a draggable timeline
+scrubber and a per-tick diff panel ("between t=37 and t=38, these 5 paths changed").
+
+**Design sketch:**
+- New HTTP command `get-tick-diff {from, to}` returns
+  `[{path, value_at_from, value_at_to, fn}]` by walking log entries between two seqs
+  (cheap given `query_at` already supports this).
+- UI: timeline strip at top (one cell per tick), drag to scrub; diff panel below shows
+  the deltas at the current tick.
+
+**Files:** `runtime/debug.lua` (command + UI), `tests/runtime/debug_spec.lua`.
+
+**Acceptance:** On `demo08`, scrubbing through the timeline visibly highlights the
+changed paths at each tick.
+
+### B4. Coverage report
+
+**Goal:** `storybase coverage game.sb` walks the BFS frontier (configurable depth)
+and reports which scenes, fns, and choices the search exercises and which it does
+not. Combined with `verify` runs, flag "this scene is unreachable" or "this fn has
+no covering verify."
+
+**Design sketch:**
+- New CLI subcommand `coverage`. Reuses `runtime/search.lua` BFS infrastructure but
+  instruments scene-entry / fn-call counts in `runtime/eval.lua` via a hook (similar
+  to `_mutation_hook`).
+- Outputs: per-scene visit count, per-fn call count, list of declared-but-unreached
+  entities, percentage coverage.
+- Optional `--format json` for CI integration.
+
+**Files:** new `cli/coverage_cmd.lua`, hook in `runtime/eval.lua`, integration in
+`cli/main.lua`, `tests/cli/coverage_spec.lua`.
+
+**Acceptance:** Running `storybase coverage demos/demo01_wanderer.sb` reports 100%
+scene coverage at modest depth; introducing a deliberately-unreachable scene flags it.
+
+### B5. Auto-docs site
+
+**Goal:** All declarations already carry doc strings (§18.4). Generate a static HTML
+reference per game — types, state schema, fn signatures with pre/post contracts, scene
+graph diagram, verify status. Currently the LSP hover is the only consumer of doc
+strings.
+
+**Design sketch:**
+- New CLI subcommand `docs`. Walks the typed AST (already used by `extract-symbols`
+  and the LSP), groups by kind, emits per-page HTML.
+- Optional flag `--format md` for Markdown output.
+- Reuses scene graph visualisation from §B1 for one of the pages.
+
+**Files:** new `cli/docs_cmd.lua`, an HTML template, `tests/cli/docs_spec.lua`.
+
+**Acceptance:** Running `storybase docs demos/demo20_harrow_house.sb -o docs_out/`
+produces a navigable site with one page per declaration kind plus a home page.
 
 ---
 
-## Authoring Ergonomics
+## C. Higher-Order Tests Beyond `verify`
 
-- [x] **AE-13 — Integer division yields floats in narration.** *(fixed 2026-05-13)*
-  `player/health / 2` evaluates to `50.0` (Lua number division), which renders as "50.0"
-  in narration. This looks unprofessional in game output.
+### C1. `test` blocks (lighter sibling of `verify`)
 
-  **Fix applied (Option C):** `val_to_display` in `runtime/eval.lua` now checks whether a
-  float value has no fractional part and formats it with `%d` (no ".0"). Purely
-  presentational; semantics unchanged. 3 regression tests added to `eval_spec.lua`.
+**Goal:** `verify-always` is BFS-heavy. Add a lighter mechanism for scripted assertions
+that authors will actually use day-to-day.
 
-- [x] **AE-14 — Compiler warnings repeat on every `storybase run`.** *(fixed 2026-05-13)*
-  Warnings from the compile pass (e.g. `WRITE_UNTYPED_VAR`, `SUPERFICIAL_IN_COND`) are
-  printed every time `storybase run` is invoked. During development this makes output very
-  noisy and obscures actual game output.
+**Design sketch (syntax):**
+```
+test "buy potion works":
+  setup:
+    set! player/gold 100
+  run:
+    buy-item `health-potion 40
+  expect:
+    player/gold = 60
+    contains? player/inventory `health-potion
+```
 
-  **Fix applied:** Added `--quiet` flag to `storybase run`. When set, warnings are suppressed
-  on stderr; errors still print unconditionally. `quiet` added to `BOOL_FLAGS`; both short
-  and long help text updated. 4 regression tests added to `cli_integration_spec.lua`.
+- New top-level declaration `TEST_DECL` parsed by `compiler/parser.lua`.
+- Codegen emits a `tests = [...]` array on the game table.
+- New runtime entry point `tests.run_all(game_table)` in `runtime/tests.lua` runs each
+  test in a fresh state, applies setup mutations, runs the body (transaction fns
+  allowed), evaluates each `expect:` clause.
+- CLI: `storybase test game.sb` (parallel to existing `verify` subcommand).
+- Stripped in production builds, same mechanism as `verify`.
 
-- [x] **AE-15 — `find` result cannot be used inline as a `set!` argument.** *(fixed 2026-05-13)*
-  Single-line `(find family where: fn(e): cond count)` already worked. The bug was
-  specifically with **multi-line** find inside parens:
-  ```
-  set! world/count (find enemies
-    where: fn(e): enemies/{e}/alive
-    count)
-  ```
-  Inside `()` the lexer emits NEWLINE tokens between continuation lines but no INDENT/DEDENT.
-  The parser's find handler saw NEWLINE → no INDENT → undid the NEWLINE consume, leaving
-  the where:/count clauses unparsed and returning `find enemies` with no clauses.
+**Files:** new AST kind in `compiler/ast.lua`; `compiler/parser.lua` parser entry;
+`compiler/codegen.lua` emitter; new `runtime/tests.lua`; new `cli/test_cmd.lua`;
+`tests/compiler/parser_spec.lua` + `tests/runtime/tests_spec.lua`.
 
-  **Fix:** In `compiler/parser.lua`, in the "NEWLINE, no INDENT" else branch of the find
-  handler: instead of always undoing, skip newlines and check whether the next token is a
-  valid find clause (NAMED_ARG or `count`). If yes, call `parse_find_clauses_inline(true)`
-  which skips newlines between clause iterations. If no clauses found, still restore position.
-  The `newline_skip` parameter was added to `parse_find_clauses_inline()`.
-  6 regression tests added (3 parser_spec, 3 query_spec runtime).
+**Edge cases:** Tests share game table but each runs in a fresh `state.new`. Disallow
+`engine/checkpoint!` and other engine-state mutations in `setup:`.
 
-- [x] **AE-16 — REPL gets stuck in computed-goto entry scenes.** *(fixed 2026-05-12 with Bug #13)*
-  Same root cause as Bug #13; fix also covers the `:choose` command which now calls
-  `game:advance_to_choices()` after each choice execution.
+**Acceptance:** A test suite for `demos/demo02_merchant.sb` written entirely in
+`test` blocks; runs in under a second; produces busted-style pass/fail report.
 
-- [x] **AE-17 — No integer-division operator / floor division.** *(fixed 2026-05-13)*
-  Added four arithmetic builtins to `runtime/eval.lua` and `compiler/checker.lua`:
-  - `int-div a b` → `math.floor(a / b)` (floor integer quotient)
-  - `floor n` → `math.floor(n)` (round toward −∞)
-  - `ceil n` → `math.ceil(n)` (round toward +∞)
-  - `mod a b` → `a % b` (floor-division remainder; sign matches divisor — same as Python)
+### C2. Property / fuzz mode
 
-  `mod` uses Lua's `%` operator which is already floor-division remainder (Python sign
-  convention): `-7 mod 3 = 2`, `7 mod -3 = -2`.
-  11 regression tests added (eval_spec).
+**Goal:** `storybase fuzz game.sb --runs 10000 --seed-from N` random-walks the choice
+tree, asserts every declared `verify` invariant on every step, and surfaces any path
+that violates one. The transaction log gives perfect repro for free.
+
+**Design sketch:**
+- New CLI subcommand `fuzz`. For each run, fresh state, pick choices uniformly (or by
+  declared weight if a choice carries a `weight:` annotation — small spec extension),
+  execute up to `--steps N`. After every step, evaluate all `verify-always`
+  predicates; on failure, save the log + seed + step index to a `failures/` directory.
+- Replay any failure with `storybase run --load failures/run123.log`.
+
+**Files:** new `cli/fuzz_cmd.lua`. Reuses `runtime/engine.lua` with a fake driver that
+selects randomly. Add `tests/cli/fuzz_spec.lua`.
+
+**Acceptance:** Fuzz `demo08` for 1000 runs; if a `verify` predicate fails, the saved
+log + seed reproduces the exact failure under `storybase run --load …`.
+
+### C3. Temporal-logic verify
+
+**Goal:** Today's `verify-always` is a single-state check. Add temporal operators
+(`eventually`, `always-eventually`, `until`) to express "after picking up the key,
+the door eventually unlocks" — currently inexpressible.
+
+**Design sketch:**
+- Minimal CTL subset: `EF p` (eventually p reachable), `AG p` (always globally p —
+  same as current `verify-always`), `AF p` (on every path, p eventually holds),
+  `p AU q` (on every path, p until q).
+- Syntax: `verify-eventually p depth: N`, `verify-always-eventually p depth: N`,
+  `verify p until q depth: N`.
+- Backend: implement via nested BFS over the state graph from `runtime/search.lua`.
+  `EF p` is just `can-reach? p` (already exists). `AF p` requires reverse BFS from
+  failing states. `p AU q` is the standard CTL fixpoint.
+
+**Files:** `runtime/search.lua` (new analyses), `runtime/verify.lua` (new clause
+kinds), `compiler/parser.lua` (new keywords), `compiler/codegen.lua`,
+`tests/runtime/search_spec.lua`, `tests/runtime/verify_spec.lua`.
+
+**Edge cases:** AF and AU explode the search space; require explicit `depth:`. Time
+budget enforcement.
+
+**Acceptance:** A demo where `verify-eventually quest-complete?` holds; modifying the
+game to remove the quest-completion path makes the verify fail with a counterexample.
+
+### C4. Cached / incremental verify
+
+**Goal:** Verify currently runs from scratch every CI cycle. Hash the AST of each
+verify block + the transitively-reached fns; persist verdicts in
+`.storybase-cache/verify.json`. Skip blocks whose hash is unchanged.
+
+**Design sketch:**
+- For each verify block: collect all fns referenced (transitively) by the verify
+  body and by every `fn` that mutates a path the verify reads. Hash the AST
+  subtree.
+- Cache key: `{verify_label, hash, schema_version}`. Value: `{verdict, states_checked,
+  cex?}`.
+- `cli/verify_cmd.lua` consults cache before running each block.
+- `--no-cache` flag to force re-run.
+
+**Files:** `cli/verify_cmd.lua`, `compiler/checker.lua` (transitive-call analysis —
+may need new pass), `tests/cli/verify_cache_spec.lua`.
+
+**Acceptance:** Run verify, edit a non-verify fn, run verify again — only affected
+blocks re-execute.
 
 ---
 
-## Spec / Documentation Divergence
+## D. LLM-Bridged Authoring
 
-- [x] **SD-1 — `find` block syntax in spec uses bare `where` keyword; implementation
-  requires `where:` NAMED_ARG.** *(fixed 2026-05-13, Option A)*
-  Updated `idea.md` to match the actual parser syntax:
-  - §15.2 example and clause table: `where:`, `order-by:`, `limit:` (with colons)
-  - §15.2 note: non-lambda `where: condition` correctly binds entity variable (Bug #12 fix)
-  - §21.2 counterfactual example: `where:` with colon
-  - §25 hostile-nearby? example: two `where:` clauses (AND-ed) instead of bare `where...and`
-  - §24 stdlib table: added `int-div`, `mod`, `floor`, `ceil`
-  No code changes; Bug #12 already handled the runtime fix.
+### D1. LLM-bounded handler standard module
+
+**Goal:** `bounded` already exists as a discrete-typed escape hatch to Lua. Ship a
+standard handler that calls an LLM with structured-output constrained to the declared
+`returns:` enum. This is probably the most distinctive use of the architecture: the
+discrete/superficial split lets LLMs supply *content* while StoryBase keeps *logic*
+deterministic and replayable.
+
+**Design sketch (author API):**
+```
+bounded npc-mood npc:
+  returns:      Mood
+  distribution: uniform
+  reads:        [player/disposition-toward/{npc}, npcs/{npc}/recent-events]
+  lua:          "storybase.llm.classify"
+```
+
+Runtime calls Claude/OpenAI with the perception snapshot + the type's enum values as
+a JSON-schema-constrained response. The model must return one of the enum values.
+Result is logged exactly like a `random-int` draw → deterministic replay.
+
+**Design sketch (Lua side):**
+- New module `lib/llm.lua` exporting `M.classify(arg, state_snapshot, type_info)`.
+- Provider abstraction: `M.set_provider(fn)` where `fn(prompt, schema) → value`.
+- Default provider reads `STORYBASE_LLM_PROVIDER` env var; built-in adapters for
+  Anthropic and OpenAI (via luasocket / luasec — already a dep for `--debug`).
+- The bounded codegen path already passes `state_snapshot`; extend it to also pass the
+  `returns:` type descriptor so `llm.classify` can build the schema constraint.
+
+**Files:** new `lib/llm.lua`, hook in `runtime/eval.lua:call_bounded`, optional
+`lib/llm_anthropic.lua` and `lib/llm_openai.lua` thin adapters, `docs/howto/llm.md`,
+`tests/lib/llm_spec.lua` (with a mock provider — no live API calls in CI).
+
+**Edge cases:**
+- Latency: optionally async via a job-queue model; for now synchronous is acceptable.
+- Cost: log all calls; provide `--no-llm` for offline/CI runs (falls back to uniform
+  random over the enum).
+- Replay: the recorded result re-plays the same value without re-calling the LLM.
+- Security: LLM output validated against the enum before being logged.
+
+**Acceptance:** A demo (call it `demo22_llm_innkeeper.sb`) where an innkeeper's mood
+is classified by an LLM, drives discrete branching, and replays deterministically
+from a saved log without re-calling the API.
+
+### D2. `narrate` LLM driver
+
+**Goal:** Symmetric to D1: a driver that asks an LLM to expand terse author lines
+into prose at runtime, with the discrete state passed in as structured context. Logic
+stays in StoryBase; prose stays in the LLM.
+
+**Design sketch:**
+- Author writes scene narration with optional `~expand` markers:
+  `~expand The shopkeeper greets you.`
+- The driver receives the line plus the current state snapshot; calls the LLM with a
+  prompt template; receives expanded prose; renders it.
+- A second mode: `--ui narrate` replaces every narration line with an LLM expansion
+  given the bare scene name and current state — turn a 100-line StoryBase game into
+  a richly-described experience without changing the source.
+
+**Files:** new `cli/drivers/narrate.lua`. Reuses `lib/llm.lua` from D1.
+
+**Acceptance:** Running `storybase run --ui narrate demo01_wanderer.sb` produces
+on-the-fly prose for every scene, varying between runs (recorded for replay).
+
+---
+
+## E. Built-in Patterns Every Game Reinvents
+
+Three patterns appear in every nontrivial demo. They deserve first-class syntax. None
+require new runtime primitives — these are parser-level desugarings.
+
+### E1. `quest` declarations
+
+**Goal:** Every game ends up hand-rolling steps + prereqs + completion + rewards.
+Surface this as first-class so the search engine can automatically check "every
+declared ending is reachable" and "no quest is softlocked once started" — emergent
+power, not new runtime features.
+
+**Design sketch:**
+```
+quest find-the-crown:
+  description: "Recover the lost crown of Erith."
+  prereq:      player/has-key
+  step talk-to-king:
+    => talk-king
+  step explore-dungeon:
+    requires: contains? player/inventory `torch
+    => dungeon
+  step retrieve-crown:
+    requires: contains? player/inventory `crown
+  reward:
+    inc!  player/gold 500
+    add!  player/quest-flags `crown-recovered
+```
+
+Compiles to: a `state quests/{q}/status: QuestStatus`-style family, scene-entry/exit
+hooks, helper fns `quest-active? q`, `quest-step-complete? q s`. Auto-emit verify
+blocks: "quest find-the-crown is reachable to completion."
+
+**Files:** AST extension in `compiler/ast.lua`; parser entry; codegen desugars to
+existing constructs; `compiler/checker.lua` cross-validates step references; new
+docs page.
+
+**Acceptance:** A demo using `quest` syntax produces the same runtime behaviour as
+the hand-rolled equivalent and auto-emits a verify proving the quest is completable.
+
+### E2. `dialog` blocks
+
+**Goal:** Demo20 hand-rolls `state asked:` flags, re-entry semantics, and
+"already-said" branches. Surface as first-class.
+
+**Design sketch:**
+```
+dialog blacksmith-talk:
+  speaker: blacksmith
+  reentry: from talk-blacksmith
+  topic family-history once:
+    "I came here as a boy."
+    -> reply
+  topic deliver-ore when: contains? player/inventory `iron-ore:
+    "You brought the ore. Excellent."
+    deliver-ore
+  topic farewell always:
+    "Farewell, traveller."
+    <-
+```
+
+Compiles to a scene + `state asked/blacksmith-talk/{topic}: Bool` + conditional
+choices. `once` topics auto-set the flag after entry; `always` topics never set;
+`when:` adds a guard.
+
+**Files:** AST/parser/codegen analogous to E1. Hook in scene rendering.
+
+**Acceptance:** Re-implement the dialog portion of `demo20_harrow_house.sb` using
+`dialog` blocks at roughly 1/3 the line count.
+
+### E3. `inventory` and `stat` mixins
+
+**Goal:** `Set(ItemKind, 10)` is the de-facto inventory pattern; hand-written
+`give!`, `take!`, `has?`, `count-of` are common. Same for stat blocks with
+base + modifiers + clamped derived values.
+
+**Design sketch:**
+```
+inventory player/inventory:
+  contents: ItemKind
+  max:      10
+  # auto-generated: give! / take! / has? / inventory-size / inventory-empty?
+
+stat player/health:
+  base:    Int(0, 100) = 100
+  buffs:   Set(BuffKind, 4) = (set)
+  derived: base + (buff-bonus buffs)
+```
+
+Compiles to existing primitives.
+
+**Files:** AST/parser/codegen extensions. New stdlib helpers for buff stacking.
+
+**Acceptance:** Replace `Set(ItemKind, 10)` boilerplate in three demos with
+`inventory` declarations; resulting tests pass.
+
+---
+
+## F. Procedural Content & Endings
+
+### F1. `generate` blocks (seed-deterministic procedural content)
+
+**Goal:** A `generate` block that runs once at session start, seeded by the RNG,
+to procedurally build state (random map layouts, item placement). Because everything
+goes through `spawn!` / `relate!` / the log, the generated world is automatically
+saveable, replayable, and visible to `verify`. Pair with
+`verify-always "every room reachable from start"` and you get *proven-solvable*
+roguelike layouts.
+
+**Design sketch:**
+```
+generate world-map seed: world/seed:
+  let room-count = (random-int 8 12):
+    for i in (range 0 room-count):
+      spawn! rooms (str "r" i) Room(...)
+    for i in (range 0 (room-count - 1)):
+      relate! exits (str "r" i) (str "r" (i + 1))
+```
+
+- Parser recognises `generate <name> seed: <path>:` as a top-level decl.
+- Runtime calls all `generate` blocks at `engine:init()` after `init_defaults`, before
+  `entry-scene` dispatch.
+- All mutations go through the log as normal; replay reconstructs the world.
+
+**Files:** AST/parser/codegen; engine init order in `runtime/engine.lua`; new
+`runtime/random.lua` `range` helper if not present; `tests/runtime/generate_spec.lua`.
+
+**Edge cases:** `generate` must be pure with respect to the RNG (no I/O). Seed must
+be set before generate runs. Re-running `generate` on reload is *not* the right
+default — emit a warning.
+
+**Acceptance:** A demo with a procedurally generated 10-room dungeon that replays
+identically from a saved log, and where `verify "all rooms reachable"` passes.
+
+### F2. `ending` declarations
+
+**Goal:** `ending name: when cond` — verifiable for reachability and mutual
+exclusivity; displayable in the auto-doc graph from §B5.
+
+**Design sketch:**
+```
+ending good when: world/chapter = `finale and player/status = `alive:
+  "You return to the village a hero."
+
+ending bad when: player/status = `dead:
+  "Your story ends in the dungeon."
+```
+
+Auto-emits verify blocks: "ending good is reachable" and "no two endings reachable
+simultaneously."
+
+**Files:** AST/parser/codegen; new `ENDING_DECL` kind; auto-verify generation.
+
+**Acceptance:** A demo with three endings produces three auto-generated verify
+blocks all of which pass.
+
+---
+
+## G. Reach Beyond Lua
+
+### G1. Web/JS compilation target
+
+**Goal:** Bundle currently produces self-contained Lua. A JS target would let
+authored games run in the browser without a Lua install. The runtime is mostly pure
+Lua tables and a tight engine loop — feasible via Fengari (Lua-in-JS) as a stopgap,
+or a hand-written transpiler for production.
+
+**Design sketch (phased):**
+- **Phase 1 (Fengari shim):** Bundle output already self-contained — wrap with
+  Fengari and a minimal HTML host page. New flag `storybase bundle --target web`
+  produces a single `.html` with embedded game.
+- **Phase 2 (native JS codegen):** Translate the game-table runtime modules to
+  JavaScript. The runtime modules don't use any Lua-specific quirks beyond tables,
+  closures, and metatables — translatable. The compiler stays in Lua.
+
+**Files:** `cli/bundle_cmd.lua` extension; new `cli/web_assets/` for HTML/JS shim;
+documentation.
+
+**Acceptance:** `storybase bundle --target web demo01_wanderer.sb` produces a single
+`.html` file that runs the demo in any modern browser.
+
+### G2. HTTP API mode (stateless `/step`)
+
+**Goal:** Distinct from existing `--serve` (which is stateful, browser-driven, one
+game per process). Add a stateless POST `/step` taking `{save_log, choice_index}` and
+returning `{narration, choices, save_log, done}`. Lets chatbots, Discord bots, web
+frontends consume games without managing a process per session.
+
+**Design sketch:**
+- New CLI mode `storybase serve-api game.sb --port 8080`.
+- POST `/step`: deserialise the input log, replay to current state, apply choice,
+  return new log + scene render.
+- Save log is the entire session state — clients hold it; server is stateless.
+
+**Files:** new `cli/serve_api_cmd.lua`. Reuse the existing HTTP server from
+`runtime/debug.lua`. `tests/cli/serve_api_spec.lua`.
+
+**Edge cases:** Log size grows with session length — provide a `compact` option in
+the API. Auth: out-of-scope; document as "place behind a reverse proxy."
+
+**Acceptance:** A Python or JS client can POST a sequence of choices and complete
+`demo01_wanderer.sb` end to end without any persistent state on the server.
+
+### G3. Engine adapters (Löve2D, Godot, etc.)
+
+**Goal:** StoryBase as the logic layer; host engine handles graphics, audio,
+input. The driver abstraction added in 2026-05-02 already proves this is possible
+in-process.
+
+**Design sketch:** Document and stabilise the `driver` interface (already implemented
+for `plain` / `ansi` / `narrate`). Write reference adapters:
+- Löve2D: in-process; LuaSocket already a dep.
+- Godot: out-of-process via the §G2 HTTP API.
+- Defold: same as Godot.
+
+**Files:** new `docs/howto/adapters.md`; reference adapter projects in
+`examples/adapters/`.
+
+**Acceptance:** A Löve2D project that consumes a StoryBase game and renders it with
+sprites + audio.
+
+---
+
+## H. Smaller Language / Runtime Polish
+
+### H1. Goal-directed actors
+
+**Goal:** Today's actors are purely reactive (perceives → behavior body). Let them
+declare a `goal: cond` and use the existing `runtime/search.lua` BFS internally to
+pick the action that moves toward the goal. Makes "intelligent" NPCs without
+hand-written heuristics.
+
+**Design sketch:**
+```
+actor scout:
+  state:     npcs/scout
+  perceives: [...]
+  goal:      contains? scout/inventory `intel
+  actions:   [move-to, search-room, return-base]
+  priority:  10
+```
+
+The runtime, instead of calling a `behavior:` fn, runs a depth-bounded search in the
+perception-filtered state space using the declared `actions:` as transitions; picks
+the action that minimises distance to the goal.
+
+**Files:** `runtime/actors.lua` extension; new `actor_decl` field `goal:` / `actions:`
+in AST/parser; codegen; `tests/runtime/actors_goal_spec.lua`.
+
+**Edge cases:** Bound search depth (default 3). Cache plans across ticks when state
+hasn't changed.
+
+**Acceptance:** A demo NPC successfully navigates a 6-room maze toward a goal item
+without any imperative behavior code.
+
+### H2. Diff-mode hot reload
+
+**Goal:** Hot reload already works for schema (add/remove fields). Extend to *body*
+edits where the *log* is re-played against the new fn bodies — let an author edit
+`take-damage` and instantly see how a past playthrough would have differed.
+
+**Design sketch:**
+- On reload command: if no schema changes, re-execute the log against the new fn
+  table from a fresh `state.new`, producing a divergence report
+  `[{tick, path, old_value, new_value}]`.
+- Optional: switch to the new playthrough state, or stay on the old one and show
+  side-by-side.
+
+**Files:** `runtime/debug.lua` reload command extension; new HTTP command
+`get-replay-diff`; UI panel in browser debug.
+
+**Acceptance:** Save a 50-tick playthrough; edit `take-damage` to halve damage;
+reload; observe the divergence report listing every health-related tick where the
+new playthrough diverges.
+
+### H3. Strategy synthesis (on top of `optimal-path`)
+
+**Goal:** Today `optimal-path` returns one trace. Extend to synthesise a *strategy*
+(state → action map) that wins against worst-case random outcomes — i.e., a winning
+policy under adversarial / probabilistic transitions.
+
+**Design sketch:**
+- Min-max search over the existing state graph; "max" nodes are player choices,
+  "min" nodes are random / actor / scheduler transitions.
+- Return: a `Strategy` value mapping reached states to recommended choices, plus an
+  expected outcome.
+
+**Files:** `runtime/search.lua` new function `synthesise-strategy`. Parser entry as a
+new builtin. Tests.
+
+**Edge cases:** State-space explosion; require explicit depth / time budget.
+
+**Acceptance:** On a stochastic demo (e.g. dice-based combat), the synthesised
+strategy beats a uniform-random policy in 1000 sampled rollouts.
+
+### H4. Inventory / dialog / quest stubs as separate from §E
+
+(Cross-reference to §E1–E3 — if those land first, this section folds into them.)
+
+---
+
+## Notes for future agents
+
+- The architecture (transaction log + discrete types + perception filtering) is the
+  source of the project's leverage. Every feature in this backlog uses one of those
+  three pillars; resist proposals that bypass them.
+- The driver abstraction (`cli/drivers/`) and the debug protocol (`runtime/debug.lua`)
+  are the right extension points for new presentation/IO modalities.
+- `runtime/search.lua` and `runtime/verify.lua` are the right extension points for
+  new analyses.
+- New top-level declarations follow a stable pattern: AST kind → parser entry →
+  codegen emitter → game-table consumer. See §6 of `idea.md` and the `quest`/`dialog`
+  sketches in §E for templates.
+- All new features must add per-feature tests under `tests/` and update `code_map.md`.
+- Update `idea.md` whenever syntax is added; update `docs/reference/language.md`
+  whenever semantics change.

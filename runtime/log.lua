@@ -179,6 +179,28 @@ end
 -- Module-level serialise / deserialise helpers
 -- ============================================================
 
+--- Format a Lua number as a Lua literal that round-trips exactly.
+--- Handles NaN, ±Infinity, and integers vs floats:
+---   * NaN          → "(0/0)"
+---   * +Infinity    → "math.huge"
+---   * -Infinity    → "-math.huge"
+---   * Integer ≤ 2^53 → "%d" (no decimal point, no scientific notation)
+---   * Other floats → "%.17g" (sufficient for IEEE 754 double round-trip)
+--- Previously this module used "%.14g" which truncated precision and emitted
+--- the literal strings "inf"/"nan" for special values — both of which fail to
+--- `load()` on deserialisation.
+---@param v number
+---@return string
+function M.fmt_number(v)
+  if v ~= v then return "(0/0)" end                     -- NaN
+  if v ==  math.huge then return "math.huge"  end
+  if v == -math.huge then return "-math.huge" end
+  if v == math.floor(v) and math.abs(v) < 2^53 then
+    return string.format("%d", v)                       -- integer
+  end
+  return string.format("%.17g", v)                      -- general float
+end
+
 --- Render a Lua runtime value as a Lua literal string.
 --- Handles: nil, boolean, number, string, array-table, hash-table.
 ---@param v any
@@ -189,8 +211,7 @@ local function ser_val(v)
   elseif type(v) == "boolean" then
     return tostring(v)
   elseif type(v) == "number" then
-    -- Use %.14g to preserve precision; avoids scientific notation for integers
-    return string.format("%.14g", v)
+    return M.fmt_number(v)
   elseif type(v) == "string" then
     -- Escape backslash, double-quote, and control characters
     local escaped = v
@@ -318,7 +339,7 @@ function M.serialise_snapshot(seq, cache, time)
     elseif type(v) == "boolean" then
       parts[#parts + 1] = tostring(v)
     elseif type(v) == "number" then
-      parts[#parts + 1] = string.format("%.14g", v)
+      parts[#parts + 1] = M.fmt_number(v)
     elseif type(v) == "string" then
       parts[#parts + 1] = string.format("%q", v)
     elseif type(v) == "table" then
@@ -330,7 +351,7 @@ function M.serialise_snapshot(seq, cache, time)
         for i = 1, n do
           local x = v[i]
           if type(x) == "string" then ap[i] = string.format("%q", x)
-          elseif type(x) == "number" then ap[i] = string.format("%.14g", x)
+          elseif type(x) == "number" then ap[i] = M.fmt_number(x)
           elseif type(x) == "boolean" then ap[i] = tostring(x)
           else ap[i] = "nil" end
         end
@@ -342,7 +363,7 @@ function M.serialise_snapshot(seq, cache, time)
           local ks = "[" .. string.format("%q", tostring(k)) .. "]"
           local vs
           if type(val) == "string" then vs = string.format("%q", val)
-          elseif type(val) == "number" then vs = string.format("%.14g", val)
+          elseif type(val) == "number" then vs = M.fmt_number(val)
           elseif type(val) == "boolean" then vs = tostring(val)
           else vs = "nil" end
           mp[#mp + 1] = ks .. "=" .. vs

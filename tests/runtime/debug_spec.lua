@@ -80,6 +80,28 @@ describe("debug: JSON encoder", function()
     assert.truthy(result:find('"event":"mutation"'))
     assert.truthy(result:find('"path":"player/gold"'))
   end)
+
+  -- JSON has no representation for NaN or ±Infinity. Lua's tostring on these
+  -- values would emit "inf"/"-inf"/"nan" — invalid JSON that browser SSE
+  -- clients silently drop. We coerce all three to JSON null.
+  it("encodes NaN as null", function()
+    assert.equal("null", debug_mod.encode_json(0/0))
+  end)
+
+  it("encodes +Infinity as null", function()
+    assert.equal("null", debug_mod.encode_json(math.huge))
+  end)
+
+  it("encodes -Infinity as null", function()
+    assert.equal("null", debug_mod.encode_json(-math.huge))
+  end)
+
+  it("encodes Infinity inside nested structures as null", function()
+    local result = debug_mod.encode_json({ rate = math.huge, name = "x" })
+    -- Output must be valid JSON: no bare "inf" anywhere.
+    assert.is_nil(result:find("inf"))
+    assert.truthy(result:find('"rate":null'))
+  end)
 end)
 
 -- ============================================================

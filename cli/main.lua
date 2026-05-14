@@ -58,6 +58,7 @@ Options (compile / run):
 Options (run):
   --save <path>               Save game log to <path> on exit
   --load <path>               Load game log from <path> before starting
+  --quiet                     Suppress compiler warnings (errors still shown)
   --debug                     Start TCP debug server + browser UI (ports 7373/7374)
   --serve                     Like --debug, but browser drives the game (no stdin)
   --http-port N               Override the HTTP UI port (default: debug-port + 1)
@@ -134,7 +135,7 @@ local function diag_summary(diags)
 end
 
 -- Flags that are boolean (do not consume the next token as a value).
-local BOOL_FLAGS = { production = true, auto = true, debug = true, serve = true, reset = true }
+local BOOL_FLAGS = { production = true, auto = true, debug = true, serve = true, reset = true, quiet = true }
 
 --- Parse a flat argument list into {flags, positional}.
 --- Flags are --name or --name value pairs; positional are the rest.
@@ -241,7 +242,13 @@ local function cmd_run(args)
 
   local compile_opts = { production = (flags["production"] == true) }
   local game_table, diags = compiler.compile_file(filepath, compile_opts)
-  print_diags(diags, run_source_map)
+  if flags["quiet"] then
+    -- Suppress warnings; errors still printed unconditionally
+    local errors_only = { all = diags.errors or {}, errors = diags.errors or {}, warnings = {} }
+    print_diags(errors_only, run_source_map)
+  else
+    print_diags(diags, run_source_map)
+  end
   if diags:has_errors() then
     io.stderr:write("Compilation failed; cannot run.\n")
     return 1
@@ -452,6 +459,7 @@ storybase run [options] <file>
     --seed N       Fix the random seed for reproducible runs
     --save <path>  Save the game log to <path> on exit
     --load <path>  Load a saved game log from <path> before starting
+    --quiet        Suppress compiler warnings (errors still shown)
     --auto         Auto-play: always select choice 1 until game ends
     --steps N      Auto-play for at most N turns (implies --auto)
     --ui <name>    UI driver: plain (default) or ansi (ANSI colour)

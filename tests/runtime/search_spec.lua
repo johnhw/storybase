@@ -1411,3 +1411,81 @@ scene result:
     assert.is_true(reached, "BFS must not collapse distinct UMap states; bob goal must be reachable")
   end)
 end)
+
+-- ============================================================
+-- A12 — Float values hash deterministically in BFS state dedup
+-- ============================================================
+
+describe("search hash_state — A12: deterministic float hashing", function()
+
+  local hash_state = search_mod._hash_state
+
+  it("treats integer-valued floats and integers as the same state", function()
+    -- Before the A12 fix, tostring(1) → "1" and tostring(1.0) → "1.0", so two
+    -- semantically-equal caches hashed differently and BFS would visit both,
+    -- inflating the frontier. With %.17g formatting they collapse.
+    local h_int   = hash_state({ ["world/x"] = 1   }, { "main" })
+    local h_float = hash_state({ ["world/x"] = 1.0 }, { "main" })
+    assert.are.equal(h_int, h_float)
+  end)
+
+  it("produces the same hash for an identical state cache (idempotent)", function()
+    local cache = {
+      ["world/x"]      = 0.1,
+      ["world/y"]      = 42,
+      ["world/items"]  = { "a", "b", "c" },
+      ["world/scores"] = { alice = 80, bob = 95 },
+    }
+    -- Two independent hashes of the same cache must agree.
+    assert.are.equal(
+      hash_state(cache, { "main" }),
+      hash_state(cache, { "main" })
+    )
+  end)
+
+  it("distinguishes states that differ only in a float value", function()
+    local h1 = hash_state({ ["world/x"] = 0.1 }, { "main" })
+    local h2 = hash_state({ ["world/x"] = 0.2 }, { "main" })
+    assert.is_not.equal(h1, h2)
+  end)
+
+  it("formats floats with enough precision to distinguish near-equal values", function()
+    -- Two doubles that differ only in the 16th significant digit must still
+    -- hash differently. With %.14g (the old default for tostring) these would
+    -- collide; with %.17g they don't.
+    local h1 = hash_state({ ["world/x"] = 0.1 + 1e-16 }, { "main" })
+    local h2 = hash_state({ ["world/x"] = 0.1         }, { "main" })
+    -- (0.1 + 1e-16) might round to 0.1 at double precision — in that case
+    -- both hashes collapse, which is correct (the values *are* equal). What
+    -- we really care about is that distinct representable doubles don't
+    -- collide. Use values guaranteed to differ:
+    local a = 0.1
+    local b = math.nextafter and math.nextafter(0.1, 1.0) or (0.1 + 1e-16)
+    if a ~= b then
+      local ha = hash_state({ ["world/x"] = a }, { "main" })
+      local hb = hash_state({ ["world/x"] = b }, { "main" })
+      assert.is_not.equal(ha, hb)
+    end
+  end)
+
+  it("hashes UMap values deterministically across re-orderings", function()
+    -- pairs() iteration order over the UMap is non-deterministic in Lua;
+    -- hash_state sorts subkeys to compensate. Verify that an identical UMap
+    -- always produces the same hash regardless of insertion order.
+    local cache_a = { ["world/m"] = {} }
+    cache_a["world/m"].alice = 1
+    cache_a["world/m"].bob   = 2
+    cache_a["world/m"].carol = 3
+
+    local cache_b = { ["world/m"] = {} }
+    cache_b["world/m"].carol = 3
+    cache_b["world/m"].alice = 1
+    cache_b["world/m"].bob   = 2
+
+    assert.are.equal(
+      hash_state(cache_a, { "main" }),
+      hash_state(cache_b, { "main" })
+    )
+  end)
+
+end)

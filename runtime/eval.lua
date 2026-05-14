@@ -97,13 +97,22 @@ local K = {
 -- Context helpers
 -- ============================================================
 
+-- Module-level lazy require for the PCG RNG. We can't require at top of file
+-- because runtime.random doesn't yet exist when eval.lua is first parsed in
+-- some bundling scenarios; lazy-load on first ctx creation.
+local _random_mod
+
 --- Create a new evaluation context.
+--- Always allocates a fresh per-context PCG RNG so that calls to random-* never
+--- touch Lua's global math.random state. Engine-driven eval contexts overwrite
+--- this with the engine's logged RNG via engine:make_ctx.
 ---@param state   table   runtime.state instance
 ---@param fns     table   game_table.fns
 ---@param fn_name string  current function name (for log)
 ---@param game    table?  compiled game table (for can-reach? etc.)
 ---@return table
 function M.new_ctx(state, fns, fn_name, game)
+  _random_mod = _random_mod or require("runtime.random")
   return {
     state      = state,
     fns        = fns or {},
@@ -114,6 +123,7 @@ function M.new_ctx(state, fns, fn_name, game)
     retval     = nil,
     game       = game,
     engine_ref = nil,  -- set by engine:make_ctx; used for engine/ pseudo-paths
+    rng        = _random_mod.new(),  -- replaced by engine's logged rng when present
   }
 end
 
@@ -872,8 +882,7 @@ local BUILTINS = {
       local v = ctx.game._random_inject(lo, hi)
       if v ~= nil then return v end
     end
-    if ctx.rng then return ctx.rng:int(lo, hi) end
-    return math.random(lo, hi)
+    return ctx.rng:int(lo, hi)
   end,
   ["random-bool"] = function(args, ctx)
     local p = (args[1] and eval_expr(args[1], ctx)) or 0.5
@@ -882,8 +891,7 @@ local BUILTINS = {
       local v = ctx.game._random_inject(0, 1)
       if v ~= nil then return v == 1 end
     end
-    if ctx.rng then return ctx.rng:bool(p) end
-    return math.random() < p
+    return ctx.rng:bool(p)
   end,
   ["random-enum"] = function(args, ctx)
     -- arg[1] is the enum type name (bare ident evaluates to its string name)
@@ -913,8 +921,7 @@ local BUILTINS = {
       local v = ctx.game._random_inject(0, #values - 1)
       if v ~= nil then return values[v + 1] end
     end
-    if ctx.rng then return ctx.rng:enum(values) end
-    return values[math.random(1, #values)]
+    return ctx.rng:enum(values)
   end,
   ["random-choice"] = function(args, ctx)
     local list = eval_expr(args[1], ctx)
@@ -923,8 +930,7 @@ local BUILTINS = {
       local v = ctx.game._random_inject(0, #list - 1)
       if v ~= nil then return list[v + 1] end
     end
-    if ctx.rng then return ctx.rng:choice(list) end
-    return list[math.random(1, #list)]
+    return ctx.rng:choice(list)
   end,
   ["random-weighted"] = function(args, ctx)
     local weights = eval_expr(args[1], ctx)
@@ -935,21 +941,7 @@ local BUILTINS = {
       local v = ctx.game._random_inject(0, #list - 1)
       if v ~= nil then return list[v + 1] end
     end
-    if ctx.rng then return ctx.rng:weighted(weights, list) end
-    -- Fallback: weighted selection without rng (no logging)
-    if type(weights) == "table" and #weights == #list then
-      local total = 0
-      for _, w in ipairs(weights) do total = total + (type(w) == "number" and w or 0) end
-      if total > 0 then
-        local r = math.random() * total
-        local cum = 0
-        for i, w in ipairs(weights) do
-          cum = cum + (type(w) == "number" and w or 0)
-          if r <= cum then return list[i] end
-        end
-      end
-    end
-    return list[math.random(1, #list)]
+    return ctx.rng:weighted(weights, list)
   end,
   ["tostring"] = function(args, ctx)
     return tostring(eval_expr(args[1], ctx))

@@ -176,16 +176,52 @@ local function pass1_collect(acc, symtab, program)
       end
 
     elseif kind == k.FN_DECL then
-      if node.name then symtab.fns[node.name] = node end
+      if node.name then
+        if symtab.fns[node.name] then
+          err(acc, ast.E.DUPLICATE_NAME,
+            "fn '" .. node.name .. "' already declared",
+            node.pos,
+            "previous declaration at line " .. symtab.fns[node.name].pos.line)
+        else
+          symtab.fns[node.name] = node
+        end
+      end
 
     elseif kind == k.BOUNDED_DECL then
-      if node.name then symtab.bounded[node.name] = node end
+      if node.name then
+        if symtab.bounded[node.name] then
+          err(acc, ast.E.DUPLICATE_NAME,
+            "bounded '" .. node.name .. "' already declared",
+            node.pos,
+            "previous declaration at line " .. symtab.bounded[node.name].pos.line)
+        else
+          symtab.bounded[node.name] = node
+        end
+      end
 
     elseif kind == k.MACRO_DECL then
-      if node.name then symtab.macros[node.name] = node end
+      if node.name then
+        if symtab.macros[node.name] then
+          err(acc, ast.E.DUPLICATE_NAME,
+            "macro '" .. node.name .. "' already declared",
+            node.pos,
+            "previous declaration at line " .. symtab.macros[node.name].pos.line)
+        else
+          symtab.macros[node.name] = node
+        end
+      end
 
     elseif kind == k.ACTOR_DECL then
-      if node.name then symtab.actors[node.name] = node end
+      if node.name then
+        if symtab.actors[node.name] then
+          err(acc, ast.E.DUPLICATE_NAME,
+            "actor '" .. node.name .. "' already declared",
+            node.pos,
+            "previous declaration at line " .. symtab.actors[node.name].pos.line)
+        else
+          symtab.actors[node.name] = node
+        end
+      end
 
     -- MODULE_DECL, IMPORT_DECL, SCHEMA_VERSION, ENGINE_CONFIG, TIME_MODEL
     -- are informational and need no symbol registration.
@@ -827,34 +863,146 @@ local function find_irreversible(node)
   return nil
 end
 
---- For each fn tagged [reversible], verify no irreversible mutation appears in its body.
+--- Recursively collect every FN_CALL name inside a subtree. Used by the
+--- transitive-call analysis below. Duplicated locally because the
+--- `collect_fn_calls` defined further down depends on declarations not yet
+--- available at this point in the file.
+local function collect_fn_calls_local(node, result)
+  if not node or type(node) ~= "table" then return end
+  if node.kind == ast.K.FN_CALL and node.name then
+    result[#result+1] = { name = node.name, pos = node.pos }
+  end
+  local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
+                        "clauses", "bindings", "args" }
+  for _, field in ipairs(LIST_FIELDS) do
+    local v = node[field]
+    if type(v) == "table" then
+      if v.kind then
+        collect_fn_calls_local(v, result)
+      else
+        for _, child in ipairs(v) do
+          collect_fn_calls_local(child, result)
+          if type(child) == "table" then
+            if child.guard then collect_fn_calls_local(child.guard, result) end
+            if child.body then
+              if type(child.body) == "table" and not child.body.kind then
+                for _, s in ipairs(child.body) do collect_fn_calls_local(s, result) end
+              else
+                collect_fn_calls_local(child.body, result)
+              end
+            end
+            if child.condition then collect_fn_calls_local(child.condition, result) end
+          end
+        end
+      end
+    end
+  end
+  for _, f in ipairs({ "condition", "expr", "left", "right", "base",
+                       "value", "amount", "inner_expr" }) do
+    collect_fn_calls_local(node[f], result)
+  end
+end
+
+--- For each fn tagged [reversible], verify no irreversible mutation appears in
+--- its body OR in any fn it transitively calls. The transitive check (A9, 2026-05-14)
+--- closes the gap where a reversible fn could call into a helper that did
+--- `clear!` / `send!` / `cancel-schedule!` etc. and pass the checker silently.
 local function pass3c_check_reversible(acc, program)
   local k = ast.K
-  -- Build a map fn_name → fn_decl for call-site checks
+  -- Build a map fn_name → fn_decl
   local fn_map = {}
   for _, node in ipairs(program.decls) do
     if node.kind == k.FN_DECL then fn_map[node.name] = node end
   end
 
-  for _, node in ipairs(program.decls) do
-    if node.kind ~= k.FN_DECL then goto continue end
+  -- For each user fn, precompute (a) the first irreversible mutation in its
+  -- own body, if any; and (b) the list of user fns it directly calls.
+  local direct_witness = {}    -- fn_name → AST node | nil
+  local calls_out      = {}    -- fn_name → [{name, pos}, ...] (only user fns)
+  for fn_name, fn_decl in pairs(fn_map) do
+    local witness = nil
+    for _, stmt in ipairs(fn_decl.body or {}) do
+      witness = find_irreversible(stmt)
+      if witness then break end
+    end
+    direct_witness[fn_name] = witness
+
+    local calls = {}
+    for _, stmt in ipairs(fn_decl.body or {}) do
+      collect_fn_calls_local(stmt, calls)
+    end
+    local user_calls = {}
+    for _, c in ipairs(calls) do
+      if fn_map[c.name] then user_calls[#user_calls+1] = c end
+    end
+    calls_out[fn_name] = user_calls
+  end
+
+  -- DFS over the call graph with cycle detection. Returns a chain
+  --   [{caller, calls?, call_pos?, witness?}, ..., {caller, witness}]
+  -- when an irreversible mutation is reachable; nil if the fn is clean.
+  local memo = {}
+  local function trace(fn_name, on_stack)
+    if memo[fn_name] ~= nil then
+      return memo[fn_name] or nil
+    end
+    if on_stack[fn_name] then
+      -- Recursive cycle; return nil locally so the outer caller can try other
+      -- paths. Do NOT memoise so the answer is computed correctly when this
+      -- fn is reached via a different DFS root.
+      return nil
+    end
+    if direct_witness[fn_name] then
+      local chain = { { caller = fn_name, witness = direct_witness[fn_name] } }
+      memo[fn_name] = chain
+      return chain
+    end
+    on_stack[fn_name] = true
+    for _, c in ipairs(calls_out[fn_name] or {}) do
+      local sub = trace(c.name, on_stack)
+      if sub then
+        local chain = { { caller = fn_name, calls = c.name, call_pos = c.pos } }
+        for _, entry in ipairs(sub) do chain[#chain+1] = entry end
+        on_stack[fn_name] = nil
+        memo[fn_name] = chain
+        return chain
+      end
+    end
+    on_stack[fn_name] = nil
+    memo[fn_name] = false
+    return nil
+  end
+
+  for _, fn_decl in ipairs(program.decls) do
+    if fn_decl.kind ~= k.FN_DECL then goto continue end
     local is_reversible = false
-    for _, tag in ipairs(node.tags or {}) do
+    for _, tag in ipairs(fn_decl.tags or {}) do
       if tag == "reversible" then is_reversible = true; break end
     end
     if not is_reversible then goto continue end
 
-    -- Check body directly
-    for _, s in ipairs(node.body or {}) do
-      local bad = find_irreversible(s)
-      if bad then
-        err(acc, ast.E.IRREVERSIBLE_IN_REVERSIBLE,
-          "fn '" .. (node.name or "?") .. "' is tagged [reversible] but contains '" ..
-          (IRREVERSIBLE_MUT_KINDS[bad.kind] or bad.kind) .. "', which cannot be undone",
-          bad.pos or node.pos)
-        break
+    local chain = trace(fn_decl.name, {})
+    if not chain then goto continue end
+
+    -- Build an error message that reports the full transitive call chain.
+    local final     = chain[#chain]
+    local final_op  = IRREVERSIBLE_MUT_KINDS[final.witness.kind] or final.witness.kind
+    local final_pos = final.witness.pos or fn_decl.pos
+    local msg
+    if #chain == 1 then
+      msg = "fn '" .. fn_decl.name .. "' is tagged [reversible] but contains '"
+            .. final_op .. "', which cannot be undone"
+    else
+      local hops = {}
+      for _, entry in ipairs(chain) do
+        if entry.calls then
+          hops[#hops+1] = "'" .. entry.caller .. "' → '" .. entry.calls .. "'"
+        end
       end
+      msg = "fn '" .. fn_decl.name .. "' is tagged [reversible] but transitively reaches '"
+            .. final_op .. "' via " .. table.concat(hops, ", ")
     end
+    err(acc, ast.E.IRREVERSIBLE_IN_REVERSIBLE, msg, final_pos)
     ::continue::
   end
 end
@@ -2131,6 +2279,83 @@ local function is_mut_path_declared(path_node, path_map, symtab)
   return lookup_path_type(path_node, path_map) ~= nil
 end
 
+-- ============================================================
+-- Pass — Undefined family detection (A4)
+-- ============================================================
+-- `spawn! foo "key" Foo(...)` and `despawn! foo "key"` would previously compile
+-- cleanly even when no `state foo/{...}` family was declared, defeating the
+-- discrete-type invariant. This pass walks every fn/scene/schedule/hook body
+-- looking for SPAWN_MUT or DESPAWN_MUT nodes and verifies their `family` is
+-- in symtab.families.
+local function pass_check_undefined_families(acc, symtab, program)
+  local k = ast.K
+
+  -- Generic statement-tree walker that fires `fn(node)` on every SPAWN_MUT
+  -- and DESPAWN_MUT node. Mirrors the recursion structure of
+  -- walk_mut_with_path so we don't drift if new nesting constructs are added.
+  local function visit(node, hook)
+    if not node or type(node) ~= "table" or not node.kind then return end
+    if node.kind == k.SPAWN_MUT or node.kind == k.DESPAWN_MUT then
+      hook(node)
+    end
+    local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
+                          "clauses", "bindings" }
+    for _, field in ipairs(LIST_FIELDS) do
+      local v = node[field]
+      if type(v) == "table" then
+        for _, child in ipairs(v) do
+          visit(child, hook)
+          if type(child) == "table" then
+            if child.guard then visit(child.guard, hook) end
+            if child.body then
+              if type(child.body) == "table" and not child.body.kind then
+                for _, s in ipairs(child.body) do visit(s, hook) end
+              else
+                visit(child.body, hook)
+              end
+            end
+          end
+        end
+      end
+    end
+    for _, f in ipairs({ "condition", "expr", "left", "right", "base",
+                         "value", "amount", "inner_expr" }) do
+      visit(node[f], hook)
+    end
+  end
+
+  local function check_one(node)
+    local family = node.family
+    if type(family) ~= "string" then return end
+    if symtab.families[family] then return end
+    local op = (node.kind == k.SPAWN_MUT) and "spawn!" or "despawn!"
+    err(acc, ast.E.UNDEFINED_FAMILY,
+      op .. " into undeclared entity family '" .. family .. "'",
+      node.pos,
+      "declare it with: state " .. family .. "/{key}: TypeName")
+  end
+
+  for _, decl in ipairs(program.decls) do
+    local d_kind = decl.kind
+    if d_kind == k.FN_DECL or d_kind == k.SCHEDULE_DECL
+    or d_kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        visit(stmt, check_one)
+      end
+    elseif d_kind == k.SCENE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        visit(stmt, check_one)
+      end
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then visit(choice.guard, check_one) end
+        for _, stmt in ipairs(choice.body or {}) do
+          visit(stmt, check_one)
+        end
+      end
+    end
+  end
+end
+
 local function pass_check_undefined_paths(acc, symtab, program)
   local k        = ast.K
   local path_map = build_path_type_map(program, symtab)
@@ -2798,6 +3023,7 @@ function M.check(ast_root, filename)
   pass_check_undefined_fns(acc, symtab, ast_root)        -- AV-1
   pass_check_scene_targets(acc, symtab, ast_root)        -- AV-2
   pass_check_undefined_read_paths(acc, symtab, ast_root) -- AV-4
+  pass_check_undefined_families(acc, symtab, ast_root)   -- A4
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

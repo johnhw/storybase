@@ -23,6 +23,9 @@
 
 local M = {}
 
+local log_mod = require("runtime.log")
+local fmt_number = log_mod.fmt_number
+
 local CLI_SAVE_VERSION = 1
 
 -- ── Helpers ────────────────────────────────────────────────────
@@ -57,7 +60,7 @@ local function ser_cache(cache)
     elseif t == "boolean" then
       sv = tostring(v)
     elseif t == "number" then
-      sv = string.format("%.14g", v)
+      sv = fmt_number(v)
     elseif t == "string" then
       sv = string.format("%q", v)
     elseif t == "table" then
@@ -65,7 +68,7 @@ local function ser_cache(cache)
       for i, x in ipairs(v) do
         local xt = type(x)
         if xt == "string" then ap[i] = string.format("%q", x)
-        elseif xt == "number" then ap[i] = string.format("%.14g", x)
+        elseif xt == "number" then ap[i] = fmt_number(x)
         elseif xt == "boolean" then ap[i] = tostring(x)
         else ap[i] = "nil" end
       end
@@ -117,7 +120,7 @@ local function ser_grids(grids)
     for i, v in ipairs(g.cells or {}) do
       local t = type(v)
       if t == "string" then cell_parts[i] = string.format("%q", v)
-      elseif t == "number" then cell_parts[i] = string.format("%.14g", v)
+      elseif t == "number" then cell_parts[i] = fmt_number(v)
       elseif t == "boolean" then cell_parts[i] = tostring(v)
       else cell_parts[i] = "nil" end
     end
@@ -357,8 +360,9 @@ function M.run(game_table, save_path, opts)
   end
 
   -- ── Build engine ─────────────────────────────────────────────
-  if opts.seed then math.randomseed(opts.seed) end
-  local eng = engine_mod.new(game_table, { io_out = io_sink })
+  -- Seed is passed through to the engine's per-instance PCG RNG; no global
+  -- math.randomseed mutation here.
+  local eng = engine_mod.new(game_table, { io_out = io_sink, seed = opts.seed })
   eng:register_actors_schedules()
 
   local is_fresh = true

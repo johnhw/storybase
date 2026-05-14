@@ -87,6 +87,7 @@ function M.run(args)
   local migrate_mod = require("runtime.migrate")
   local mdiags = migrate_mod.migrate(
     store._cache, migrations, save_version, game_version, gt)
+  local has_errors = false
   for _, d in ipairs(mdiags.errors or {}) do
     io.stderr:write(string.format("migration error: %s\n", d.message))
     has_errors = true

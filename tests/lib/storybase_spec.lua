@@ -901,3 +901,241 @@ describe("advance_to_choices (Bug #13)", function()
     assert.equal(2, #choices2)
   end)
 end)
+
+-- ============================================================
+-- save / load error paths
+-- ============================================================
+
+describe("game:save / game:load — error paths", function()
+  local SRC_SAVE = [[
+module save-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  count: Int(0, 99) = 0
+fn bump:
+  inc! world/count 1
+scene main:
+  * Go -> main
+]]
+
+  it("save() returns false + error when the path is not writable", function()
+    local g = sb.from_source(SRC_SAVE, "save-test"); g:init()
+    -- Try to write under /proc which is read-only for non-root.  Be
+    -- liberal in what we accept here in case the test runs as root: at
+    -- minimum we want the API contract to return (ok, err) rather than
+    -- raise an error.
+    local ok, err = g:save("/proc/storybase-should-fail-" .. os.time() .. ".sbd")
+    if ok then
+      -- Running as root: the write actually succeeded; clean up.
+      os.remove("/proc/storybase-should-fail-" .. os.time() .. ".sbd")
+    else
+      assert.is_false(ok)
+      assert.is_string(err)
+    end
+  end)
+
+  it("save() returns false + error when the path is in a non-existent directory", function()
+    local g = sb.from_source(SRC_SAVE, "save-test"); g:init()
+    local bad_path = "/tmp/does-not-exist-" .. os.time() .. "/save.sbd"
+    local ok, err = g:save(bad_path)
+    assert.is_false(ok)
+    assert.is_string(err)
+  end)
+
+  it("load() returns false + error when the file is missing", function()
+    local g = sb.from_source(SRC_SAVE, "save-test"); g:init()
+    local ok, err = g:load("/tmp/no-such-save-" .. os.time() .. ".sbd")
+    assert.is_false(ok)
+    assert.is_string(err)
+  end)
+
+  it("load() returns false when the file is not valid Lua", function()
+    local g = sb.from_source(SRC_SAVE, "save-test"); g:init()
+    local bad_path = os.tmpname() .. ".sbd"
+    local f = io.open(bad_path, "w"); f:write("@@@ not lua @@@"); f:close()
+    local ok, err = g:load(bad_path)
+    os.remove(bad_path)
+    assert.is_false(ok)
+    assert.is_string(err)
+    assert.is_truthy(err:find("parse error") or err:find("syntax"))
+  end)
+
+  it("load() returns false when the file returns nil", function()
+    local g = sb.from_source(SRC_SAVE, "save-test"); g:init()
+    local bad_path = os.tmpname() .. ".sbd"
+    -- Valid Lua, returns nil
+    local f = io.open(bad_path, "w"); f:write("return nil"); f:close()
+    local ok, err = g:load(bad_path)
+    os.remove(bad_path)
+    assert.is_false(ok)
+    assert.is_truthy(err:find("nil"))
+  end)
+
+  it("save() then load() round-trips state correctly", function()
+    local g = sb.from_source(SRC_SAVE, "save-test"); g:init()
+    g:call("bump")
+    g:call("bump")
+    assert.equal(2, g:get("world/count"))
+    local path = os.tmpname() .. ".sbd"
+    local ok, _ = g:save(path)
+    assert.is_true(ok)
+
+    -- Mutate further, then load: the count should snap back to 2
+    g:call("bump")
+    assert.equal(3, g:get("world/count"))
+    local ok2, _ = g:load(path)
+    os.remove(path)
+    assert.is_true(ok2)
+    assert.equal(2, g:get("world/count"))
+  end)
+end)
+
+-- ============================================================
+-- register_bounded — handler error / wrong-type returns
+-- ============================================================
+
+describe("game:register_bounded — handler error / wrong-type returns", function()
+  local BOUNDED_ERR_SRC = [[
+module bounded-err
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  luck: Int(0, 100) = 50
+bounded roll-die:
+  reads: [world/luck]
+fn apply-roll:
+  let result = roll-die
+  set! world/luck result
+scene main:
+  * Go -> main
+]]
+
+  it("handler that raises an error does not crash the game", function()
+    local g = sb.from_source(BOUNDED_ERR_SRC, "bounded-err")
+    g:register_bounded("roll-die", function(_, _) error("boom!") end)
+    g:init()
+    assert.has_no_error(function() g:call("apply-roll") end,
+      "engine must not propagate a raised bounded handler error")
+  end)
+
+  it("handler that returns a wrong-type value does not crash the game", function()
+    local g = sb.from_source(BOUNDED_ERR_SRC, "bounded-err")
+    -- Returning a string when an Int is expected.  The runtime may clamp,
+    -- ignore, or warn; we just assert no crash.
+    g:register_bounded("roll-die", function(_, _) return "not a number" end)
+    g:init()
+    assert.has_no_error(function() g:call("apply-roll") end)
+  end)
+
+  it("handler that returns nil does not crash the game", function()
+    local g = sb.from_source(BOUNDED_ERR_SRC, "bounded-err")
+    g:register_bounded("roll-die", function(_, _) return nil end)
+    g:init()
+    assert.has_no_error(function() g:call("apply-roll") end)
+  end)
+
+  it("unregistered bounded falls back gracefully (no Lua error)", function()
+    -- If no handler is registered, the runtime should still not crash.
+    local g = sb.from_source(BOUNDED_ERR_SRC, "bounded-err"); g:init()
+    -- This may produce a warning or set a default; we just assert no crash.
+    assert.has_no_error(function() g:call("apply-roll") end)
+  end)
+end)
+
+-- ============================================================
+-- on("mutation") event delivery
+-- ============================================================
+
+describe('game:on("mutation") event delivery', function()
+  local MUT_SRC = [[
+module mutation-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+schema-version: 1
+state world:
+  count:  Int(0, 99) = 0
+  flag:   Bool       = false
+fn bump:
+  inc! world/count 1
+fn flip:
+  set! world/flag true
+scene main:
+  * Bump
+    bump
+    -> main
+  * Flip
+    flip
+    -> main
+]]
+
+  it("fires for set! mutations through a fn call", function()
+    local g = sb.from_source(MUT_SRC, "mutation-test")
+    assert.is_not_nil(g)
+    g:init()
+    local events = {}
+    g:on("mutation", function(p) events[#events+1] = p end)
+    g:call("flip")
+    -- Exactly one mutation event for world/flag
+    local flag_event = nil
+    for _, e in ipairs(events) do
+      if e.path == "world/flag" then flag_event = e; break end
+    end
+    assert.is_not_nil(flag_event, "expected a mutation event on world/flag")
+    assert.equals(false, flag_event.old)
+    assert.equals(true, flag_event.new)
+  end)
+
+  it("fires for inc! mutations", function()
+    local g = sb.from_source(MUT_SRC, "mutation-test")
+    g:init()
+    local events = {}
+    g:on("mutation", function(p)
+      if p.path == "world/count" then events[#events+1] = p end
+    end)
+    g:call("bump")
+    g:call("bump")
+    assert.equal(2, #events, "expected two mutation events for two bumps")
+    assert.equals(0, events[1].old); assert.equals(1, events[1].new)
+    assert.equals(1, events[2].old); assert.equals(2, events[2].new)
+  end)
+
+  it("delivers fn name in the payload", function()
+    local g = sb.from_source(MUT_SRC, "mutation-test")
+    g:init()
+    local last_fn
+    g:on("mutation", function(p)
+      if p.path == "world/count" then last_fn = p.fn end
+    end)
+    g:call("bump")
+    assert.equals("bump", last_fn,
+      "mutation payload should record the originating fn name")
+  end)
+
+  it("multiple listeners all receive the same mutation event", function()
+    local g = sb.from_source(MUT_SRC, "mutation-test")
+    g:init()
+    local a, b = 0, 0
+    g:on("mutation", function(p) if p.path == "world/count" then a = a + 1 end end)
+    g:on("mutation", function(p) if p.path == "world/count" then b = b + 1 end end)
+    g:call("bump")
+    assert.equals(1, a)
+    assert.equals(1, b)
+  end)
+
+  it("a raising listener does not prevent others from running", function()
+    local g = sb.from_source(MUT_SRC, "mutation-test")
+    g:init()
+    local survived = 0
+    g:on("mutation", function() error("boom") end)
+    g:on("mutation", function() survived = survived + 1 end)
+    assert.has_no_error(function() g:call("bump") end)
+    assert.is_true(survived >= 1,
+      "second listener must still fire after first raises")
+  end)
+end)

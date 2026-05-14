@@ -248,6 +248,146 @@ verify "can afford 30":
 end)
 
 -- ============================================================
+-- verify: errors in requires / when / from-any-state surfaced
+-- ============================================================
+--
+-- Previously, an evaluation error inside a `requires:` clause was caught by
+-- pcall and silently treated as "requires not met" — the block reported as
+-- skipped, the assertion never ran. Same for `when:` filters in
+-- `from-any-state` blocks. A typo or removed-path reference disabled the
+-- verify without anyone noticing.
+
+describe("verify: evaluation errors are surfaced (A7)", function()
+
+  local eval_mod = require("runtime.eval")
+
+  -- Build a minimal compiled game with one requires/after verify block, then
+  -- monkey-patch eval.eval_expr to raise for the requires evaluation.
+  local function with_eval_error_in(fn_name, body)
+    local original = eval_mod.eval_expr
+    local fired = false
+    eval_mod.eval_expr = function(node, ctx)
+      if not fired and ctx and ctx.fn_name == fn_name then
+        fired = true
+        error("synthetic error in " .. fn_name)
+      end
+      return original(node, ctx)
+    end
+    local ok, results = pcall(body)
+    eval_mod.eval_expr = original
+    assert(ok, results)
+    return results
+  end
+
+  it("reports failure when `requires:` evaluation errors (not skipped)", function()
+    local src = [[
+module verify-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 200
+
+fn spend amount:
+  dec! world/gold amount
+
+scene main:
+  * Go
+    -> main
+
+verify "requires errors":
+  requires world/gold >= 100
+  after (spend 30):
+    world/gold = world/gold@before - 30
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local results = with_eval_error_in("verify-requires", function()
+      return verify_mod.run_all(gt)
+    end)
+
+    assert.equals(1, #results)
+    -- Must NOT be silently skipped — that was the bug.
+    assert.is_nil(results[1].skipped)
+    assert.is_false(results[1].pass)
+    assert.is_truthy(results[1].fail_msg,
+      "expected a fail_msg describing the requires error")
+    assert.is_truthy(results[1].fail_msg:find("requires clause errored"),
+      "fail_msg should mention 'requires clause errored', got: "
+        .. tostring(results[1].fail_msg))
+  end)
+
+  it("reports failure when `when:` evaluation errors in from-any-state", function()
+    local src = [[
+module verify-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 0
+
+scene main:
+  * Wait
+    -> main
+
+verify "when errors":
+  when world/gold >= 0:
+  from-any-state:
+    world/gold >= 0
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local results = with_eval_error_in("verify-when", function()
+      return verify_mod.run_all(gt)
+    end)
+
+    assert.equals(1, #results)
+    assert.is_false(results[1].pass)
+    assert.is_truthy(results[1].fail_msg)
+    assert.is_truthy(results[1].fail_msg:find("when clause errored"),
+      "fail_msg should mention 'when clause errored', got: "
+        .. tostring(results[1].fail_msg))
+  end)
+
+  it("distinguishes 'condition errored' from 'condition failed' in from-any-state", function()
+    local src = [[
+module verify-test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 0
+
+scene main:
+  * Wait
+    -> main
+
+verify "from-any-state errors":
+  from-any-state:
+    world/gold >= 0
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+
+    local results = with_eval_error_in("verify-from-any", function()
+      return verify_mod.run_all(gt)
+    end)
+
+    assert.equals(1, #results)
+    assert.is_false(results[1].pass)
+    assert.is_truthy(results[1].fail_msg:find("condition errored"),
+      "fail_msg should distinguish errored from failed, got: "
+        .. tostring(results[1].fail_msg))
+  end)
+
+end)
+
+-- ============================================================
 -- multiple verify blocks
 -- ============================================================
 
