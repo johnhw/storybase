@@ -705,3 +705,219 @@ verify "wrong assertion":
   end)
 
 end)
+
+-- ============================================================
+-- B2: Counterexample minimisation — shrink_path API
+-- ============================================================
+
+describe("verify: shrink_path (B2)", function()
+
+  it("shrink_path is exported from verify_mod", function()
+    assert.is_function(verify_mod.shrink_path)
+  end)
+
+  it("returns a 1-step path unchanged", function()
+    -- gold starts at 5; dec! by 10 clamps to 0 (Int(0,9999)); 0 is NOT > 0 → violation
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  gold: Int(0, 9999) = 5
+fn bust:
+  dec! world/gold 10
+scene main:
+  * Bust
+    bust
+    -> main
+verify "gold positive":
+  verify-always world/gold > 0
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local always_expr = gt.verifies[1].clauses[1].condition
+    local path = { { scene = "main", label = "Bust", index = 1 } }
+    local shrunk, exceeded = verify_mod.shrink_path(gt, path, always_expr, 5.0)
+    assert.equals(1, #shrunk)
+    assert.equals("Bust", shrunk[1].label)
+    assert.is_false(exceeded)
+  end)
+
+  it("shrink_path reduces a redundant multi-step path to its minimum", function()
+    -- [Pass, Pass, Trigger] can be reduced to [Trigger] because Pass is a no-op
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  triggered: Bool = false
+fn trigger:
+  set! world/triggered true
+scene main:
+  * Pass
+    -> main
+  * Trigger
+    trigger
+    -> main
+verify "not triggered":
+  verify-always not world/triggered
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local always_expr = gt.verifies[1].clauses[1].condition
+
+    local long_path = {
+      { scene = "main", label = "Pass",    index = 1 },
+      { scene = "main", label = "Pass",    index = 1 },
+      { scene = "main", label = "Trigger", index = 2 },
+    }
+
+    local shrunk, exceeded = verify_mod.shrink_path(gt, long_path, always_expr, 5.0)
+    assert.is_false(exceeded)
+    assert.equals(1, #shrunk, "expected path reduced to 1 step")
+    assert.equals("Trigger", shrunk[1].label)
+  end)
+
+  it("shrink_path leaves a path unchanged when every step is necessary", function()
+    -- 'Finish' is guarded by world/unlocked; Unlock must come first
+    local src = [[
+engine-config:
+  entry-scene: setup
+state world:
+  unlocked: Bool = false
+  done:     Bool = false
+scene setup:
+  * Unlock
+    set! world/unlocked true
+    -> main
+scene main:
+  * Finish (when world/unlocked)
+    set! world/done true
+    -> main
+verify "not done":
+  verify-always not world/done
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local always_expr = gt.verifies[1].clauses[1].condition
+
+    local path = {
+      { scene = "setup", label = "Unlock", index = 1 },
+      { scene = "main",  label = "Finish", index = 1 },
+    }
+
+    local shrunk, exceeded = verify_mod.shrink_path(gt, path, always_expr, 5.0)
+    assert.is_false(exceeded)
+    assert.equals(2, #shrunk, "both steps are necessary; path must stay at length 2")
+    assert.equals("Unlock", shrunk[1].label)
+    assert.equals("Finish", shrunk[2].label)
+  end)
+
+  it("shrink_path removes the redundant middle step from a 3-step path", function()
+    -- gold starts at 5; Earn→15; Waste→15 (no-op); Bust→0 (clamped, violates >0).
+    -- The Waste step is redundant: [Earn, Bust] produces the same violation.
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  gold: Int(0, 9999) = 5
+fn earn:
+  inc! world/gold 10
+fn waste:
+  inc! world/gold 0
+fn bust:
+  dec! world/gold 20
+scene main:
+  * Earn
+    earn
+    -> main
+  * Waste
+    waste
+    -> main
+  * Bust
+    bust
+    -> main
+verify "gold positive":
+  verify-always world/gold > 0
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local always_expr = gt.verifies[1].clauses[1].condition
+
+    local path = {
+      { scene = "main", label = "Earn",  index = 1 },
+      { scene = "main", label = "Waste", index = 2 },
+      { scene = "main", label = "Bust",  index = 3 },
+    }
+
+    local shrunk, exceeded = verify_mod.shrink_path(gt, path, always_expr, 5.0)
+    assert.is_false(exceeded)
+    assert.is_true(#shrunk <= 2, "shrinker must remove the redundant Waste step")
+    local found_bust = false
+    for _, s in ipairs(shrunk) do
+      if s.label == "Bust" then found_bust = true end
+    end
+    assert.is_true(found_bust, "Bust step must remain in the minimised path")
+  end)
+
+  it("run_all counterexample_path is set for a failing verify-always", function()
+    -- gold=5; Bust clamps to 0; invariant >0 violated in 1 step.
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  gold: Int(0, 9999) = 5
+fn bust:
+  dec! world/gold 10
+scene main:
+  * Bust
+    bust
+    -> main
+verify "gold positive":
+  verify-always world/gold > 0
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+    assert.is_not_nil(results[1].counterexample_path,
+      "counterexample_path must be present")
+    assert.equals(1, #results[1].counterexample_path,
+      "BFS gives the minimum 1-step path [Bust]")
+    assert.equals("Bust", results[1].counterexample_path[1].label)
+    -- Already minimal — shrinker should not populate original_len
+    assert.is_nil(results[1].counterexample_path_original_len,
+      "original_len must be nil when path was not shortened")
+  end)
+
+  it("shrink_path reports a shorter path than the manually supplied overlong one", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  triggered: Bool = false
+fn trigger:
+  set! world/triggered true
+scene main:
+  * Pass
+    -> main
+  * Trigger
+    trigger
+    -> main
+verify "not triggered":
+  verify-always not world/triggered
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+
+    local always_expr = gt.verifies[1].clauses[1].condition
+    local long_path = {
+      { scene = "main", label = "Pass",    index = 1 },
+      { scene = "main", label = "Pass",    index = 1 },
+      { scene = "main", label = "Trigger", index = 2 },
+    }
+    local shrunk, exceeded = verify_mod.shrink_path(gt, long_path, always_expr, 5.0)
+    assert.is_false(exceeded)
+    assert.equals(1, #shrunk, "overlong path should be minimised to 1 step")
+    assert.is_true(#long_path > #shrunk, "caller can detect minimisation via length comparison")
+  end)
+
+end)

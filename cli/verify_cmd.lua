@@ -67,7 +67,16 @@ function M.run(args)
       end
       -- Print counterexample action sequence if available
       if r.counterexample_path and #r.counterexample_path > 0 then
-        io.stdout:write("        Counterexample path:\n")
+        local hdr = "Counterexample path"
+        if r.counterexample_path_original_len then
+          hdr = string.format(
+            "Counterexample path (minimised from %d to %d steps)",
+            r.counterexample_path_original_len, #r.counterexample_path)
+        end
+        if r.counterexample_shrink_budget_exceeded then
+          hdr = hdr .. " [budget exceeded — may not be minimal]"
+        end
+        io.stdout:write("        " .. hdr .. ":\n")
         for step_i, step in ipairs(r.counterexample_path) do
           io.stdout:write(string.format("          %d. [%s] %s\n",
             step_i, step.scene or "?", step.label or "?"))

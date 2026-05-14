@@ -12,8 +12,9 @@ UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) a
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. The 2026-05-14 codebase
 audit backlog (§A3–§A9, §A11–§A16) has fully landed. §C1 (`test` blocks) complete.
+§B2 (counterexample minimisation) complete.
 
-**2571 successes / 0 failures / 2 pending (known limitations).**
+**2579 successes / 0 failures / 2 pending (known limitations).**
 
 The core language and runtime are feature-complete against the V1.0 specification.
 
@@ -34,7 +35,7 @@ impact:
 1. §B1 — State-graph explorer + §B4 coverage report
 2. ~~§C1 — `test` blocks~~ **DONE** — §C2 fuzz mode
 3. §D1 — LLM-bounded handler standard module
-4. §B2 — Counterexample minimisation
+4. ~~§B2 — Counterexample minimisation~~ **DONE**
 5. §E1–E3 — `quest` / `dialog` / `inventory` built-in patterns
 6. §B5 — Auto-docs site
 7. §C3 — Temporal-logic verify
@@ -134,27 +135,26 @@ solve graph layout for `> 1000` nodes — provide a tree-view fallback.
 see the full BFS expansion. Clicking a node shows its scene+cache. Identifying an
 unreachable choice in a real demo is the success criterion.
 
-### B2. Counterexample minimisation
+### B2. Counterexample minimisation — **COMPLETE**
 
-**Goal:** When a `verify-always` fails, the current counterexample is *a* failing
-state. What authors want is the *shortest action sequence* that reaches it.
+**Implemented:** `runtime/verify.lua` exports `M.shrink_path(gt, path, expr, budget_secs)`
+which greedily removes one step at a time (restarting on each successful removal) until
+the path is 1-minimal. The `run_always_check` post-processes every counterexample through
+the shrinker (5-second default budget). `cli/verify_cmd.lua` shows
+"Counterexample path (minimised from N to M steps)" when the shrinker reduced the path,
+and "[budget exceeded — may not be minimal]" when time ran out.
 
-**Design sketch:**
-- After `verify.lua:run_all` records a `counterexample`, post-process to find the
-  minimum-length prefix path that still reaches a failing state, then apply
-  delta-debugging on the choice sequence: drop one transition at a time and re-verify
-  the failing predicate at the resulting endpoint.
-- Use the existing log/replay infrastructure to re-execute candidate shorter paths
-  deterministically.
+**Implementation note:** The BFS in `verify.lua` already explores states breadth-first
+and thus records the minimum-depth path to the first failing state. For purely
+deterministic games the shrinker is a no-op at the verify level (BFS guarantees
+minimality). Its real value is for paths supplied externally — e.g., from §C2 fuzz
+runs or manually constructed test cases — where the path may be longer than necessary.
+The `M.shrink_path` API is public for this reason.
 
-**Files:** `runtime/verify.lua` (post-process step), `cli/verify_cmd.lua` (pretty-print
-minimised path), `tests/runtime/verify_spec.lua` (new tests).
-
-**Edge cases:** Bound the shrinking work by time budget. Some verify failures are
-intrinsically long-path; in that case report "minimum length found in budget: N".
-
-**Acceptance:** A deliberately-broken demo where the counterexample path is 20 steps
-is reduced to ≤ 5 steps by the shrinker.
+**Future:** Apply the same shrinker to `run_after_check` (requires path) and
+`run_can_reach_check` (from-any-state counterexamples). Both would need a
+custom "still-fails" predicate that checks the full after/requires/from-any-state
+semantics, not just the invariant expression.
 
 ### B3. Trace scrubber (browser debug UI)
 

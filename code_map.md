@@ -363,10 +363,12 @@ Stripped from production builds (`game_table.tests = {}` when `opts.production`)
 
 ---
 
-### `runtime/verify.lua` (594 lines)
+### `runtime/verify.lua` (700+ lines)
 Verify block runner (offline model-checker).
 
-- `M.run_all(game_table)` → `[{label, pass, fail_msg?, skipped?, reason?, states_checked?, counterexample?, counterexample_n?}]`
+- `M.run_all(game_table)` → `[{label, pass, fail_msg?, skipped?, reason?, states_checked?, counterexample?, counterexample_n?, counterexample_path?, counterexample_path_original_len?, counterexample_shrink_budget_exceeded?}]`
+- `M.shrink_path(game_table, path, condition_expr, budget_secs?)` → `(minimised_path, budget_exceeded_bool)` — greedy 1-minimal delta-debugger; exported for external use (e.g., fuzz test counterexamples)
+- `M.match_path_pattern(pattern, path)` → bool — path wildcard/alternation matching
 
 **Clause kinds handled:**
 - `"always"` → BFS check: `verify-always expr`
@@ -375,7 +377,12 @@ Verify block runner (offline model-checker).
 - `"from_any_state"` → check expression holds from every BFS-reachable state
 - `"when"` → filter for `from_any_state` snapshots
 
-**BFS depth:** `DEFAULT_BFS_DEPTH = 5`
+**BFS depth:** `DEFAULT_BFS_DEPTH = 5`; **Shrink budget:** `DEFAULT_SHRINK_BUDGET_SECS = 5.0`
+
+**Counterexample path fields** (set on `run_always_check` failures):
+- `counterexample_path` — `[{scene, label, index}]` minimised action sequence leading to the violation
+- `counterexample_path_original_len` — original path length before shrinking (nil if already minimal)
+- `counterexample_shrink_budget_exceeded` — true if the 5-second shrink budget ran out
 
 ---
 

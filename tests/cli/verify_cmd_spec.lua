@@ -122,6 +122,36 @@ scene main:
   end)
 end)
 
+describe("verify_cmd — counterexample path display", function()
+  it("prints counterexample path header and steps when verify-always fails", function()
+    local path = tmpfile([[
+engine-config:
+  entry-scene: main
+
+state world:
+  gold: Int(0, 9999) = 5
+
+fn bust:
+  dec! world/gold 10
+
+scene main:
+  * Bust
+    bust
+    -> main
+
+verify "gold positive":
+  verify-always world/gold > 0
+]])
+    local code, out, _ = capture_run({path})
+    os.remove(path)
+    assert.equals(1, code)
+    assert.is_truthy(out:find("FAIL"),              "should show FAIL")
+    assert.is_truthy(out:find("Counterexample path"), "should show path header")
+    assert.is_truthy(out:find("main"),              "should mention the scene")
+    assert.is_truthy(out:find("Bust"),              "should mention the choice label")
+  end)
+end)
+
 describe("verify_cmd — summary line", function()
   it("reports counts of passed/failed/skipped in the summary", function()
     local path = tmpfile([[

@@ -18,7 +18,8 @@
 local eval = require("runtime.eval")
 local M    = {}
 
-local DEFAULT_BFS_DEPTH = 5
+local DEFAULT_BFS_DEPTH         = 5
+local DEFAULT_SHRINK_BUDGET_SECS = 5.0
 
 -- ============================================================
 -- Path pattern matching (§4.3)
@@ -225,7 +226,7 @@ local function bfs_states(game_table, max_depth)
             if #new_stack > 0 then
               local new_path = {}
               for _, step in ipairs(item.path) do new_path[#new_path+1] = step end
-              new_path[#new_path+1] = { scene = scene_name, label = ch.label }
+              new_path[#new_path+1] = { scene = scene_name, label = ch.label, index = ch.index }
               queue[#queue+1] = {
                 stack = new_stack,
                 cache = new_cache,
@@ -273,6 +274,152 @@ local function store_from_snap(snap, game_table)
 end
 
 -- ============================================================
+-- Counterexample minimisation (B2)
+-- ============================================================
+
+--- Replay a list of choice steps from the initial game state.
+--- Each step is {scene, label, index?}.  Matching is by label first; the stored
+--- index is used as a fallback when labels are dynamic.
+--- Returns (cache_snapshot, scene_stack) on success, or nil, nil on any failure
+--- (wrong scene, choice not found, error during execution).
+local function replay_path(game_table, steps)
+  local engine_mod = require("runtime.engine")
+
+  local eng = engine_mod.new(game_table, { io_out = { write = function() end } })
+  eng:init()
+  eng._in_bfs = true
+
+  -- Mirror the BFS approach: track scene stack manually because do_choice does
+  -- not update eng._scene_stack.
+  local stack = {}
+  for _, s in ipairs(eng._scene_stack) do stack[#stack+1] = s end
+
+  for _, step in ipairs(steps) do
+    local current_scene = stack[#stack]
+    if not current_scene then return nil, nil end
+
+    -- If the step recorded a scene, it must match where we are now.
+    if step.scene and step.scene ~= current_scene then return nil, nil end
+
+    -- Render available choices at the current scene.
+    local ok_r, _, choices = pcall(function()
+      return eng:render_scene(current_scene)
+    end)
+    if not ok_r then return nil, nil end
+
+    -- Match choice by label (primary), fall back to the stored index.
+    local chosen_idx = nil
+    for _, ch in ipairs(choices or {}) do
+      if ch.label == step.label then chosen_idx = ch.index; break end
+    end
+    if not chosen_idx and step.index then
+      for _, ch in ipairs(choices or {}) do
+        if ch.index == step.index then chosen_idx = ch.index; break end
+      end
+    end
+    if not chosen_idx then return nil, nil end
+
+    -- Execute the choice body.
+    local ok_c, sig = pcall(function() return eng:do_choice(current_scene, chosen_idx) end)
+    if not ok_c then return nil, nil end
+    -- Run post-action phases; actors/scheduler may update eng._scene_stack.
+    pcall(function() eng:post_action() end)
+
+    -- Read scene stack after post_action (mirrors BFS pattern).
+    local new_stack = {}
+    for _, s in ipairs(eng._scene_stack) do new_stack[#new_stack+1] = s end
+
+    -- Apply the choice's navigation signal on top.
+    if sig then
+      if sig.type == "goto" and sig.target then
+        if #new_stack > 0 then new_stack[#new_stack] = sig.target
+        else new_stack[1] = sig.target end
+      elseif sig.type == "enter" and sig.target then
+        new_stack[#new_stack+1] = sig.target
+      elseif sig.type == "exit" then
+        new_stack[#new_stack] = nil
+      end
+    end
+
+    stack = new_stack
+    eng._scene_stack = {}
+    for _, s in ipairs(stack) do eng._scene_stack[#eng._scene_stack+1] = s end
+  end
+
+  return clone_cache(eng._state), stack
+end
+
+--- Return true when replaying `steps` ends in a state where `condition_expr`
+--- is false (i.e. the invariant is still violated).
+local function path_still_fails(game_table, steps, condition_expr)
+  local cache, stack = replay_path(game_table, steps)
+  if not cache then return false end
+
+  local log_mod   = require("runtime.log")
+  local state_mod = require("runtime.state")
+  local fake_state = state_mod.new(game_table.schema, log_mod.new())
+  for k, v in pairs(cache) do fake_state._cache[k] = v end
+
+  local ctx = eval.new_ctx(fake_state, game_table.fns, "verify-shrink", game_table)
+  ctx.scene_stack = stack
+
+  local ok, result = pcall(eval.eval_expr, condition_expr, ctx)
+  if not ok then return false end
+  return not result  -- violated when the invariant expression is false
+end
+
+--- Greedily shrink a counterexample path by attempting to remove one step at
+--- a time.  Restarts the greedy pass each time a step is successfully removed,
+--- so the result is 1-minimal: no single step can be dropped further.
+---
+--- Returns (minimised_path, budget_exceeded_bool).
+--- If budget_secs is nil there is no time limit.
+---
+---@param game_table    table   compiled game table
+---@param path          table   list of {scene, label, index?} steps
+---@param condition_expr table  AST node for the violated invariant
+---@param budget_secs   number? wall-clock budget in seconds; nil = unlimited
+---@return table, boolean
+local function shrink_path(game_table, path, condition_expr, budget_secs)
+  if #path <= 1 then return path, false end
+
+  local current = {}
+  for _, s in ipairs(path) do current[#current+1] = s end
+
+  local deadline        = budget_secs and (os.clock() + budget_secs)
+  local budget_exceeded = false
+
+  local changed = true
+  while changed and #current > 1 do
+    changed = false
+    for i = 1, #current do
+      if deadline and os.clock() > deadline then
+        budget_exceeded = true
+        return current, budget_exceeded
+      end
+
+      -- Try removing step i.
+      local candidate = {}
+      for j, s in ipairs(current) do
+        if j ~= i then candidate[#candidate+1] = s end
+      end
+
+      if path_still_fails(game_table, candidate, condition_expr) then
+        current = candidate
+        changed = true
+        break  -- restart the greedy pass on the shorter path
+      end
+    end
+  end
+
+  return current, budget_exceeded
+end
+
+--- Public entry point so tests and external tooling can call the shrinker
+--- directly without going through run_all.
+M.shrink_path = shrink_path
+
+-- ============================================================
 -- verify-always evaluation
 -- ============================================================
 
@@ -304,13 +451,30 @@ local function run_always_check(verify_entry, game_table)
                fail_msg = "error evaluating verify-always: " .. tostring(result) }
     end
     if not result then
+      -- Post-process: minimise the counterexample path with greedy delta-debugging.
+      local min_path            = snap_item.path
+      local original_len        = nil
+      local shrink_budget_flag  = nil
+
+      if #snap_item.path > 1 then
+        local shrunk, budget_exceeded = shrink_path(
+          game_table, snap_item.path, always_expr, DEFAULT_SHRINK_BUDGET_SECS)
+        if #shrunk < #snap_item.path then
+          original_len = #snap_item.path
+          min_path     = shrunk
+        end
+        if budget_exceeded then shrink_budget_flag = true end
+      end
+
       return {
-        pass                 = false,
-        fail_msg             = string.format(
+        pass                                  = false,
+        fail_msg                              = string.format(
           "verify-always violated at BFS state %d: %s", i, snap_str(cache_snap)),
-        counterexample       = cache_snap,
-        counterexample_n     = i,
-        counterexample_path  = snap_item.path,
+        counterexample                        = cache_snap,
+        counterexample_n                      = i,
+        counterexample_path                   = min_path,
+        counterexample_path_original_len      = original_len,
+        counterexample_shrink_budget_exceeded = shrink_budget_flag,
       }
     end
   end
