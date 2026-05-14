@@ -711,14 +711,15 @@ function M.run(game_table, opts)
   if opts.debug_port then
     local ok_d, debug_mod = pcall(require, "runtime.debug")
     if ok_d then
-      local srv = debug_mod.new(eng, { port = opts.debug_port, mode = "tcp" })
+      local bind_addr = opts.bind or "127.0.0.1"
+      local srv = debug_mod.new(eng, { port = opts.debug_port, mode = "tcp", bind = bind_addr })
       eng:set_debug_server(srv)
       srv:start()
-      io.stderr:write(string.format("[debug] listening on :%d\n", opts.debug_port))
+      io.stderr:write(string.format("[debug] listening on %s:%d\n", bind_addr, opts.debug_port))
       -- Start HTTP UI server when requested
       if opts.http_port then
         srv:start_http(opts.http_port)
-        io.stderr:write(string.format("[debug ui] http://localhost:%d\n", opts.http_port))
+        io.stderr:write(string.format("[debug ui] http://%s:%d\n", bind_addr, opts.http_port))
       end
       -- Mark serve mode so do-choice commands are accepted
       if opts.serve then

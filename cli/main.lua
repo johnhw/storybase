@@ -64,6 +64,7 @@ Options (run):
   --debug                     Start TCP debug server + browser UI (ports 7373/7374)
   --serve                     Like --debug, but browser drives the game (no stdin)
   --http-port N               Override the HTTP UI port (default: debug-port + 1)
+  --bind <addr>               Bind debug/serve sockets to <addr> (default: 127.0.0.1)
   --ui <name>                 UI driver: plain (default) or ansi (ANSI colour)
   --cli <save.sbd>            Single-step scripting mode: read one choice from stdin,
                               output JSON to stdout, save full state, then exit
@@ -339,6 +340,7 @@ local function cmd_run(args)
     debug_port  = debug_port,
     http_port   = http_port,
     serve       = is_serve,
+    bind        = flags["bind"],
     driver      = driver,
   }
 

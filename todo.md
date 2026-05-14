@@ -12,9 +12,9 @@ UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) a
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. The 2026-05-14 codebase
 audit backlog (§A3–§A9, §A11–§A16) has fully landed. §C1 (`test` blocks) complete.
-§B2 (counterexample minimisation) complete.
+§B2 (counterexample minimisation) complete. §A10 (`--serve` security) complete.
 
-**2579 successes / 0 failures / 2 pending (known limitations).**
+**2583 successes / 0 failures / 2 pending (known limitations).**
 
 The core language and runtime are feature-complete against the V1.0 specification.
 
@@ -23,7 +23,7 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 ## What to work on next
 
 **Security-adjacent (do before any production `--serve` use):**
-- §A10 — `--serve` exposes arbitrary code execution via the debug `eval` command.
+- ~~§A10 — `--serve` exposes arbitrary code execution via the debug `eval` command.~~ **DONE**
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.

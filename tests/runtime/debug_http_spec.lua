@@ -424,3 +424,48 @@ describe("debug HTTP server: SSE events", function()
     assert.is_table(srv._sse_clients)
   end)
 end)
+
+describe("debug HTTP server: A10 security — bind address + eval gating", function()
+  local PORT_D = BASE_PORT + 50   -- debug mode server
+  local PORT_S = BASE_PORT + 51   -- serve mode server
+  local srv_d, srv_s
+
+  setup(function()
+    srv_d = make_server(PORT_D, false)  -- debug mode
+    srv_s = make_server(PORT_S, true)   -- serve mode
+  end)
+
+  teardown(function()
+    srv_d:stop_http()
+    srv_s:stop_http()
+  end)
+
+  it("default _bind is 127.0.0.1", function()
+    local gt = make_minimal_game()
+    local eng = engine_mod.new(gt, {})
+    local srv = debug_mod.new(eng, { mode = "hook" })
+    assert.equals("127.0.0.1", srv._bind)
+  end)
+
+  it("explicit bind address is stored", function()
+    local gt = make_minimal_game()
+    local eng = engine_mod.new(gt, {})
+    local srv = debug_mod.new(eng, { mode = "hook", bind = "0.0.0.0" })
+    assert.equals("0.0.0.0", srv._bind)
+  end)
+
+  it("eval succeeds in debug mode", function()
+    local r = http_post(srv_d, PORT_D, "/command",
+      { cmd = "eval", expr = "world/tick" })
+    assert.is_not_nil(r)
+    assert.is_nil(r.error, "eval should not error in debug mode")
+  end)
+
+  it("eval is blocked in serve mode", function()
+    local r = http_post(srv_s, PORT_S, "/command",
+      { cmd = "eval", expr = "world/tick" })
+    assert.is_not_nil(r)
+    assert.is_string(r.error)
+    assert.truthy(r.error:find("serve"), "error should mention serve mode")
+  end)
+end)

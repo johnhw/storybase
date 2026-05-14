@@ -410,6 +410,7 @@ function M.new(engine, opts)
     _engine       = engine,
     _port         = opts.port or DEFAULT_PORT,
     _mode         = opts.mode or "hook",
+    _bind         = opts.bind or "127.0.0.1",   -- bind address; default loopback-only
     _running      = false,
     _clients      = {},          -- TCP clients (when in tcp mode)
     _breakpoints  = {},          -- {id → condition_fn}
@@ -563,6 +564,9 @@ function M.new(engine, opts)
       return { state = result }
 
     elseif cmd == "eval" then
+      if self._serve_mode then
+        return { error = "eval is disabled in serve mode; start with --debug to enable" }
+      end
       local expr_src = payload.expr
       if not expr_src then return { error = "missing 'expr'" } end
       if not eng then return { error = "no engine" } end
@@ -570,7 +574,7 @@ function M.new(engine, opts)
       -- Compile the expression
       local compiler_mod = require("compiler.compiler")
       local ok, gt = pcall(compiler_mod.compile,
-        "module _eval version: 1.0 engine-config: entry-scene: _s\n"
+        "module _eval\n  version: 1.0\n\nengine-config:\n  entry-scene: _s\n"
         .. "scene _s:\n  * Go\n    -> _s\n"
         .. "fn _expr:\n  " .. expr_src)
       if not ok or not gt then
@@ -660,7 +664,7 @@ function M.new(engine, opts)
       -- Compile the condition string into an evaluable fn body now so
       -- check_watches() can eval it cheaply each turn.
       local compiler_mod = require("compiler.compiler")
-      local bp_src = "module _bp\n  version: 1\n"
+      local bp_src = "module _bp\n  version: 1.0\n\n"
                    .. "engine-config:\n  entry-scene: _s\n"
                    .. "scene _s:\n  * Go\n    -> _s\n"
                    .. "fn _cond:\n  return " .. cond
@@ -1070,7 +1074,7 @@ function M.new(engine, opts)
           self._mode = "hook"; return
         end
         s:setoption("reuseaddr", true)
-        local bound, berr = s:bind("*", self._port)
+        local bound, berr = s:bind(self._bind, self._port)
         if not bound then
           io.stderr:write("storybase debug: cannot bind port "
                           .. self._port .. ": " .. tostring(berr) .. "\n")
@@ -1122,7 +1126,7 @@ function M.new(engine, opts)
     end
     s:setoption("reuseaddr", true)
     pcall(function() s:setoption("reuseport", true) end)  -- best-effort; not all platforms
-    local bound, berr = s:bind("*", port)
+    local bound, berr = s:bind(self._bind, port)
     if not bound then
       io.stderr:write("storybase debug-ui: cannot bind port " .. port
                       .. ": " .. tostring(berr) .. "\n")
