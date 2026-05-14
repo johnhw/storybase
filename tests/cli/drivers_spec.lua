@@ -243,3 +243,79 @@ scene start:
     end
   end)
 end)
+
+-- ── --ui flag: driver-name whitelist (A11) ────────────────────────────────────
+
+describe("--ui flag: whitelist", function()
+  local cli = require("cli.main")
+
+  -- Minimal game source for cli.main to load.
+  local src = [[
+module ui-whitelist-test
+  version: 1.0
+engine-config:
+  entry-scene: start
+scene start:
+  Hi.
+  * Done -> start
+]]
+
+  local game_path
+  before_each(function()
+    game_path = os.tmpname() .. ".sb"
+    local f = assert(io.open(game_path, "w"))
+    f:write(src)
+    f:close()
+  end)
+  after_each(function()
+    if game_path then os.remove(game_path) end
+  end)
+
+  -- Run cli.main with captured stderr; returns exit_code, err_str.
+  local function run_with(argv)
+    local err_parts = {}
+    local old_err = io.stderr
+    io.stderr = setmetatable({}, {
+      __index = {
+        write = function(_, ...)
+          for _, s in ipairs({...}) do err_parts[#err_parts + 1] = tostring(s) end
+        end,
+        flush = function() end,
+      }
+    })
+    local ok, rc = pcall(cli.main, argv)
+    io.stderr = old_err
+    if not ok then error(rc, 2) end
+    return rc or 0, table.concat(err_parts)
+  end
+
+  it("rejects path-traversal driver name", function()
+    local rc, err = run_with({"run", game_path, "--ui", "../../foo", "--auto", "--steps", "0"})
+    assert.equal(1, rc)
+    assert.is_truthy(err:find("unknown UI driver"), err)
+    assert.is_truthy(err:find("%.%./%.%./foo"), err)
+  end)
+
+  it("rejects arbitrary module names not in the whitelist", function()
+    local rc, err = run_with({"run", game_path, "--ui", "os", "--auto", "--steps", "0"})
+    assert.equal(1, rc)
+    assert.is_truthy(err:find("unknown UI driver"), err)
+  end)
+
+  it("rejects dotted module paths", function()
+    local rc, err = run_with({"run", game_path, "--ui", "foo.bar", "--auto", "--steps", "0"})
+    assert.equal(1, rc)
+    assert.is_truthy(err:find("unknown UI driver"), err)
+  end)
+
+  it("accepts whitelisted `plain' driver", function()
+    -- 0 auto steps exits cleanly without consuming choices.
+    local rc, err = run_with({"run", game_path, "--ui", "plain", "--auto", "--steps", "0"})
+    assert.equal(0, rc, "stderr: " .. err)
+  end)
+
+  it("accepts whitelisted `ansi' driver", function()
+    local rc, err = run_with({"run", game_path, "--ui", "ansi", "--auto", "--steps", "0"})
+    assert.equal(0, rc, "stderr: " .. err)
+  end)
+end)

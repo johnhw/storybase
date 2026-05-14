@@ -5,6 +5,34 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## A11 — `--ui <name>` driver-name whitelist ✅ (2026-05-14)
+
+**Bug.** `cli/main.lua`'s `cmd_run` accepted any string for `--ui <name>` and
+fed it straight into `require("cli.drivers." .. ui_name)`. A crafted value like
+`--ui ../../foo` would attempt to load arbitrary Lua modules from `package.path`
+rather than the legitimate `cli/drivers/` directory. Low blast-radius (the
+attacker needs CLI access already), but a textbook trust-the-input footgun and
+exactly the kind of thing that grows teeth once `--serve` deployment scenarios
+are added.
+
+**Fix.** Added an explicit `ALLOWED_UI_DRIVERS = { plain = true, ansi = true }`
+whitelist in `cli/main.lua:316`. Driver names outside the whitelist are
+rejected with `error: unknown UI driver '<name>' (available: plain, ansi)` and
+exit code 1 *before* any `require` call runs. The post-`require` error branch
+was kept (now reporting `failed to load UI driver '<name>': <err>`) for
+unexpected runtime breakage inside the driver modules themselves. New drivers
+must be added to the whitelist set when they land.
+
+**Tests.** Five new cases in `tests/cli/drivers_spec.lua` under a new
+`describe("--ui flag: whitelist", ...)` block: path-traversal name
+(`../../foo`), unrelated stdlib name (`os`), dotted name (`foo.bar`), and
+the two valid drivers (`plain`, `ansi`) — each invoked through `cli.main`
+with `--auto --steps 0` against a minimal temp game file.
+
+**Files touched.** `cli/main.lua`, `tests/cli/drivers_spec.lua`.
+
+---
+
 ## A16 — Test-coverage backlog ✅ (2026-05-14)
 
 **2512 successes / 0 failures (non-HTTP) / 2 pending.** +111 new tests across

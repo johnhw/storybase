@@ -12,15 +12,15 @@ UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) a
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved.
 
-**2378 successes / 0 failures / 2 pending (known limitations).**
+**2540 successes / 0 failures / 2 pending (known limitations).**
 
 The core language and runtime are feature-complete against the V1.0 specification.
 
 A codebase review on 2026-05-14 surfaced a fresh backlog of small bugs, footguns,
 and hygiene items — §A3 through §A16 below. As of the end of 2026-05-14 most
-of that backlog has landed: §A3, §A4, §A5, §A6, §A7, §A8, §A9, §A12, §A13, §A14,
-§A15, and §A16 are all done (see [completed.md](completed.md)). The remaining
-open work is the security-adjacent pair §A10/§A11.
+of that backlog has landed: §A3, §A4, §A5, §A6, §A7, §A8, §A9, §A11, §A12, §A13,
+§A14, §A15, and §A16 are all done (see [completed.md](completed.md)). The only
+remaining item is §A10 (`--serve` debug-eval exposure).
 
 ---
 
@@ -36,7 +36,7 @@ open work is the security-adjacent pair §A10/§A11.
 
 **Security-adjacent (do before any production `--serve` use):**
 - §A10 — `--serve` exposes arbitrary code execution via the debug `eval` command.
-- §A11 — `--ui <name>` accepts arbitrary module paths.
+- ~~§A11~~ — `--ui <name>` accepts arbitrary module paths. **Done 2026-05-14.**
 
 **Hygiene (5–15 minutes each):**
 - ~~§A13~~ — Stray `*.lua.tmp.PID.MS` files. **Done 2026-05-14.**
@@ -176,16 +176,15 @@ not acceptable for any `--serve` deployment.
 **Files to touch:** `runtime/debug.lua` (socket bind, command dispatch),
 `cli/main.lua` (flag parsing + defaults), `tests/runtime/debug_http_spec.lua`.
 
-### A11. `--ui <name>` accepts arbitrary module paths
+### A11. `--ui <name>` accepts arbitrary module paths ✅ Done 2026-05-14
 
-`cli/main.lua` does `require("cli.drivers." .. ui_name)` with no whitelist. A
-crafted `--ui ../../foo` would attempt to load arbitrary Lua modules from
-`package.path`. Low impact (the attacker already has CLI access) but still wrong.
-
-**Fix:** whitelist `{plain = true, ansi = true, narrate = true}` (extend as drivers
-land); error with the list of valid drivers otherwise.
-
-**Files to touch:** `cli/main.lua`, `tests/cli/drivers_spec.lua`.
+Resolved by adding an `ALLOWED_UI_DRIVERS = { plain = true, ansi = true }`
+whitelist check in `cli/main.lua`'s `cmd_run` before the `require` call. Driver
+names outside the whitelist are rejected with `unknown UI driver` before any
+module loading occurs, blocking path-traversal attempts like `--ui ../../foo`
+and unrelated module loads like `--ui os`. The post-require error branch was
+kept (now reporting "failed to load") for unexpected runtime breakage in the
+driver modules themselves. New tests in `tests/cli/drivers_spec.lua` (5 tests).
 
 ### A12. BFS state hash non-deterministic for Float values ✅ Done 2026-05-14
 

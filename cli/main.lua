@@ -311,11 +311,19 @@ local function cmd_run(args)
   end
 
   -- --ui <name>: select UI driver (default: plain)
+  -- Whitelist driver names to prevent arbitrary module loading via package.path
+  -- traversal (e.g. `--ui ../../foo`). Extend this set as new drivers land.
+  local ALLOWED_UI_DRIVERS = { plain = true, ansi = true }
   local ui_name = flags["ui"] or "plain"
+  if not ALLOWED_UI_DRIVERS[ui_name] then
+    io.stderr:write("error: unknown UI driver '" .. tostring(ui_name)
+                    .. "' (available: plain, ansi)\n")
+    return 1
+  end
   local ok_drv, drv_mod = pcall(require, "cli.drivers." .. ui_name)
   if not ok_drv then
-    io.stderr:write("error: unknown UI driver '" .. ui_name
-                    .. "' (available: plain, ansi)\n")
+    io.stderr:write("error: failed to load UI driver '" .. ui_name
+                    .. "': " .. tostring(drv_mod) .. "\n")
     return 1
   end
   local driver = drv_mod.new({ io_out = io.stdout, io_in = io_in })
