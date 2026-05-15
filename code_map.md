@@ -583,6 +583,14 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - Outputs: per-scene visit count, per-fn call count, lists of unreachable scenes and uncovered fns, percentage totals
 - Exit 0 on success (even partial coverage), 1 on compile/argument error
 
+### `cli/fuzz_cmd.lua`
+- `M.run(args)` — compile + random-walk the choice tree + check `verify-always` invariants after every step
+- Flags: `--runs N` (default 1000), `--steps N` (default 50), `--seed N` (base seed, default `os.time()`), `--failures-dir D` (default `failures`), `--max-failures N` (default 10), `--format json`
+- Per run: fresh engine seeded with `base_seed + run_i`, random driver using Park-Miller LCG, step loop up to max_steps
+- On violation: saves the engine log to `<failures-dir>/run{i}_seed{N}.sbd` (replayable with `storybase run --load`)
+- Collects `verify-always` clauses from all `verify` blocks in `game_table.verifies[*].clauses`
+- Exit 0 if no violations found, 1 if any violation or compile/argument error
+
 ### `cli/verify_cmd.lua` (85 lines)
 - `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
 
@@ -700,6 +708,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/migrate_cmd_spec.lua` | `storybase migrate` subcommand unit tests: usage, compile fail, no-migrations, version match, success, --out, corrupt save, missing save (11 tests) |
 | `tests/cli/verify_cmd_spec.lua` | `storybase verify` subcommand unit tests: usage, compile fail, no verify blocks, PASS, FAIL, summary (7 tests) |
 | `tests/cli/coverage_spec.lua` | `storybase coverage` subcommand: argument errors, 100% coverage, unreachable scene detection, uncovered fn detection, JSON format, --depth flag (17 tests) |
+| `tests/cli/fuzz_spec.lua` | `storybase fuzz` subcommand: argument errors, no-verify mode, passing invariants, failing invariants, .sbd save files, JSON format, --runs/--steps/--seed flags, main dispatcher (26 tests) |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
 | `tests/fuzz/log_fuzz_spec.lua` | Property test: log serialise/deserialise round-trip; replay determinism |

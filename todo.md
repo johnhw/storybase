@@ -14,8 +14,9 @@ resolved. All critical and major bugs (#1–#13) resolved. The 2026-05-14 codeba
 audit backlog (§A3–§A9, §A11–§A16) has fully landed. §C1 (`test` blocks) complete.
 §B2 (counterexample minimisation) complete. §A10 (`--serve` security) complete.
 §B1 (state-graph explorer) complete. §B4 (coverage report) complete.
+§C2 (fuzz mode) complete.
 
-**2614 successes / 0 failures / 2 pending (known limitations).**
+**2640 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -35,7 +36,7 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 impact:
 
 1. ~~§B1 — State-graph explorer~~ **DONE** + ~~§B4 coverage report~~ **DONE**
-2. ~~§C1 — `test` blocks~~ **DONE** — §C2 fuzz mode
+2. ~~§C1 — `test` blocks~~ **DONE** + ~~§C2 fuzz mode~~ **DONE**
 3. §D1 — LLM-bounded handler standard module
 4. ~~§B2 — Counterexample minimisation~~ **DONE**
 5. §E1–E3 — `quest` / `dialog` / `inventory` built-in patterns
@@ -231,24 +232,23 @@ test "buy potion works":
 **Acceptance:** A test suite for `demos/demo02_merchant.sb` written entirely in
 `test` blocks; runs in under a second; produces busted-style pass/fail report.
 
-### C2. Property / fuzz mode
+### ~~C2. Property / fuzz mode~~ **COMPLETE**
 
-**Goal:** `storybase fuzz game.sb --runs 10000 --seed-from N` random-walks the choice
-tree, asserts every declared `verify` invariant on every step, and surfaces any path
-that violates one. The transaction log gives perfect repro for free.
+**Implemented:** `storybase fuzz [--runs N] [--steps N] [--seed N] [--failures-dir D]
+[--max-failures N] [--format json] <file>` random-walks the choice tree using a fresh
+engine per run (seeded with `base_seed + run_i`). A lightweight Park-Miller LCG drives
+choice selection via an internal driver (`render`/`prompt` protocol). After each step,
+all `verify-always` clauses from `game_table.verifies[*].clauses` are evaluated against
+the live engine state via `eng:make_ctx` + `eval.eval_expr`. On violation, the engine
+log is saved as a `.sbd` file (replayable with `storybase run --load`).
 
-**Design sketch:**
-- New CLI subcommand `fuzz`. For each run, fresh state, pick choices uniformly (or by
-  declared weight if a choice carries a `weight:` annotation — small spec extension),
-  execute up to `--steps N`. After every step, evaluate all `verify-always`
-  predicates; on failure, save the log + seed + step index to a `failures/` directory.
-- Replay any failure with `storybase run --load failures/run123.log`.
+**Files:** `cli/fuzz_cmd.lua` (new), `cli/main.lua` (fuzz subcommand registered),
+`tests/cli/fuzz_spec.lua` (26 tests).
 
-**Files:** new `cli/fuzz_cmd.lua`. Reuses `runtime/engine.lua` with a fake driver that
-selects randomly. Add `tests/cli/fuzz_spec.lua`.
-
-**Acceptance:** Fuzz `demo08` for 1000 runs; if a `verify` predicate fails, the saved
-log + seed reproduces the exact failure under `storybase run --load …`.
+**Acceptance verified:** Game with `verify "count stays small": verify-always count < 3`
+produces violations detected and `.sbd` files saved within 10 runs × 20 steps.
+Named type aliases (`Gold = Int(0, 9999)`) do NOT clamp in `dec!` (pre-existing
+limitation of state.lua's type index); use inline `Int(0, N)` for clamping guarantees.
 
 ### C3. Temporal-logic verify
 

@@ -10,6 +10,7 @@
 --   verify  <file>             Run all verify blocks in a .sb file
 --   test    <file>             Run all test blocks in a .sb file
 --   coverage <file>            BFS coverage report: scenes and fns reached
+--   fuzz    <file>             Random-walk the choice tree; check verify-always invariants
 --   migrate <save.log>         Apply outstanding schema migrations to a save log
 --   extract-symbols <file>     Scan symbol literals; suggest type declarations
 --   compact <save.log>         Emit snapshot + delta log for faster replay
@@ -48,6 +49,7 @@ Commands:
   verify   <file>             Run all verify blocks in a .sb file
   test     <file>             Run all test blocks in a .sb file
   coverage <file>             BFS coverage report: scenes and fns reached
+  fuzz     <file>             Random-walk choice tree; check verify-always invariants
   migrate  <save.log>         Apply outstanding schema migrations to a save log
   extract-symbols <file>      Scan symbol literals; suggest type declarations
   compact  <game.sb> <save.log> Emit snapshot + delta log for faster replay
@@ -438,6 +440,17 @@ local function cmd_bundle(args)
   return bundle_cmd.run(args) or 0
 end
 
+-- ── Command: fuzz ─────────────────────────────────────────────
+
+local function cmd_fuzz(args)
+  local ok, fuzz_cmd = pcall(require, "cli.fuzz_cmd")
+  if not ok then
+    io.stderr:write("error: could not load fuzz command: " .. tostring(fuzz_cmd) .. "\n")
+    return 1
+  end
+  return fuzz_cmd.run(args) or 0
+end
+
 -- ── Command: coverage ─────────────────────────────────────────
 
 local function cmd_coverage(args)
@@ -584,6 +597,25 @@ storybase bundle [--production] [--output <path>] <file>
     --save <path>    Save game log to <path> on exit
     --load <path>    Load game log from <path> before starting
 ]],
+  ["fuzz"] = [[
+storybase fuzz [--runs N] [--steps N] [--seed N] [--failures-dir D]
+              [--max-failures N] [--format json] <file>
+
+  Random-walk the choice tree of a .sb game and check every verify-always
+  invariant after each step.  On violation, the engine log is saved so the
+  path can be replayed with:
+    storybase run <file> --load <failure.sbd>
+
+  Options:
+    --runs N             Number of random-walk runs (default: 1000)
+    --steps N            Max steps per run (default: 50)
+    --seed N             Base random seed; run i uses seed+i (default: os.time())
+    --failures-dir D     Directory for saved failure logs (default: failures)
+    --max-failures N     Stop saving after N failures (default: 10)
+    --format json        Emit a JSON summary instead of human-readable text
+
+  Exit codes: 0 if no invariants violated, 1 if any violation found or error.
+]],
   ["coverage"] = [[
 storybase coverage [--depth N] [--budget N] [--format json] <file>
 
@@ -641,6 +673,7 @@ local COMMANDS = {
   ["repl"]            = cmd_repl,
   ["verify"]          = cmd_verify,
   ["test"]            = cmd_test,
+  ["fuzz"]            = cmd_fuzz,
   ["coverage"]        = cmd_coverage,
   ["migrate"]         = cmd_migrate,
   ["extract-symbols"] = cmd_extract_symbols,
