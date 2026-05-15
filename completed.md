@@ -1595,3 +1595,93 @@ No code changes; Bug #12 already handled the runtime fix.
 - **`runtime/eval.lua` added.** Not in original plan; cleanly separates AST interpretation from engine turn-loop concerns. Scene navigation uses `ctx.signal` (not Lua exceptions).
 - **Debug server uses TCP/NDJSON**, not WebSocket as `idea.md §18.1` specifies. Protocol difference is intentional for simplicity; `idea.md` spec not updated.
 - **`as Alias` import namespacing** — parser parses `as` but resolver performs a flat merge. Noted as a known gap; enforcement deferred to active tasks.
+
+---
+
+## §A10 — `--serve` arbitrary code execution via `eval` command ✅ (2026-05-14)
+
+**Fixed (commit a8ab009):** Sockets now bind `127.0.0.1` by default; `--bind <addr>`
+opts into broader exposure. The `eval` debug command is blocked entirely in `--serve`
+mode. The `--ui <name>` driver name is validated against an explicit whitelist.
+
+---
+
+## §B1 — State-graph explorer (browser debug UI) ✅ (2026-05-14)
+
+`runtime/search.lua` exports `M.expand_graph(gt, cache, stack, opts)` — full BFS
+returning `{nodes, edges, truncated, node_count, edge_count}`. Nodes carry
+`{id, scene, depth, terminal, cache_summary, cache}`; edges carry
+`{from, to, label, choice_index}`. IDs are CSS-safe strings (`"n1"`, `"n2"`, …).
+
+New debug command `get-state-graph {depth, max_nodes, budget}` in `runtime/debug.lua`
+calls `expand_graph` from the live engine state. Browser debug UI gains a **Graph**
+tab using cytoscape.js (CDN, force-directed `cose` layout). Terminal nodes shown
+green; current node highlighted blue. Degrades gracefully if CDN is unavailable.
+
+**Files:** `runtime/search.lua`, `runtime/debug.lua`, `tests/runtime/debug_spec.lua`
+(14 new tests).
+
+---
+
+## §B2 — Counterexample minimisation ✅ (2026-05-14)
+
+`runtime/verify.lua` exports `M.shrink_path(gt, path, expr, budget_secs)` which
+greedily removes one step at a time (restarting on each successful removal) until
+1-minimal. `run_always_check` post-processes every counterexample through the
+shrinker (5-second default budget). `cli/verify_cmd.lua` displays
+"Counterexample path (minimised from N to M steps)" and "[budget exceeded — may
+not be minimal]" when applicable.
+
+For purely deterministic games the shrinker is a no-op (BFS already finds the
+shortest path). Its value is for externally-supplied paths (fuzz runs, manual
+test cases). `M.shrink_path` is public for this reason.
+
+---
+
+## §B4 — Coverage report ✅ (2026-05-15)
+
+`storybase coverage [--depth N] [--budget N] [--format json] <file>` walks the BFS
+frontier via `M.expand_graph` and reports per-scene visit counts and per-fn call
+counts. Unreachable scenes and uncovered fns are listed explicitly. `--format json`
+emits a CI-friendly JSON object.
+
+`runtime/eval.lua`'s `call_fn` fires `ctx.game._fn_call_hook(name)` before executing
+each user fn body; `coverage_cmd` sets this hook on the game table before BFS runs.
+
+**Files:** `cli/coverage_cmd.lua` (new), `runtime/eval.lua` (hook), `cli/main.lua`
+(subcommand), `tests/cli/coverage_spec.lua` (17 tests).
+
+---
+
+## §C1 — `test` blocks ✅ (2026-05-13)
+
+New top-level declaration `test "label": setup: ... run: ... expect: ...`. Parsed
+by `compiler/parser.lua` (`TEST_DECL`), emitted by `compiler/codegen.lua` into
+`game_table.tests`. `runtime/tests.lua` runs each test in a fresh state: applies
+`setup:` mutations, executes `run:` fn calls, evaluates each `expect:` clause.
+
+CLI: `storybase test game.sb` (mirrors the `verify` subcommand). Stripped from
+production builds. `storybase run --auto` exercises test files safely.
+
+**Files:** `compiler/ast.lua`, `compiler/parser.lua`, `compiler/codegen.lua`,
+`runtime/tests.lua` (new), `cli/test_cmd.lua` (new), `cli/main.lua`,
+`tests/compiler/test_decl_spec.lua`, `tests/runtime/tests_spec.lua`,
+`tests/cli/test_cmd_spec.lua`.
+
+---
+
+## §C2 — Property / fuzz mode ✅ (2026-05-15)
+
+`storybase fuzz [--runs N] [--steps N] [--seed N] [--failures-dir D]
+[--max-failures N] [--format json] <file>` random-walks the choice tree using a
+fresh engine per run (seeded `base_seed + run_i`). A Park-Miller LCG drives choice
+selection via an internal driver. After each step, all `verify-always` clauses from
+`game_table.verifies[*].clauses` are evaluated via `eng:make_ctx` + `eval.eval_expr`.
+On violation, the engine log is saved as a `.sbd` file replayable with
+`storybase run --load`.
+
+**Key note:** named type aliases (`Gold = Int(0,N)`) do NOT clamp in `dec!`/`inc!` —
+only inline `Int(0,N)` types do. Pre-existing limitation of `state.lua`'s type index.
+
+**Files:** `cli/fuzz_cmd.lua` (new), `cli/main.lua` (subcommand),
+`tests/cli/fuzz_spec.lua` (26 tests).

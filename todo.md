@@ -10,11 +10,8 @@ All eight implementation phases complete. Language review passes 1 and 2 complet
 Demos 01–21 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
-resolved. All critical and major bugs (#1–#13) resolved. The 2026-05-14 codebase
-audit backlog (§A3–§A9, §A11–§A16) has fully landed. §C1 (`test` blocks) complete.
-§B2 (counterexample minimisation) complete. §A10 (`--serve` security) complete.
-§B1 (state-graph explorer) complete. §B4 (coverage report) complete.
-§C2 (fuzz mode) complete.
+resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
+complete. §B1/B2/B4, §C1/C2 all complete.
 
 **2640 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
@@ -25,25 +22,19 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 
 ## What to work on next
 
-**Security-adjacent (do before any production `--serve` use):**
-- ~~§A10 — `--serve` exposes arbitrary code execution via the debug `eval` command.~~ **DONE**
-
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
 - §A2 — Inelegance #7 — BFS expansion duplication (deferred; documented).
 
-**Future Features and Extensions (large):** Roadmap below. Suggested ordering for
-impact:
+**Future Features and Extensions (large):** Suggested ordering for impact:
 
-1. ~~§B1 — State-graph explorer~~ **DONE** + ~~§B4 coverage report~~ **DONE**
-2. ~~§C1 — `test` blocks~~ **DONE** + ~~§C2 fuzz mode~~ **DONE**
-3. §D1 — LLM-bounded handler standard module
-4. ~~§B2 — Counterexample minimisation~~ **DONE**
-5. §E1–E3 — `quest` / `dialog` / `inventory` built-in patterns
-6. §B5 — Auto-docs site
-7. §C3 — Temporal-logic verify
-8. §F1 — Procedural generation primitives
-9. §G1 — Web/JS compilation target
+1. §D1 — LLM-bounded handler standard module
+2. §B3 — Trace scrubber (browser debug UI)
+3. §E1–E3 — `quest` / `dialog` / `inventory` built-in patterns
+4. §B5 — Auto-docs site
+5. §C3 — Temporal-logic verify
+6. §F1 — Procedural generation primitives
+7. §G1 — Web/JS compilation target
 
 ---
 
@@ -85,58 +76,9 @@ different data payload (priority / path / probability / cost) and queue mechanis
 callback strategy and add more complexity than it removes. Revisit if a sixth variant
 is needed or if a perf hot-spot emerges.
 
-### ~~A10. `--serve` exposes arbitrary code execution via the debug `eval` command~~ **DONE**
-
-**FIXED (commit a8ab009):** Sockets now bind `127.0.0.1` by default; `--bind <addr>`
-opts into broader exposure. `eval` command blocked in serve mode.
-
 ---
 
 ## B. Authoring UX — Make the Latent Power Visible
-
-The engine already computes things authors can't see. These surface them.
-
-### ~~B1. State-graph explorer (browser debug UI)~~ **COMPLETE**
-
-**Implemented:** `runtime/search.lua` exports `M.expand_graph(gt, cache, stack, opts)`
-which performs full BFS and returns `{nodes, edges, truncated, node_count, edge_count}`.
-Nodes have `{id, scene, depth, terminal, cache_summary, cache}` (IDs are `"n1"`, `"n2"`,
-… — CSS-safe strings). Edges have `{from, to, label, choice_index}`. Handles bounded and
-random branching (same expansion as `can_reach`). Capped at `depth:6`, `max_nodes:2000`,
-`budget:10s` by default.
-
-New debug command `get-state-graph {depth, max_nodes, budget}` in `runtime/debug.lua`
-calls `expand_graph` from the live engine state and returns the result plus
-`current_node_id = "n1"` (the initial node always represents the current game state).
-
-Browser debug UI gains a **Graph** tab (tab strip added to `#debug-panels`). Uses
-cytoscape.js from CDN for force-directed layout (`cose`). Clicking a node shows its
-full state snapshot in a detail panel. Terminal nodes (no choices) shown in green.
-Current node highlighted in blue. Graph degrades gracefully if CDN is unavailable.
-
-**Files:** `runtime/search.lua` (new `M.expand_graph`), `runtime/debug.lua` (command +
-HTML_UI tab strip + Graph panel + JS), `tests/runtime/debug_spec.lua` (14 new tests).
-
-### B2. Counterexample minimisation — **COMPLETE**
-
-**Implemented:** `runtime/verify.lua` exports `M.shrink_path(gt, path, expr, budget_secs)`
-which greedily removes one step at a time (restarting on each successful removal) until
-the path is 1-minimal. The `run_always_check` post-processes every counterexample through
-the shrinker (5-second default budget). `cli/verify_cmd.lua` shows
-"Counterexample path (minimised from N to M steps)" when the shrinker reduced the path,
-and "[budget exceeded — may not be minimal]" when time ran out.
-
-**Implementation note:** The BFS in `verify.lua` already explores states breadth-first
-and thus records the minimum-depth path to the first failing state. For purely
-deterministic games the shrinker is a no-op at the verify level (BFS guarantees
-minimality). Its real value is for paths supplied externally — e.g., from §C2 fuzz
-runs or manually constructed test cases — where the path may be longer than necessary.
-The `M.shrink_path` API is public for this reason.
-
-**Future:** Apply the same shrinker to `run_after_check` (requires path) and
-`run_can_reach_check` (from-any-state counterexamples). Both would need a
-custom "still-fails" predicate that checks the full after/requires/from-any-state
-semantics, not just the invariant expression.
 
 ### B3. Trace scrubber (browser debug UI)
 
@@ -154,26 +96,6 @@ scrubber and a per-tick diff panel ("between t=37 and t=38, these 5 paths change
 
 **Acceptance:** On `demo08`, scrubbing through the timeline visibly highlights the
 changed paths at each tick.
-
-### ~~B4. Coverage report~~ **COMPLETE**
-
-**Implemented:** `storybase coverage [--depth N] [--budget N] [--format json] <file>`
-walks the BFS frontier via `runtime/search.lua`'s `M.expand_graph` and reports
-per-scene visit counts and per-fn call counts. Scenes that never appear in BFS
-nodes are listed as unreachable; fns never invoked during BFS are listed as
-uncovered. `--format json` emits a JSON object for CI integration.
-
-`runtime/eval.lua`'s `call_fn` fires `ctx.game._fn_call_hook(name)` before executing
-each user-defined fn body, allowing coverage_cmd to count calls by setting the hook
-on the game_table before the BFS runs.
-
-**Files:** `cli/coverage_cmd.lua` (new), `runtime/eval.lua` (hook added),
-`cli/main.lua` (coverage subcommand registered), `tests/cli/coverage_spec.lua`
-(17 tests).
-
-**Acceptance verified:** `storybase coverage demos/demo01_wanderer.sb` reports 100%
-scene coverage; a game with a disconnected `scene secret:` block flags it in the
-Unreachable scenes list.
 
 ### B5. Auto-docs site
 
@@ -196,59 +118,6 @@ produces a navigable site with one page per declaration kind plus a home page.
 ---
 
 ## C. Higher-Order Tests Beyond `verify`
-
-### C1. `test` blocks (lighter sibling of `verify`) — **COMPLETE**
-
-**Goal:** `verify-always` is BFS-heavy. Add a lighter mechanism for scripted assertions
-that authors will actually use day-to-day.
-
-**Design sketch (syntax):**
-```
-test "buy potion works":
-  setup:
-    set! player/gold 100
-  run:
-    buy-item `health-potion 40
-  expect:
-    player/gold = 60
-    contains? player/inventory `health-potion
-```
-
-- New top-level declaration `TEST_DECL` parsed by `compiler/parser.lua`.
-- Codegen emits a `tests = [...]` array on the game table.
-- New runtime entry point `tests.run_all(game_table)` in `runtime/tests.lua` runs each
-  test in a fresh state, applies setup mutations, runs the body (transaction fns
-  allowed), evaluates each `expect:` clause.
-- CLI: `storybase test game.sb` (parallel to existing `verify` subcommand).
-- Stripped in production builds, same mechanism as `verify`.
-
-**Files:** new AST kind in `compiler/ast.lua`; `compiler/parser.lua` parser entry;
-`compiler/codegen.lua` emitter; new `runtime/tests.lua`; new `cli/test_cmd.lua`;
-`tests/compiler/parser_spec.lua` + `tests/runtime/tests_spec.lua`.
-
-**Edge cases:** Tests share game table but each runs in a fresh `state.new`. Disallow
-`engine/checkpoint!` and other engine-state mutations in `setup:`.
-
-**Acceptance:** A test suite for `demos/demo02_merchant.sb` written entirely in
-`test` blocks; runs in under a second; produces busted-style pass/fail report.
-
-### ~~C2. Property / fuzz mode~~ **COMPLETE**
-
-**Implemented:** `storybase fuzz [--runs N] [--steps N] [--seed N] [--failures-dir D]
-[--max-failures N] [--format json] <file>` random-walks the choice tree using a fresh
-engine per run (seeded with `base_seed + run_i`). A lightweight Park-Miller LCG drives
-choice selection via an internal driver (`render`/`prompt` protocol). After each step,
-all `verify-always` clauses from `game_table.verifies[*].clauses` are evaluated against
-the live engine state via `eng:make_ctx` + `eval.eval_expr`. On violation, the engine
-log is saved as a `.sbd` file (replayable with `storybase run --load`).
-
-**Files:** `cli/fuzz_cmd.lua` (new), `cli/main.lua` (fuzz subcommand registered),
-`tests/cli/fuzz_spec.lua` (26 tests).
-
-**Acceptance verified:** Game with `verify "count stays small": verify-always count < 3`
-produces violations detected and `.sbd` files saved within 10 runs × 20 steps.
-Named type aliases (`Gold = Int(0, 9999)`) do NOT clamp in `dec!` (pre-existing
-limitation of state.lua's type index); use inline `Int(0, N)` for clamping guarantees.
 
 ### C3. Temporal-logic verify
 
@@ -573,11 +442,10 @@ the API. Auth: out-of-scope; document as "place behind a reverse proxy."
 ### G3. Engine adapters (Löve2D, Godot, etc.)
 
 **Goal:** StoryBase as the logic layer; host engine handles graphics, audio,
-input. The driver abstraction added in 2026-05-02 already proves this is possible
-in-process.
+input. The driver abstraction already proves this is possible in-process.
 
 **Design sketch:** Document and stabilise the `driver` interface (already implemented
-for `plain` / `ansi` / `narrate`). Write reference adapters:
+for `plain` / `ansi`). Write reference adapters:
 - Löve2D: in-process; LuaSocket already a dep.
 - Godot: out-of-process via the §G2 HTTP API.
 - Defold: same as Godot.
@@ -662,7 +530,7 @@ new builtin. Tests.
 **Acceptance:** On a stochastic demo (e.g. dice-based combat), the synthesised
 strategy beats a uniform-random policy in 1000 sampled rollouts.
 
-### H4. Inventory / dialog / quest stubs as separate from §E
+### H4. Inventory / dialog / quest stubs
 
 (Cross-reference to §E1–E3 — if those land first, this section folds into them.)
 
@@ -683,3 +551,7 @@ strategy beats a uniform-random policy in 1000 sampled rollouts.
 - All new features must add per-feature tests under `tests/` and update `code_map.md`.
 - Update `idea.md` whenever syntax is added; update `docs/reference/language.md`
   whenever semantics change.
+- Named type aliases (`Gold = Int(0,N)`) do NOT trigger clamping in `dec!`/`inc!`
+  — only inline `Int(0,N)` types do. Pre-existing limitation of `state.lua`'s type
+  index (`lookup_type` returns `{tag="named"}`, not `{tag="int"}`). Worth fixing
+  before §E1–E3 ship, since those patterns will use named types heavily.
