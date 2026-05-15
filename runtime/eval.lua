@@ -2129,6 +2129,11 @@ call_fn = function(name, args, ctx)
   -- Record log length before body execution (for `changes` in post-hooks)
   local log_seq_before = ctx.state and ctx.state._log and #(ctx.state._log._entries or {}) or 0
 
+  -- Coverage hook: track user fn calls (set game_table._fn_call_hook to instrument)
+  if ctx.game and ctx.game._fn_call_hook then
+    ctx.game._fn_call_hook(name)
+  end
+
   -- Execute body
   eval_stmts(fn.body, sub)
 

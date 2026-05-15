@@ -287,6 +287,7 @@ occupied-by      grid-name family-name x y → key | nil
 ```
 
 **Dispatch order in `call_fn`:** vars → BUILTINS → bounded defs → user fns → bare string fallback
+**Coverage hook:** before executing a user fn body, `call_fn` fires `ctx.game._fn_call_hook(name)` if set — used by `cli/coverage_cmd.lua` to count fn invocations during BFS
 
 **Mutation statements (eval_stmt):** SET_MUT, INC_MUT, DEC_MUT, ADD_MUT, REMOVE_MUT, CLEAR_MUT, PUSH_MUT, POP_MUT, SPAWN_MUT, DESPAWN_MUT
 
@@ -575,6 +576,13 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - `M.run(args)` — compile + `tests_mod.run_all` + pretty-print results
 - Returns 0 if all pass, 1 if any fail or on compile error
 
+### `cli/coverage_cmd.lua`
+- `M.run(args)` — compile + BFS via `runtime/search.lua`'s `expand_graph` + per-scene/fn coverage report
+- Flags: `--depth N` (BFS depth, default 8), `--budget N` (seconds, default 30), `--format json`
+- Sets `game_table._fn_call_hook` before BFS; `runtime/eval.lua`'s `call_fn` fires the hook on every user fn call
+- Outputs: per-scene visit count, per-fn call count, lists of unreachable scenes and uncovered fns, percentage totals
+- Exit 0 on success (even partial coverage), 1 on compile/argument error
+
 ### `cli/verify_cmd.lua` (85 lines)
 - `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
 
@@ -691,6 +699,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/repl_cmd_spec.lua` | `storybase repl` subcommand unit tests via mocked stdio: meta-commands, fn invocation, save/load round-trip (16 tests) |
 | `tests/cli/migrate_cmd_spec.lua` | `storybase migrate` subcommand unit tests: usage, compile fail, no-migrations, version match, success, --out, corrupt save, missing save (11 tests) |
 | `tests/cli/verify_cmd_spec.lua` | `storybase verify` subcommand unit tests: usage, compile fail, no verify blocks, PASS, FAIL, summary (7 tests) |
+| `tests/cli/coverage_spec.lua` | `storybase coverage` subcommand: argument errors, 100% coverage, unreachable scene detection, uncovered fn detection, JSON format, --depth flag (17 tests) |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
 | `tests/fuzz/log_fuzz_spec.lua` | Property test: log serialise/deserialise round-trip; replay determinism |

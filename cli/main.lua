@@ -9,6 +9,7 @@
 --   run     <file>             Compile and run a game interactively
 --   verify  <file>             Run all verify blocks in a .sb file
 --   test    <file>             Run all test blocks in a .sb file
+--   coverage <file>            BFS coverage report: scenes and fns reached
 --   migrate <save.log>         Apply outstanding schema migrations to a save log
 --   extract-symbols <file>     Scan symbol literals; suggest type declarations
 --   compact <save.log>         Emit snapshot + delta log for faster replay
@@ -39,17 +40,18 @@ local function print_usage()
 Usage: storybase <command> [options] <file>
 
 Commands:
-  check   <file>              Check a .sb file (lexer+parser+checker; no codegen)
-  compile <file>              Compile a .sb file; report errors and warnings
-  run     <file>              Compile and run a game interactively
-  format  <file>              Pretty-print a .sb file in canonical style
-  repl    <file>              Load and explore a .sb file interactively
-  verify  <file>              Run all verify blocks in a .sb file
-  test    <file>              Run all test blocks in a .sb file
-  migrate <save.log>          Apply outstanding schema migrations to a save log
+  check    <file>             Check a .sb file (lexer+parser+checker; no codegen)
+  compile  <file>             Compile a .sb file; report errors and warnings
+  run      <file>             Compile and run a game interactively
+  format   <file>             Pretty-print a .sb file in canonical style
+  repl     <file>             Load and explore a .sb file interactively
+  verify   <file>             Run all verify blocks in a .sb file
+  test     <file>             Run all test blocks in a .sb file
+  coverage <file>             BFS coverage report: scenes and fns reached
+  migrate  <save.log>         Apply outstanding schema migrations to a save log
   extract-symbols <file>      Scan symbol literals; suggest type declarations
-  compact <game.sb> <save.log> Emit snapshot + delta log for faster replay
-  bundle  <file>              Bundle a game into a single self-contained .lua file
+  compact  <game.sb> <save.log> Emit snapshot + delta log for faster replay
+  bundle   <file>             Bundle a game into a single self-contained .lua file
   lsp                         Start the LSP server (stdio JSON-RPC)
   help                        Show this help text
 
@@ -436,6 +438,17 @@ local function cmd_bundle(args)
   return bundle_cmd.run(args) or 0
 end
 
+-- ── Command: coverage ─────────────────────────────────────────
+
+local function cmd_coverage(args)
+  local ok, coverage_cmd = pcall(require, "cli.coverage_cmd")
+  if not ok then
+    io.stderr:write("error: could not load coverage command: " .. tostring(coverage_cmd) .. "\n")
+    return 1
+  end
+  return coverage_cmd.run(args) or 0
+end
+
 -- ── Command: compact ──────────────────────────────────────────
 
 local function cmd_compact(args)
@@ -571,6 +584,19 @@ storybase bundle [--production] [--output <path>] <file>
     --save <path>    Save game log to <path> on exit
     --load <path>    Load game log from <path> before starting
 ]],
+  ["coverage"] = [[
+storybase coverage [--depth N] [--budget N] [--format json] <file>
+
+  Walk the BFS frontier of a .sb game and report which scenes and
+  functions are reachable within the given search depth.
+
+  Options:
+    --depth  N       BFS depth limit (default: 8)
+    --budget N       Time budget in seconds (default: 30)
+    --format json    Emit a JSON object instead of human-readable text
+
+  Exit codes: 0 on success (even if coverage is incomplete), 1 on error.
+]],
   ["lsp"] = [[
 storybase lsp
 
@@ -615,6 +641,7 @@ local COMMANDS = {
   ["repl"]            = cmd_repl,
   ["verify"]          = cmd_verify,
   ["test"]            = cmd_test,
+  ["coverage"]        = cmd_coverage,
   ["migrate"]         = cmd_migrate,
   ["extract-symbols"] = cmd_extract_symbols,
   ["compact"]         = cmd_compact,
