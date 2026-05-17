@@ -364,3 +364,372 @@ scene main:
     assert.is_nil(gt.fns and gt.fns["inside-the-macro"])
   end)
 end)
+
+-- ── Parser — Stage 2b: name_parts on decl names ───────────────────────────────
+
+describe("parser — Stage 2b (decl-macro name interpolation slots)", function()
+  it("accepts MACRO_PARAM in fn-decl name and stores name_parts", function()
+    local src = [[
+decl-macro mk:
+  fn $thing:
+    pass
+]]
+    local tree, _ = parse(src)
+    assert.equal(0, #parse_errors(src))
+    local m = find_decl(tree, ast.K.DECL_MACRO_DECL, "mk")
+    assert.is_not_nil(m)
+    local fn = m.body[1]
+    assert.equal(ast.K.FN_DECL, fn.kind)
+    assert.is_not_nil(fn.name_parts)
+    assert.equal(1, #fn.name_parts)
+    assert.equal("macro_param", fn.name_parts[1].kind)
+    assert.equal("thing", fn.name_parts[1].name)
+  end)
+
+  it("accepts COMPOSITE_IDENT in fn-decl name and preserves the parts list", function()
+    local src = [[
+decl-macro mk:
+  fn $path-inc:
+    pass
+]]
+    local tree, _ = parse(src)
+    assert.equal(0, #parse_errors(src))
+    local m = find_decl(tree, ast.K.DECL_MACRO_DECL, "mk")
+    assert.is_not_nil(m)
+    local fn = m.body[1]
+    assert.equal(ast.K.FN_DECL, fn.kind)
+    assert.is_not_nil(fn.name_parts)
+    assert.equal(2, #fn.name_parts)
+    assert.equal("path", fn.name_parts[1].name)
+    assert.equal("-inc", fn.name_parts[2])
+  end)
+
+  it("uses a $-bearing placeholder string for the legacy fn.name field", function()
+    local src = [[
+decl-macro mk:
+  fn $path-inc:
+    pass
+]]
+    local tree, _ = parse(src)
+    local m = find_decl(tree, ast.K.DECL_MACRO_DECL, "mk")
+    local fn = m.body[1]
+    assert.equal("$path-inc", fn.name)
+  end)
+
+  it("accepts MACRO_PARAM in state-decl path position", function()
+    local src = [[
+decl-macro mk:
+  state $foo: Int(0, 10) = 0
+]]
+    local tree, _ = parse(src)
+    assert.equal(0, #parse_errors(src))
+    local m = find_decl(tree, ast.K.DECL_MACRO_DECL, "mk")
+    local st = m.body[1]
+    assert.equal(ast.K.STATE_SCALAR, st.kind)
+    assert.equal(ast.K.PATH_EXPR, st.path.kind)
+    -- The single segment is a macro_param placeholder
+    assert.equal("table", type(st.path.segments[1]))
+    assert.equal("macro_param", st.path.segments[1].kind)
+    assert.equal("foo", st.path.segments[1].name)
+  end)
+
+  it("accepts MACRO_PARAM as mutation target (inc! $path 1)", function()
+    local src = [[
+decl-macro mk:
+  fn touch:
+    inc! $path 1
+]]
+    local tree, _ = parse(src)
+    assert.equal(0, #parse_errors(src))
+    local m = find_decl(tree, ast.K.DECL_MACRO_DECL, "mk")
+    local fn = m.body[1]
+    local stmt = fn.body[1]
+    assert.equal(ast.K.INC_MUT, stmt.kind)
+    assert.equal(ast.K.PATH_EXPR, stmt.path.kind)
+    assert.equal("macro_param", stmt.path.segments[1].kind)
+    assert.equal("path", stmt.path.segments[1].name)
+  end)
+
+  it("parses a top-level macro-call decl with one argument", function()
+    local src = [[
+decl-macro mk:
+  fn noop:
+    pass
+mk player-health
+]]
+    local tree, _ = parse(src)
+    assert.equal(0, #parse_errors(src))
+    local call
+    for _, d in ipairs(tree.decls) do
+      if d.kind == ast.K.MACRO_CALL_DECL then call = d; break end
+    end
+    assert.is_not_nil(call)
+    assert.equal("mk", call.name)
+    assert.equal(1, #call.args)
+  end)
+end)
+
+-- ── Stage 3 — decl-level expansion ───────────────────────────────────────────
+
+describe("compile — Stage 3 decl-macro expansion", function()
+  local function compile_ok(src)
+    local gt, diags = compiler.compile(src, "test.sb")
+    local errs = (diags and diags.errors) or {}
+    if #errs > 0 then
+      for _, e in ipairs(errs) do
+        print("ERR", e.code, e.message, e.line)
+      end
+    end
+    return gt, errs
+  end
+
+  local function has_state_path(gt, path)
+    for _, st in ipairs(gt.schema.states or {}) do
+      if st.path == path then return true end
+    end
+    return false
+  end
+
+  it("expands a zero-arg decl-macro at a call site", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter:
+  state world/count: Int(0, 100) = 0
+  fn count-inc:
+    inc! world/count 1
+counter
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+    -- The state path emitted by the macro should now be present
+    assert.is_true(has_state_path(gt, "world/count"))
+    -- The fn emitted by the macro should be registered
+    assert.is_not_nil(gt.fns["count-inc"])
+  end)
+
+  it("substitutes a $path macro param into a state path", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+counter player-health
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+    -- The expanded state path is "player-health" (the macro's $path slot)
+    assert.is_true(has_state_path(gt, "player-health"))
+  end)
+
+  it("substitutes a $path macro param into a composite fn name", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+counter player-health
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+    -- The composite ident `$path-inc` becomes `player-health-inc`
+    assert.is_not_nil(gt.fns["player-health-inc"])
+    -- The inc! body inside it should target the expanded path
+    -- (we can't easily introspect body here without re-checking AST shape,
+    --  but the fact that it compiles + runs proves substitution worked)
+  end)
+
+  it("expands two call sites with different params without collision", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+counter player-health
+counter monster-rage
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+    assert.is_true(has_state_path(gt, "player-health"))
+    assert.is_true(has_state_path(gt, "monster-rage"))
+    assert.is_not_nil(gt.fns["player-health-inc"])
+    assert.is_not_nil(gt.fns["monster-rage-inc"])
+  end)
+
+  it("expanded fn body actually mutates the substituted path at runtime", function()
+    local engine = require("runtime.engine")
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+counter player-health
+scene main:
+  -> main
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+    local eng = engine.new(gt, {})
+    eng:init()
+    assert.equal(0, eng._state:get("player-health"))
+    -- Invoke the expanded function and verify the state moves
+    local eval = require("runtime.eval")
+    local ctx  = eng:make_ctx("player-health-inc")
+    eval.call_fn("player-health-inc", {}, ctx)
+    assert.equal(1, eng._state:get("player-health"))
+  end)
+
+  it("reports UNDEFINED_NAME when a call site references no decl-macro", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+no-such-macro foo
+scene main:
+  the end
+]]
+    local _, diags = compiler.compile(src, "test.sb")
+    local errs = (diags and diags.errors) or {}
+    assert.is_true(#errs >= 1)
+    local found
+    for _, e in ipairs(errs) do
+      if e.code == "UNDEFINED_NAME" then found = e; break end
+    end
+    assert.is_not_nil(found)
+  end)
+
+  it("reports MACRO_DECL_EMIT when arg count mismatches param count", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+counter
+scene main:
+  the end
+]]
+    local _, diags = compiler.compile(src, "test.sb")
+    local errs = (diags and diags.errors) or {}
+    local found
+    for _, e in ipairs(errs) do
+      if e.code == "MACRO_DECL_EMIT" then found = e; break end
+    end
+    assert.is_not_nil(found)
+  end)
+
+  it("reports MACRO_DECL_EMIT when substituting multi-segment path into composite name", function()
+    -- `counter player/health` substitutes $path with PATH_EXPR{"player","health"}.
+    -- That's fine for `state $path:` (multi-segment path) but `$path-inc` is a
+    -- composite fn name — the substitution would yield "player/health-inc"
+    -- which is not a legal identifier; we must reject.
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+counter player/health
+scene main:
+  the end
+]]
+    local _, diags = compiler.compile(src, "test.sb")
+    local errs = (diags and diags.errors) or {}
+    local found
+    for _, e in ipairs(errs) do
+      if e.code == "MACRO_DECL_EMIT" then found = e; break end
+    end
+    assert.is_not_nil(found)
+  end)
+
+  it("does not break the existing stmt-level macro system", function()
+    -- A program that uses ONLY the legacy stmt-level `macro` should be
+    -- unaffected by the new decl-level pass.
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+state world/count: Int(0, 100) = 0
+macro count-twice body:
+  body
+  body
+fn tick:
+  count-twice:
+    inc! world/count 1
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt)
+    assert.is_not_nil(gt.fns["tick"])
+  end)
+
+  it("call-site pos is propagated onto expanded decls", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+counter player-health
+scene main:
+  the end
+]]
+    local typed, _ = compiler.parse_and_check(src, "test.sb")
+    assert.is_not_nil(typed)
+    -- Find the expanded state decl and check its pos points at the call line.
+    -- The call is on the 7th line of the source; the state decl in the macro
+    -- body is on line 6. After Stage 4-style pos stamping, the emitted decl
+    -- must carry the call-site position.
+    local found
+    for _, d in ipairs(typed.decls) do
+      if d.kind == ast.K.STATE_SCALAR
+         and d.path and d.path.segments
+         and d.path.segments[1] == "player-health" then
+        found = d; break
+      end
+    end
+    assert.is_not_nil(found)
+    assert.equal(7, found.pos.line)
+    -- And we preserve the macro-body source position for error notes.
+    assert.is_not_nil(found.expanded_from)
+    assert.equal(6, found.expanded_from.line)
+  end)
+end)

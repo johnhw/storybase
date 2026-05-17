@@ -13,7 +13,7 @@ silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through A
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete.
 
-**~2700 successes / 0 failures / 2 pending (known limitations).**
+**~2787 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -279,43 +279,68 @@ Stage 3 expansion so the spec coverage isn't theatre.
 No regressions: 2771 passing, 2 pre-existing pending (unrelated formatter
 limitations).
 
-**Stage 2b — parser plumbing (open).** Where IDENTs are consumed for
-*names* (decl names, FN_CALL names, path segments), accept the
-`COMPOSITE_IDENT` / `MACRO_PARAM` shape and store the parts list on the AST
-node — `name_parts` field if composite, plain `name` string otherwise so
-non-macro code paths are unchanged. Wiring this without Stage 3 expansion
-buys nothing (the checker would still error on un-substituted nodes), so
-the natural batching is Stage 2b + Stage 3 in one commit.
+**Stage 2b ✅ + Stage 3 ✅ (2026-05-17).** Parser plumbing + decl-level
+expansion pass shipped together.
 
-#### Stage 3 — Decl-level expansion pass + decl-level macro calls
+- `compiler/parser.lua`:
+  - `parse_fn_decl` accepts `MACRO_PARAM` and `COMPOSITE_IDENT` for the
+    fn name; stores the parts list on `fn.name_parts` and a `$`-bearing
+    placeholder in `fn.name` until Stage 3 substitutes it.
+  - `parse_state_decl` accepts `MACRO_PARAM` and `COMPOSITE_IDENT`; the
+    resulting `STATE_SCALAR.path` is a `PATH_EXPR` whose only segment is
+    a `{kind="macro_param", name=...}` or `{kind="composite", parts=...}`
+    placeholder table.
+  - `parse_mut_path` accepts `MACRO_PARAM` and `COMPOSITE_IDENT` as a
+    single-segment mutation target.
+  - `parse_atom` accepts `MACRO_PARAM` and `COMPOSITE_IDENT` as
+    expression atoms (becomes a `PATH_EXPR` with the same placeholder
+    segment shape).
+  - `can_start_arg` recognises both token kinds so they're collected as
+    function-call arguments.
+  - New `parse_macro_call_decl` handles top-level IDENT decls that don't
+    match any decl keyword (`counter player-health` etc.); the
+    `parse_decl` IDENT branch now falls through to it instead of
+    erroring on `UNEXPECTED_TOKEN`.
+  - `parse_decl_macro_decl` accepts `MACRO_PARAM` tokens in the header
+    so the canonical form `decl-macro counter $path:` works.
 
-Goal: a `decl-macro` is actually expanded at the program-decl level into a
-spliced list of decls, with `$param` substitution applied.
+- `compiler/compiler.lua`:
+  - New `expand_decl_macros` pass runs first inside `expand_macros`.
+    Collects every `DECL_MACRO_DECL` into a registry, walks the
+    top-level decl list, and at each `MACRO_CALL_DECL` looks up the
+    template, builds a `param_map`, deep-copies the body with
+    substitutions applied, and splices the result into the program.
+    Both template and call nodes are stripped from the AST before the
+    checker sees it.
+  - `substitute_decl_node` performs the deep-copy + substitution. It
+    handles two placeholder shapes inside `PATH_EXPR.segments`:
+    `{kind="macro_param", name=X}` (replaced by the bound param's
+    segments — supports multi-segment paths via flattening) and
+    `{kind="composite", parts=...}` (resolved into one concrete string).
+    Resolution of `name_parts` on any node (e.g. `FN_DECL`) follows the
+    same rules but always demands a single-segment substitution; passing
+    a multi-segment path into a composite name slot raises
+    `MACRO_DECL_EMIT`.
+  - Every emitted node carries the call site's `pos` and a back-link to
+    the macro body's `pos` via `expanded_from` (Stage 4 prep — the
+    checker doesn't yet decorate diagnostics with that note, but
+    downstream tooling can already use it).
+  - `ast.E.MACRO_DECL_EMIT` and `ast.E.UNDEFINED_NAME` codes added.
 
-- `compiler/parser.lua`: in `parse_decl` (line 3557), if the leading IDENT
-  matches no decl keyword *and* is followed by macro-call shape (args + `:`
-  + INDENT), defer to a new `parse_macro_call_decl` that produces a
-  `MACRO_CALL_DECL`.
-- `compiler/compiler.lua:expand_macros`: new pass that runs **before** the
-  existing stmt-level walk. Collect `DECL_MACRO_DECL` nodes into a separate
-  registry; walk `ast_root.decls`; when a `MACRO_CALL_DECL` is found, look
-  up the macro, build `param_map`, run `expand_decl_macro_body` (new,
-  parallel to `expand_macro_body`), splice the result into the decl list.
-- Substitution sites (handled in `expand_decl_macro_body`):
-  - `PATH_EXPR.segments`: new third segment shape
-    `{kind="macro_param", name=...}` is replaced by the param value (which
-    itself must be a PATH_EXPR — substituted by joining segments).
-  - Composite-identifier `name_parts` lists on decl names / FN_CALL names /
-    PATH_EXPR segments: resolve each `{kind="macro_param",...}` part to its
-    param value's stringification, concat with literal parts to produce a
-    plain string. Reject (raise `MACRO_DECL_EMIT`) if a param is missing or
-    its value cannot stringify to a legal identifier.
-- Strip both `DECL_MACRO_DECL` and `MACRO_CALL_DECL` nodes from the program
-  before returning, mirroring the existing `MACRO_DECL` strip
-  (`compiler/compiler.lua:530`).
-- `tests/compiler/macro_decl_spec.lua`: a `decl-macro counter $path:` call
-  site expands end-to-end; the resulting `state` path and `fn` names appear
-  in the typed AST under the interpolated names.
+- `tests/compiler/macro_decl_spec.lua`: 16 new tests covering parser
+  `name_parts` capture for fn/state/mut targets, end-to-end expansion of
+  a `counter $path:` exemplar (state path, composite fn name, runtime
+  mutation through the expanded fn), two call sites without collision,
+  error paths (missing macro, arity mismatch, illegal multi-segment
+  substitution into a composite name), the legacy stmt-level macro
+  system still works, and position propagation onto expanded decls.
+
+Open (deferred to Stage 4–6):
+- Decorate checker diagnostics with `expanded from macro 'NAME' at
+  FILE:LINE` notes when `expanded_from` is set (Stage 4).
+- Cross-import wiring: rename walker for `DECL_MACRO_DECL` /
+  `MACRO_CALL_DECL` and `@stdlib/` resolver (Stage 5).
+- Docs + acceptance demo (Stage 6).
 
 #### Stage 4 — Position propagation + checker hookup
 

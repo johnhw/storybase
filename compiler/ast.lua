@@ -138,6 +138,8 @@ M.E = {
   -- Macro system
   MACRO_RECURSIVE          = "MACRO_RECURSIVE",
   MACRO_CROSS_UNIT         = "MACRO_CROSS_UNIT",
+  MACRO_DECL_EMIT          = "MACRO_DECL_EMIT",
+  UNDEFINED_NAME           = "UNDEFINED_NAME",
   -- File I/O
   FILE_NOT_FOUND           = "FILE_NOT_FOUND",
   FILE_READ_ERROR          = "FILE_READ_ERROR",

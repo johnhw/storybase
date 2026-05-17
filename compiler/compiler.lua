@@ -488,11 +488,334 @@ local function walk_and_expand(stmts, macros, diags, expanding, filename)
   return result
 end
 
+-- ============================================================
+-- §E0 Stage 3 — decl-level macro expansion
+-- ============================================================
+--
+-- A `decl-macro NAME params...:` declaration defines a *template* for a
+-- list of declarations (state, fn, verify, ...) parameterised by `$ident`
+-- substitution slots.  At every `MACRO_CALL_DECL` site found in the
+-- top-level decl list, we look up the matching `decl-macro`, build a
+-- param map from the call's positional args, deep-copy the template body
+-- with substitutions applied, and splice the resulting decls into the
+-- program.  Both `DECL_MACRO_DECL` and `MACRO_CALL_DECL` nodes are
+-- stripped from the AST before the checker sees it.
+--
+-- Substitution sites:
+--   * `PATH_EXPR.segments` may contain `{kind="macro_param", name=X}` or
+--     `{kind="composite", parts={...}}` entries; both are replaced by
+--     concrete string segments.
+--   * Top-level `name_parts` on a node (e.g. FN_DECL) — same shape; the
+--     resolved string overwrites `.name` and `name_parts` is removed.
+
+-- Forward-declared so substitute_decl_node can reference it before its
+-- definition (it lives below for proximity to its sole caller).
+local compose_name_placeholder_for_err
+
+--- Stringify a `path_expr`-shaped param argument into a string. Used when
+--- a param value needs to land inside a composite identifier (e.g. fn
+--- name `$path-inc`). Returns (string, err_message_or_nil) — err is set
+--- when the value cannot be stringified to a *single* identifier
+--- segment (e.g. multi-segment path).
+local function _stringify_param_for_segment(val)
+  if val == nil then
+    return nil, "param value is missing"
+  end
+  if type(val) == "string" then
+    if val:find("/", 1, true) then
+      return nil, "param value '" .. val .. "' contains '/'"
+    end
+    return val
+  end
+  if type(val) ~= "table" or not val.kind then
+    return nil, "param value is not a path-shaped expression"
+  end
+  if val.kind == ast.K.PATH_EXPR then
+    local segs = val.segments or {}
+    if #segs == 0 then
+      return nil, "param value has no segments"
+    end
+    if #segs > 1 then
+      return nil, "param value spans " .. #segs ..
+        " path segments; expected a single identifier"
+    end
+    local s = segs[1]
+    if type(s) ~= "string" then
+      return nil, "param value's segment is not yet substituted"
+    end
+    return s
+  end
+  if val.kind == ast.K.FN_CALL and (#(val.args or {}) == 0) then
+    return val.name  -- bare ident-as-fn-call
+  end
+  if val.kind == ast.K.SYMBOL_LIT then
+    return val.name
+  end
+  if val.kind == ast.K.STRING_LIT then
+    return val.value
+  end
+  return nil, "param value of kind '" .. tostring(val.kind) ..
+    "' cannot stringify to an identifier"
+end
+
+--- Resolve a composite name_parts list (mixed strings and macro_param
+--- placeholder tables) against `param_map`, returning the concatenated
+--- string or (nil, err) on failure.
+local function _resolve_name_parts(parts, param_map)
+  local out = {}
+  for _, p in ipairs(parts) do
+    if type(p) == "string" then
+      out[#out + 1] = p
+    elseif type(p) == "table" and p.kind == "macro_param" then
+      local val = param_map[p.name]
+      if val == nil then
+        return nil, "no value bound for $" .. p.name
+      end
+      local s, err = _stringify_param_for_segment(val)
+      if not s then return nil, err end
+      out[#out + 1] = s
+    else
+      return nil, "unexpected name-part entry"
+    end
+  end
+  return table.concat(out)
+end
+
+--- Given a path-expr param value, return its segments as a list of
+--- strings (so they can be spliced into the surrounding segments list).
+local function _path_segments_of(val)
+  if val == nil then return nil, "param value is missing" end
+  if type(val) == "string" then return { val } end
+  if type(val) ~= "table" or not val.kind then
+    return nil, "param value is not a path-shaped expression"
+  end
+  if val.kind == ast.K.PATH_EXPR then
+    local segs = {}
+    for _, s in ipairs(val.segments or {}) do
+      if type(s) ~= "string" then
+        return nil, "param value contains an un-substituted segment"
+      end
+      segs[#segs + 1] = s
+    end
+    return segs
+  end
+  if val.kind == ast.K.FN_CALL and (#(val.args or {}) == 0) then
+    return { val.name }
+  end
+  if val.kind == ast.K.SYMBOL_LIT then return { val.name } end
+  if val.kind == ast.K.STRING_LIT then return { val.value } end
+  return nil,
+    "param value of kind '" .. tostring(val.kind) ..
+    "' cannot supply path segments"
+end
+
+--- Deep-copy `node`, substituting macro params throughout. Recurses into
+--- all table-valued fields. Reports errors into `diags` with the
+--- `call_pos` source position. Returns the substituted copy.
+local function substitute_decl_node(node, param_map, diags, call_pos, filename)
+  -- Forward declaration so the closures below can reference it.
+  local subst
+
+  -- Resolve a PATH_EXPR.segments-style list: replace macro_param and
+  -- composite placeholder entries with concrete strings; flatten
+  -- macro_param values that are themselves multi-segment paths.
+  local function subst_path_segments(segs)
+    local out = {}
+    for _, s in ipairs(segs) do
+      if type(s) == "string" then
+        out[#out + 1] = s
+      elseif type(s) == "table" and s.kind == "macro_param" then
+        local val = param_map[s.name]
+        if val == nil then
+          diags:push_error(ast.E.MACRO_DECL_EMIT,
+            "decl-macro: no value bound for $" .. s.name,
+            ast.pos(filename, call_pos.line or 0, call_pos.col or 0))
+        else
+          local segs2, err = _path_segments_of(val)
+          if not segs2 then
+            diags:push_error(ast.E.MACRO_DECL_EMIT,
+              "decl-macro: cannot substitute $" .. s.name .. ": " .. err,
+              ast.pos(filename, call_pos.line or 0, call_pos.col or 0))
+          else
+            for _, seg in ipairs(segs2) do out[#out + 1] = seg end
+          end
+        end
+      elseif type(s) == "table" and s.kind == "composite" then
+        local resolved, err = _resolve_name_parts(s.parts or {}, param_map)
+        if not resolved then
+          diags:push_error(ast.E.MACRO_DECL_EMIT,
+            "decl-macro: cannot resolve composite identifier: " .. err,
+            ast.pos(filename, call_pos.line or 0, call_pos.col or 0))
+        else
+          out[#out + 1] = resolved
+        end
+      else
+        out[#out + 1] = s  -- {interp=...} or other shape; leave intact
+      end
+    end
+    return out
+  end
+
+  subst = function(n)
+    if type(n) ~= "table" then return n end
+
+    -- Plain (kindless) table: walk all keys
+    if not n.kind then
+      local copy = {}
+      for k, v in pairs(n) do copy[k] = subst(v) end
+      return copy
+    end
+
+    -- AST node: shallow-copy
+    local copy = {}
+    for k, v in pairs(n) do copy[k] = v end
+
+    -- PATH_EXPR with macro_param / composite segments → substitute
+    if n.kind == ast.K.PATH_EXPR and type(n.segments) == "table" then
+      copy.segments = subst_path_segments(n.segments)
+    end
+
+    -- Resolve `name_parts` field on decl-name-bearing nodes
+    if type(copy.name_parts) == "table" then
+      local resolved, err = _resolve_name_parts(copy.name_parts, param_map)
+      if not resolved then
+        diags:push_error(ast.E.MACRO_DECL_EMIT,
+          "decl-macro: cannot resolve identifier '" ..
+          compose_name_placeholder_for_err(copy.name_parts) .. "': " .. err,
+          ast.pos(filename, call_pos.line or 0, call_pos.col or 0))
+      else
+        copy.name = resolved
+      end
+      copy.name_parts = nil
+    end
+
+    -- Stamp call-site position on every emitted node so checker errors
+    -- point at the call site, not the macro body line. Preserve a link
+    -- back to the macro body for §E0 Stage 4 error-note decoration.
+    local orig_pos = copy.pos
+    copy.pos = ast.pos(
+      filename,
+      call_pos.line or 0,
+      call_pos.col or 0)
+    copy.expanded_from = orig_pos
+
+    -- Recurse into all child table-valued fields (after the shallow-copy
+    -- of scalar fields).
+    for k, v in pairs(copy) do
+      if k ~= "pos" and k ~= "expanded_from"
+         and k ~= "name_parts" -- already handled
+         and type(v) == "table" then
+        copy[k] = subst(v)
+      end
+    end
+
+    return copy
+  end
+
+  return subst(node)
+end
+
+-- Helper to format a parts list for diagnostic messages without leaking
+-- the internal table shape. (Mirrors parser's compose_name_placeholder
+-- but lives here to avoid a circular require.)
+compose_name_placeholder_for_err = function(parts)
+  local out = {}
+  for _, p in ipairs(parts or {}) do
+    if type(p) == "string" then
+      out[#out + 1] = p
+    elseif type(p) == "table" and p.kind == "macro_param" then
+      out[#out + 1] = "$" .. p.name
+    else
+      out[#out + 1] = "?"
+    end
+  end
+  return table.concat(out)
+end
+
+--- Expand all top-level `MACRO_CALL_DECL` invocations into their spliced
+--- decl lists. Reports `UNDEFINED_NAME` for unknown macros and
+--- `MACRO_DECL_EMIT` for malformed substitutions.
+---
+---@param ast_root table   PROGRAM node
+---@param diags    table   Diagnostic accumulator
+---@param filename string
+local function expand_decl_macros(ast_root, diags, filename)
+  -- 1. Collect every DECL_MACRO_DECL by name.
+  local decl_macros = {}
+  for _, decl in ipairs(ast_root.decls or {}) do
+    if decl and decl.kind == ast.K.DECL_MACRO_DECL then
+      if decl_macros[decl.name] then
+        diags:push_error(ast.E.DUPLICATE_NAME,
+          "duplicate decl-macro '" .. decl.name .. "'",
+          ast.pos(filename, decl.pos and decl.pos.line or 0,
+                            decl.pos and decl.pos.col or 0))
+      else
+        decl_macros[decl.name] = decl
+      end
+    end
+  end
+
+  -- 2. Walk decl list, splicing expansions at each MACRO_CALL_DECL.
+  local new_decls = {}
+  for _, decl in ipairs(ast_root.decls or {}) do
+    if decl and decl.kind == ast.K.MACRO_CALL_DECL then
+      local m = decl_macros[decl.name]
+      if not m then
+        -- Not a known decl-macro: leave the node in place; the existing
+        -- stmt-level macro expander or later passes will diagnose. We
+        -- emit a targeted error here too so the message is actionable.
+        diags:push_error(ast.E.UNDEFINED_NAME,
+          "no decl-macro named '" .. decl.name .. "' is in scope",
+          ast.pos(filename, decl.pos and decl.pos.line or 0,
+                            decl.pos and decl.pos.col or 0))
+      else
+        local params = m.params or {}
+        local args   = decl.args or {}
+        if #args ~= #params then
+          diags:push_error(ast.E.MACRO_DECL_EMIT,
+            string.format(
+              "decl-macro '%s' expects %d argument(s), got %d",
+              decl.name, #params, #args),
+            ast.pos(filename, decl.pos and decl.pos.line or 0,
+                              decl.pos and decl.pos.col or 0))
+        else
+          local param_map = {}
+          for i, pname in ipairs(params) do
+            local arg = args[i]
+            if arg and arg.kind == ast.K.NAMED_ARG then
+              param_map[pname] = arg.value
+            else
+              param_map[pname] = arg
+            end
+          end
+          local call_pos = decl.pos or ast.pos(filename, 0, 0)
+          for _, body_decl in ipairs(m.body or {}) do
+            local expanded = substitute_decl_node(
+              body_decl, param_map, diags, call_pos, filename)
+            new_decls[#new_decls + 1] = expanded
+          end
+        end
+      end
+    elseif decl and decl.kind == ast.K.DECL_MACRO_DECL then
+      -- Strip: templates are not part of the final program.
+    else
+      new_decls[#new_decls + 1] = decl
+    end
+  end
+  ast_root.decls = new_decls
+end
+
 --- Expand all macro calls in the parsed AST, in-place.
 ---@param ast_root table  PROGRAM node with .decls
 ---@param diags    table  Diagnostic accumulator
 ---@param filename string
 local function expand_macros(ast_root, diags, filename)
+  -- ── §E0 Stage 3: decl-level expansion runs first so the spliced decls
+  -- ── can themselves contain stmt-level macro calls that get expanded
+  -- ── in the second pass below.
+  expand_decl_macros(ast_root, diags, filename)
+  if diags:has_errors() then return end
+
   -- Collect macro declarations
   local macros = {}
   for _, decl in ipairs(ast_root.decls or {}) do
@@ -513,14 +836,10 @@ local function expand_macros(ast_root, diags, filename)
     end
   end
 
-  -- Expand macros in all declaration bodies
-  -- DECL_MACRO_DECL is stripped here as a placeholder for §E0 stages 2–3.
-  -- Stage 1 only parses these nodes; without removal they'd reach downstream
-  -- passes that don't yet know about them.
+  -- Expand macros in all declaration bodies.
   local new_decls = {}
   for _, decl in ipairs(ast_root.decls or {}) do
-    if decl and decl.kind ~= ast.K.MACRO_DECL
-       and decl.kind ~= ast.K.DECL_MACRO_DECL then
+    if decl and decl.kind ~= ast.K.MACRO_DECL then
       local copy = {}
       for k, v in pairs(decl) do copy[k] = v end
       -- Expand in fn/scene/actor bodies

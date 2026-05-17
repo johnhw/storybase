@@ -26,7 +26,7 @@ AST node constructors and constants. Import as `local ast = require("compiler.as
 
 **Constants:**
 - `ast.K.*` — all node kind strings (see below)
-- `ast.E.*` — error codes (e.g. `UNDEFINED_TYPE`, `DUPLICATE_DECL`)
+- `ast.E.*` — error codes (e.g. `UNDEFINED_TYPE`, `DUPLICATE_DECL`, `MACRO_DECL_EMIT`)
 - `ast.W.*` — warning codes (e.g. `PERCEIVES_VIOLATION`, `IMPURE_IN_PURE`)
 
 **Helpers:**
@@ -93,6 +93,13 @@ EMIT_MUT         -- engine/emit event [args]
 - Recursive descent; parser state `p` carries cursor + error accumulator
 - Key parse functions (all local): `parse_decl`, `parse_expr`, `parse_primary`, `parse_stmt`, `parse_type_expr`, `parse_scene_body`
 - `parse_primary` IDENT branch: checks for `[` before arg-collection loop to produce `INDEX_EXPR` instead of `FN_CALL`
+- §E0 Stage 2b: `parse_fn_decl`, `parse_state_decl`, `parse_mut_path`,
+  and `parse_atom` accept `MACRO_PARAM`/`COMPOSITE_IDENT` in name and
+  path positions; AST nodes carry a `name_parts` field (composite case)
+  or a `PATH_EXPR.segments` entry of shape `{kind="macro_param",name=X}`
+  / `{kind="composite",parts=...}` until Stage 3 expansion substitutes
+  them. `parse_decl`'s IDENT branch falls through to
+  `parse_macro_call_decl` (new) for unknown idents.
 
 ---
 
@@ -131,6 +138,13 @@ EMIT_MUT         -- engine/emit event [args]
 - `opts.production = true` → passed to codegen to strip debug-only content
 - Runs lexer → parser → resolve_imports → checker → codegen in sequence
 - `resolve_imports` splices imported declarations (from `import "file.sb"`) before type-check; cycle detection via IMPORT_CYCLE error
+- `expand_macros` runs two sub-passes: §E0 Stage 3 `expand_decl_macros`
+  splices `MACRO_CALL_DECL` sites with `DECL_MACRO_DECL` bodies (deep-copy
+  + `$param` substitution into `PATH_EXPR.segments` and `name_parts`),
+  then the legacy stmt-level walker expands `MACRO_CALL_STMT`. Both
+  `DECL_MACRO_DECL`/`MACRO_CALL_DECL` and `MACRO_DECL` nodes are stripped
+  before the checker runs. Errors: `UNDEFINED_NAME` for unknown macro;
+  `MACRO_DECL_EMIT` for arity/substitution mismatch.
 
 ---
 

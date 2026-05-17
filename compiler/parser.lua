@@ -139,6 +139,46 @@ local function split_interp_path(val)
 end
 
 -- ============================================================
+-- §E0 Stage 2b helpers — composite-ident / macro-param tokens
+-- ============================================================
+--
+-- The lexer emits two name-shaped tokens used only inside `decl-macro`
+-- bodies and at their call sites:
+--   MACRO_PARAM     — bare `$ident`, value=name string
+--   COMPOSITE_IDENT — no-whitespace run mixing IDENT / `$IDENT` joined by
+--                     `-`, value=parts list of strings + `{kind="macro_param",
+--                     name=...}` entries.
+--
+-- Where names are consumed (decl names, fn names, mutation paths) we accept
+-- either token shape, store a `name_parts` list on the AST node when the
+-- name is composite, and use a recognisable placeholder string for the
+-- legacy `name` field. After Stage 3 expansion every node has a plain
+-- `name` and `name_parts` is gone.
+
+--- Stringify a parts list (e.g. `{"give-", {macro_param,"path"}, "-init"}`)
+--- into a stable placeholder name. Used before Stage-3 expansion so that
+--- code paths walking the AST (formatter, error messages) see a printable
+--- name.
+local function compose_name_placeholder(parts)
+  local out = {}
+  for _, p in ipairs(parts) do
+    if type(p) == "string" then
+      out[#out + 1] = p
+    else
+      out[#out + 1] = "$" .. p.name
+    end
+  end
+  return table.concat(out)
+end
+
+--- Is this token kind one we treat as an ident-like *name* in
+--- decl-macro-aware positions?
+local function _is_name_like(kind)
+  return kind == "IDENT" or kind == "NAMED_ARG"
+      or kind == "MACRO_PARAM" or kind == "COMPOSITE_IDENT"
+end
+
+-- ============================================================
 -- Type expression parser
 -- ============================================================
 
@@ -680,6 +720,16 @@ local function parse_state_decl(p, doc)
     path_kind, path_val, path_pos = "simple", t.value, t.pos
     p:adv()
     p:expect("OP", ":", "expected ':' after state name")
+  elseif t.kind == "MACRO_PARAM" then
+    -- `state $path:` — single-segment path that is a substitution slot.
+    path_kind, path_val, path_pos = "macro_param", t.value, t.pos
+    p:adv()
+    p:expect("OP", ":", "expected ':' after state name")
+  elseif t.kind == "COMPOSITE_IDENT" then
+    -- `state $path-sub:` or `state foo-$bar:` — single-segment composite.
+    path_kind, path_val, path_pos = "composite", t.value, t.pos
+    p:adv()
+    p:expect("OP", ":", "expected ':' after state name")
   else
     p:emit_err(ast.E.BAD_DECLARATION, "expected state path")
     p:skip_to_eol()
@@ -691,6 +741,12 @@ local function parse_state_decl(p, doc)
     path_node = ast.path_expr({ path_val }, path_pos)
   elseif path_kind == "path" then
     path_node = ast.path_expr(split_path(path_val), path_pos)
+  elseif path_kind == "macro_param" then
+    path_node = ast.path_expr({ { kind = "macro_param", name = path_val } }, path_pos)
+  elseif path_kind == "composite" then
+    -- A composite identifier becomes one segment whose value is the parts
+    -- list; the expander stringifies it into a plain segment.
+    path_node = ast.path_expr({ { kind = "composite", parts = path_val } }, path_pos)
   else
     path_node = ast.interp_path(split_interp_path(path_val), path_pos)
   end
@@ -867,6 +923,7 @@ local function can_start_arg(p)
       or k == "STRING"  or k == "MULTILINE_STRING"
       or k == "SYMBOL"  or k == "PATH" or k == "INTERP_PATH"
       or k == "IDENT"
+      or k == "MACRO_PARAM" or k == "COMPOSITE_IDENT"
       or (k == "OP" and (t.value == "(" or t.value == "["))
 end
 
@@ -897,6 +954,14 @@ local function parse_atom(p)
     p:adv(); return ast.multiline_string(t.value, tpos)
   elseif t.kind == "SYMBOL" then
     p:adv(); return ast.symbol_lit(t.value, tpos)
+  elseif t.kind == "MACRO_PARAM" then
+    -- `$path` as an expression atom — becomes a one-segment path_expr
+    -- with a macro_param segment; substituted at expansion time.
+    p:adv()
+    return ast.path_expr({ { kind = "macro_param", name = t.value } }, tpos)
+  elseif t.kind == "COMPOSITE_IDENT" then
+    p:adv()
+    return ast.path_expr({ { kind = "composite", parts = t.value } }, tpos)
   elseif t.kind == "PATH" then
     p:adv()
     local path_node = make_path_expr(t.value, tpos)
@@ -1834,6 +1899,15 @@ local function parse_mut_path(p)
   elseif t.kind == "IDENT" then
     -- Single-segment path (no slash) used in mutation position
     local v = p:adv(); base_node = ast.path_expr({v.value}, v.pos)
+  elseif t.kind == "MACRO_PARAM" then
+    -- `$path` used as a mutation target inside a decl-macro body.
+    -- Becomes a path_expr with a single macro_param segment; expansion
+    -- substitutes the segment(s) of the param's PATH_EXPR value in place.
+    local v = p:adv()
+    base_node = ast.path_expr({ { kind = "macro_param", name = v.value } }, v.pos)
+  elseif t.kind == "COMPOSITE_IDENT" then
+    local v = p:adv()
+    base_node = ast.path_expr({ { kind = "composite", parts = v.value } }, v.pos)
   else
     p:emit_err(ast.E.BAD_EXPRESSION, "expected state path", t.pos)
     return ast.path_expr({}, t.pos)
@@ -2417,9 +2491,34 @@ local function parse_fn_decl(p, doc)
 
   -- Parse function name (and parameters)
   local fn_name, params = nil, {}
+  local name_parts = nil  -- set when the fn name is a COMPOSITE_IDENT or MACRO_PARAM
   if p:at("NAMED_ARG") then
     -- fn name:  (no parameters)
     fn_name = p:adv().value
+  elseif p:at("COMPOSITE_IDENT") then
+    local t = p:adv()
+    name_parts = t.value
+    fn_name = compose_name_placeholder(name_parts)
+    -- COMPOSITE_IDENT never fuses ':' into the token; eat it (or NAMED_ARG params).
+    if not p:at("OP", ":") and not p:at("NAMED_ARG") and not p:at("IDENT") and not p:at("NEWLINE") then
+      p:emit_err(ast.E.EXPECTED_TOKEN, "expected ':' after function name", p:cur().pos)
+    end
+    while p:at("IDENT") do table.insert(params, p:adv().value) end
+    if p:at("NAMED_ARG") then
+      table.insert(params, p:adv().value)
+    else
+      p:match("OP", ":")
+    end
+  elseif p:at("MACRO_PARAM") then
+    local t = p:adv()
+    name_parts = { { kind = "macro_param", name = t.value } }
+    fn_name = "$" .. t.value
+    while p:at("IDENT") do table.insert(params, p:adv().value) end
+    if p:at("NAMED_ARG") then
+      table.insert(params, p:adv().value)
+    else
+      p:match("OP", ":")
+    end
   elseif p:at("IDENT") then
     fn_name = p:adv().value
     -- Collect intermediate IDENT params, last one is NAMED_ARG
@@ -2446,7 +2545,9 @@ local function parse_fn_decl(p, doc)
 
   if not p:at("INDENT") then
     -- Zero-line function body (unusual but possible with pass)
-    return ast.fn_decl(fn_name, params, pre_exprs, post_exprs, tags, body_stmts, doc, tpos)
+    local fd = ast.fn_decl(fn_name, params, pre_exprs, post_exprs, tags, body_stmts, doc, tpos)
+    if name_parts then fd.name_parts = name_parts end
+    return fd
   end
   p:adv()  -- consume INDENT
 
@@ -2504,7 +2605,9 @@ local function parse_fn_decl(p, doc)
   end
 
   if p:at("DEDENT") then p:adv() end
-  return ast.fn_decl(fn_name, params, pre_exprs, post_exprs, tags, body_stmts, doc, tpos)
+  local fd = ast.fn_decl(fn_name, params, pre_exprs, post_exprs, tags, body_stmts, doc, tpos)
+  if name_parts then fd.name_parts = name_parts end
+  return fd
 end
 
 -- ── Scene declaration ────────────────────────────────────────────────────────
@@ -3068,8 +3171,11 @@ local function parse_decl_macro_decl(p, doc)
   end
 
   if not header_done then
-    while p:at("IDENT") or p:at("NAMED_ARG") do
+    while p:at("IDENT") or p:at("NAMED_ARG") or p:at("MACRO_PARAM") do
       local t = p:adv()
+      -- MACRO_PARAM's value is the bare ident name (no leading `$`); that
+      -- is also how params are looked up from substitution sites in the
+      -- body, so the storage shape matches IDENT params.
       params[#params + 1] = t.value
       if t.kind == "NAMED_ARG" then break end  -- "param:" eats the ':'
     end
@@ -3117,6 +3223,48 @@ local function parse_decl_macro_decl(p, doc)
   if p:at("DEDENT") then p:adv() end
 
   return ast.decl_macro_decl(name, params, body, doc, tpos)
+end
+
+--- Parse a decl-level macro call: an IDENT name followed by zero or
+--- more positional argument atoms, optional `:` + body block, then
+--- NEWLINE. The macro body must be a previously-declared `decl-macro`;
+--- it is resolved and expanded at the decl-level expansion pass
+--- (compiler/compiler.lua:expand_macros, §E0 Stage 3). Args appear as
+--- AST atoms; the expansion stringifies them where needed.
+local function parse_macro_call_decl(p, doc)
+  local _ = doc  -- decl-macro calls don't currently carry a doc string of their own
+  local tpos = p:cur().pos
+  local name_tok = p:adv()
+  local name = name_tok.value
+
+  -- Collect positional args (atoms): IDENT, PATH, INTERP_PATH, MACRO_PARAM,
+  -- COMPOSITE_IDENT, literals.
+  local args = {}
+  while can_start_arg(p) and not p:at("NAMED_ARG") do
+    local a = parse_atom(p)
+    if not a then break end
+    args[#args + 1] = a
+  end
+  -- Trailing named args (rare for now, but harmless to accept)
+  while p:at("NAMED_ARG") do
+    local na = p:adv()
+    local val = parse_atom(p)
+    args[#args + 1] = ast.named_arg(na.value, val, na.pos)
+  end
+
+  -- Optional body: `:` then NEWLINE + INDENT block
+  local body = {}
+  if p:at("OP", ":") then
+    p:adv()  -- consume `:`
+    p:match("NEWLINE")
+    if p:at("INDENT") then
+      body = parse_body_items(p, false)
+    end
+  else
+    p:skip_to_eol()
+  end
+
+  return ast.macro_call_decl(name, args, body, tpos)
 end
 
 --- Parse a `verify "label": clauses` declaration.
@@ -3680,12 +3828,9 @@ parse_decl = function(p, doc)
     elseif t.value == "defgrid"   then return parse_defgrid_decl(p, doc)
     elseif t.value == "test"      then return parse_test_decl(p, doc)
     end
-    -- unknown top-level identifier — skip
-    p:emit_err(ast.E.UNEXPECTED_TOKEN,
-      "unexpected IDENT '" .. t.value .. "' at top level", t.pos)
-    p:skip_to_eol()
-    p:skip_block()
-    return nil
+    -- Fall back to a decl-level macro call (§E0 Stage 3); the expansion
+    -- pass will error if the name doesn't resolve to a `decl-macro`.
+    return parse_macro_call_decl(p, doc)
 
   else
     p:emit_err(ast.E.UNEXPECTED_TOKEN,
