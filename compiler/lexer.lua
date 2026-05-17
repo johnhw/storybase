@@ -8,7 +8,13 @@
 --   INTEGER, FLOAT, BOOL, STRING, MULTILINE_STRING
 --   SYMBOL, PATH, INTERP_PATH, NAMED_ARG
 --   IDENT, KEYWORD
+--   MACRO_PARAM      — bare `$ident` (decl-macro substitution slot)
+--   COMPOSITE_IDENT  — no-whitespace run of IDENT and `$IDENT` segments joined
+--                      by `-`; value is a list whose entries are either literal
+--                      strings or `{kind="macro_param", name="..."}` placeholders.
+--                      Consecutive string parts are merged at emit time.
 --   OP  (operator / punctuation)
+--   RAW_TEXT
 --   INDENT, DEDENT, NEWLINE
 --   EOF
 
@@ -353,10 +359,109 @@ function M.tokenize(source, filename)
       end
       line_has_tok = true
 
-    -- ── Identifier / keyword / path ───────────────────────────────────
+    -- ── Macro parameter '$ident' / composite ident with $-slots ──────
+    -- `$ident` alone becomes MACRO_PARAM. If the param participates in a
+    -- no-whitespace run with IDENTs / other params joined by `-` (e.g.
+    -- `give-$path`, `$path-init`, `$a-$b`, `has-$path?`), the whole run is
+    -- emitted as one COMPOSITE_IDENT token whose `value` is the parts list.
+    elseif c == '$' then
+      local tok_line, tok_col = cur_line, col()
+      if not is_alpha(peek(1)) then
+        err("ILLEGAL_CHAR", "Expected identifier after '$'", tok_line, tok_col)
+        adv()
+      else
+        adv()  -- consume '$'
+        local mp_start = pos
+        while is_alnum(peek()) do adv() end
+        local mp_name = s:sub(mp_start, pos - 1)
+
+        local has_continuation =
+            (peek() == '-' and (is_alpha(peek(1))
+                              or (peek(1) == '$' and is_alpha(peek(2)))))
+            or peek() == '!' or peek() == '?'
+
+        if has_continuation then
+          local parts = { { kind = "macro_param", name = mp_name } }
+          local function append_str(str)
+            if type(parts[#parts]) == "string" then
+              parts[#parts] = parts[#parts] .. str
+            else
+              table.insert(parts, str)
+            end
+          end
+
+          while peek() == '-' and (is_alpha(peek(1))
+                              or (peek(1) == '$' and is_alpha(peek(2)))) do
+            adv()  -- consume '-'
+            append_str('-')
+            if peek() == '$' then
+              adv()  -- consume '$'
+              local ms = pos
+              while is_alnum(peek()) do adv() end
+              table.insert(parts, { kind = "macro_param", name = s:sub(ms, pos - 1) })
+            else
+              local ss = pos
+              while is_alnum(peek()) do adv() end
+              append_str(s:sub(ss, pos - 1))
+            end
+          end
+
+          if peek() == '!' or peek() == '?' then
+            append_str(peek())
+            adv()
+          end
+
+          emit("COMPOSITE_IDENT", parts, tok_line, tok_col)
+        else
+          emit("MACRO_PARAM", mp_name, tok_line, tok_col)
+        end
+        line_has_tok = true
+      end
+
+    -- ── Identifier / keyword / path / composite-ident with $-slots ────
     elseif is_alpha(c) then
       local tok_line, tok_col = cur_line, col()
       local first_seg = scan_ident_seg()  -- always succeeds (is_alpha guard above)
+
+      -- Composite continuation: '-$ident' with no whitespace? scan_ident_seg
+      -- already absorbed any '-ident' runs (since alnum follows the '-'), so
+      -- the only way to land here is a '-$...' transition.
+      if peek() == '-' and peek(1) == '$' and is_alpha(peek(2)) then
+        local parts = { first_seg }
+        local function append_str(str)
+          if type(parts[#parts]) == "string" then
+            parts[#parts] = parts[#parts] .. str
+          else
+            table.insert(parts, str)
+          end
+        end
+
+        while peek() == '-' and (is_alpha(peek(1))
+                            or (peek(1) == '$' and is_alpha(peek(2)))) do
+          adv()  -- consume '-'
+          append_str('-')
+          if peek() == '$' then
+            adv()  -- consume '$'
+            local ms = pos
+            while is_alnum(peek()) do adv() end
+            table.insert(parts, { kind = "macro_param", name = s:sub(ms, pos - 1) })
+          else
+            local ss = pos
+            while is_alnum(peek()) do adv() end
+            append_str(s:sub(ss, pos - 1))
+          end
+        end
+
+        if peek() == '!' or peek() == '?' then
+          append_str(peek())
+          adv()
+        end
+
+        emit("COMPOSITE_IDENT", parts, tok_line, tok_col)
+        line_has_tok = true
+        goto continue_scan
+      end
+
       local segments  = { first_seg }
       local has_interp = false
 
@@ -511,6 +616,7 @@ function M.tokenize(source, filename)
       end
       line_has_tok = true
     end
+    ::continue_scan::
   end
 
   -- ── End of source: close off last line and remaining indents ─────────

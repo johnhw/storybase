@@ -255,24 +255,37 @@ No regressions: full suite still 2755 passing / 2 pre-existing pending
 
 #### Stage 2 — Lexer `$param` + composite identifiers
 
-Goal: source text like `$path`, `give-$path`, `$path-init`, `has-$path?`
-lex into tokens the parser can stitch into substitutable identifiers and
-PATH_EXPR segments.
+**Lexer half ✅ (2026-05-17).** Parser plumbing (storing `name_parts` on AST
+nodes at name-consuming sites) is deferred to Stage 2b; lands together with
+Stage 3 expansion so the spec coverage isn't theatre.
 
-- `compiler/lexer.lua`: recognise `$IDENT` as `MACRO_PARAM` token. When an
-  `IDENT`/`-`/`MACRO_PARAM` run has no whitespace between tokens, emit a
-  composite identifier token whose `value` is a list of parts (mix of
-  literal strings and `{kind="macro_param", name=...}` placeholders).
-  Decision point: do this in the lexer (composite token) vs the parser
-  (stitch from primitive tokens). Lexer is simpler given how identifiers
-  are consumed in many parser sites.
-- `compiler/parser.lua`: where IDENTs are consumed for *names* (decl names,
-  FN_CALL names, path segments), accept the composite-IDENT shape and
-  store the parts list on the AST node (`name_parts` field if composite;
-  plain `name` string otherwise — so non-macro code paths are unchanged).
-- `tests/compiler/macro_decl_spec.lua`: lex-level assertions that the
-  expected tokens come out for `$path`, `give-$path`, `$path-init`,
-  `$a-$b` (back-to-back).
+- `compiler/lexer.lua`: `$IDENT` now emits a `MACRO_PARAM` token (value =
+  name string). A no-whitespace run mixing `IDENT` / `MACRO_PARAM` joined by
+  `-` collapses into a single `COMPOSITE_IDENT` token whose `value` is a
+  parts list — strings and `{kind="macro_param", name=...}` entries,
+  consecutive string parts merged at emit time. Trailing `!`/`?` is
+  appended to the last string part. Composite continuation does not cross
+  whitespace, and a `/` ends the composite (`npcs/$kind` is three tokens —
+  PATH-with-`$` is a Stage 3 concern). Bare `$` (no identifier) raises
+  `ILLEGAL_CHAR` and the scanner recovers by consuming the lone `$`.
+- `tests/compiler/macro_decl_spec.lua`: 16 new lex-level tests covering
+  `$path`, `give-$path`, `$path-init`, `$a-$b`, `has-$path?`,
+  `give-thing-$path`, `$path?`, plus negative cases (plain ident
+  unchanged, whitespace breaks composite, bare `$` errors and recovers,
+  source positions).
+- `tests/compiler/lexer_spec.lua`: the `$foo` illegal-char fixture (now
+  legal) was swapped to `~foo`.
+
+No regressions: 2771 passing, 2 pre-existing pending (unrelated formatter
+limitations).
+
+**Stage 2b — parser plumbing (open).** Where IDENTs are consumed for
+*names* (decl names, FN_CALL names, path segments), accept the
+`COMPOSITE_IDENT` / `MACRO_PARAM` shape and store the parts list on the AST
+node — `name_parts` field if composite, plain `name` string otherwise so
+non-macro code paths are unchanged. Wiring this without Stage 3 expansion
+buys nothing (the checker would still error on un-substituted nodes), so
+the natural batching is Stage 2b + Stage 3 in one commit.
 
 #### Stage 3 — Decl-level expansion pass + decl-level macro calls
 

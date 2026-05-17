@@ -627,14 +627,14 @@ end)
 
 describe("lexer — error: illegal character", function()
   it("reports ILLEGAL_CHAR for an unknown character", function()
-    local d = first_diag("$foo")
+    local d = first_diag("~foo")
     assert.is_not_nil(d)
     assert.equal("ILLEGAL_CHAR", d.code)
     assert.equal("error", d.level)
   end)
 
   it("continues lexing after an illegal character", function()
-    local ks = kind_list("$ 42")
+    local ks = kind_list("~ 42")
     local found = false
     for _, k in ipairs(ks) do
       if k == "INTEGER" then found = true end

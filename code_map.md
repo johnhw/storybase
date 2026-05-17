@@ -81,6 +81,10 @@ EMIT_MUT         -- engine/emit event [args]
 - `M.tokenize(source, filename)` → `{tokens=[], errors=[]}`
 - Handles INDENT/DEDENT pre-pass, all token types, NAMED_ARG (`foo:`), COMPUTED_GOTO, PATH tokens (`a/b/c`)
 - Token shape: `{type=STRING, value=ANY, line=N, col=N}`
+- §E0 Stage 2 tokens: `MACRO_PARAM` (bare `$ident`, value=name) and
+  `COMPOSITE_IDENT` (no-whitespace `IDENT`/`$IDENT` run joined by `-`,
+  value=parts list of strings and `{kind="macro_param", name=...}` entries;
+  trailing `!`/`?` folded into the last string part)
 
 ---
 
