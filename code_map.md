@@ -636,6 +636,18 @@ Single-step scripting mode for `storybase run --cli save.sbd`.
 - JSON output: `{type, scene, narration, choices, state, done, saved}` for state; `{type="quit"}`, `{type="done"}`, `{type="error", message}`
 - `opts.reset = true` — restart from initial state; `opts.seed` — RNG seed
 
+### `cli/serve_api_cmd.lua` (§G2)
+Stateless HTTP API hosting a compiled game; distinct from `run --serve` which is stateful and browser-driven.
+- `M.run(args)` — CLI entry: compile + start an HTTP server on `--port` (default 8080)
+- `M.start(game_table, opts)` → server  (binds non-blocking listener via LuaSocket)
+- `M.poll(server)` → integer  — accept + dispatch any pending connections (used by tests)
+- `M.stop(server)` — close the listener
+- `M.serve(game_table, opts)` — blocking loop: `poll` + `socket.sleep(0.01)` until process exit
+- Routes: `GET /` (text usage), `GET /schema` (compiled schema summary), `POST /step` (stateless step), `POST /reset` (alias for step with reset:true), `OPTIONS *` (CORS preflight)
+- `POST /step` contract: `{save_log?, choice_index?, seed?, reset?}` → `{scene, narration, choices, state, save_log, done, ended}`
+- Save-log serialisation: plain Lua tables of the same shape as `cli/cli_cmd.lua` (scene stack + log entries + checkpoints + scheduler state) round-tripped through `runtime.debug.encode_json`/`decode_json`; client holds opaque session state across requests
+- Exported for tests: `M._save_to_table`, `M._restore_from_table`, `M._handle_step`, `M._schema_summary`
+
 ---
 
 ## lib/
@@ -696,6 +708,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/cli_integration_spec.lua` | Full CLI integration tests: all subcommands (check/compile/run/format/repl/verify/migrate) against all test*.sb + demo*.sb files; also import alias, exports:, source-context error output tests |
 | `tests/cli/lsp_spec.lua` | LSP server unit tests: build_syms (types/states/fns/actors/docs), word_at (word extraction, paths, hyphens), make_lsp_diags (severity, positions), integration with real parse+check (43 tests) |
 | `tests/cli/cli_cmd_spec.lua` | `--cli` single-step mode: fresh start, state persistence, reset, quit, error handling, game completion, checkpoint+undo (demo08), state fields, subprocess integration (35 tests) |
+| `tests/cli/serve_api_spec.lua` | §G2 `storybase serve-api`: handle_step kernel (fresh start, choice advance, JSON round-trip determinism, invalid choice, malformed body), HTTP lifecycle (start/stop), GET / and /schema, OPTIONS preflight, POST /step and /reset end-to-end (22 tests) |
 | `tests/cli/drivers_spec.lua` | UI drivers: plain render/prompt/notify, ansi color escapes, --ui driver injection via engine.new (18 tests) |
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, multi-axis at:/every:, cancel-during-tick, end-to-end pipeline (22 tests) |
 | `tests/compiler/types_spec.lua` | compiler/types.lua state_space_size arithmetic (bool/int/enum/symbol/option/set/list/record/variant) (30 tests) |

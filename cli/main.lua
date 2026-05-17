@@ -54,6 +54,7 @@ Commands:
   extract-symbols <file>      Scan symbol literals; suggest type declarations
   compact  <game.sb> <save.log> Emit snapshot + delta log for faster replay
   bundle   <file>             Bundle a game into a single self-contained .lua file
+  serve-api <file>            Stateless HTTP API (client-held save log)
   lsp                         Start the LSP server (stdio JSON-RPC)
   help                        Show this help text
 
@@ -473,6 +474,17 @@ local function cmd_compact(args)
   return compact_cmd.run(args) or 0
 end
 
+-- ── Command: serve-api ───────────────────────────────────────
+
+local function cmd_serve_api(args)
+  local ok, serve_api_cmd = pcall(require, "cli.serve_api_cmd")
+  if not ok then
+    io.stderr:write("error: could not load serve-api command: " .. tostring(serve_api_cmd) .. "\n")
+    return 1
+  end
+  return serve_api_cmd.run(args) or 0
+end
+
 -- ── Command: lsp ─────────────────────────────────────────────
 
 local function cmd_lsp(_args)
@@ -629,6 +641,29 @@ storybase coverage [--depth N] [--budget N] [--format json] <file>
 
   Exit codes: 0 on success (even if coverage is incomplete), 1 on error.
 ]],
+  ["serve-api"] = [[
+storybase serve-api [--port N] [--bind addr] [--seed N] [--production] <file>
+
+  Start a stateless HTTP API server that hosts the compiled game.  Unlike
+  --serve (which keeps one session in memory and is browser-driven), every
+  request to serve-api is independent: clients carry the full save log
+  between calls.  Multiple chat-bot, web, or Discord frontends can share a
+  single server process without locking.
+
+  Endpoints:
+    GET  /         Plain-text usage page
+    GET  /schema   JSON summary of the compiled schema (states, scenes)
+    POST /step     {save_log?, choice_index?, seed?, reset?}
+                   → {scene, narration, choices, state, save_log, done, ended}
+    POST /reset    Alias for /step with reset:true
+
+  Options:
+    --port N         Listen port (default: 8080)
+    --bind addr      Bind address (default: 127.0.0.1)
+    --seed N         Default seed for fresh-start games when the client
+                     omits its own seed
+    --production     Compile with verify/watch stripped before serving
+]],
   ["lsp"] = [[
 storybase lsp
 
@@ -679,6 +714,7 @@ local COMMANDS = {
   ["extract-symbols"] = cmd_extract_symbols,
   ["compact"]         = cmd_compact,
   ["bundle"]          = cmd_bundle,
+  ["serve-api"]       = cmd_serve_api,
   ["lsp"]             = cmd_lsp,
   ["help"]            = cmd_help,
 }

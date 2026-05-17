@@ -417,27 +417,14 @@ documentation.
 **Acceptance:** `storybase bundle --target web demo01_wanderer.sb` produces a single
 `.html` file that runs the demo in any modern browser.
 
-### G2. HTTP API mode (stateless `/step`)
+### G2. HTTP API mode (stateless `/step`) ✅ (2026-05-17 — see completed.md)
 
-**Goal:** Distinct from existing `--serve` (which is stateful, browser-driven, one
-game per process). Add a stateless POST `/step` taking `{save_log, choice_index}` and
-returning `{narration, choices, save_log, done}`. Lets chatbots, Discord bots, web
-frontends consume games without managing a process per session.
-
-**Design sketch:**
-- New CLI mode `storybase serve-api game.sb --port 8080`.
-- POST `/step`: deserialise the input log, replay to current state, apply choice,
-  return new log + scene render.
-- Save log is the entire session state — clients hold it; server is stateless.
-
-**Files:** new `cli/serve_api_cmd.lua`. Reuse the existing HTTP server from
-`runtime/debug.lua`. `tests/cli/serve_api_spec.lua`.
-
-**Edge cases:** Log size grows with session length — provide a `compact` option in
-the API. Auth: out-of-scope; document as "place behind a reverse proxy."
-
-**Acceptance:** A Python or JS client can POST a sequence of choices and complete
-`demo01_wanderer.sb` end to end without any persistent state on the server.
+Shipped as `storybase serve-api`. Endpoints `GET /`, `GET /schema`,
+`POST /step`, `POST /reset`, `OPTIONS *`. Client-held opaque `save_log`
+round-trips through JSON; the server is stateless. 22 tests
+(`tests/cli/serve_api_spec.lua`). Compaction was not added to the API
+itself — clients can replay saves through `storybase compact` offline
+if logs grow large; revisit if real usage shows it needs to be inline.
 
 ### G3. Engine adapters (Löve2D, Godot, etc.)
 

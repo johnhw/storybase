@@ -5,6 +5,60 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## G2 — Stateless HTTP API mode (`serve-api`) ✅ (2026-05-17)
+
+New CLI command `storybase serve-api game.sb [--port N] [--bind addr]
+[--seed N] [--production]` that hosts a compiled game over HTTP without
+keeping any per-session state. Distinct from `run --serve`, which holds a
+single engine in memory and is browser-driven; `serve-api` is the API a
+chat-bot, web frontend, or Discord bot connects to: each request carries
+the entire save log, the server replays it, applies one choice, and
+returns the new save log.
+
+**Endpoints**
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`  | `/` | Plain-text usage page |
+| `GET`  | `/schema` | JSON summary of states / scenes / entry scene |
+| `POST` | `/step` | `{save_log?, choice_index?, seed?, reset?}` → `{scene, narration, choices, state, save_log, done, ended}` |
+| `POST` | `/reset` | Alias for `/step` with `reset:true` |
+| `OPTIONS` | `*` | CORS preflight (Access-Control-Allow-Origin: `*`) |
+
+**Save-log format.** Same data shape used by `cli/cli_cmd.lua` (scene
+stack, log entries, checkpoint stack, scheduler `next_fire` + `fired`
+sets) but serialised as a plain Lua table so the JSON codec from
+`runtime/debug.lua` can ship it to and from the client. Two requests
+with the same save log + choice index produce the same next state —
+the determinism is inherited from the transaction log + seeded RNG
+pipeline; no fresh randomness is introduced server-side per request.
+
+**Files.**
+
+- `cli/serve_api_cmd.lua` (NEW) — entry, save/restore-over-table,
+  step kernel, self-contained HTTP server (non-blocking accept loop
+  with `start` / `poll` / `stop` lifecycle for tests; blocking `serve`
+  wrapper for production).
+- `cli/main.lua` — new `serve-api` dispatcher entry + help text.
+- `tests/cli/serve_api_spec.lua` (NEW, 22 tests) — kernel tests
+  (fresh start, choice advance, JSON round-trip determinism, invalid
+  choice, malformed JSON, reset) + HTTP end-to-end tests (lifecycle,
+  GET / and /schema, OPTIONS, multi-step play-through, /reset). Uses
+  the same non-blocking `start` / `poll` pattern as
+  `runtime/debug.lua`'s HTTP tests, so the server runs in-process.
+- `docs/reference/cli.md` — full reference entry with endpoint
+  schema and deployment notes (auth / TLS out of scope; deploy
+  behind a reverse proxy).
+- `code_map.md` — new entries for `cli/serve_api_cmd.lua` and the
+  new test file.
+
+**Acceptance.** A client can POST a sequence of `/step` requests to
+complete `demo01_wanderer.sb` end to end without any per-session
+state on the server (covered by the play-through HTTP test).
+Save-log replay is deterministic across JSON round-trips (kernel
+test). Invalid input (out-of-range choice, malformed JSON,
+non-object body) returns HTTP 400 with `{error: ...}`.
+
 ## A11 — `--ui <name>` driver-name whitelist ✅ (2026-05-14)
 
 **Bug.** `cli/main.lua`'s `cmd_run` accepted any string for `--ui <name>` and

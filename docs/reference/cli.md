@@ -243,6 +243,70 @@ The bundled file embeds the full runtime and the compiled game table. At runtime
 
 ---
 
+### `serve-api`
+
+Start a stateless HTTP API server that hosts the compiled game. Unlike `run --serve` (which keeps a single session in memory and is browser-driven), every request is independent: clients carry the full save log between calls. Multiple chat-bot, web, or Discord frontends can share a single server process without per-session locking.
+
+```
+storybase serve-api [--port N] [--bind addr] [--seed N] [--production] <file.sb>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--port N` | Listen port (default: `8080`). |
+| `--bind addr` | Bind address (default: `127.0.0.1`). |
+| `--seed N` | Default seed for fresh-start games when the client omits its own seed. |
+| `--production` | Compile with `verify` / `watch` stripped before serving. |
+
+**Endpoints**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/` | Plain-text usage page describing the API. |
+| `GET`  | `/schema` | JSON summary of the compiled schema (state paths, scenes, entry scene). |
+| `POST` | `/step` | Take one game step; see request/response below. |
+| `POST` | `/reset` | Alias for `/step` with `reset: true`. |
+| `OPTIONS` | `*` | CORS preflight (Access-Control-Allow-Origin: `*`). |
+
+**`POST /step` request** (JSON):
+
+```json
+{
+  "save_log":     <opaque object from previous response> | null,
+  "choice_index": 1,
+  "seed":         42,
+  "reset":        false
+}
+```
+
+`choice_index` is 1-based; omit or pass `null` to render the current scene without making a choice. `seed` is honoured only on fresh-start requests (no `save_log`). `reset: true` ignores any supplied `save_log` and starts a new session.
+
+**`POST /step` response** (JSON):
+
+```json
+{
+  "scene":     "village",
+  "narration": [ { "kind": "narration", "text": "..." }, ... ],
+  "choices":   [ { "index": 1, "label": "Leave the village" }, ... ],
+  "state":     { "world/gold": 42, ... },
+  "save_log":  { ... },
+  "done":      false,
+  "ended":     null
+}
+```
+
+`save_log` is opaque to clients: receive it from one response and post it back unchanged with the next request. `ended` is the matched ending name when an §F2 `ending` declaration fires, otherwise `null`.
+
+Error responses use HTTP status `400` and the body `{ "error": "..." }`.
+
+**Save-log determinism.** The save log is the same transaction log used by `storybase run --save / --load`, serialised as a plain JSON object. Two requests with the same save log and choice index produce the same next state. Logs grow with session length; if needed, clients can replay them through `storybase compact` offline.
+
+**Auth and TLS.** Out of scope. Place the server behind a reverse proxy (Caddy, nginx) for HTTPS, authentication, and rate limiting in production deployments.
+
+**Exit codes:** `0` if the listener was started and the loop exits cleanly (typically the process is killed externally); `1` if the file fails to compile or the listener cannot bind.
+
+---
+
 ### `lsp`
 
 Start the StoryBase Language Server Protocol (LSP) server. Communicates over stdio using JSON-RPC 2.0. Intended to be launched by editor integrations.
