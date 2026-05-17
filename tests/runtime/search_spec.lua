@@ -1489,3 +1489,166 @@ describe("search hash_state — A12: deterministic float hashing", function()
   end)
 
 end)
+
+-- ============================================================
+-- Temporal-logic verifiers (C3)
+-- ============================================================
+
+describe("search.verify_eventually (EF)", function()
+
+  it("passes when a reaching path exists", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  flag: Bool = false
+fn flip:
+  set! world/flag true
+scene main:
+  * Flip
+    flip
+    -> main
+  * Idle
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = search_mod.clone_cache(eng._state, eng._scheduler, gt)
+    local cond = function(c) return c["world/flag"] == true end
+    local r = search_mod.verify_eventually(gt, cache, {"main"}, cond, 4, 10)
+    assert.is_true(r.pass, r.fail_msg)
+    assert.is_truthy(r.counterexample_path)
+    assert.is_true(#r.counterexample_path > 0)
+  end)
+
+  it("fails when no path satisfies condition", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  flag: Bool = false
+scene main:
+  * Idle
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = search_mod.clone_cache(eng._state, eng._scheduler, gt)
+    local cond = function(c) return c["world/flag"] == true end
+    local r = search_mod.verify_eventually(gt, cache, {"main"}, cond, 4, 10)
+    assert.is_false(r.pass)
+  end)
+
+end)
+
+describe("search.verify_always_eventually (AF)", function()
+
+  it("passes when condition is forced", function()
+    -- Only one choice, which sets flag=true.
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  flag: Bool = false
+fn flip:
+  set! world/flag true
+scene main:
+  * Go
+    flip
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = search_mod.clone_cache(eng._state, eng._scheduler, gt)
+    local cond = function(c) return c["world/flag"] == true end
+    local r = search_mod.verify_always_eventually(gt, cache, {"main"}, cond, 4, 10)
+    assert.is_true(r.pass, r.fail_msg)
+  end)
+
+  it("fails when an avoidant path exists", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  flag: Bool = false
+fn flip:
+  set! world/flag true
+scene main:
+  * Flip
+    flip
+    -> main
+  * Avoid
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = search_mod.clone_cache(eng._state, eng._scheduler, gt)
+    local cond = function(c) return c["world/flag"] == true end
+    local r = search_mod.verify_always_eventually(gt, cache, {"main"}, cond, 4, 10)
+    assert.is_false(r.pass)
+    assert.is_truthy(r.counterexample_path)
+    assert.is_true(#r.counterexample_path > 0)
+  end)
+
+end)
+
+describe("search.verify_until (AU)", function()
+
+  it("passes when p holds until q on every path", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  step: Int(0, 10) = 0
+fn next:
+  inc! world/step 1
+scene main:
+  * Next
+    next
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = search_mod.clone_cache(eng._state, eng._scheduler, gt)
+    local p = function(c) return (c["world/step"] or 0) < 5 end
+    local q = function(c) return (c["world/step"] or 0) >= 2 end
+    local r = search_mod.verify_until(gt, cache, {"main"}, p, q, 4, 10)
+    assert.is_true(r.pass, r.fail_msg)
+  end)
+
+  it("fails when p is violated before q ever holds", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+state world:
+  step: Int(0, 10) = 0
+fn next:
+  inc! world/step 1
+scene main:
+  * Next
+    next
+    -> main
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs)
+    local eng = engine_mod.new(gt, { io_out = { write = function() end } })
+    eng:init()
+    local cache = search_mod.clone_cache(eng._state, eng._scheduler, gt)
+    -- p: step <= 0, q: step >= 5. p violated at step=1 before q ever holds.
+    local p = function(c) return (c["world/step"] or 0) <= 0 end
+    local q = function(c) return (c["world/step"] or 0) >= 5 end
+    local r = search_mod.verify_until(gt, cache, {"main"}, p, q, 4, 10)
+    assert.is_false(r.pass)
+  end)
+
+end)

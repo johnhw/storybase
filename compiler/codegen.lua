@@ -810,6 +810,86 @@ local function emit_speakers(decls)
   return speakers
 end
 
+--- Emit generate declarations into game_table.generates (§F1).
+--- Result is an ordered list so the engine runs them in source order.
+--- Each entry preserves the raw AST body for runtime evaluation by eval.lua.
+local function emit_generates(decls)
+  local generates = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.GENERATE_DECL then
+      generates[#generates+1] = {
+        name      = node.name,
+        seed_path = node.seed_path,  -- nil or PATH_EXPR/INTERP_PATH AST node
+        body      = node.body or {},
+        doc       = node.doc,
+      }
+    end
+  end
+  return generates
+end
+
+--- Emit ending declarations into game_table.endings (§F2).
+--- Each entry preserves the when expression (AST) and the narration body
+--- (scene-mode AST) for the engine to evaluate on every step.
+local function emit_endings(decls)
+  local endings = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.ENDING_DECL then
+      endings[#endings+1] = {
+        name      = node.name,
+        when_expr = node.when_expr,
+        body      = node.body or {},
+        doc       = node.doc,
+      }
+    end
+  end
+  return endings
+end
+
+--- Synthesise auto-verify entries for every ending declaration (§F2):
+---  - "ending '<name>' is reachable"          → verify-eventually <when_expr>
+---  - "endings '<a>' and '<b>' are exclusive" → verify-always not (a and b)
+--- The synthesised AST nodes mirror what the parser would produce for a
+--- hand-written verify block, so verify.lua can consume them unchanged.
+local function emit_ending_verifies(endings_list)
+  local k = ast.K
+  local out = {}
+  if #endings_list == 0 then return out end
+
+  local function make_clause(kind, expr)
+    return { kind = kind, condition = expr, body = {} }
+  end
+
+  -- Reachability verify for each ending
+  for _, e in ipairs(endings_list) do
+    out[#out+1] = {
+      label    = "ending '" .. (e.name or "?") .. "' is reachable",
+      clauses  = { make_clause("eventually", e.when_expr) },
+      _auto    = true,
+    }
+  end
+
+  -- Pairwise mutual-exclusivity: verify-always not (a.when and b.when)
+  for i = 1, #endings_list do
+    for j = i + 1, #endings_list do
+      local a, b = endings_list[i], endings_list[j]
+      if a.when_expr and b.when_expr then
+        local pos = a.when_expr.pos
+        local conj = ast.binary_op("and", a.when_expr, b.when_expr, pos)
+        local neg  = ast.unary_op("not", conj, pos)
+        out[#out+1] = {
+          label   = "endings '" .. a.name .. "' and '" .. b.name ..
+                    "' are mutually exclusive",
+          clauses = { make_clause("always", neg) },
+          _auto   = true,
+        }
+      end
+    end
+  end
+
+  return out
+end
+
 local function emit_migrations(decls)
   local migrations = {}
   for _, node in ipairs(decls) do
@@ -919,8 +999,19 @@ function M.emit(typed_ast, opts)
     grids      = emit_grids(decls),
     tags       = emit_tags(decls),
     hooks      = emit_hooks(decls),
+    generates  = emit_generates(decls),
+    endings    = emit_endings(decls),
     production = opts.production or false,
   }
+
+  -- §F2: auto-emit reachability + mutual-exclusivity verify blocks for endings.
+  -- Skipped in production (since verifies are stripped anyway).
+  if not opts.production and #game_table.endings > 0 then
+    local auto_v = emit_ending_verifies(game_table.endings)
+    for _, v in ipairs(auto_v) do
+      game_table.verifies[#game_table.verifies+1] = v
+    end
+  end
 
   return game_table, diags
 end

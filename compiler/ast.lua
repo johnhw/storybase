@@ -204,6 +204,8 @@ M.K.DEFGRID_DECL        = "defgrid_decl"
 M.K.TAG_DECL            = "tag_decl"   -- tag name
 M.K.HOOK_DECL           = "hook_decl"  -- hook tag_name: pre:/post: body
 M.K.TEST_DECL           = "test_decl"  -- test "label": setup/run/expect
+M.K.GENERATE_DECL       = "generate_decl"  -- generate name [seed: path]: body  (§F1)
+M.K.ENDING_DECL         = "ending_decl"    -- ending name when: cond: body      (§F2)
 
 -- ── Type expressions ──────────────────────────────────────────
 M.K.TYPE_BOOL           = "type_bool"
@@ -347,6 +349,8 @@ local DECL_KINDS = {
   [M.K.TAG_DECL]       = true, [M.K.HOOK_DECL]       = true,
   [M.K.SPEAKER_DECL]   = true,
   [M.K.TEST_DECL]      = true,
+  [M.K.GENERATE_DECL]  = true,
+  [M.K.ENDING_DECL]    = true,
 }
 
 local MUT_KINDS = {
@@ -611,6 +615,38 @@ function M.test_decl(label, setup, run, expect, pos)
     setup  = setup  or {},
     run    = run    or {},
     expect = expect or {},
+  }, pos)
+end
+
+--- generate_decl: a seed-deterministic procedural-generation block.
+---   name      string   Identifier (e.g. "world-map")
+---   seed_path table?   Optional PATH_EXPR/INTERP_PATH node naming a state
+---                      path whose Int value is used as the RNG seed before the
+---                      body runs.  When nil, the engine's existing RNG is reused
+---                      without re-seeding.
+---   body      table    List of AST statement nodes; runs once at engine init.
+---   doc       string?  Optional documentation string.
+function M.generate_decl(name, seed_path, body, doc, pos)
+  return M.node(M.K.GENERATE_DECL, {
+    name      = name,
+    seed_path = seed_path,
+    body      = body or {},
+    doc       = doc,
+  }, pos)
+end
+
+--- ending_decl: a verifiable end-state declaration.
+---   name       string   Identifier (e.g. "good")
+---   when_expr  table    Expression — Bool condition that triggers the ending.
+---   body       table    List of scene-mode AST nodes (narration/say) rendered
+---                       as the final output when the ending fires.
+---   doc        string?  Optional documentation string.
+function M.ending_decl(name, when_expr, body, doc, pos)
+  return M.node(M.K.ENDING_DECL, {
+    name      = name,
+    when_expr = when_expr,
+    body      = body or {},
+    doc       = doc,
   }, pos)
 end
 

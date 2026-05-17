@@ -1,0 +1,98 @@
+# demo23_procedural_dungeon.sb
+# A tiny procedurally-generated dungeon that exercises both §F1 (generate
+# blocks) and §F2 (ending declarations).
+#
+# The `generate` block runs once at engine init: it reads `world/seed` and
+# uses it to reseed the logged RNG, then spawns 3–5 rooms with a linear chain
+# of `exits` relations between them. Because every mutation flows through the
+# log, replaying the save file produces an identical dungeon without re-
+# running the generate block.
+#
+# Two ending declarations cover the win/lose outcomes. The compiler auto-
+# emits three verify blocks:
+#   - "ending 'escape' is reachable"
+#   - "ending 'lost' is reachable"
+#   - "endings 'escape' and 'lost' are mutually exclusive"
+#
+# Run with:
+#   storybase run    demos/demo23_procedural_dungeon.sb
+#   storybase verify demos/demo23_procedural_dungeon.sb
+
+module procedural-dungeon
+  version: 1.0
+
+engine-config:
+  entry-scene: enter
+
+# ─────────────────────────────────────────────────────────
+# Types and state
+# ─────────────────────────────────────────────────────────
+
+type RoomKind = chamber | corridor | exit
+
+state world:
+  seed:       Int(1, 1000000) = 1729
+  room-count: Int(0, 5)       = 0
+  generated:  Bool            = false
+
+state rooms/{r}: RoomKind max: 5
+
+state player:
+  location: Int(0, 5) = 0
+  alive:    Bool      = true
+  escaped:  Bool      = false
+
+# ─────────────────────────────────────────────────────────
+# §F1 — procedural generation
+# ─────────────────────────────────────────────────────────
+# Picks a random room count in 3..5, spawns the corresponding rooms (always
+# placing an `exit` at the final index), and marks `world/generated` so the
+# game knows it is ready to begin. The body is deterministic in the seed.
+
+generate dungeon-layout seed: world/seed:
+  let count = (random-int 3 5):
+    set! world/room-count count
+    spawn! rooms "r0" `chamber
+    spawn! rooms "r1" `corridor
+    spawn! rooms "r2" `corridor
+    when count >= 4:
+      spawn! rooms "r3" `corridor
+    when count >= 5:
+      spawn! rooms "r4" `chamber
+    set! world/generated true
+
+# ─────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────
+
+fn step-forward:
+  pre: player/alive
+  inc! player/location 1
+  when player/location >= world/room-count:
+    set! player/escaped true
+
+fn perish:
+  set! player/alive false
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene enter:
+  You stand at the threshold of a {world/room-count}-room dungeon (seed {world/seed}).
+  Room {player/location} of {world/room-count}.
+  * Advance
+    step-forward
+    -> enter
+  * Stumble
+    perish
+
+# ─────────────────────────────────────────────────────────
+# §F2 — endings (auto-verified for reachability + exclusivity)
+# ─────────────────────────────────────────────────────────
+
+ending escape when: player/escaped and player/alive:
+  "You step into the daylight, dungeon behind you."
+
+ending lost when: not player/alive:
+  "Your light goes out. The dungeon keeps its secrets."

@@ -2001,13 +2001,22 @@ MUTATION_TABLE = {
 
 -- ── Scene navigation ─────────────────────────────────────────────────────────
 
+-- Some scene names happen to collide with reserved keywords (e.g. `ending` —
+-- introduced for §F2 — has been used as an ordinary scene name in older demos).
+-- The keyword check happens at the lexer; here we accept either kind in the
+-- target position of `->` / `=>` so a scene literally named `ending` keeps
+-- working.
+local function _is_target_name_token(t)
+  return t.kind == "IDENT" or t.kind == "PATH" or t.kind == "KEYWORD"
+end
+
 local function parse_scene_goto(p)
   local tpos = p:cur().pos
   p:adv()  -- consume "->"
   local target
   if p:at("OP", "(") then
     p:adv(); target = parse_expr(p); p:expect("OP", ")")
-  elseif p:at("IDENT") or p:at("PATH") then
+  elseif _is_target_name_token(p:cur()) then
     target = p:adv().value
     -- Support namespace-qualified scene: -> E.scene-name
     if p:at("OP", ".") then
@@ -2030,7 +2039,7 @@ local function parse_scene_enter(p)
   local tpos = p:cur().pos
   p:adv()  -- consume "=>"
   local target
-  if p:at("IDENT") or p:at("PATH") then
+  if _is_target_name_token(p:cur()) then
     target = p:adv().value
     -- Support namespace-qualified scene: => E.scene-name
     if p:at("OP", ".") then
@@ -3138,6 +3147,29 @@ local function parse_verify_decl(p, doc)
       local expr = parse_expr(p); p:skip_to_eol()
       clauses[#clauses+1] = ast.verify_clause("always", expr, {}, cpos)
 
+    elseif ct.kind == "IDENT" and ct.value == "verify-eventually" then
+      p:adv()
+      local expr = parse_expr(p); p:skip_to_eol()
+      clauses[#clauses+1] = ast.verify_clause("eventually", expr, {}, cpos)
+
+    elseif ct.kind == "IDENT" and ct.value == "verify-always-eventually" then
+      p:adv()
+      local expr = parse_expr(p); p:skip_to_eol()
+      clauses[#clauses+1] = ast.verify_clause("always_eventually", expr, {}, cpos)
+
+    elseif ct.kind == "IDENT" and ct.value == "verify-until" then
+      -- verify-until <p-expr> until <q-expr>
+      p:adv()
+      local p_expr = parse_expr(p)
+      if p:at("IDENT", "until") then
+        p:adv()
+      else
+        p:emit_err(ast.E.BAD_DECLARATION,
+          "expected 'until' between verify-until expressions", p:cur().pos)
+      end
+      local q_expr = parse_expr(p); p:skip_to_eol()
+      clauses[#clauses+1] = ast.verify_clause("until", p_expr, { q_expr }, cpos)
+
     elseif ct.kind == "NAMED_ARG" and ct.value == "from-any-state" then
       p:adv(); p:skip_to_eol()
       -- Consume the nested body (sub-clauses like can-reach?) — stored but not yet evaluated
@@ -3501,6 +3533,102 @@ local function parse_speaker_decl(p, doc)
   return ast.speaker_decl(name, display, color, doc, tpos)
 end
 
+-- ── Generate declaration (§F1) ──────────────────────────────────────────────
+-- Syntax:
+--   generate <name>:                       (no seed — uses engine RNG state)
+--     body...
+--   generate <name> seed: <path>:          (seed RNG from state path's Int value)
+--     body...
+local function parse_generate_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD("generate")
+
+  local name, seed_path
+
+  if p:at("NAMED_ARG") then
+    -- `generate name:` — no seed clause
+    name = p:adv().value
+  elseif p:at("IDENT") then
+    name = p:adv().value
+    if p:at("NAMED_ARG", "seed") then
+      p:adv()  -- consume "seed:"
+      if p:at("PATH") then
+        local pt = p:adv(); seed_path = make_path_expr(pt.value, pt.pos)
+      elseif p:at("INTERP_PATH") then
+        local pt = p:adv(); seed_path = make_interp_path(pt.value, pt.pos)
+      elseif p:at("IDENT") then
+        local pt = p:adv(); seed_path = ast.path_expr({ pt.value }, pt.pos)
+      else
+        p:emit_err(ast.E.BAD_DECLARATION,
+          "expected state path after 'seed:'", p:cur().pos)
+      end
+      p:expect("OP", ":", "expected ':' after generate seed path")
+    else
+      p:expect("OP", ":", "expected ':' or 'seed:' after generate name")
+    end
+  else
+    p:emit_err(ast.E.BAD_DECLARATION,
+      "expected generate name after 'generate'", p:cur().pos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  end
+
+  p:match("NEWLINE")
+
+  local body = {}
+  if p:at("INDENT") then
+    body = parse_body_items(p, false)  -- code mode: statements only
+  end
+
+  return ast.generate_decl(name, seed_path, body, doc, tpos)
+end
+
+-- ── Ending declaration (§F2) ────────────────────────────────────────────────
+-- Syntax:
+--   ending <name> when: <cond>:
+--     narration line
+--     ...
+local function parse_ending_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD("ending")
+
+  local name
+  if p:at("IDENT") then
+    name = p:adv().value
+  elseif p:at("NAMED_ARG") then
+    -- `ending name:` — illegal: missing when clause
+    name = p:adv().value
+    p:emit_err(ast.E.BAD_DECLARATION,
+      "ending '" .. tostring(name) .. "' is missing 'when:' clause", tpos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  else
+    p:emit_err(ast.E.BAD_DECLARATION,
+      "expected ending name after 'ending'", p:cur().pos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  end
+
+  local when_expr
+  if p:at("NAMED_ARG", "when") then
+    p:adv()  -- consume "when:"
+    when_expr = parse_expr(p)
+  elseif p:at("KEYWORD", "when") then
+    p:adv()  -- consume "when" keyword form
+    when_expr = parse_expr(p)
+  else
+    p:emit_err(ast.E.BAD_DECLARATION,
+      "expected 'when:' after ending name", p:cur().pos)
+  end
+
+  p:expect("OP", ":", "expected ':' after ending when-condition")
+  p:match("NEWLINE")
+
+  local body = {}
+  if p:at("INDENT") then
+    body = parse_body_items(p, true)  -- scene mode: narration / say allowed
+  end
+
+  return ast.ending_decl(name, when_expr, body, doc, tpos)
+end
+
 -- ============================================================
 -- Top-level dispatch
 -- ============================================================
@@ -3527,6 +3655,8 @@ parse_decl = function(p, doc)
     elseif t.value == "macro"      then return parse_macro_decl(p, doc)
     elseif t.value == "decl-macro" then return parse_decl_macro_decl(p, doc)
     elseif t.value == "speaker"    then return parse_speaker_decl(p, doc)
+    elseif t.value == "generate"   then return parse_generate_decl(p, doc)
+    elseif t.value == "ending"     then return parse_ending_decl(p, doc)
     else
       p:skip_to_eol()
       p:skip_block()

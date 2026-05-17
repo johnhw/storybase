@@ -462,12 +462,74 @@ function M.new(game_table, opts)
       schema._type_index = idx
     end
 
+    -- §F1: run generate blocks AFTER defaults+grids but BEFORE entry-scene
+    -- assignment, so seed-state reads see initialised values and any
+    -- spawn!/relate!/set! mutations land in the log for replay.
+    self:run_generates()
+
     local entry = self._game.schema
       and self._game.schema.engine_config
       and self._game.schema.engine_config["entry-scene"]
     if entry then
       self._scene_stack = { entry }
     end
+  end
+
+  --- Run every declared generate block once (§F1).
+  --- Each generate's seed_path (if present) is read and used to re-seed the RNG
+  --- before the body executes. All state mutations pass through the transaction
+  --- log so the produced world replays deterministically from a saved log
+  --- without re-running the generate block.
+  function eng:run_generates()
+    local gens = self._game.generates or {}
+    if #gens == 0 then return end
+    for _, gen in ipairs(gens) do
+      if gen.seed_path then
+        local path_key = (function(node)
+          if node.kind == "path_expr" then
+            return table.concat(node.segments or {}, "/")
+          end
+          return nil
+        end)(gen.seed_path)
+        if path_key then
+          local seed_val = self._state:get(path_key)
+          if type(seed_val) == "number" then
+            self._rng:seed(math.floor(seed_val))
+          end
+        end
+      end
+      local ctx = self:make_ctx("generate:" .. (gen.name or "?"))
+      eval.eval_stmts(gen.body or {}, ctx)
+    end
+  end
+
+  --- Evaluate every declared ending's when-condition against the current state
+  --- (§F2). Returns the first ending whose condition is true (in declaration
+  --- order), or nil. Used by the step loop to decide when to render the
+  --- ending body and terminate.
+  ---@return table?  the ending descriptor {name, when_expr, body, doc} or nil
+  function eng:check_ending()
+    local endings = self._game.endings or {}
+    if #endings == 0 then return nil end
+    local ctx = self:make_ctx("ending-check")
+    for _, e in ipairs(endings) do
+      if e.when_expr then
+        local ok, v = pcall(eval.eval_expr, e.when_expr, ctx)
+        if ok and v then return e end
+      end
+    end
+    return nil
+  end
+
+  --- Render the body of a triggered ending into a narration list, returning the
+  --- list. Reuses the same scene-mode narration machinery so narration_line,
+  --- cond_narration, say_stmt, when_stmt, and if_expr all work as expected.
+  function eng:_render_ending(ending)
+    local ctx = self:make_ctx("ending:" .. (ending.name or "?"))
+    local narration = {}
+    ctx.narration_buf = narration
+    self:_render_narration_items(narration, ending.body or {}, ctx)
+    return narration
   end
 
   --- Initialise all declared tile grids with their default cell values.
@@ -619,6 +681,23 @@ function M.new(game_table, opts)
       self:_render_plain(narration)
     end
 
+    -- §F2: an ending whose condition is already true at the start of the turn
+    -- terminates the game before prompting for a choice. Useful when init or a
+    -- generate block lands the player straight into an end state.
+    do
+      local triggered = self:check_ending()
+      if triggered then
+        local enarr = self:_render_ending(triggered)
+        if self._driver then
+          self._driver:render({ narration = enarr, choices = {} })
+        else
+          self:_render_plain(enarr)
+        end
+        self._ended_at = triggered.name
+        return false
+      end
+    end
+
     -- Follow unconditional scene navigation (e.g. computed -> in scene body)
     if nav_signal then
       if nav_signal.type == "goto" then
@@ -686,6 +765,23 @@ function M.new(game_table, opts)
         self:enter_scene(signal.target)
       elseif signal.type == "exit" then
         self:exit_scene()
+      end
+    end
+
+    -- §F2: post-action ending check. If a choice or autonomous turn moved
+    -- state into an ending condition, render the ending body and exit the
+    -- loop. Pre-prompt check above handles the init-time case.
+    do
+      local triggered = self:check_ending()
+      if triggered then
+        local enarr = self:_render_ending(triggered)
+        if self._driver then
+          self._driver:render({ narration = enarr, choices = {} })
+        else
+          self:_render_plain(enarr)
+        end
+        self._ended_at = triggered.name
+        return false
       end
     end
 

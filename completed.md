@@ -5,7 +5,7 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
-## G2 — Stateless HTTP API mode (`serve-api`) ✅ (2026-05-17)
+## G2 — Stateless HTTP API mode (`serve-api`) ✅ (2026-05-16)
 
 New CLI command `storybase serve-api game.sb [--port N] [--bind addr]
 [--seed N] [--production]` that hosts a compiled game over HTTP without
@@ -31,7 +31,7 @@ sets) but serialised as a plain Lua table so the JSON codec from
 `runtime/debug.lua` can ship it to and from the client. Two requests
 with the same save log + choice index produce the same next state —
 the determinism is inherited from the transaction log + seeded RNG
-pipeline; no fresh randomness is introduced server-side per request.
+pipeline, no fresh randomness is introduced server-side per request.
 
 **Files.**
 
@@ -58,6 +58,84 @@ state on the server (covered by the play-through HTTP test).
 Save-log replay is deterministic across JSON round-trips (kernel
 test). Invalid input (out-of-range choice, malformed JSON,
 non-object body) returns HTTP 400 with `{error: ...}`.
+
+## C3 — Temporal-logic verify ✅ (2026-05-15)
+
+Added a CTL subset for verify blocks alongside the existing `verify-always`
+(AG). Three new clause kinds, each backed by a bounded fixpoint over the
+state graph produced by `runtime/search.lua:expand_graph`:
+
+| Clause | CTL | Semantics |
+|--------|-----|-----------|
+| `verify-eventually <p>` | EF p | `p` is reachable on some path |
+| `verify-always-eventually <p>` | AF p | every path eventually reaches `p` |
+| `verify-until <p> until <q>` | p AU q | every path: `p` holds until `q` |
+
+Each new check returns the standard result shape (`pass`, `fail_msg`,
+`counterexample_path`, `states_checked`, `truncated`). For AF and AU,
+counterexamples are produced by a greedy walk through the non-AU/non-AF set,
+terminating at a terminal state, depth boundary, or cycle — by the fixpoint
+definition such a walk always exists when the property fails.
+
+**Bounded semantics.** Boundary nodes (depth == `max_depth`) participate
+only via the base predicate; their unexplored successors are treated
+conservatively. Increasing depth can only flip failures into passes, never
+the other way around.
+
+**Files.**
+- `runtime/search.lua`: `verify_eventually`, `verify_always_eventually`,
+  `verify_until`, plus helpers (`build_out_adjacency`, `compute_ef_set`,
+  `compute_af_set`, `compute_au_set`, `walk_outside_set`, `node_id_map`,
+  `find_path_in_graph`).
+- `runtime/verify.lua`: dispatches the new clause kinds through `run_all`.
+- `compiler/parser.lua`: new branches in `parse_verify_decl`.
+- `cli/format_cmd.lua`: formatter emits the new clauses.
+- `cli/main.lua`: `verify` help text updated.
+- `docs/reference/language.md`, `docs/reference/cli.md`: documented.
+- `demos/demo22_quest_temporal.sb`: forced-completion quest where all four
+  temporal operators (AG / EF / AF / AU) pass at default depth.
+- Tests in `tests/runtime/search_spec.lua` (+9) and
+  `tests/runtime/verify_spec.lua` (+5).
+
+## C4 — Cached / incremental verify ✅ (2026-05-15)
+
+`storybase verify` now persists per-block verdicts in
+`.storybase-cache/verify.json`. On re-run, blocks whose AST-level hash is
+unchanged are reported as `[cached]` and the BFS is skipped.
+
+**Hash inputs (per verify block):**
+1. The verify block's own clauses AST (label + clause kinds + conditions).
+2. The schema slice (`types`, `states`, `relations`, `engine_config`,
+   `time_model`) of the compiled game table.
+3. The AST of every fn transitively reachable from the verify body.
+4. For BFS-style verifies (always / eventually / always-eventually / until /
+   from-any-state / requires): scenes, actors, schedules, bounded
+   declarations, and their transitively-reached fns.
+
+Source positions (`pos`, `file`, `line`, `col`) are stripped before
+serialisation so formatting changes do not invalidate. Hash is FNV-1a
+64-bit; cache is JSON via `runtime.debug.encode_json` for portability.
+
+**Granularity proof.** A two-block file with two fns (one per verify):
+editing fn A invalidates only the verify that depends on A; the verify
+depending on fn B stays cached. Validated by
+`tests/cli/verify_cache_spec.lua`.
+
+**CLI flags (cli/verify_cmd.lua):**
+- `--no-cache`       — skip cache lookups (always re-run).
+- `--clear-cache`    — delete cache before running.
+- `--cache-dir DIR`  — use a non-default cache location.
+
+**Files.**
+- `cli/verify_cache.lua` (new): hash + load/save + dependency analysis.
+- `cli/verify_cmd.lua`: cache lookup + flag parsing.
+- `docs/reference/cli.md`: `--no-cache` / `--clear-cache` / `--cache-dir`
+  documented.
+- Tests in `tests/cli/verify_cache_spec.lua` (+15): hash determinism,
+  cosmetic-edit insensitivity, dep closure granularity, cache I/O,
+  end-to-end re-run behaviour.
+
+---
 
 ## A11 — `--ui <name>` driver-name whitelist ✅ (2026-05-14)
 
@@ -1739,3 +1817,106 @@ only inline `Int(0,N)` types do. Pre-existing limitation of `state.lua`'s type i
 
 **Files:** `cli/fuzz_cmd.lua` (new), `cli/main.lua` (subcommand),
 `tests/cli/fuzz_spec.lua` (26 tests).
+
+---
+
+## §B5 — Auto-docs site ✅ (2026-05-15)
+
+`storybase docs [-o <path>] [--format html|md] <file.sb>` walks the typed AST
+(`compiler.parse_and_check_file`), groups top-level declarations by kind, and emits
+a static reference site. HTML mode (default) writes 14 pages (`index.html` plus one
+per declaration kind) and a shared `style.css` into the output directory; the
+sidebar shows per-kind counts and a static scene-graph listing on `scenes.html`
+follows each scene's `->` / `=>` targets. Markdown mode writes a single `docs.md`
+file with sections for every kind.
+
+Doc strings attached to each declaration (§18.4) are surfaced as prose under each
+heading. Macros — stripped by `expand_macros` before `parse_and_check_file` returns
+— are recovered via a supplementary lex+parse pass on the raw source.
+
+`M.build_pages(typed_ast, filename, format)` is exposed for tests and external use;
+it returns `{pages = {[filename] = contents}, groups = {...}}` without touching the
+filesystem.
+
+**Files:** `cli/docs_cmd.lua` (new), `cli/main.lua` (subcommand + per-command
+help), `docs/reference/cli.md` (entry), `tests/cli/docs_spec.lua` (21 tests).
+
+---
+
+## §F1 — `generate` blocks ✅ (2026-05-16)
+
+Seed-deterministic procedural content. A new `generate <name> [seed: <path>]:`
+top-level declaration runs once at engine init — after `init_defaults` and
+`init_grids`, before the entry-scene is assigned. Two syntactic forms:
+
+```
+generate dungeon-layout seed: world/seed:
+  let count = (random-int 3 6):
+    spawn! rooms "alpha" `chamber
+    relate! exits "alpha" "beta"
+
+generate setup:           # no seed clause — uses engine's current RNG
+  set! world/ready true
+```
+
+With `seed:`, the engine reads the Int at that state path and calls
+`rng:seed(value)` before the body runs, so identical seed values produce
+identical worlds independent of the engine-level `--seed`. All mutations flow
+through the transaction log, so saved games replay the *generated* world
+without re-running the generate block (verified by a dedicated round-trip
+test).
+
+**Files:** `compiler/lexer.lua` (`generate` keyword), `compiler/ast.lua`
+(`GENERATE_DECL` kind + constructor), `compiler/parser.lua`
+(`parse_generate_decl` + dispatch wiring), `compiler/checker.lua`
+(symtab.generates registration + iteration in passes 5, undefined-paths,
+undefined-fns, undefined-read-paths, invalid-enum-writes, undefined-families,
+scene-targets), `compiler/codegen.lua` (`emit_generates` →
+`game_table.generates`), `runtime/engine.lua` (`eng:run_generates()` + call
+from `eng:init()`), `tests/compiler/generate_spec.lua` (8 tests),
+`tests/runtime/generate_spec.lua` (6 tests),
+`demos/demo23_procedural_dungeon.sb`.
+
+## §F2 — `ending` declarations ✅ (2026-05-16)
+
+Verifiable end-state declarations:
+
+```
+ending escape when: player/escaped and player/alive:
+  "You step into the daylight."
+
+ending lost when: not player/alive:
+  "Your light goes out."
+```
+
+The engine evaluates every ending's `when_expr` on each step (pre-prompt and
+post-action). The first true ending in declaration order renders its body
+via `_render_narration_items` and terminates the game loop with
+`eng._ended_at = <name>`.
+
+The compiler auto-emits two kinds of verify blocks per ending set:
+
+| Auto-verify | Clause kind | Meaning |
+|-------------|-------------|---------|
+| `ending '<n>' is reachable` | `eventually` (EF) | the ending's `when_expr` is reachable from the entry scene |
+| `endings '<a>' and '<b>' are mutually exclusive` | `always` (AG) | no reachable state satisfies both `when_expr` simultaneously |
+
+These auto-verifies use the existing verify-block infrastructure and are
+stripped along with hand-written verifies in production builds.
+
+**Keyword conflict mitigation:** older demos use `ending` as an ordinary
+scene name (e.g. `demos/demo05_siege.sb` uses `-> ending`). The parser's
+`parse_scene_goto` / `parse_scene_enter` were widened to accept KEYWORD
+tokens as the target identifier so those demos compile unchanged.
+
+**Files:** `compiler/lexer.lua` (`ending` keyword), `compiler/ast.lua`
+(`ENDING_DECL` kind + constructor), `compiler/parser.lua`
+(`parse_ending_decl` + dispatch wiring + scene-goto/enter keyword target
+relaxation), `compiler/checker.lua` (symtab.endings registration +
+when_expr/body iteration in undefined-fns / undefined-read-paths /
+scene-targets / pass5), `compiler/codegen.lua` (`emit_endings` +
+`emit_ending_verifies` synthesising auto-verify entries),
+`runtime/engine.lua` (`eng:check_ending()`, `eng:_render_ending()`, two
+ending checks inside `eng:step()`),
+`tests/compiler/ending_spec.lua` (9 tests),
+`tests/runtime/ending_spec.lua` (9 tests), `demos/demo23_procedural_dungeon.sb`.

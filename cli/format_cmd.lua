@@ -1150,6 +1150,15 @@ local function fmt_decl(buf, decl)
       local ck = clause.clause_kind or clause.kind
       if ck == "always" then
         buf.line("verify-always " .. fmt_expr(clause.condition))
+      elseif ck == "eventually" then
+        buf.line("verify-eventually " .. fmt_expr(clause.condition))
+      elseif ck == "always_eventually" then
+        buf.line("verify-always-eventually " .. fmt_expr(clause.condition))
+      elseif ck == "until" then
+        local p_expr = fmt_expr(clause.condition)
+        local q_node = clause.body and clause.body[1]
+        local q_expr = q_node and fmt_expr(q_node) or "?"
+        buf.line("verify-until " .. p_expr .. " until " .. q_expr)
       elseif ck == "from_any_state" then
         buf.line("from-any-state:")
         buf.push()

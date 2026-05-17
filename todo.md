@@ -4,16 +4,16 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-15)
+## Current Status (2026-05-16)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–21 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
+Demos 01–23 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
-complete. §B1/B2/B4, §C1/C2 all complete.
+complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete.
 
-**2640 successes / 0 failures / 2 pending (known limitations).**
+**~2700 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -30,11 +30,12 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 
 1. §D1 — LLM-bounded handler standard module
 2. §B3 — Trace scrubber (browser debug UI)
-3. §E1–E3 — `quest` / `dialog` / `inventory` built-in patterns
-4. §B5 — Auto-docs site
-5. §C3 — Temporal-logic verify
-6. §F1 — Procedural generation primitives
-7. §G1 — Web/JS compilation target
+3. §E0 — Decl-emitting macro substrate (unlocks E2/E3 as stdlib)
+4. §E2 / §E3 — `dialog` / `inventory` / `stat` shipped as stdlib `.sb` modules
+5. §E1 — `quest` as base feature, layered on the E0 substrate
+6. §G1 — Web/JS compilation target
+
+(§G2 — stateless HTTP API — complete, see completed.md.)
 
 ---
 
@@ -97,74 +98,9 @@ scrubber and a per-tick diff panel ("between t=37 and t=38, these 5 paths change
 **Acceptance:** On `demo08`, scrubbing through the timeline visibly highlights the
 changed paths at each tick.
 
-### B5. Auto-docs site
-
-**Goal:** All declarations already carry doc strings (§18.4). Generate a static HTML
-reference per game — types, state schema, fn signatures with pre/post contracts, scene
-graph diagram, verify status. Currently the LSP hover is the only consumer of doc
-strings.
-
-**Design sketch:**
-- New CLI subcommand `docs`. Walks the typed AST (already used by `extract-symbols`
-  and the LSP), groups by kind, emits per-page HTML.
-- Optional flag `--format md` for Markdown output.
-- Reuses scene graph visualisation from §B1 for one of the pages.
-
-**Files:** new `cli/docs_cmd.lua`, an HTML template, `tests/cli/docs_spec.lua`.
-
-**Acceptance:** Running `storybase docs demos/demo20_harrow_house.sb -o docs_out/`
-produces a navigable site with one page per declaration kind plus a home page.
-
----
-
 ## C. Higher-Order Tests Beyond `verify`
 
-### C3. Temporal-logic verify
-
-**Goal:** Today's `verify-always` is a single-state check. Add temporal operators
-(`eventually`, `always-eventually`, `until`) to express "after picking up the key,
-the door eventually unlocks" — currently inexpressible.
-
-**Design sketch:**
-- Minimal CTL subset: `EF p` (eventually p reachable), `AG p` (always globally p —
-  same as current `verify-always`), `AF p` (on every path, p eventually holds),
-  `p AU q` (on every path, p until q).
-- Syntax: `verify-eventually p depth: N`, `verify-always-eventually p depth: N`,
-  `verify p until q depth: N`.
-- Backend: implement via nested BFS over the state graph from `runtime/search.lua`.
-  `EF p` is just `can-reach? p` (already exists). `AF p` requires reverse BFS from
-  failing states. `p AU q` is the standard CTL fixpoint.
-
-**Files:** `runtime/search.lua` (new analyses), `runtime/verify.lua` (new clause
-kinds), `compiler/parser.lua` (new keywords), `compiler/codegen.lua`,
-`tests/runtime/search_spec.lua`, `tests/runtime/verify_spec.lua`.
-
-**Edge cases:** AF and AU explode the search space; require explicit `depth:`. Time
-budget enforcement.
-
-**Acceptance:** A demo where `verify-eventually quest-complete?` holds; modifying the
-game to remove the quest-completion path makes the verify fail with a counterexample.
-
-### C4. Cached / incremental verify
-
-**Goal:** Verify currently runs from scratch every CI cycle. Hash the AST of each
-verify block + the transitively-reached fns; persist verdicts in
-`.storybase-cache/verify.json`. Skip blocks whose hash is unchanged.
-
-**Design sketch:**
-- For each verify block: collect all fns referenced (transitively) by the verify
-  body and by every `fn` that mutates a path the verify reads. Hash the AST
-  subtree.
-- Cache key: `{verify_label, hash, schema_version}`. Value: `{verdict, states_checked,
-  cex?}`.
-- `cli/verify_cmd.lua` consults cache before running each block.
-- `--no-cache` flag to force re-run.
-
-**Files:** `cli/verify_cmd.lua`, `compiler/checker.lua` (transitive-call analysis —
-may need new pass), `tests/cli/verify_cache_spec.lua`.
-
-**Acceptance:** Run verify, edit a non-verify fn, run verify again — only affected
-blocks re-execute.
+(C1, C2, C3, C4 complete — see completed.md.)
 
 ---
 
@@ -238,17 +174,251 @@ on-the-fly prose for every scene, varying between runs (recorded for replay).
 
 ## E. Built-in Patterns Every Game Reinvents
 
-Three patterns appear in every nontrivial demo. They deserve first-class syntax. None
-require new runtime primitives — these are parser-level desugarings.
+Three patterns (quest / dialog / inventory+stat) appear in every nontrivial demo.
+Originally planned as base-language declarations; revised 2026-05-16 to a staged
+plan that prefers **stdlib `.sb` modules** over compiler-internal AST kinds,
+backed by a one-time extension to the macro system (§E0). E1 stays partly base
+because its value is in *analyses* (verify auto-emission), not desugaring.
 
-### E1. `quest` declarations
+### E0. Decl-emitting macro substrate
+
+**Goal:** Make the macro system powerful enough that `dialog` / `inventory` /
+`stat` (and any future "pattern every game reinvents") can live as stdlib `.sb`
+modules instead of bespoke AST kinds. Today macros (`compiler/compiler.lua:495–533`)
+expand statements only, and imports' `exports:` filter excludes `state`, so neither
+mechanism can deliver a reusable state-family template.
+
+**What this unlocks:** the three "patterns every game reinvents" become library
+code; users can ship their own DSL patterns the same way; the language surface
+stays small.
+
+#### Confirmed design decisions (2026-05-17)
+
+- **New keyword `decl-macro`** for declaration-emitting macros, parallel to the
+  existing `macro`. The existing `macro` keyword stays stmt-level only; no
+  overload. AST gets a new kind `DECL_MACRO_DECL` (parallel to `MACRO_DECL`)
+  and a new kind `MACRO_CALL_DECL` (parallel to `MACRO_CALL_STMT`). No
+  `body_kind` discriminator field — the AST kind encodes it.
+- **Lexer-level `$param` support.** `$IDENT` becomes a new `MACRO_PARAM`
+  token. Adjacent `IDENT` / `-` / `MACRO_PARAM` runs with no whitespace
+  produce a composite identifier so `fn give-$path item:`, `fn $path-init`,
+  and `has-$path?` all work as written. `$` was previously illegal outside
+  string literals, so no existing test should regress.
+- **Delivery:** six commits on `master`, one per stage below, tests added per
+  stage. Bisect- and review-friendly.
+
+#### Current state of the plumbing (already there)
+
+- `expand_macros` already runs after `resolve_imports` and before
+  `checker.check` (`compiler/compiler.lua:566–571`). ✓
+- `MACRO_DECL` is already in `EXPORTS_FILTERABLE`
+  (`compiler/compiler.lua:51,57`); the namespace renamer already rewrites
+  `MACRO_CALL_STMT.name` (`compiler/compiler.lua:126`). Cross-import macro
+  *names* are wired but untestable today because no macro body can emit
+  decls. Stage 5 adds the same wiring for the new `MACRO_CALL_DECL` /
+  `DECL_MACRO_DECL` kinds.
+- `cli/verify_cache.lua:compute_hash` walks the typed AST post-expansion, so
+  cache invalidation comes for free when a macro body that emits `verify`
+  blocks is edited.
+
+#### Stage 1 — Decl-bodied `decl-macro` parsing + AST ✅ (2026-05-17)
+
+Done: parse `decl-macro NAME params...:` whose body is a list of decls
+(`state`, `fn`, `scene`, `verify`, `actor`, `schedule`, `bounded`, `relation`,
+`type`). Params are accepted but ignored at substitution time (no `$`
+interpolation yet — that lands in stage 2).
+
+- `compiler/ast.lua`: added `DECL_MACRO_DECL` and `MACRO_CALL_DECL` kinds;
+  added `ast.decl_macro_decl(name, params, body, doc, pos)` and
+  `ast.macro_call_decl(name, args, body, pos)` constructors; both kinds added
+  to `DECL_KINDS` predicate set.
+- `compiler/lexer.lua`: `decl-macro` added to the reserved-keyword table.
+- `compiler/parser.lua`: forward-declared `parse_decl`; new
+  `parse_decl_macro_decl` immediately after `parse_macro_decl`; wired into
+  `parse_decl` under the `decl-macro` keyword. Header parses both
+  `decl-macro name:` (NAMED_ARG name, no params) and
+  `decl-macro name p1 p2:` (IDENT name + IDENT/NAMED_ARG param run). Body
+  parses by looping `parse_decl` between INDENT/DEDENT.
+- `compiler/compiler.lua` (`expand_macros`): strips `DECL_MACRO_DECL` nodes
+  from the program after the existing `MACRO_DECL` strip so the checker /
+  codegen don't see them. Placeholder for stage 3, which replaces the strip
+  with proper decl-level expansion.
+- `tests/compiler/macro_decl_spec.lua`: 11 tests — lexer keyword recognition;
+  parser into `DECL_MACRO_DECL` for zero / one / many params, bodies
+  containing `state` + `fn` + `verify`, empty body, doc-string preservation,
+  source position; pipeline `compile()` accepts a program with a
+  `decl-macro` without errors and does not register inner body decls as
+  top-level fns.
+
+No regressions: full suite still 2755 passing / 2 pre-existing pending
+(unrelated formatter known-limitations).
+
+#### Stage 2 — Lexer `$param` + composite identifiers
+
+Goal: source text like `$path`, `give-$path`, `$path-init`, `has-$path?`
+lex into tokens the parser can stitch into substitutable identifiers and
+PATH_EXPR segments.
+
+- `compiler/lexer.lua`: recognise `$IDENT` as `MACRO_PARAM` token. When an
+  `IDENT`/`-`/`MACRO_PARAM` run has no whitespace between tokens, emit a
+  composite identifier token whose `value` is a list of parts (mix of
+  literal strings and `{kind="macro_param", name=...}` placeholders).
+  Decision point: do this in the lexer (composite token) vs the parser
+  (stitch from primitive tokens). Lexer is simpler given how identifiers
+  are consumed in many parser sites.
+- `compiler/parser.lua`: where IDENTs are consumed for *names* (decl names,
+  FN_CALL names, path segments), accept the composite-IDENT shape and
+  store the parts list on the AST node (`name_parts` field if composite;
+  plain `name` string otherwise — so non-macro code paths are unchanged).
+- `tests/compiler/macro_decl_spec.lua`: lex-level assertions that the
+  expected tokens come out for `$path`, `give-$path`, `$path-init`,
+  `$a-$b` (back-to-back).
+
+#### Stage 3 — Decl-level expansion pass + decl-level macro calls
+
+Goal: a `decl-macro` is actually expanded at the program-decl level into a
+spliced list of decls, with `$param` substitution applied.
+
+- `compiler/parser.lua`: in `parse_decl` (line 3557), if the leading IDENT
+  matches no decl keyword *and* is followed by macro-call shape (args + `:`
+  + INDENT), defer to a new `parse_macro_call_decl` that produces a
+  `MACRO_CALL_DECL`.
+- `compiler/compiler.lua:expand_macros`: new pass that runs **before** the
+  existing stmt-level walk. Collect `DECL_MACRO_DECL` nodes into a separate
+  registry; walk `ast_root.decls`; when a `MACRO_CALL_DECL` is found, look
+  up the macro, build `param_map`, run `expand_decl_macro_body` (new,
+  parallel to `expand_macro_body`), splice the result into the decl list.
+- Substitution sites (handled in `expand_decl_macro_body`):
+  - `PATH_EXPR.segments`: new third segment shape
+    `{kind="macro_param", name=...}` is replaced by the param value (which
+    itself must be a PATH_EXPR — substituted by joining segments).
+  - Composite-identifier `name_parts` lists on decl names / FN_CALL names /
+    PATH_EXPR segments: resolve each `{kind="macro_param",...}` part to its
+    param value's stringification, concat with literal parts to produce a
+    plain string. Reject (raise `MACRO_DECL_EMIT`) if a param is missing or
+    its value cannot stringify to a legal identifier.
+- Strip both `DECL_MACRO_DECL` and `MACRO_CALL_DECL` nodes from the program
+  before returning, mirroring the existing `MACRO_DECL` strip
+  (`compiler/compiler.lua:530`).
+- `tests/compiler/macro_decl_spec.lua`: a `decl-macro counter $path:` call
+  site expands end-to-end; the resulting `state` path and `fn` names appear
+  in the typed AST under the interpolated names.
+
+#### Stage 4 — Position propagation + checker hookup
+
+Goal: when the checker errors on an expanded node, the error points at the
+**call site**, with an optional note pointing at the macro definition.
+
+- In `expand_decl_macro_body`, stamp every emitted node's `pos` to the call
+  site's `pos`; attach `expanded_from = macro.pos` to each emitted node.
+- `compiler/checker.lua`: no logic change needed (it walks emitted decls as
+  if hand-written), but if an emitted node fails a check, decorate the
+  diag's `note` with `"expanded from macro 'NAME' at FILE:LINE"` when
+  `expanded_from` is present. Helper added in `ast.lua`.
+- New diag `ast.E.MACRO_DECL_EMIT` for invalid emissions (missing param,
+  un-stringifiable param value, illegal interpolated path syntax). Raised
+  from the substitution code with the call-site pos.
+- Test: a deliberately broken `decl-macro` call produces a checker error
+  whose `pos.line` is the line of the macro **call**, not the macro
+  definition.
+
+#### Stage 5 — Cross-import wiring
+
+Goal: `import "@stdlib/inventory"` followed by `inventory player/inventory:`
+works; namespaced `import ... as Foo` still renames cleanly.
+
+- `compiler/compiler.lua:apply_import_namespace`: extend the rename walker
+  to handle the new `DECL_MACRO_DECL.name` and `MACRO_CALL_DECL.name`
+  (mirror the existing `MACRO_CALL_STMT` branch at line 126).
+- `compiler/compiler.lua:EXPORTS_FILTERABLE`: add `DECL_MACRO_DECL` so
+  `exports:` whitelist filtering works for it.
+- `compiler/compiler.lua:resolve_import_path` (line 32): add `@stdlib/`
+  prefix handling — map to a known dir, default `<repo>/stdlib/`,
+  overridable via `STORYBASE_STDLIB_DIR` env var (so tests can point at a
+  fixture directory).
+- Tests: imported module exports a `decl-macro`; downstream file uses it
+  unaliased and via `import ... as Inv`. Checker errors at the call site
+  point at the call site.
+
+#### Stage 6 — Docs, acceptance demo, code-map
+
+- `docs/reference/language.md`: new section "Decl-emitting macros". Cover
+  the `decl-macro` keyword, `$param` interpolation rules (where it works,
+  where it doesn't), hygiene model (path collisions are the caller's
+  problem; same `DUPLICATE_DECL` catches them), single-pass restriction
+  (a `decl-macro` body may not invoke another `decl-macro`), and the
+  `expanded from` error-note behaviour.
+- Acceptance demo or test fixture exercising the three E0 acceptance
+  criteria (`tests/compiler/macro_decl_spec.lua`):
+  1. `decl-macro counter $path:` emits a `state $path: Int(0,100)`,
+     `fn $path-inc:`, `fn $path-reset:` — compiles, type-checks, runs.
+  2. Imported `decl-macro` works; checker errors at the call site point
+     at the call site.
+  3. Existing `tests/compiler/macro_spec.lua` all still pass (no
+     regression on the stmt-level `macro`).
+- `code_map.md`: add the new AST kinds, the new parser entry, the new
+  expansion pass, the `stdlib/` directory convention, and the
+  `STORYBASE_STDLIB_DIR` env var.
+
+#### Edge cases (apply across stages)
+
+- Multiple expansions of the same `decl-macro` at different call sites
+  with overlapping `$path` values → caught by existing `DUPLICATE_DECL`;
+  confirm in a test that the error position is the *second* call site.
+- A `decl-macro` body that invokes another `decl-macro` → keep the
+  single-pass restriction; emit `MACRO_CROSS_UNIT` (or a new
+  `DECL_MACRO_NESTED`) and document.
+- `decl-macro` emits a `verify` block → verify-cache hash already covers
+  the expanded AST (`cli/verify_cache.lua:174`); add a regression test that
+  editing the macro body invalidates the cache for downstream verifies.
+- Composite identifiers used as a state path segment that contains `/` →
+  forbid; substitution must yield a single segment, not a sub-path. Raise
+  `MACRO_DECL_EMIT`.
+- `decl-macro` with no `$` params at all should still work (zero-arg
+  templates).
+
+#### Effort estimate
+
+Stages 1, 3 are ~half a day each. Stage 2 (lexer + composite identifiers)
+is the wildcard at ~2–3 days. Stages 4–6 total ~2 days. Plan ~1.5 weeks
+end-to-end.
+
+#### Files touched (summary)
+
+- `compiler/lexer.lua` — `decl-macro` keyword, `$IDENT` MACRO_PARAM token,
+  composite-identifier emission.
+- `compiler/ast.lua` — new `DECL_MACRO_DECL`, `MACRO_CALL_DECL` kinds; new
+  constructors; new `E.MACRO_DECL_EMIT` diag code; `expanded_from` field
+  convention.
+- `compiler/parser.lua` — `parse_decl_macro_decl`, `parse_macro_call_decl`,
+  composite-identifier handling in name-consuming sites.
+- `compiler/compiler.lua` — decl-level expansion pass, position
+  propagation, `@stdlib/` resolver, namespace renamer extension,
+  `EXPORTS_FILTERABLE` update.
+- `compiler/checker.lua` — `expanded_from` note decoration on diags.
+- `tests/compiler/macro_decl_spec.lua` — new spec, per-stage growth.
+- `docs/reference/language.md` — new section.
+- `code_map.md` — new entries.
+- `stdlib/` — new directory (E2/E3 will populate; E0 may add a fixture).
+
+### E1. `quest` declarations (base feature, layered on §E0)
 
 **Goal:** Every game ends up hand-rolling steps + prereqs + completion + rewards.
 Surface this as first-class so the search engine can automatically check "every
 declared ending is reachable" and "no quest is softlocked once started" — emergent
 power, not new runtime features.
 
-**Design sketch:**
+**Why base, not stdlib:** the desugar is mechanical, but the *value* is in
+auto-emitted analyses (verify reachability, softlock detection) that need
+compiler-internal knowledge of the quest graph. Implementing this in user-space
+would require exposing too much of the verify machinery.
+
+**Plan:** ship the desugar via the §E0 substrate where possible, but keep
+`QUEST_DECL` as a first-class AST kind so codegen can emit the analysis
+`verify` blocks. The "shape" of the desugar (state family, helper fns) lives
+in `compiler/codegen.lua` next to actor/schedule emission.
+
+**Design sketch (unchanged from original):**
 ```
 quest find-the-crown:
   description: "Recover the lost crown of Erith."
@@ -267,22 +437,33 @@ quest find-the-crown:
 
 Compiles to: a `state quests/{q}/status: QuestStatus`-style family, scene-entry/exit
 hooks, helper fns `quest-active? q`, `quest-step-complete? q s`. Auto-emit verify
-blocks: "quest find-the-crown is reachable to completion."
+blocks: "quest find-the-crown is reachable to completion" + "no step combination
+leaves the player unable to reach completion."
 
-**Files:** AST extension in `compiler/ast.lua`; parser entry; codegen desugars to
-existing constructs; `compiler/checker.lua` cross-validates step references; new
-docs page.
+**Files:** `compiler/ast.lua` (new `QUEST_DECL` kind), `compiler/parser.lua`
+(parse entry), `compiler/codegen.lua` (desugar + verify auto-emit),
+`compiler/checker.lua` (cross-validate step references), new docs page,
+`tests/compiler/quest_spec.lua` + new demo.
 
-**Acceptance:** A demo using `quest` syntax produces the same runtime behaviour as
-the hand-rolled equivalent and auto-emits a verify proving the quest is completable.
+**Depends on:** §E0 for the state-family/helper-fn emission machinery.
 
-### E2. `dialog` blocks
+**Acceptance:** A demo using `quest` syntax produces the same runtime behaviour
+as the hand-rolled equivalent and auto-emits a verify proving the quest is
+completable; intentionally softlocking the quest causes a verify failure with
+a counterexample path.
+
+### E2. `dialog` blocks (stdlib `.sb` module)
 
 **Goal:** Demo20 hand-rolls `state asked:` flags, re-entry semantics, and
-"already-said" branches. Surface as first-class.
+"already-said" branches. Surface as a stdlib import.
 
-**Design sketch:**
+**Plan:** ships as `stdlib/dialog.sb` exporting a `dialog` macro built on §E0.
+No new compiler AST kinds.
+
+**Design sketch (author API unchanged from original):**
 ```
+import "@stdlib/dialog"
+
 dialog blacksmith-talk:
   speaker: blacksmith
   reentry: from talk-blacksmith
@@ -297,27 +478,43 @@ dialog blacksmith-talk:
     <-
 ```
 
-Compiles to a scene + `state asked/blacksmith-talk/{topic}: Bool` + conditional
-choices. `once` topics auto-set the flag after entry; `always` topics never set;
-`when:` adds a guard.
+The macro expands to a scene + `state asked/blacksmith-talk/{topic}: Bool` +
+conditional choices. `once` topics auto-set the flag after entry; `always`
+topics never set; `when:` adds a guard.
 
-**Files:** AST/parser/codegen analogous to E1. Hook in scene rendering.
+**Files:** new `stdlib/dialog.sb`; resolver entry for `@stdlib/...` import
+prefix in `compiler/compiler.lua:resolve_imports`; `tests/stdlib/dialog_spec.lua`;
+docs page in `docs/howto/dialog.md`.
 
-**Acceptance:** Re-implement the dialog portion of `demo20_harrow_house.sb` using
-`dialog` blocks at roughly 1/3 the line count.
+**Depends on:** §E0.
 
-### E3. `inventory` and `stat` mixins
+**Acceptance:** Re-implement the dialog portion of `demo20_harrow_house.sb`
+using the `dialog` macro at roughly 1/3 the line count; behaviour identical;
+all of demo20's verify blocks still pass.
+
+### E3. `inventory` and `stat` (stdlib `.sb` module)
 
 **Goal:** `Set(ItemKind, 10)` is the de-facto inventory pattern; hand-written
 `give!`, `take!`, `has?`, `count-of` are common. Same for stat blocks with
 base + modifiers + clamped derived values.
 
-**Design sketch:**
+**Plan:** ships as `stdlib/inventory.sb` and `stdlib/stat.sb`. No new compiler
+AST kinds.
+
+**Design sketch (author API unchanged):**
 ```
+import "@stdlib/inventory"
+import "@stdlib/stat"
+
 inventory player/inventory:
   contents: ItemKind
   max:      10
-  # auto-generated: give! / take! / has? / inventory-size / inventory-empty?
+  # macro emits: state player/inventory: Set(ItemKind, 10)
+  #              fn give-player-inventory item: add! player/inventory item
+  #              fn take-player-inventory item: remove! player/inventory item
+  #              fn has-player-inventory? item: contains? player/inventory item
+  #              fn player-inventory-size: size player/inventory
+  #              fn player-inventory-empty?: empty? player/inventory
 
 stat player/health:
   base:    Int(0, 100) = 100
@@ -325,72 +522,23 @@ stat player/health:
   derived: base + (buff-bonus buffs)
 ```
 
-Compiles to existing primitives.
+**Files:** new `stdlib/inventory.sb`, `stdlib/stat.sb`;
+`tests/stdlib/inventory_spec.lua` + `tests/stdlib/stat_spec.lua`;
+`docs/howto/inventory.md`.
 
-**Files:** AST/parser/codegen extensions. New stdlib helpers for buff stacking.
+**Depends on:** §E0.
 
 **Acceptance:** Replace `Set(ItemKind, 10)` boilerplate in three demos with
-`inventory` declarations; resulting tests pass.
+`inventory` declarations; resulting tests + verify blocks pass unchanged.
 
----
+### E-alt. Fast-win alternative (if §E0 is too speculative)
 
-## F. Procedural Content & Endings
-
-### F1. `generate` blocks (seed-deterministic procedural content)
-
-**Goal:** A `generate` block that runs once at session start, seeded by the RNG,
-to procedurally build state (random map layouts, item placement). Because everything
-goes through `spawn!` / `relate!` / the log, the generated world is automatically
-saveable, replayable, and visible to `verify`. Pair with
-`verify-always "every room reachable from start"` and you get *proven-solvable*
-roguelike layouts.
-
-**Design sketch:**
-```
-generate world-map seed: world/seed:
-  let room-count = (random-int 8 12):
-    for i in (range 0 room-count):
-      spawn! rooms (str "r" i) Room(...)
-    for i in (range 0 (room-count - 1)):
-      relate! exits (str "r" i) (str "r" (i + 1))
-```
-
-- Parser recognises `generate <name> seed: <path>:` as a top-level decl.
-- Runtime calls all `generate` blocks at `engine:init()` after `init_defaults`, before
-  `entry-scene` dispatch.
-- All mutations go through the log as normal; replay reconstructs the world.
-
-**Files:** AST/parser/codegen; engine init order in `runtime/engine.lua`; new
-`runtime/random.lua` `range` helper if not present; `tests/runtime/generate_spec.lua`.
-
-**Edge cases:** `generate` must be pure with respect to the RNG (no I/O). Seed must
-be set before generate runs. Re-running `generate` on reload is *not* the right
-default — emit a warning.
-
-**Acceptance:** A demo with a procedurally generated 10-room dungeon that replays
-identically from a saved log, and where `verify "all rooms reachable"` passes.
-
-### F2. `ending` declarations
-
-**Goal:** `ending name: when cond` — verifiable for reachability and mutual
-exclusivity; displayable in the auto-doc graph from §B5.
-
-**Design sketch:**
-```
-ending good when: world/chapter = `finale and player/status = `alive:
-  "You return to the village a hero."
-
-ending bad when: player/status = `dead:
-  "Your story ends in the dungeon."
-```
-
-Auto-emits verify blocks: "ending good is reachable" and "no two endings reachable
-simultaneously."
-
-**Files:** AST/parser/codegen; new `ENDING_DECL` kind; auto-verify generation.
-
-**Acceptance:** A demo with three endings produces three auto-generated verify
-blocks all of which pass.
+If the full substrate looks too risky to land cleanly, the minimum-viable
+alternative is to teach macros one new trick — **emit a state family whose path
+is interpolated from a parameter** — sized just for E2/E3. Implement E1 as
+originally specified (base feature). Cost ~3–4 days instead of ~1–2 weeks, but
+no general extensibility payoff: future "pattern every game reinvents" needs
+another bespoke language change.
 
 ---
 
@@ -417,7 +565,7 @@ documentation.
 **Acceptance:** `storybase bundle --target web demo01_wanderer.sb` produces a single
 `.html` file that runs the demo in any modern browser.
 
-### G2. HTTP API mode (stateless `/step`) ✅ (2026-05-17 — see completed.md)
+### G2. HTTP API mode (stateless `/step`) ✅ (2026-05-16 — see completed.md)
 
 Shipped as `storybase serve-api`. Endpoints `GET /`, `GET /schema`,
 `POST /step`, `POST /reset`, `OPTIONS *`. Client-held opaque `save_log`
@@ -519,7 +667,9 @@ strategy beats a uniform-random policy in 1000 sampled rollouts.
 
 ### H4. Inventory / dialog / quest stubs
 
-(Cross-reference to §E1–E3 — if those land first, this section folds into them.)
+(Cross-reference to §E0–E3 — folded into them. The staged plan: §E0 ships the
+decl-emitting macro substrate, §E2/E3 ride it as stdlib `.sb` modules, §E1
+ships as a base feature for the verify-emission analyses.)
 
 ---
 

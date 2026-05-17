@@ -1,0 +1,90 @@
+# demo22_quest_temporal.sb
+# The Caretaker — a tiny three-task quest used to demonstrate temporal-logic
+# verify clauses (§C3). The world is small enough to run AG / EF / AF / AU
+# fixpoints to completion at default depth.
+#
+# Features demonstrated:
+#   verify-always              — AG: safety invariant
+#   verify-eventually          — EF: outcome reachable on some path
+#   verify-always-eventually   — AF: every path eventually reaches outcome
+#   verify-until ... until ... — AU: invariant holds until objective met
+#
+# Run with:
+#   storybase run    demos/demo22_quest_temporal.sb
+#   storybase verify demos/demo22_quest_temporal.sb
+
+module quest-temporal
+  version: 1.0
+
+engine-config:
+  entry-scene: hub
+
+# ─────────────────────────────────────────────────────────
+# Types and state
+# ─────────────────────────────────────────────────────────
+
+type Phase = starting | gathering | finishing | done
+
+state world:
+  phase:   Phase = `starting
+  reports: Int(0, 3) = 0
+  health:  Int(0, 10) = 8
+
+# ─────────────────────────────────────────────────────────
+# Transactions
+# ─────────────────────────────────────────────────────────
+
+fn collect-report:
+  inc! world/reports 1
+  dec! world/health 1
+  match world/phase:
+    `starting:
+      set! world/phase `gathering
+    `gathering:
+      when world/reports >= 2:
+        set! world/phase `finishing
+    `finishing:
+      pass
+    `done:
+      pass
+
+fn wrap-up:
+  set! world/phase `done
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+#
+# A single forward-only choice per scene makes the quest fully forced:
+# every reachable path leads to `done within four steps. Because of that,
+# verify-always-eventually and verify-until both pass (no stalling option).
+#
+# To see a counterexample from these checks in action, add a no-op
+# "* Idle" choice to `hub` — the AF / AU fixpoints will report the Idle
+# path as a witness that the quest is not forced to completion.
+
+scene hub:
+  The town hall is quiet. The caretaker considers the day.
+  Phase: {world/phase}    Reports: {world/reports}/2    HP: {world/health}
+  * Collect another report
+    when world/phase != `finishing:
+      collect-report
+    when world/phase = `finishing:
+      wrap-up
+    -> hub
+
+# ─────────────────────────────────────────────────────────
+# Temporal-logic verify blocks
+# ─────────────────────────────────────────────────────────
+
+verify "health is never negative (AG)":
+  verify-always world/health >= 0
+
+verify "the quest can be completed (EF)":
+  verify-eventually world/phase = `done
+
+verify "every path completes the quest (AF)":
+  verify-always-eventually world/phase = `done
+
+verify "health stays positive until quest is done (AU)":
+  verify-until world/health > 0 until world/phase = `done

@@ -921,3 +921,246 @@ verify "not triggered":
   end)
 
 end)
+
+-- ============================================================
+-- Temporal-logic verify (C3): EF / AF / AU
+-- ============================================================
+
+describe("verify-eventually (EF)", function()
+
+  it("passes when condition is reachable via some choice path", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  goal: Bool = false
+
+fn reach-goal:
+  set! world/goal true
+
+scene main:
+  * Reach
+    reach-goal
+    -> main
+  * Stay
+    -> main
+
+verify "goal is reachable":
+  verify-eventually world/goal
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.equals(1, #results)
+    assert.is_true(results[1].pass, results[1].fail_msg)
+    -- witness path should be present
+    assert.is_truthy(results[1].counterexample_path)
+  end)
+
+  it("fails when condition is never reachable", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  goal: Bool = false
+
+scene main:
+  * Stay
+    -> main
+
+verify "goal is reachable":
+  verify-eventually world/goal
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+    assert.is_truthy(results[1].fail_msg)
+  end)
+
+end)
+
+describe("verify-always-eventually (AF)", function()
+
+  it("passes when every path eventually satisfies condition", function()
+    -- Every choice eventually sets goal=true within depth 5.
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  count: Int(0, 10) = 0
+  goal: Bool = false
+
+fn tick:
+  inc! world/count 1
+  when world/count >= 2:
+    set! world/goal true
+
+scene main:
+  * Tick
+    tick
+    -> main
+
+verify "goal eventually":
+  verify-always-eventually world/goal
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_true(results[1].pass, results[1].fail_msg)
+  end)
+
+  it("fails when some path never satisfies condition", function()
+    -- "Skip" choice loops forever without setting goal=true.
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  goal: Bool = false
+
+fn finish:
+  set! world/goal true
+
+scene main:
+  * Finish
+    finish
+    -> main
+  * Skip
+    -> main
+
+verify "goal eventually":
+  verify-always-eventually world/goal
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+    assert.is_truthy(results[1].counterexample_path)
+    -- counterexample should include "Skip" choices (the bad path)
+    local has_skip = false
+    for _, step in ipairs(results[1].counterexample_path) do
+      if step.label == "Skip" then has_skip = true; break end
+    end
+    assert.is_true(has_skip, "counterexample should follow the Skip choice")
+  end)
+
+end)
+
+describe("verify-until (AU)", function()
+
+  it("passes when p holds until q on every path", function()
+    -- p: count < 3; q: count >= 3. Every path of "Tick" eventually reaches q.
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  count: Int(0, 10) = 0
+
+fn tick:
+  inc! world/count 1
+
+scene main:
+  * Tick
+    tick
+    -> main
+
+verify "safely advancing":
+  verify-until world/count < 5 until world/count >= 3
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_true(results[1].pass, results[1].fail_msg)
+  end)
+
+  it("fails when p is violated before q holds", function()
+    -- p: count <= 1; q: count >= 5. p violated at count=2 before q ever holds.
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  count: Int(0, 10) = 0
+
+fn tick:
+  inc! world/count 1
+
+scene main:
+  * Tick
+    tick
+    -> main
+
+verify "p before q":
+  verify-until world/count <= 1 until world/count >= 5
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+    assert.is_truthy(results[1].counterexample_path)
+  end)
+
+  it("fails when q is never reached on some path", function()
+    -- p holds always but q (goal=true) never gets set on the Skip path.
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  goal: Bool = false
+
+fn finish:
+  set! world/goal true
+
+scene main:
+  * Finish
+    finish
+    -> main
+  * Skip
+    -> main
+
+verify "must end":
+  verify-until not world/goal until world/goal
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_false(results[1].pass)
+  end)
+
+end)
+
+describe("temporal-logic verify: mixed clauses", function()
+
+  it("supports multiple temporal clauses in one verify block", function()
+    local src = [[
+engine-config:
+  entry-scene: main
+
+state world:
+  step: Int(0, 10) = 0
+
+fn next-step:
+  inc! world/step 1
+
+scene main:
+  * Next
+    next-step
+    -> main
+
+verify "advances and bounded":
+  verify-always world/step >= 0
+  verify-eventually world/step >= 3
+]]
+    local gt, errs = compile(src)
+    assert.equals(0, #errs, errs[1] and errs[1].message)
+    local results = verify_mod.run_all(gt)
+    assert.is_true(results[1].pass, results[1].fail_msg)
+  end)
+
+end)

@@ -106,7 +106,7 @@ Save files are newline-delimited JSON (NDJSON), one log entry per line. They are
 Compile the file and run all `verify` blocks, reporting pass/fail for each.
 
 ```
-storybase verify <file.sb>
+storybase verify <file.sb> [--no-cache] [--clear-cache] [--cache-dir DIR]
 ```
 
 **Output:**
@@ -116,6 +116,18 @@ PASS  "castle hp stays non-negative"  (checked 47 states)
 FAIL  "player always has a way out"
       counterexample: player/location=dungeon, world/gate-open=false
 ```
+
+**Result cache.** Verify results are cached at `.storybase-cache/verify.json`
+keyed by an AST-level hash of each block plus the schema and the fns the
+block transitively reaches. Re-runs that hit the cache print `[cached]`
+next to the block label and skip the BFS. Editing a fn outside a block's
+dependency closure does not invalidate that block.
+
+| Flag | Effect |
+|------|--------|
+| `--no-cache`       | Skip the cache (always run every block) |
+| `--clear-cache`    | Delete the cache file before running |
+| `--cache-dir DIR`  | Use `DIR` instead of `.storybase-cache` |
 
 **Exit codes:**
 
@@ -243,6 +255,25 @@ The bundled file embeds the full runtime and the compiled game table. At runtime
 
 ---
 
+### `docs`
+
+Walk the typed AST of a `.sb` file and emit a static reference site: one page per declaration kind (types, state, fns, scenes, actors, schedules, bounded, macros, speakers, grids, hooks, verify) plus an overview home page. Doc strings (§18.4) on each declaration are surfaced as prose.
+
+```
+storybase docs [-o <path>] [--format html|md] <file.sb>
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o`, `--output <path>` | Output directory (HTML mode) or file (Markdown mode). Defaults: `./docs_out/` for HTML, `./docs.md` for Markdown. |
+| `--format html\|md` | Output format. Default is `html`. |
+
+The HTML output includes a sidebar with one entry per declaration kind, a summary card grid, and a static scene-graph listing (each scene's `->` / `=>` targets). Macros — which are stripped by macro-expansion before the typed AST is built — are recovered via a supplementary lex+parse pass so they appear in the docs when present.
+
+**Exit codes:** `0` on success, `1` on compile or argument error.
+
+---
+
 ### `serve-api`
 
 Start a stateless HTTP API server that hosts the compiled game. Unlike `run --serve` (which keeps a single session in memory and is browser-driven), every request is independent: clients carry the full save log between calls. Multiple chat-bot, web, or Discord frontends can share a single server process without per-session locking.
@@ -273,13 +304,11 @@ storybase serve-api [--port N] [--bind addr] [--seed N] [--production] <file.sb>
 ```json
 {
   "save_log":     <opaque object from previous response> | null,
-  "choice_index": 1,
-  "seed":         42,
-  "reset":        false
+  "choice_index": 1,            // 1-based; omit/null = render only
+  "seed":         42,           // honoured only on fresh start
+  "reset":        false         // if true, ignore save_log
 }
 ```
-
-`choice_index` is 1-based; omit or pass `null` to render the current scene without making a choice. `seed` is honoured only on fresh-start requests (no `save_log`). `reset: true` ignores any supplied `save_log` and starts a new session.
 
 **`POST /step` response** (JSON):
 
@@ -289,13 +318,11 @@ storybase serve-api [--port N] [--bind addr] [--seed N] [--production] <file.sb>
   "narration": [ { "kind": "narration", "text": "..." }, ... ],
   "choices":   [ { "index": 1, "label": "Leave the village" }, ... ],
   "state":     { "world/gold": 42, ... },
-  "save_log":  { ... },
+  "save_log":  { ... },         // opaque; pass back unchanged next call
   "done":      false,
-  "ended":     null
+  "ended":     null             // ending name (string) when game finished, else null
 }
 ```
-
-`save_log` is opaque to clients: receive it from one response and post it back unchanged with the next request. `ended` is the matched ending name when an §F2 `ending` declaration fires, otherwise `null`.
 
 Error responses use HTTP status `400` and the body `{ "error": "..." }`.
 

@@ -35,6 +35,8 @@ local function new_symtab()
     bounded   = {},  -- name → BOUNDED_DECL node (AV-1)
     macros    = {},  -- name → MACRO_DECL node (AV-1)
     actors    = {},  -- name → ACTOR_DECL node (AV-1)
+    generates = {},  -- name → GENERATE_DECL node (§F1)
+    endings   = {},  -- name → ENDING_DECL node   (§F2)
   }
 end
 
@@ -220,6 +222,30 @@ local function pass1_collect(acc, symtab, program)
             "previous declaration at line " .. symtab.actors[node.name].pos.line)
         else
           symtab.actors[node.name] = node
+        end
+      end
+
+    elseif kind == k.GENERATE_DECL then
+      if node.name then
+        if symtab.generates[node.name] then
+          err(acc, ast.E.DUPLICATE_NAME,
+            "generate '" .. node.name .. "' already declared",
+            node.pos,
+            "previous declaration at line " .. symtab.generates[node.name].pos.line)
+        else
+          symtab.generates[node.name] = node
+        end
+      end
+
+    elseif kind == k.ENDING_DECL then
+      if node.name then
+        if symtab.endings[node.name] then
+          err(acc, ast.E.DUPLICATE_NAME,
+            "ending '" .. node.name .. "' already declared",
+            node.pos,
+            "previous declaration at line " .. symtab.endings[node.name].pos.line)
+        else
+          symtab.endings[node.name] = node
         end
       end
 
@@ -1613,6 +1639,11 @@ local function pass5_check_boundary(acc, symtab_data, program)
           _walk(stmt)
         end
       end
+    elseif node.kind == k.GENERATE_DECL then
+      for _, stmt in ipairs(node.body or {}) do _walk(stmt) end
+    elseif node.kind == k.ENDING_DECL then
+      if node.when_expr then _walk(node.when_expr) end
+      for _, stmt in ipairs(node.body or {}) do _walk(stmt) end
     end
   end
 end
@@ -2236,6 +2267,10 @@ local function pass_check_invalid_enum_writes(acc, symtab, program)
       for _, stmt in ipairs(decl.body or {}) do
         walk_mut_with_path(stmt, check_set)
       end
+    elseif decl.kind == k.GENERATE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_set)
+      end
     end
   end
 end
@@ -2338,7 +2373,7 @@ local function pass_check_undefined_families(acc, symtab, program)
   for _, decl in ipairs(program.decls) do
     local d_kind = decl.kind
     if d_kind == k.FN_DECL or d_kind == k.SCHEDULE_DECL
-    or d_kind == k.HOOK_DECL then
+    or d_kind == k.HOOK_DECL or d_kind == k.GENERATE_DECL then
       for _, stmt in ipairs(decl.body or {}) do
         visit(stmt, check_one)
       end
@@ -2398,6 +2433,10 @@ local function pass_check_undefined_paths(acc, symtab, program)
         walk_mut_with_path(stmt, check_one)
       end
     elseif decl.kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do
+        walk_mut_with_path(stmt, check_one)
+      end
+    elseif decl.kind == k.GENERATE_DECL then
       for _, stmt in ipairs(decl.body or {}) do
         walk_mut_with_path(stmt, check_one)
       end
@@ -2757,6 +2796,12 @@ local function pass_check_undefined_fns(acc, symtab, program)
       walk_body_seq(decl.body or {}, {}, check_call)
     elseif decl.kind == k.HOOK_DECL then
       walk_body_seq(decl.body or {}, {}, check_call)
+    elseif decl.kind == k.GENERATE_DECL then
+      walk_body_seq(decl.body or {}, {}, check_call)
+    elseif decl.kind == k.ENDING_DECL then
+      -- when_expr + narration body (scene-mode)
+      if decl.when_expr then walk_fn_calls(decl.when_expr, {}, check_call) end
+      walk_body_seq(decl.body or {}, {}, check_call)
     end
   end
 end
@@ -2844,6 +2889,10 @@ local function pass_check_scene_targets(acc, symtab, program)
     elseif decl.kind == k.SCHEDULE_DECL then
       for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
     elseif decl.kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
+    elseif decl.kind == k.GENERATE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
+    elseif decl.kind == k.ENDING_DECL then
       for _, stmt in ipairs(decl.body or {}) do walk_nav_targets(stmt, check_nav) end
     end
   end
@@ -2970,6 +3019,12 @@ local function pass_check_undefined_read_paths(acc, symtab, program)
     elseif decl.kind == k.SCHEDULE_DECL then
       for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
     elseif decl.kind == k.HOOK_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
+    elseif decl.kind == k.GENERATE_DECL then
+      for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
+      if decl.seed_path then walk_read_path_exprs(decl.seed_path, check_read_path) end
+    elseif decl.kind == k.ENDING_DECL then
+      if decl.when_expr then walk_read_path_exprs(decl.when_expr, check_read_path) end
       for _, stmt in ipairs(decl.body or {}) do walk_read_path_exprs(stmt, check_read_path) end
     end
   end

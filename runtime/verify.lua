@@ -691,6 +691,96 @@ end
 -- Public API
 -- ============================================================
 
+-- ============================================================
+-- Temporal-logic checks (C3: EF / AF / AU)
+-- ============================================================
+--
+-- These wrap `runtime/search.lua` verifiers. The shape of each result is the
+-- same as the existing checks (`pass`, `fail_msg`, `counterexample`,
+-- `counterexample_path`, `states_checked`, `truncated`).
+
+local DEFAULT_CTL_DEPTH  = 5
+local DEFAULT_CTL_BUDGET = 30  -- seconds
+
+--- Build the initial cache + scene stack for CTL-style checks.
+local function ctl_initial(game_table)
+  local engine_mod = require("runtime.engine")
+  local eng = engine_mod.new(game_table, { io_out = { write = function() end } })
+  eng:init()
+  local search_mod = require("runtime.search")
+  local cache = search_mod.clone_cache(eng._state, eng._scheduler, game_table)
+  local entry = game_table.schema
+    and game_table.schema.engine_config
+    and game_table.schema.engine_config["entry-scene"]
+  local stack = entry and { entry } or {}
+  return cache, stack
+end
+
+--- Build a closure that evaluates an AST condition against a state snapshot.
+local function make_condition_fn(game_table, fn_name, condition_expr)
+  local log_mod   = require("runtime.log")
+  local state_mod = require("runtime.state")
+  return function(snap_cache)
+    local fake_state = state_mod.new(game_table.schema or {}, log_mod.new())
+    for k, v in pairs(snap_cache) do
+      if not k:match("^__") then fake_state._cache[k] = v end
+    end
+    local ctx = eval.new_ctx(fake_state, game_table.fns, fn_name, game_table)
+    local ok, result = pcall(eval.eval_expr, condition_expr, ctx)
+    return ok and result
+  end
+end
+
+local function run_eventually_check(verify_entry, game_table)
+  local expr = nil
+  for _, c in ipairs(verify_entry.clauses) do
+    if c.kind == "eventually" then expr = c.condition end
+  end
+  if not expr then return { pass = true } end
+
+  local search_mod = require("runtime.search")
+  local cache, stack = ctl_initial(game_table)
+  local cond_fn = make_condition_fn(game_table, "verify-eventually", expr)
+  return search_mod.verify_eventually(
+    game_table, cache, stack, cond_fn, DEFAULT_CTL_DEPTH, DEFAULT_CTL_BUDGET)
+end
+
+local function run_always_eventually_check(verify_entry, game_table)
+  local expr = nil
+  for _, c in ipairs(verify_entry.clauses) do
+    if c.kind == "always_eventually" then expr = c.condition end
+  end
+  if not expr then return { pass = true } end
+
+  local search_mod = require("runtime.search")
+  local cache, stack = ctl_initial(game_table)
+  local cond_fn = make_condition_fn(game_table, "verify-always-eventually", expr)
+  return search_mod.verify_always_eventually(
+    game_table, cache, stack, cond_fn, DEFAULT_CTL_DEPTH, DEFAULT_CTL_BUDGET)
+end
+
+local function run_until_check(verify_entry, game_table)
+  local p_expr, q_expr = nil, nil
+  for _, c in ipairs(verify_entry.clauses) do
+    if c.kind == "until" then
+      p_expr = c.condition
+      q_expr = c.body and c.body[1] or nil
+    end
+  end
+  if not p_expr or not q_expr then return { pass = true } end
+
+  local search_mod = require("runtime.search")
+  local cache, stack = ctl_initial(game_table)
+  local p_fn = make_condition_fn(game_table, "verify-until-p", p_expr)
+  local q_fn = make_condition_fn(game_table, "verify-until-q", q_expr)
+  return search_mod.verify_until(
+    game_table, cache, stack, p_fn, q_fn, DEFAULT_CTL_DEPTH, DEFAULT_CTL_BUDGET)
+end
+
+-- ============================================================
+-- Public API
+-- ============================================================
+
 --- Run all verify blocks in a compiled game table.
 ---@param game_table table  Compiled game table from codegen
 ---@return table  list of {label, pass, fail_msg?, skipped?, reason?, states_checked?}
@@ -698,29 +788,41 @@ function M.run_all(game_table)
   local results = {}
 
   for _, verify_entry in ipairs(game_table.verifies or {}) do
-    local has_always          = false
-    local has_after           = false
-    local has_from_any_state  = false
+    local has_always             = false
+    local has_after              = false
+    local has_from_any_state     = false
+    local has_eventually         = false
+    local has_always_eventually  = false
+    local has_until              = false
     for _, c in ipairs(verify_entry.clauses) do
-      if c.kind == "always"          then has_always         = true end
-      if c.kind == "after"           then has_after          = true end
-      if c.kind == "from_any_state"  then has_from_any_state = true end
+      if c.kind == "always"             then has_always            = true end
+      if c.kind == "after"              then has_after             = true end
+      if c.kind == "from_any_state"     then has_from_any_state    = true end
+      if c.kind == "eventually"         then has_eventually        = true end
+      if c.kind == "always_eventually"  then has_always_eventually = true end
+      if c.kind == "until"              then has_until             = true end
     end
 
     local result = { label = verify_entry.label, pass = true }
 
-    if has_always then
-      local r = run_always_check(verify_entry, game_table)
+    local function absorb(r)
       if not r.pass then
         result.pass                 = false
         result.fail_msg             = r.fail_msg
         result.counterexample       = r.counterexample
         result.counterexample_n     = r.counterexample_n
         result.counterexample_path  = r.counterexample_path
+        result.truncated            = r.truncated
       else
-        result.states_checked = r.states_checked
+        if r.states_checked then result.states_checked = r.states_checked end
+        if r.truncated      then result.truncated      = r.truncated      end
+        if r.counterexample_path and not result.counterexample_path then
+          result.counterexample_path = r.counterexample_path
+        end
       end
     end
+
+    if has_always then absorb(run_always_check(verify_entry, game_table)) end
 
     if has_after and result.pass then
       local r = run_after_check(verify_entry, game_table)
@@ -738,16 +840,10 @@ function M.run_all(game_table)
       end
     end
 
-    if has_from_any_state and result.pass then
-      local r = run_can_reach_check(verify_entry, game_table)
-      if not r.pass then
-        result.pass                 = false
-        result.fail_msg             = r.fail_msg
-        result.counterexample       = r.counterexample
-        result.counterexample_n     = r.counterexample_n
-        result.counterexample_path  = r.counterexample_path
-      end
-    end
+    if has_from_any_state        and result.pass then absorb(run_can_reach_check(verify_entry, game_table)) end
+    if has_eventually            and result.pass then absorb(run_eventually_check(verify_entry, game_table)) end
+    if has_always_eventually     and result.pass then absorb(run_always_eventually_check(verify_entry, game_table)) end
+    if has_until                 and result.pass then absorb(run_until_check(verify_entry, game_table)) end
 
     results[#results+1] = result
   end

@@ -400,10 +400,31 @@ Clause kinds:
 
 | Clause | Description |
 |--------|-------------|
-| `verify-always <cond>` | BFS: condition holds in all reachable states |
+| `verify-always <cond>` | BFS: condition holds in all reachable states (AG) |
+| `verify-eventually <cond>` | BFS: condition is reachable on some path (EF) |
+| `verify-always-eventually <cond>` | BFS: condition eventually holds on every path (AF) |
+| `verify-until <p> until <q>` | BFS: on every path, `p` holds until `q` does (AU) |
 | `after (<fn> <args>): <assertions>` | Apply function; check assertions (see below) |
 | `requires: <cond>` | Filter states for `after` check (see below) |
 | `from-any-state: when <cond>: <check>` | Check `<check>` from every state where `<cond>` holds |
+
+**Temporal-logic clauses (CTL subset):**
+
+```
+verify "quest is reachable":
+  verify-eventually quest/complete
+
+verify "every game ends":
+  verify-always-eventually game/over
+
+verify "no harm before objective":
+  verify-until player/health > 0 until quest/complete
+```
+
+`verify-always-eventually` and `verify-until` are bounded model-checks (depth
+5 by default). They expand the reachable state graph and compute a CTL
+fixpoint, conservatively treating depth-cutoff boundary states as failures.
+A counterexample is a path through states where the property does not hold.
 
 **`after` semantics depend on whether `requires:` is present:**
 
@@ -532,6 +553,65 @@ macro hurt-player amount:
 ```
 
 Macros are inlined at each call site. They may not be recursive.
+
+### `generate` (§F1)
+
+Declares a seed-deterministic procedural-generation block that runs once at
+engine init — after schema defaults and grid initialisation, before the
+entry scene is entered:
+
+```
+generate dungeon-layout seed: world/seed:
+  let count = (random-int 3 6):
+    set! world/room-count count
+    spawn! rooms "alpha" `chamber
+    relate! exits "alpha" "beta"
+```
+
+Two forms are supported:
+
+| Form | Effect |
+|------|--------|
+| `generate <name>:` | Body runs with the engine's existing RNG state. |
+| `generate <name> seed: <path>:` | The Int value at `<path>` is read first and passed to `rng:seed(...)`, so the body is deterministic in that state path's initial value. |
+
+All mutations inside the body flow through the transaction log, so saved
+games replay the *generated* world by replaying log entries — the generate
+block is **not** re-run on load.
+
+The body is parsed as a code block (statements only). It may use `set!`,
+`inc!` / `dec!`, `add!` / `remove!`, `clear!`, `push!` / `pop!`, `spawn!` /
+`despawn!`, `relate!` / `unrelate!`, and arbitrary expressions including
+`(random-int ...)`. It must not navigate scenes (`->`, `=>`, `<-`) — the
+scene stack has not been initialised yet.
+
+### `ending` (§F2)
+
+Declares a verifiable end-state. When its `when:` condition becomes true,
+the engine renders the body as a final narration block and the game loop
+exits.
+
+```
+ending escape when: player/escaped and player/alive:
+  "You step into the daylight."
+
+ending lost when: not player/alive:
+  "Your light goes out."
+```
+
+The compiler auto-emits two kinds of verify blocks for every set of
+endings:
+
+| Auto-verify | Clause | Meaning |
+|-------------|--------|---------|
+| `ending '<n>' is reachable` | `verify-eventually <when_expr>` | EF: some reachable state satisfies the ending's condition |
+| `endings '<a>' and '<b>' are mutually exclusive` | `verify-always not (<a.when> and <b.when>)` | AG: no reachable state satisfies both at once |
+
+Bodies are parsed in scene mode and may contain narration lines, `say`
+statements, conditional narration, `when:` blocks, and `if/else` blocks —
+the same constructs that work inside an ordinary scene narration block.
+Choices in an ending body are accepted by the parser but ignored at
+render time (the game exits immediately after the body renders).
 
 ---
 

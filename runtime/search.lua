@@ -1354,6 +1354,345 @@ function M.expand_graph(game_table, initial_cache, initial_stack, opts)
 end
 
 -- ============================================================
+-- Temporal-logic verifiers (C3: CTL subset over bounded state graph)
+-- ============================================================
+--
+-- These operate on the bounded reachable state graph produced by
+-- `M.expand_graph`. The graph is finite (bounded by `depth` and `max_nodes`),
+-- so each operator below is computed as a fixpoint over the graph.
+--
+-- Boundary handling: a node at depth == max_depth has its successors
+-- unexplored. Such nodes participate in the fixpoint only via the base
+-- predicate (i.e. they are "in" the AF/AU set only if the condition already
+-- holds there). This is the conservative reading — if you increase depth and
+-- the verifier passed, it will still pass; if it failed, it may now pass.
+
+--- Build {from_id -> {to_id -> edge}} out-adjacency from a list of edges.
+local function build_out_adjacency(edges)
+  local out = {}
+  for _, ed in ipairs(edges) do
+    local s = out[ed.from]
+    if not s then s = {}; out[ed.from] = s end
+    -- If multiple edges go from -> to, keep one (label/index is arbitrary).
+    if not s[ed.to] then s[ed.to] = ed end
+  end
+  return out
+end
+
+--- Find a path from `init_id` to a node satisfying `is_target_id`,
+--- traversing only edges whose `from` node satisfies `traverse_via`.
+--- Returns `[{scene, label, index}, ...]` (relative to `graph.nodes`),
+--- or nil if no such path exists.
+local function find_path_in_graph(graph, init_id, traverse_via, is_target_id, node_map)
+  if is_target_id(init_id) then return {} end
+  local out = build_out_adjacency(graph.edges)
+  local seen = { [init_id] = true }
+  local queue = { { id = init_id, path = {} } }
+  local head = 1
+  while head <= #queue do
+    local item = queue[head]; head = head + 1
+    if not traverse_via(item.id) then goto cont end
+    local succs = out[item.id]
+    if not succs then goto cont end
+    for to_id, ed in pairs(succs) do
+      if not seen[to_id] then
+        seen[to_id] = true
+        local from_scene = node_map[item.id] and node_map[item.id].scene
+        local new_path = {}
+        for _, s in ipairs(item.path) do new_path[#new_path + 1] = s end
+        new_path[#new_path + 1] = {
+          scene = from_scene,
+          label = ed.label,
+          index = ed.choice_index,
+        }
+        if is_target_id(to_id) then return new_path end
+        queue[#queue + 1] = { id = to_id, path = new_path }
+      end
+    end
+    ::cont::
+  end
+  return nil
+end
+
+--- Walk from `init_id` greedily through successors not in `safe_set`,
+--- returning the path until we either reach a node with no escape
+--- (terminal, or all successors in safe_set, or a cycle).
+---
+--- Used to build counterexamples for AF/AU. By the fixpoint construction,
+--- every node not in safe_set (whose base predicate doesn't hold) is either
+--- terminal or has at least one successor that's also not in safe_set, so
+--- this walk always demonstrates a bad path.
+local function walk_outside_set(graph, init_id, safe_set, node_map)
+  local out = build_out_adjacency(graph.edges)
+  local path = {}
+  local visited = { [init_id] = true }
+  local cur = init_id
+  -- Bound the walk to graph size to guarantee termination.
+  local max_steps = #graph.nodes + 1
+  for _ = 1, max_steps do
+    local succs = out[cur]
+    if not succs then break end
+    local next_id, next_edge = nil, nil
+    for to_id, ed in pairs(succs) do
+      if not safe_set[to_id] then
+        next_id  = to_id
+        next_edge = ed
+        break
+      end
+    end
+    if not next_id then break end
+    local from_scene = node_map[cur] and node_map[cur].scene
+    path[#path + 1] = {
+      scene = from_scene,
+      label = next_edge.label,
+      index = next_edge.choice_index,
+    }
+    if visited[next_id] then break end
+    visited[next_id] = true
+    cur = next_id
+  end
+  return path, cur
+end
+
+--- Compute the EF (exists future) set: nodes from which `cond_fn` is
+--- reachable along some path. Returns a set keyed by node id.
+local function compute_ef_set(graph, cond_fn)
+  local out = build_out_adjacency(graph.edges)
+  -- Reverse adjacency for backward propagation.
+  local in_adj = {}
+  for _, ed in ipairs(graph.edges) do
+    local s = in_adj[ed.to]
+    if not s then s = {}; in_adj[ed.to] = s end
+    s[ed.from] = true
+  end
+  local _ = out  -- unused after building reverse adjacency
+
+  local ef = {}
+  local stack = {}
+  for _, node in ipairs(graph.nodes) do
+    if cond_fn(node.cache) then
+      ef[node.id] = true
+      stack[#stack + 1] = node.id
+    end
+  end
+  while #stack > 0 do
+    local id = table.remove(stack)
+    local preds = in_adj[id]
+    if preds then
+      for pid in pairs(preds) do
+        if not ef[pid] then
+          ef[pid] = true
+          stack[#stack + 1] = pid
+        end
+      end
+    end
+  end
+  return ef
+end
+
+--- Compute the AF set: nodes from which every path eventually satisfies `cond_fn`,
+--- within the bounded graph. Conservative: boundary nodes (depth == max_depth)
+--- count only if they directly satisfy the condition.
+---
+--- Rule: a node n is in AF iff cond_fn(n) OR (n has ≥1 explored successor
+--- AND every explored successor is in AF AND n is not a boundary node).
+local function compute_af_set(graph, cond_fn, max_depth)
+  local out = build_out_adjacency(graph.edges)
+
+  local af = {}
+  for _, node in ipairs(graph.nodes) do
+    if cond_fn(node.cache) then af[node.id] = true end
+  end
+
+  -- Worklist fixpoint. To avoid quadratic scans, we keep iterating until
+  -- no node was added in a full pass. The reverse-adjacency worklist version
+  -- would be faster but the graph is bounded so a simple loop is fine.
+  local changed = true
+  while changed do
+    changed = false
+    for _, node in ipairs(graph.nodes) do
+      if not af[node.id] and node.depth < max_depth then
+        local succs = out[node.id]
+        if succs and next(succs) then
+          local all_in = true
+          for to_id in pairs(succs) do
+            if not af[to_id] then all_in = false; break end
+          end
+          if all_in then
+            af[node.id] = true
+            changed = true
+          end
+        end
+      end
+    end
+  end
+  return af
+end
+
+--- Compute the AU set for p AU q: nodes from which every path satisfies p
+--- at every step until q holds, and q must eventually hold (bounded).
+---
+--- Rule: a node n is in AU iff q(n) OR (p(n) AND n is non-boundary
+--- AND has ≥1 successor AND every successor is in AU).
+local function compute_au_set(graph, p_fn, q_fn, max_depth)
+  local out = build_out_adjacency(graph.edges)
+
+  local au = {}
+  for _, node in ipairs(graph.nodes) do
+    if q_fn(node.cache) then au[node.id] = true end
+  end
+
+  local changed = true
+  while changed do
+    changed = false
+    for _, node in ipairs(graph.nodes) do
+      if not au[node.id] and node.depth < max_depth and p_fn(node.cache) then
+        local succs = out[node.id]
+        if succs and next(succs) then
+          local all_in = true
+          for to_id in pairs(succs) do
+            if not au[to_id] then all_in = false; break end
+          end
+          if all_in then
+            au[node.id] = true
+            changed = true
+          end
+        end
+      end
+    end
+  end
+  return au
+end
+
+--- Build a {node_id -> node} map for O(1) lookup.
+local function node_id_map(graph)
+  local m = {}
+  for _, n in ipairs(graph.nodes) do m[n.id] = n end
+  return m
+end
+
+--- Verify EF: condition is reachable on some path from initial.
+---
+---@return table  { pass, states_checked, truncated?, fail_msg?, counterexample?,
+---                 counterexample_path? (witness path when pass=true) }
+function M.verify_eventually(game_table, initial_cache, initial_stack,
+                             condition_fn, depth, budget)
+  depth  = depth  or 5
+  budget = budget or 30
+
+  local graph = M.expand_graph(game_table, initial_cache, initial_stack, {
+    depth = depth, budget = budget, max_nodes = 5000,
+  })
+  if #graph.nodes == 0 then
+    return { pass = false, states_checked = 0,
+             fail_msg = "verify-eventually: no states explored" }
+  end
+
+  local ef = compute_ef_set(graph, condition_fn)
+  local node_map = node_id_map(graph)
+  local init_id = graph.nodes[1].id
+
+  if ef[init_id] then
+    -- Build a witness path from initial to a satisfying state.
+    local witness = find_path_in_graph(
+      graph, init_id,
+      function() return true end,
+      function(id) return condition_fn(node_map[id].cache) end,
+      node_map
+    )
+    return {
+      pass                = true,
+      states_checked      = #graph.nodes,
+      truncated           = graph.truncated,
+      counterexample_path = witness or {},
+    }
+  end
+
+  return {
+    pass            = false,
+    states_checked  = #graph.nodes,
+    truncated       = graph.truncated,
+    fail_msg        = graph.truncated
+        and "verify-eventually: condition not reached within depth (graph truncated — try larger depth/budget)"
+        or  "verify-eventually: condition not reachable from initial state",
+  }
+end
+
+--- Verify AF: condition eventually holds on every path from initial.
+function M.verify_always_eventually(game_table, initial_cache, initial_stack,
+                                    condition_fn, depth, budget)
+  depth  = depth  or 5
+  budget = budget or 30
+
+  local graph = M.expand_graph(game_table, initial_cache, initial_stack, {
+    depth = depth, budget = budget, max_nodes = 5000,
+  })
+  if #graph.nodes == 0 then
+    return { pass = true, states_checked = 0 }
+  end
+
+  local af = compute_af_set(graph, condition_fn, depth)
+  local node_map = node_id_map(graph)
+  local init_id  = graph.nodes[1].id
+
+  if af[init_id] then
+    return { pass = true, states_checked = #graph.nodes, truncated = graph.truncated }
+  end
+
+  -- Counterexample: greedy walk through non-AF nodes. By the fixpoint
+  -- construction, every non-AF node has a non-AF successor (or no successors),
+  -- so this walk either ends at a cycle or at a terminal/boundary state.
+  local cex_path, final_id = walk_outside_set(graph, init_id, af, node_map)
+  local final_cache = (node_map[final_id] and node_map[final_id].cache)
+                   or node_map[init_id].cache
+
+  return {
+    pass                = false,
+    states_checked      = #graph.nodes,
+    truncated           = graph.truncated,
+    counterexample      = final_cache,
+    counterexample_path = cex_path,
+    fail_msg            = "verify-always-eventually: condition does not hold on every path",
+  }
+end
+
+--- Verify AU: p holds until q, on every path, q eventually holds.
+function M.verify_until(game_table, initial_cache, initial_stack,
+                        p_fn, q_fn, depth, budget)
+  depth  = depth  or 5
+  budget = budget or 30
+
+  local graph = M.expand_graph(game_table, initial_cache, initial_stack, {
+    depth = depth, budget = budget, max_nodes = 5000,
+  })
+  if #graph.nodes == 0 then
+    return { pass = true, states_checked = 0 }
+  end
+
+  local au = compute_au_set(graph, p_fn, q_fn, depth)
+  local node_map = node_id_map(graph)
+  local init_id  = graph.nodes[1].id
+
+  if au[init_id] then
+    return { pass = true, states_checked = #graph.nodes, truncated = graph.truncated }
+  end
+
+  -- Counterexample: greedy walk through non-AU nodes.
+  local cex_path, final_id = walk_outside_set(graph, init_id, au, node_map)
+  local final_cache = (node_map[final_id] and node_map[final_id].cache)
+                   or node_map[init_id].cache
+
+  return {
+    pass                = false,
+    states_checked      = #graph.nodes,
+    truncated           = graph.truncated,
+    counterexample      = final_cache,
+    counterexample_path = cex_path,
+    fail_msg            = "verify-until: 'p until q' does not hold on every path",
+  }
+end
+
+-- ============================================================
 -- Legacy object-based API (stub, kept for compatibility)
 -- ============================================================
 

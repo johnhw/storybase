@@ -54,6 +54,7 @@ Commands:
   extract-symbols <file>      Scan symbol literals; suggest type declarations
   compact  <game.sb> <save.log> Emit snapshot + delta log for faster replay
   bundle   <file>             Bundle a game into a single self-contained .lua file
+  docs     <file>             Generate static HTML/Markdown reference for a game
   serve-api <file>            Stateless HTTP API (client-held save log)
   lsp                         Start the LSP server (stdio JSON-RPC)
   help                        Show this help text
@@ -474,6 +475,17 @@ local function cmd_compact(args)
   return compact_cmd.run(args) or 0
 end
 
+-- ── Command: docs ────────────────────────────────────────────
+
+local function cmd_docs(args)
+  local ok, docs_cmd = pcall(require, "cli.docs_cmd")
+  if not ok then
+    io.stderr:write("error: could not load docs command: " .. tostring(docs_cmd) .. "\n")
+    return 1
+  end
+  return docs_cmd.run(args) or 0
+end
+
 -- ── Command: serve-api ───────────────────────────────────────
 
 local function cmd_serve_api(args)
@@ -526,11 +538,27 @@ storybase run [options] <file>
     --ui <name>    UI driver: plain (default) or ansi (ANSI colour)
 ]],
   ["verify"] = [[
-storybase verify <file>
+storybase verify <file> [--no-cache] [--clear-cache] [--cache-dir DIR]
 
   Run all verify blocks defined in a .sb file.
   Each block performs a BFS over reachable states and checks invariants.
   Exits 0 if all checks pass, 1 if any fail.
+
+  Supported clause kinds:
+    verify-always              expr  — invariant at every reachable state
+    verify-eventually          expr  — expr reachable on some path (EF)
+    verify-always-eventually   expr  — expr eventually holds on every path (AF)
+    verify-until      p until  q     — every path: p holds until q (AU)
+    after (fn args): assertions      — post-condition with path@before
+    requires expr                    — pre-condition guard for `after`
+    from-any-state:                  — reachability sub-clauses
+
+  Results are cached in .storybase-cache/verify.json keyed by an AST-level
+  hash of each block plus the fns it transitively reaches. Re-running with
+  unchanged inputs reuses cached verdicts (marked [cached]). Flags:
+    --no-cache       skip cache lookup; always re-run every block
+    --clear-cache    delete the cache file before running
+    --cache-dir DIR  use DIR instead of .storybase-cache
 ]],
   ["migrate"] = [[
 storybase migrate <save.log>
@@ -641,6 +669,20 @@ storybase coverage [--depth N] [--budget N] [--format json] <file>
 
   Exit codes: 0 on success (even if coverage is incomplete), 1 on error.
 ]],
+  ["docs"] = [[
+storybase docs <file> [-o <output>] [--format html|md]
+
+  Walk the typed AST of a .sb file and emit a static reference site:
+  one page per declaration kind (types, state, fns, scenes, actors,
+  schedules, bounded, macros, speakers, grids, hooks, verify) plus an
+  overview home page.  Reuses the doc strings (§18.4) attached to
+  declarations in the source.
+
+  Options:
+    -o, --output <path>   Output directory (HTML) or file (md).
+                          Defaults to ./docs_out/ for HTML, ./docs.md for md.
+    --format html|md      Output format (default: html)
+]],
   ["serve-api"] = [[
 storybase serve-api [--port N] [--bind addr] [--seed N] [--production] <file>
 
@@ -714,6 +756,7 @@ local COMMANDS = {
   ["extract-symbols"] = cmd_extract_symbols,
   ["compact"]         = cmd_compact,
   ["bundle"]          = cmd_bundle,
+  ["docs"]            = cmd_docs,
   ["serve-api"]       = cmd_serve_api,
   ["lsp"]             = cmd_lsp,
   ["help"]            = cmd_help,

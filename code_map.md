@@ -43,7 +43,7 @@ STATE_SCALAR, STATE_RECORD, STATE_FAMILY
 RELATION_DECL, FN_DECL, ACTOR_DECL, SCHEDULE_DECL
 BOUNDED_DECL, VERIFY_DECL, WATCH_DECL, WATCH_WHEN_DECL
 SCENE_DECL, MACRO_DECL, DECL_MACRO_DECL, MACRO_CALL_DECL, MIGRATION_DECL, DEFGRID_DECL
-TEST_DECL
+TEST_DECL, GENERATE_DECL, ENDING_DECL
 ```
 
 **Type expression kinds:**
@@ -158,6 +158,8 @@ game_table = {
   tests      = [ {label, setup=[stmts], run=[stmts], expect=[exprs]} ],  -- empty in production builds
   migrations = [ {from_version, body} ],
   bounded    = { [name] = {reads, body} },
+  generates  = [ {name, seed_path, body, doc} ],            -- §F1
+  endings    = [ {name, when_expr, body, doc} ],            -- §F2
   production = bool,  -- true if compiled with opts.production
 }
 ```
@@ -320,6 +322,9 @@ eng:make_ctx(fn_name)         → eval ctx
 eng:render_text(text, ctx)    → string
 eng:out(s)                    -- write to io_out
 eng:inp()                     → string  -- read from io_in
+eng:run_generates()           -- §F1: execute every generate block once
+eng:check_ending()            → ending|nil  -- §F2: first matching ending
+eng:_render_ending(ending)    → narration list  -- §F2
 ```
 
 **Narration item structure** (returned by `render_scene`):
@@ -342,6 +347,9 @@ BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 - `M.probability(game_table, cache, stack, condition_fn, depth, threshold)` → float 0..1
 - `M.optimal_path(game_table, cache, stack, condition_fn, depth, cost_fn)` → path | nil  (Dijkstra)
 - `M.expand_graph(game_table, cache, stack, opts)` → `{nodes, edges, truncated, node_count, edge_count}` — full BFS expansion for the Graph tab; opts: `depth` (6), `max_nodes` (2000), `budget` (10s); nodes have `{id="nN", scene, depth, terminal, cache_summary, cache}`; edges have `{from, to, label, choice_index}`
+- `M.verify_eventually(game_table, cache, stack, cond_fn, depth?, budget?)` → result table — EF: condition reachable. Result includes `pass`, `counterexample_path` (witness path on pass, or empty on fail), `states_checked`, `truncated`.
+- `M.verify_always_eventually(game_table, cache, stack, cond_fn, depth?, budget?)` → result table — AF: every path eventually satisfies condition. Bounded fixpoint over `expand_graph`. Counterexample = greedy walk through non-AF nodes.
+- `M.verify_until(game_table, cache, stack, p_fn, q_fn, depth?, budget?)` → result table — AU: p until q. Bounded fixpoint over `expand_graph`.
 - `M.new(state, game, opts)` → search object (alternative stateful API, less used)
 
 **BFS node:** `{stack=[], cache={}, depth=N}`  
@@ -368,18 +376,21 @@ Stripped from production builds (`game_table.tests = {}` when `opts.production`)
 ### `runtime/verify.lua` (700+ lines)
 Verify block runner (offline model-checker).
 
-- `M.run_all(game_table)` → `[{label, pass, fail_msg?, skipped?, reason?, states_checked?, counterexample?, counterexample_n?, counterexample_path?, counterexample_path_original_len?, counterexample_shrink_budget_exceeded?}]`
+- `M.run_all(game_table)` → `[{label, pass, fail_msg?, skipped?, reason?, states_checked?, counterexample?, counterexample_n?, counterexample_path?, counterexample_path_original_len?, counterexample_shrink_budget_exceeded?, truncated?}]`
 - `M.shrink_path(game_table, path, condition_expr, budget_secs?)` → `(minimised_path, budget_exceeded_bool)` — greedy 1-minimal delta-debugger; exported for external use (e.g., fuzz test counterexamples)
 - `M.match_path_pattern(pattern, path)` → bool — path wildcard/alternation matching
 
 **Clause kinds handled:**
-- `"always"` → BFS check: `verify-always expr`
+- `"always"` → BFS check: `verify-always expr` (AG)
+- `"eventually"` → BFS reachability: `verify-eventually expr` (EF) — via `runtime/search.lua:verify_eventually`
+- `"always_eventually"` → bounded AF fixpoint: `verify-always-eventually expr` — via `runtime/search.lua:verify_always_eventually`
+- `"until"` → bounded AU fixpoint: `verify-until p until q` — via `runtime/search.lua:verify_until`
 - `"after"` → single-state check: `after (fn args): assertions`
 - `"requires"` → precondition for skipping `after` check
 - `"from_any_state"` → check expression holds from every BFS-reachable state
 - `"when"` → filter for `from_any_state` snapshots
 
-**BFS depth:** `DEFAULT_BFS_DEPTH = 5`; **Shrink budget:** `DEFAULT_SHRINK_BUDGET_SECS = 5.0`
+**BFS depth:** `DEFAULT_BFS_DEPTH = 5`; **Shrink budget:** `DEFAULT_SHRINK_BUDGET_SECS = 5.0`; **CTL fixpoint depth/budget:** `DEFAULT_CTL_DEPTH = 5`, `DEFAULT_CTL_BUDGET = 30`
 
 **Counterexample path fields** (set on `run_always_check` failures):
 - `counterexample_path` — `[{scene, label, index}]` minimised action sequence leading to the violation
@@ -591,14 +602,35 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - Collects `verify-always` clauses from all `verify` blocks in `game_table.verifies[*].clauses`
 - Exit 0 if no violations found, 1 if any violation or compile/argument error
 
-### `cli/verify_cmd.lua` (85 lines)
-- `M.run(args)` — compile + `verify_mod.run_all` + pretty-print results
+### `cli/verify_cmd.lua` (~160 lines)
+- `M.run(args)` — compile + per-block cache lookup via `cli/verify_cache.lua` + `verify_mod.run_all` (one-block sub-game-table per uncached entry) + pretty-print
+- Flags: `--no-cache` (skip lookup), `--clear-cache` (delete file first), `--cache-dir DIR` (default `.storybase-cache`)
+- Output marks cached entries with `[cached]` and reports `(N cached)` in the summary line
+
+### `cli/verify_cache.lua` (~250 lines, §C4)
+Persistent cache for verify-block results.
+- `M.compute_hash(verify_entry, game_table)` → hex string — FNV-1a 64-bit of (verify-block AST + schema slice + transitively-reached fns + (for BFS verifies) scenes/actors/schedules/bounded)
+- `M.load(cache_dir?)` → `{version, entries}` — tolerates missing/malformed/old-version files
+- `M.save(cache, cache_dir?)` → `(ok, err?)` — creates dir if missing
+- `M.get(cache, hash)` → entry | nil
+- `M.put(cache, hash, result)` — strips non-serialisable fields before storing
+- AST serialiser skips `pos`/`file`/`line`/`col` so cosmetic edits don't invalidate
+- Cache file format: `.storybase-cache/verify.json` (JSON via `runtime.debug.encode_json`)
 
 ### `cli/migrate_cmd.lua` (141 lines)
 - `M.run(args)` — load save file, run migrations, write output
 
 ### `cli/extract_cmd.lua` (220 lines)
 - `M.run(args)` — walk typed AST (via `parse_and_check_file`), collect SYMBOL_LIT nodes grouped by SET_MUT target path, output candidate `type Name = val | val` declarations
+
+### `cli/docs_cmd.lua` (§B5)
+- `M.run(args)` — compile via `compiler.parse_and_check_file`, group typed AST decls by kind, and emit a static reference site
+- `M.build_pages(typed_ast, filename, format, out_name?)` → `{pages = {[file] = contents}, groups = {...}}` — pure renderer, exposed for tests
+- HTML mode (default): 14 pages (`index.html` + one per declaration kind) plus `style.css`; sidebar nav with per-kind counts; scene-graph listing on `scenes.html`
+- Markdown mode (`--format md`): single `docs.md` file with sections for each kind
+- Flags: `-o`/`--output <path>` (output dir for HTML, output file for md), `--format html|md`
+- Macros are recovered via a supplementary lexer+parser pass on the raw source since `expand_macros` strips MACRO_DECL nodes before `parse_and_check_file` returns
+- Reuses doc strings (§18.4) and the `fmt_type` / `fmt_expr` patterns from `cli/format_cmd.lua` (lifted locally — not exported there)
 
 ### `cli/bundle_cmd.lua` (395 lines)
 - `M.run(args)` — compile a .sb file and emit a single self-contained Lua file
@@ -629,24 +661,24 @@ Language Server Protocol server. Communicates over stdio using JSON-RPC 2.0.
 - `M.run(args)` — replay save log into fresh state, write compact save with one entry per path
 - Usage: `storybase compact <game.sb> <save.log> [--out <out.log>]`
 
+### `cli/serve_api_cmd.lua` (§G2)
+- `M.run(args)` — CLI entry: compile + start a stateless HTTP API server on `--port` (default 8080)
+- `M.start(game_table, opts)` → server (binds non-blocking listener; reuses `LuaSocket`)
+- `M.poll(server)` → integer count — accept + dispatch any pending connections (used by tests)
+- `M.stop(server)` — close the listener; outstanding connections close themselves
+- `M.serve(game_table, opts)` — blocking loop: `poll` + `socket.sleep(0.01)` until process exit
+- HTTP routes: `GET /` (text usage), `GET /schema` (compiled schema summary), `POST /step` (stateless step), `POST /reset` (alias for step with reset:true), `OPTIONS *` (CORS preflight)
+- POST /step contract: `{save_log?, choice_index?, seed?, reset?}` → `{scene, narration, choices, state, save_log, done, ended}`
+- Save-log serialization is identical to `cli/cli_cmd.lua` but plain Lua tables (no Lua source); flows through `runtime.debug.encode_json` / `decode_json` so the client can hold opaque session state across requests
+- Internal helpers exported for tests: `M._save_to_table`, `M._restore_from_table`, `M._handle_step`, `M._schema_summary`
+- Distinct from `runtime/debug.lua`'s `--serve` HTTP server (which is stateful, one engine per process, browser UI)
+
 ### `cli/cli_cmd.lua` (583 lines)
 Single-step scripting mode for `storybase run --cli save.sbd`.
 - `M.run(game_table, save_path, opts)` — main entry point; reads `opts.input` as a choice index (or `q`/`quit`/`exit`), executes one step, writes save, emits JSON to `opts.output`
 - Save format: `save.sbd` Lua chunk (scene stack, log, state snapshot, checkpoint stack) + `save.sbd.snap` for fast replay
 - JSON output: `{type, scene, narration, choices, state, done, saved}` for state; `{type="quit"}`, `{type="done"}`, `{type="error", message}`
 - `opts.reset = true` — restart from initial state; `opts.seed` — RNG seed
-
-### `cli/serve_api_cmd.lua` (§G2)
-Stateless HTTP API hosting a compiled game; distinct from `run --serve` which is stateful and browser-driven.
-- `M.run(args)` — CLI entry: compile + start an HTTP server on `--port` (default 8080)
-- `M.start(game_table, opts)` → server  (binds non-blocking listener via LuaSocket)
-- `M.poll(server)` → integer  — accept + dispatch any pending connections (used by tests)
-- `M.stop(server)` — close the listener
-- `M.serve(game_table, opts)` — blocking loop: `poll` + `socket.sleep(0.01)` until process exit
-- Routes: `GET /` (text usage), `GET /schema` (compiled schema summary), `POST /step` (stateless step), `POST /reset` (alias for step with reset:true), `OPTIONS *` (CORS preflight)
-- `POST /step` contract: `{save_log?, choice_index?, seed?, reset?}` → `{scene, narration, choices, state, save_log, done, ended}`
-- Save-log serialisation: plain Lua tables of the same shape as `cli/cli_cmd.lua` (scene stack + log entries + checkpoints + scheduler state) round-tripped through `runtime.debug.encode_json`/`decode_json`; client holds opaque session state across requests
-- Exported for tests: `M._save_to_table`, `M._restore_from_table`, `M._handle_step`, `M._schema_summary`
 
 ---
 
@@ -691,8 +723,8 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/eval_spec.lua` | Expr/stmt evaluation; pre: fix; path-exists? fix |
 | `tests/runtime/engine_spec.lua` | Engine init, render, choice, save/load |
 | `tests/runtime/actors_spec.lua` | Actor registry, perception filtering |
-| `tests/runtime/search_spec.lua` | can_reach, find_path, probability, optimal_path; time-budget |
-| `tests/runtime/verify_spec.lua` | verify block runner (always/after/requires/counterexample) |
+| `tests/runtime/search_spec.lua` | can_reach, find_path, probability, optimal_path; time-budget; temporal (EF/AF/AU) verifiers |
+| `tests/runtime/verify_spec.lua` | verify block runner (always/after/requires/counterexample, plus eventually/always-eventually/until) |
 | `tests/runtime/log_spec.lua` | Log append, query, serialise/deserialise, query_at |
 | `tests/runtime/query_spec.lua` | Relation queries |
 | `tests/runtime/counterfactual_spec.lua` | Counterfactual branching |
@@ -711,8 +743,12 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/serve_api_spec.lua` | §G2 `storybase serve-api`: handle_step kernel (fresh start, choice advance, JSON round-trip determinism, invalid choice, malformed body), HTTP lifecycle (start/stop), GET / and /schema, OPTIONS preflight, POST /step and /reset end-to-end (22 tests) |
 | `tests/cli/drivers_spec.lua` | UI drivers: plain render/prompt/notify, ansi color escapes, --ui driver injection via engine.new (18 tests) |
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, multi-axis at:/every:, cancel-during-tick, end-to-end pipeline (22 tests) |
+| `tests/runtime/generate_spec.lua` | §F1 generate at runtime: body runs during eng:init, seed_path reseeds RNG, declaration-order execution, spawn! populates families, save/load determinism via state.replay (6 tests) |
+| `tests/runtime/ending_spec.lua` | §F2 ending at runtime: check_ending nil/first-match, _render_ending narration, eng:step termination (post-action + pre-prompt), auto-verify pass/fail round-trip via verify.run_all (9 tests) |
 | `tests/compiler/types_spec.lua` | compiler/types.lua state_space_size arithmetic (bool/int/enum/symbol/option/set/list/record/variant) (30 tests) |
 | `tests/compiler/test_decl_spec.lua` | TEST_DECL parser (label forms, sections, multiple blocks, 'test' as ident); codegen (game_table.tests, production strip) (14 tests) |
+| `tests/compiler/generate_spec.lua` | §F1 `generate` decl: parser (with/without seed_path, error paths), codegen (game_table.generates entry, duplicate-name diag), checker (UNDEFINED_PATH / UNDEFINED_FN propagate into body) (8 tests) |
+| `tests/compiler/ending_spec.lua` | §F2 `ending` decl: parser (with/without when:), codegen (game_table.endings, auto-emit reachability + pairwise exclusivity verify, production strip), duplicate-name diag (9 tests) |
 | `tests/compiler/macro_decl_spec.lua` | §E0 Stage 1 `decl-macro`: lexer keyword, parser into `DECL_MACRO_DECL` (zero/one/many params, state/fn/verify bodies, doc-string, source position), pipeline-strip placeholder (11 tests) |
 | `tests/runtime/tests_spec.lua` | runtime/tests.lua: basic pass/fail, setup/run sections, multiple expects, fresh-state isolation, multiple tests (19 tests) |
 | `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
@@ -721,7 +757,9 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/repl_cmd_spec.lua` | `storybase repl` subcommand unit tests via mocked stdio: meta-commands, fn invocation, save/load round-trip (16 tests) |
 | `tests/cli/migrate_cmd_spec.lua` | `storybase migrate` subcommand unit tests: usage, compile fail, no-migrations, version match, success, --out, corrupt save, missing save (11 tests) |
 | `tests/cli/verify_cmd_spec.lua` | `storybase verify` subcommand unit tests: usage, compile fail, no verify blocks, PASS, FAIL, summary (7 tests) |
+| `tests/cli/verify_cache_spec.lua` | §C4 verify cache: hash determinism, AST/dep-closure granularity, cache I/O, end-to-end `--no-cache` / `--clear-cache` (15 tests) |
 | `tests/cli/coverage_spec.lua` | `storybase coverage` subcommand: argument errors, 100% coverage, unreachable scene detection, uncovered fn detection, JSON format, --depth flag (17 tests) |
+| `tests/cli/docs_spec.lua` | `storybase docs` subcommand: HTML page emission per kind, Markdown emission, sidebar/current-page marking, HTML escaping, demo round-trips, macro recovery (21 tests) |
 | `tests/cli/fuzz_spec.lua` | `storybase fuzz` subcommand: argument errors, no-verify mode, passing invariants, failing invariants, .sbd save files, JSON format, --runs/--steps/--seed flags, main dispatcher (26 tests) |
 | `tests/test01_minimal.sb` – `test06_actors.sb` | Integration .sb files (test suite) |
 | `tests/fuzz/parser_fuzz_spec.lua` | Property test: random input never crashes parser |
@@ -774,6 +812,8 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo19_signal_tower.sb` | debug server showcase: 10× `watch` (live path values in browser), 5× `watch-when` (positive-edge conditional alerts), `engine-config debug-port`, `verify-always` invariants (beacon/visibility safety enforced by BFS, 448 states), `after (fn): @before` postcondition verify; storm-extinguishes-beacon game logic; serves as the subject for `debug_demo19_spec.lua` |
 | `demo20_harrow_house.sb` | time-model (`period` axis, wrap: 8), actor + schedule driving NPC spawn/despawn, static + dynamic relations (house-exits room graph, room-items), `bounded` computation (dialog-intent classifier with `??` fallback), `Set(KnowledgeFlag)` accumulation driving phase transitions, `hook after:` for room-discovery flags, `verify` invariants (phase monotone, rapport bounds, ending prereqs); three-phase arc (prosaic → uneasy → revelation) |
 | `demo21_merchants_reckoning.sb` | `query-history path` (full ledger via `for` loop), `query-changes path last-n: N` (last 3 locations), `query-at path time: {axis: val}` (gold at named day via `fn gold-on-day d:`), wildcard `query-history player/*` (broad audit); `time-model` single `day` axis, `time-inc! day: 1`; `for…else:` over query results in scene bodies; multi-segment path access `{entry/time/day}` in loop narration; `verify-always`, `after (earn-gold 30)` post-condition verify |
+| `demo22_quest_temporal.sb` | Temporal-logic verify showcase (§C3): all four CTL operators on a forced-completion three-task quest — `verify-always` (AG safety), `verify-eventually` (EF reachability), `verify-always-eventually` (AF forced outcome), `verify-until p until q` (AU "p holds until q"). Pairs with `cli/verify_cache.lua` to demonstrate `[cached]` re-runs. |
+| `demo23_procedural_dungeon.sb` | §F1 + §F2: a procedurally-generated 3–5 room dungeon. `generate dungeon-layout seed: world/seed` spawns rooms via `random-int`; two `ending` declarations (`escape`, `lost`) drive the auto-emitted reachability + pairwise-exclusivity verify blocks. |
 | `demo02_merchant_tests.sb` | Test suite for demo02_merchant.sb: 11 test blocks covering buy/sell fns, port bonus, round-trip, and defaults; uses `import`, `setup:`/`run:`/`expect:` sections |
 
 ---
