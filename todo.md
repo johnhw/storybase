@@ -13,7 +13,7 @@ silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through A
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete.
 
-**~2787 successes / 0 failures / 2 pending (known limitations).**
+**~2794 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -335,30 +335,47 @@ expansion pass shipped together.
   substitution into a composite name), the legacy stmt-level macro
   system still works, and position propagation onto expanded decls.
 
-Open (deferred to Stage 4–6):
-- Decorate checker diagnostics with `expanded from macro 'NAME' at
-  FILE:LINE` notes when `expanded_from` is set (Stage 4).
+Open (deferred to Stage 5–6):
 - Cross-import wiring: rename walker for `DECL_MACRO_DECL` /
   `MACRO_CALL_DECL` and `@stdlib/` resolver (Stage 5).
 - Docs + acceptance demo (Stage 6).
 
-#### Stage 4 — Position propagation + checker hookup
+#### Stage 4 — Position propagation + checker hookup ✅ (2026-05-17)
 
 Goal: when the checker errors on an expanded node, the error points at the
-**call site**, with an optional note pointing at the macro definition.
+**call site**, with a note pointing at the macro definition.
 
-- In `expand_decl_macro_body`, stamp every emitted node's `pos` to the call
-  site's `pos`; attach `expanded_from = macro.pos` to each emitted node.
-- `compiler/checker.lua`: no logic change needed (it walks emitted decls as
-  if hand-written), but if an emitted node fails a check, decorate the
-  diag's `note` with `"expanded from macro 'NAME' at FILE:LINE"` when
-  `expanded_from` is present. Helper added in `ast.lua`.
-- New diag `ast.E.MACRO_DECL_EMIT` for invalid emissions (missing param,
-  un-stringifiable param value, illegal interpolated path syntax). Raised
-  from the substitution code with the call-site pos.
-- Test: a deliberately broken `decl-macro` call produces a checker error
-  whose `pos.line` is the line of the macro **call**, not the macro
-  definition.
+Strategy: attach the expansion info (`{ macro_name, macro_pos }`) directly
+to the pos table of every emitted node, then have the diagnostic
+constructor (`ast._diag`) auto-decorate the `note` field whenever it sees
+`pos.expanded_from`. This required zero changes to `checker.lua` — every
+diagnostic emitter already funnels through `ast.error` / `ast.warning` /
+`ast.hint`, so the decoration is uniform.
+
+- `compiler/ast.lua`: new `ast.format_expanded_from(info)` returns
+  `"expanded from macro 'NAME' at FILE:LINE"`; `_diag` calls it when
+  `pos.expanded_from` is present and appends to any existing note with
+  `"; "`. Empty / malformed info is tolerated gracefully.
+- `compiler/compiler.lua`: `substitute_decl_node` takes a new
+  `expansion_info` parameter and attaches it to every freshly-minted pos
+  table; `expand_decl_macros` builds one `{ macro_name = m.name,
+  macro_pos = m.pos }` table per macro call and threads it through.
+- `tests/compiler/macro_decl_spec.lua`: 7 new Stage 4 tests covering:
+  - checker `UNDEFINED_TYPE` on an expanded decl reports the call-site
+    line (not the macro body line);
+  - the emitted diag's `note` contains `expanded from macro 'NAME'` and
+    the macro's file:line;
+  - the `DUPLICATE_NAME` edge case (two call sites with the same path)
+    reports the *second* call site and carries *both* the existing
+    "previous declaration at line N" note and the expansion note,
+    joined with `"; "`;
+  - clean expansions never decorate unrelated diagnostics;
+  - regression: legacy stmt-level `macro` errors are unaffected
+    (no spurious `expanded from` notes);
+  - `format_expanded_from` happy-path + missing-fields tolerance.
+
+No regressions: full suite 2794 passing / 0 failures / 2 pre-existing
+pending (unrelated formatter known-limitations).
 
 #### Stage 5 — Cross-import wiring
 

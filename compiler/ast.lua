@@ -37,8 +37,29 @@ local NO_POS = M.pos("?", 0, 0)
 --   @field note    string?  Optional additional context
 --   @field level   string   "error" or "warning"
 
+--- Format a `pos.expanded_from` info table into a one-line note suitable
+--- for diagnostic decoration. Returns nil if `info` is missing or
+--- malformed. See §E0 Stage 4: the substitution pass attaches an info
+--- table to every emitted node's `pos`, so any diagnostic whose `pos`
+--- traces back to a decl-macro body can be decorated automatically.
+function M.format_expanded_from(info)
+  if type(info) ~= "table" then return nil end
+  local name = info.macro_name or "?"
+  local mp   = info.macro_pos or {}
+  local file = mp.file or "?"
+  local line = mp.line or 0
+  return string.format(
+    "expanded from macro '%s' at %s:%d", name, file, line)
+end
+
 local function _diag(level, code, message, pos, note)
   pos = pos or NO_POS
+  if pos.expanded_from then
+    local exp_note = M.format_expanded_from(pos.expanded_from)
+    if exp_note then
+      note = note and (note .. "; " .. exp_note) or exp_note
+    end
+  end
   return {
     level   = level,
     code    = code,

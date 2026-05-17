@@ -733,3 +733,174 @@ scene main:
     assert.equal(6, found.expanded_from.line)
   end)
 end)
+
+-- ── §E0 Stage 4: checker diagnostics on expanded nodes ───────────────────────
+
+describe("compile — Stage 4 expanded_from diag decoration", function()
+  local function compile_errs(src)
+    local _, diags = compiler.compile(src, "test.sb")
+    return (diags and diags.errors) or {}
+  end
+
+  local function find_err(errs, code)
+    for _, e in ipairs(errs) do
+      if e.code == code then return e end
+    end
+    return nil
+  end
+
+  it("checker UNDEFINED_TYPE in expanded decl points at the call site", function()
+    -- `BadType` is not declared. The expanded `state $path: BadType = 0`
+    -- triggers UNDEFINED_TYPE during type resolution. Its pos should be
+    -- stamped to the call-site line (line 8), not the macro body (line 6).
+    local src = table.concat({
+      "module test",                       -- 1
+      "  version: 1.0",                    -- 2
+      "engine-config:",                    -- 3
+      "  entry-scene: main",               -- 4
+      "decl-macro counter $path:",         -- 5
+      "  state $path: BadType = 0",        -- 6
+      "",                                  -- 7
+      "counter player-health",             -- 8
+      "scene main:",                       -- 9
+      "  the end",                         -- 10
+    }, "\n") .. "\n"
+
+    local errs = compile_errs(src)
+    local e = find_err(errs, "UNDEFINED_TYPE")
+    assert.is_not_nil(e)
+    assert.equal(8, e.line)
+  end)
+
+  it("checker diag on expanded node has 'expanded from macro' note", function()
+    local src = table.concat({
+      "module test",
+      "  version: 1.0",
+      "engine-config:",
+      "  entry-scene: main",
+      "decl-macro counter $path:",
+      "  state $path: BadType = 0",
+      "",
+      "counter player-health",
+      "scene main:",
+      "  the end",
+    }, "\n") .. "\n"
+
+    local errs = compile_errs(src)
+    local e = find_err(errs, "UNDEFINED_TYPE")
+    assert.is_not_nil(e)
+    assert.is_not_nil(e.note)
+    -- The note must mention the macro by name and point at its definition line.
+    assert.is_truthy(e.note:match("expanded from macro 'counter'"))
+    assert.is_truthy(e.note:match("test%.sb:5"))
+  end)
+
+  it("DUPLICATE_NAME on a clashing expansion points at the second call", function()
+    -- Two macro calls expand to the same state path → the second one is
+    -- the duplicate. Its diagnostic should point at the second call site,
+    -- and the note should contain *both* the original "previous declaration"
+    -- text and the "expanded from" decoration.
+    local src = table.concat({
+      "module test",                         -- 1
+      "  version: 1.0",                      -- 2
+      "engine-config:",                      -- 3
+      "  entry-scene: main",                 -- 4
+      "decl-macro counter $path:",           -- 5
+      "  state $path: Int(0, 100) = 0",      -- 6
+      "",                                    -- 7
+      "counter player-health",               -- 8
+      "counter player-health",               -- 9  ← duplicate call
+      "scene main:",                         -- 10
+      "  the end",                           -- 11
+    }, "\n") .. "\n"
+
+    local errs = compile_errs(src)
+    local e = find_err(errs, "DUPLICATE_NAME")
+    assert.is_not_nil(e)
+    -- Points at the *second* call site.
+    assert.equal(9, e.line)
+    assert.is_not_nil(e.note)
+    assert.is_truthy(e.note:match("previous declaration"))
+    assert.is_truthy(e.note:match("expanded from macro 'counter'"))
+  end)
+
+  it("clean expansion produces no expanded_from note on unrelated diagnostics", function()
+    -- A program that fully type-checks should have no errors; if any
+    -- warnings are emitted from non-expanded nodes, they must not carry
+    -- a spurious `expanded from` note.
+    local src = table.concat({
+      "module test",
+      "  version: 1.0",
+      "engine-config:",
+      "  entry-scene: main",
+      "decl-macro counter $path:",
+      "  state $path: Int(0, 100) = 0",
+      "",
+      "counter player-health",
+      "scene main:",
+      "  the end",
+    }, "\n") .. "\n"
+
+    local _, diags = compiler.compile(src, "test.sb")
+    local all = (diags and diags.errors) or {}
+    for _, w in ipairs((diags and diags.warnings) or {}) do
+      all[#all + 1] = w
+    end
+    for _, d in ipairs(all) do
+      if d.note then
+        assert.is_falsy(d.note:match("expanded from macro"))
+      end
+    end
+  end)
+
+  it("legacy stmt-level macro errors carry no 'expanded from' note", function()
+    -- Regression guard: only decl-level expansion sets expanded_from on
+    -- pos tables. The old MACRO_CALL_STMT path does not (yet) get this
+    -- decoration — confirm no leakage.
+    local src = table.concat({
+      "module test",                                -- 1
+      "  version: 1.0",                             -- 2
+      "engine-config:",                             -- 3
+      "  entry-scene: main",                        -- 4
+      "state world/count: Int(0, 100) = 0",         -- 5
+      "macro count-twice body:",                    -- 6
+      "  body",                                     -- 7
+      "  body",                                     -- 8
+      "fn tick:",                                   -- 9
+      "  inc! BadPath 1",                           -- 10  ← bad ident
+      "  count-twice:",                             -- 11
+      "    inc! world/count 1",                     -- 12
+      "scene main:",                                -- 13
+      "  the end",                                  -- 14
+    }, "\n") .. "\n"
+
+    local _, diags = compiler.compile(src, "test.sb")
+    local all = (diags and diags.errors) or {}
+    for _, w in ipairs((diags and diags.warnings) or {}) do
+      all[#all + 1] = w
+    end
+    -- Whatever the legacy macro emits, no diagnostic should claim it was
+    -- "expanded from macro 'count-twice'"-style (that's strictly Stage 4
+    -- decoration, which is scoped to decl-level expansion).
+    for _, d in ipairs(all) do
+      if d.note then
+        assert.is_falsy(d.note:match("expanded from macro 'count%-twice'"))
+      end
+    end
+  end)
+
+  it("format_expanded_from helper produces the documented string", function()
+    local s = ast.format_expanded_from({
+      macro_name = "counter",
+      macro_pos  = ast.pos("foo.sb", 42, 1),
+    })
+    assert.equal("expanded from macro 'counter' at foo.sb:42", s)
+  end)
+
+  it("format_expanded_from helper tolerates missing fields", function()
+    assert.is_nil(ast.format_expanded_from(nil))
+    -- Missing macro_pos → "?" file, line 0
+    local s = ast.format_expanded_from({ macro_name = "x" })
+    assert.is_truthy(s:match("expanded from macro 'x' at %?:0"))
+  end)
+end)

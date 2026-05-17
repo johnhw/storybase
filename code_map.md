@@ -34,6 +34,11 @@ AST node constructors and constants. Import as `local ast = require("compiler.as
 - `ast.error(code, msg, pos, note?)` → diag table
 - `ast.warning(code, msg, pos, note?)` → diag table
 - `ast.is_mut(node)` → bool — true if node is a mutation statement kind
+- `ast.format_expanded_from(info)` → string — §E0 Stage 4 helper that
+  formats `{macro_name, macro_pos}` into a `"expanded from macro 'N' at
+  F:L"` note; `_diag` calls it automatically when `pos.expanded_from`
+  is set, so any diagnostic carrying a stamped expansion pos is decorated
+  for free
 
 **Declaration kinds (`ast.K.*`):**
 ```
@@ -145,6 +150,13 @@ EMIT_MUT         -- engine/emit event [args]
   `DECL_MACRO_DECL`/`MACRO_CALL_DECL` and `MACRO_DECL` nodes are stripped
   before the checker runs. Errors: `UNDEFINED_NAME` for unknown macro;
   `MACRO_DECL_EMIT` for arity/substitution mismatch.
+- §E0 Stage 4: every emitted node gets a fresh pos table stamped with the
+  call site's `(file, line, col)` plus a `pos.expanded_from =
+  { macro_name, macro_pos }`. The node itself also carries
+  `node.expanded_from = <body's original pos>` for tooling. Diagnostics
+  raised by the checker (or any later pass) against expanded nodes are
+  auto-decorated with `"expanded from macro 'NAME' at FILE:LINE"`
+  inside `ast._diag` — no checker-side change needed.
 
 ---
 

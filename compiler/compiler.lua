@@ -612,7 +612,12 @@ end
 --- Deep-copy `node`, substituting macro params throughout. Recurses into
 --- all table-valued fields. Reports errors into `diags` with the
 --- `call_pos` source position. Returns the substituted copy.
-local function substitute_decl_node(node, param_map, diags, call_pos, filename)
+---
+--- `expansion_info` (§E0 Stage 4) — table `{ macro_name, macro_pos }`
+--- attached to every emitted node's `pos`, so downstream diagnostics
+--- pick up an "expanded from macro 'NAME' at FILE:LINE" note for free
+--- via `ast.format_expanded_from` inside the diagnostic constructor.
+local function substitute_decl_node(node, param_map, diags, call_pos, filename, expansion_info)
   -- Forward declaration so the closures below can reference it.
   local subst
 
@@ -691,12 +696,19 @@ local function substitute_decl_node(node, param_map, diags, call_pos, filename)
 
     -- Stamp call-site position on every emitted node so checker errors
     -- point at the call site, not the macro body line. Preserve a link
-    -- back to the macro body for §E0 Stage 4 error-note decoration.
+    -- back to the macro body for tooling on the node itself, and attach
+    -- `expanded_from` to the pos table so any diagnostic carrying that
+    -- pos is auto-decorated with an "expanded from macro 'X' at F:L" note
+    -- (see ast.format_expanded_from / ast._diag).
     local orig_pos = copy.pos
-    copy.pos = ast.pos(
+    local new_pos = ast.pos(
       filename,
       call_pos.line or 0,
       call_pos.col or 0)
+    if expansion_info then
+      new_pos.expanded_from = expansion_info
+    end
+    copy.pos = new_pos
     copy.expanded_from = orig_pos
 
     -- Recurse into all child table-valued fields (after the shallow-copy
@@ -789,9 +801,14 @@ local function expand_decl_macros(ast_root, diags, filename)
             end
           end
           local call_pos = decl.pos or ast.pos(filename, 0, 0)
+          local expansion_info = {
+            macro_name = m.name,
+            macro_pos  = m.pos or ast.pos(filename, 0, 0),
+          }
           for _, body_decl in ipairs(m.body or {}) do
             local expanded = substitute_decl_node(
-              body_decl, param_map, diags, call_pos, filename)
+              body_decl, param_map, diags, call_pos, filename,
+              expansion_info)
             new_decls[#new_decls + 1] = expanded
           end
         end
