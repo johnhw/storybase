@@ -514,9 +514,13 @@ local function expand_macros(ast_root, diags, filename)
   end
 
   -- Expand macros in all declaration bodies
+  -- DECL_MACRO_DECL is stripped here as a placeholder for §E0 stages 2–3.
+  -- Stage 1 only parses these nodes; without removal they'd reach downstream
+  -- passes that don't yet know about them.
   local new_decls = {}
   for _, decl in ipairs(ast_root.decls or {}) do
-    if decl and decl.kind ~= ast.K.MACRO_DECL then
+    if decl and decl.kind ~= ast.K.MACRO_DECL
+       and decl.kind ~= ast.K.DECL_MACRO_DECL then
       local copy = {}
       for k, v in pairs(decl) do copy[k] = v end
       -- Expand in fn/scene/actor bodies

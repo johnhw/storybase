@@ -19,7 +19,7 @@ local KEYWORDS = {}
 for _, kw in ipairs({
   "fn", "state", "type", "scene", "when", "if", "else", "match",
   "cond", "for", "while", "break", "continue", "return", "let", "in", "with", "import", "module",
-  "relation", "actor", "schedule", "bounded", "macro", "verify",
+  "relation", "actor", "schedule", "bounded", "macro", "decl-macro", "verify",
   "watch", "watch-when", "pre", "post", "tags", "pass",
   "tag", "hook", "say", "speaker",
   "and", "or", "not",

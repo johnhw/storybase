@@ -197,6 +197,8 @@ M.K.WATCH_WHEN_DECL     = "watch_when_decl"
 M.K.SCENE_DECL          = "scene_decl"
 M.K.MACRO_DECL          = "macro_decl"
 M.K.MACRO_CALL_STMT     = "macro_call_stmt"
+M.K.DECL_MACRO_DECL     = "decl_macro_decl"      -- decl-macro NAME params...: body (decls)
+M.K.MACRO_CALL_DECL     = "macro_call_decl"      -- macro call appearing at decl-level
 M.K.MIGRATION_DECL      = "migration_decl"
 M.K.DEFGRID_DECL        = "defgrid_decl"
 M.K.TAG_DECL            = "tag_decl"   -- tag name
@@ -340,6 +342,7 @@ local DECL_KINDS = {
   [M.K.BOUNDED_DECL]   = true, [M.K.VERIFY_DECL]     = true,
   [M.K.WATCH_DECL]     = true, [M.K.WATCH_WHEN_DECL] = true,
   [M.K.SCENE_DECL]     = true, [M.K.MACRO_DECL]      = true,
+  [M.K.DECL_MACRO_DECL] = true, [M.K.MACRO_CALL_DECL] = true,
   [M.K.MIGRATION_DECL] = true, [M.K.DEFGRID_DECL]    = true,
   [M.K.TAG_DECL]       = true, [M.K.HOOK_DECL]       = true,
   [M.K.SPEAKER_DECL]   = true,
@@ -568,6 +571,20 @@ end
 
 function M.macro_call_stmt(name, args, body, pos)
   return M.node(M.K.MACRO_CALL_STMT,
+    { name = name, args = args or {}, body = body or {} }, pos)
+end
+
+--- Decl-emitting macro declaration: body is a list of decls (state, fn, etc.).
+--- See §E0 of todo.md / docs/reference/language.md for design notes.
+function M.decl_macro_decl(name, params, body, doc, pos)
+  return M.node(M.K.DECL_MACRO_DECL,
+    { name = name, params = params or {}, body = body or {}, doc = doc }, pos)
+end
+
+--- A decl-level invocation of a decl-macro. Replaced at expansion time by the
+--- spliced list of decls produced from the macro body.
+function M.macro_call_decl(name, args, body, pos)
+  return M.node(M.K.MACRO_CALL_DECL,
     { name = name, args = args or {}, body = body or {} }, pos)
 end
 

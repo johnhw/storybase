@@ -42,7 +42,7 @@ TYPE_ENUM, TYPE_ALIAS, TYPE_RECORD, TYPE_VARIANT
 STATE_SCALAR, STATE_RECORD, STATE_FAMILY
 RELATION_DECL, FN_DECL, ACTOR_DECL, SCHEDULE_DECL
 BOUNDED_DECL, VERIFY_DECL, WATCH_DECL, WATCH_WHEN_DECL
-SCENE_DECL, MACRO_DECL, MIGRATION_DECL, DEFGRID_DECL
+SCENE_DECL, MACRO_DECL, DECL_MACRO_DECL, MACRO_CALL_DECL, MIGRATION_DECL, DEFGRID_DECL
 TEST_DECL
 ```
 
@@ -713,6 +713,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, multi-axis at:/every:, cancel-during-tick, end-to-end pipeline (22 tests) |
 | `tests/compiler/types_spec.lua` | compiler/types.lua state_space_size arithmetic (bool/int/enum/symbol/option/set/list/record/variant) (30 tests) |
 | `tests/compiler/test_decl_spec.lua` | TEST_DECL parser (label forms, sections, multiple blocks, 'test' as ident); codegen (game_table.tests, production strip) (14 tests) |
+| `tests/compiler/macro_decl_spec.lua` | §E0 Stage 1 `decl-macro`: lexer keyword, parser into `DECL_MACRO_DECL` (zero/one/many params, state/fn/verify bodies, doc-string, source position), pipeline-strip placeholder (11 tests) |
 | `tests/runtime/tests_spec.lua` | runtime/tests.lua: basic pass/fail, setup/run sections, multiple expects, fresh-state isolation, multiple tests (19 tests) |
 | `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
 | `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |

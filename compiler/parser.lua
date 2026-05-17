@@ -872,6 +872,9 @@ end
 
 -- Forward declarations (mutual recursion)
 local parse_expr, parse_stmt, parse_body_items, parse_narration_text
+-- `parse_decl_macro_decl` recurses into `parse_decl` so the latter must be
+-- forward-declared as well (it's defined near the bottom of the file).
+local parse_decl
 -- Forward-declared so parse_match_expr (defined before the table) captures
 -- the same upvalue slot that is filled at the MUTATION_TABLE = {...} assignment.
 local MUTATION_TABLE
@@ -3031,6 +3034,82 @@ local function parse_macro_decl(p, doc)
   return ast.macro_decl(name, params, body, doc, tpos)
 end
 
+--- Parse a `decl-macro name param1 param2...: body` declaration.
+--- The header has two shapes the lexer can produce:
+---   decl-macro name:           → KEYWORD NAMED_ARG("name")   (no params)
+---   decl-macro name p1 p2:     → KEYWORD IDENT("name") IDENT("p1") NAMED_ARG("p2")
+--- so we pick the name off the first token, then collect any remaining
+--- IDENT/NAMED_ARG tokens as parameter names. The body is a sequence of
+--- top-level decls (`state`, `fn`, `scene`, `verify`, ...) rather than
+--- statements. See §E0 Stage 1 in todo.md.
+local function parse_decl_macro_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD "decl-macro"
+
+  local name = "?"
+  local params = {}
+  local header_done = false
+
+  if p:at("NAMED_ARG") then
+    -- Bare 'decl-macro name:' — name has the colon already attached.
+    name = p:adv().value
+    header_done = true
+  elseif p:at("IDENT") then
+    name = p:adv().value
+  end
+
+  if not header_done then
+    while p:at("IDENT") or p:at("NAMED_ARG") do
+      local t = p:adv()
+      params[#params + 1] = t.value
+      if t.kind == "NAMED_ARG" then break end  -- "param:" eats the ':'
+    end
+    -- Optional fallback if the ':' was emitted as a plain OP rather than
+    -- attached to the last parameter (defensive — matches parse_macro_decl).
+    p:match("OP", ":")
+  end
+  p:match("NEWLINE")
+
+  -- Body: a list of decls between INDENT and DEDENT.
+  local body = {}
+  p:skip_newlines()
+  if not p:at("INDENT") then
+    -- Empty body — accept silently (matches behaviour of empty fn body).
+    return ast.decl_macro_decl(name, params, body, doc, tpos)
+  end
+  p:adv()  -- consume INDENT
+
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+
+    -- Optional inner doc string immediately before a decl.
+    local inner_doc = nil
+    if p:at("STRING") or p:at("MULTILINE_STRING") then
+      inner_doc = p:adv().value
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+    end
+
+    local prev = p.pos
+    local d = parse_decl(p, inner_doc)
+    if d then
+      if d._multi_decl then
+        for _, dd in ipairs(d.decls or {}) do
+          body[#body + 1] = dd
+        end
+      else
+        body[#body + 1] = d
+      end
+    end
+    p:skip_newlines()
+    if p.pos == prev then p:adv() end  -- safety: avoid infinite loop
+  end
+  if p:at("DEDENT") then p:adv() end
+
+  return ast.decl_macro_decl(name, params, body, doc, tpos)
+end
+
 --- Parse a `verify "label": clauses` declaration.
 local function parse_verify_decl(p, doc)
   local tpos = p:cur().pos
@@ -3426,7 +3505,7 @@ end
 -- Top-level dispatch
 -- ============================================================
 
-local function parse_decl(p, doc)
+parse_decl = function(p, doc)
   local t = p:cur()
 
   if t.kind == "KEYWORD" then
@@ -3446,6 +3525,7 @@ local function parse_decl(p, doc)
         or t.value == "watch-when" then return parse_watch_decl(p, doc)
     elseif t.value == "bounded"    then return parse_bounded_decl(p, doc)
     elseif t.value == "macro"      then return parse_macro_decl(p, doc)
+    elseif t.value == "decl-macro" then return parse_decl_macro_decl(p, doc)
     elseif t.value == "speaker"    then return parse_speaker_decl(p, doc)
     else
       p:skip_to_eol()
