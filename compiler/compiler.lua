@@ -932,6 +932,231 @@ local function expand_macros(ast_root, diags, filename)
   ast_root.decls = new_decls
 end
 
+-- ============================================================
+-- §E1 Quest desugar
+-- ============================================================
+--
+-- Each `quest Q:` declaration desugars into a fixed set of `state` and
+-- `fn` declarations spliced into the program after macro expansion but
+-- before the type checker runs.  The original QUEST_DECL is retained so
+-- codegen can synthesise an auto-verify ("quest 'Q' is reachable to
+-- completion") in the same pattern as ending verifies.
+--
+-- Emitted per quest Q with steps [s1, .., sN]:
+--   state quests/Q/active:   Bool = false
+--   state quests/Q/complete: Bool = false
+--   state quests/Q/<s>:      Bool = false    (one per step)
+--
+--   fn quest-Q-active?:    quests/Q/active
+--   fn quest-Q-complete?:  quests/Q/complete
+--   fn quest-Q-step-<s>?:  quests/Q/<s>      (one per step)
+--
+--   fn quest-Q-start!:
+--     when (not quests/Q/active) and (not quests/Q/complete) [and (prereq)]:
+--       set! quests/Q/active true
+--
+--   fn quest-Q-do-<s>:                       (one per step)
+--     when quests/Q/active and (not quests/Q/<s>) [and (requires)]:
+--       <step body>
+--       set! quests/Q/<s> true
+--       when quests/Q/<s1> and ... and quests/Q/<sN>:
+--         set! quests/Q/complete true
+--         set! quests/Q/active   false
+--         <reward body>
+
+local function _qpath(file, line, ...)
+  local segs = {...}
+  return ast.path_expr(segs, ast.pos(file, line or 0, 0))
+end
+
+local function _qbool_lit(v, file, line)
+  return ast.bool_lit(v, ast.pos(file, line or 0, 0))
+end
+
+local function _and(a, b, pos)
+  if not a then return b end
+  if not b then return a end
+  return ast.binary_op("and", a, b, pos)
+end
+
+local function _not(e, pos)
+  return ast.unary_op("not", e, pos)
+end
+
+local function _path_read(file, line, ...)
+  return _qpath(file, line, ...)
+end
+
+--- Expand every QUEST_DECL in the program by appending desugared state +
+--- fn declarations.  The QUEST_DECL nodes themselves are *kept* so that
+--- codegen can emit auto-verify blocks referencing them.  Reports
+--- DUPLICATE_NAME if two quests share the same name (the same error is
+--- also raised by the checker, but raising here keeps the desugar from
+--- generating conflicting state/fn decls).
+local function expand_quests(ast_root, diags, filename)
+  local K = ast.K
+  local seen = {}
+  local extras = {}
+
+  for _, decl in ipairs(ast_root.decls or {}) do
+    if decl and decl.kind == K.QUEST_DECL then
+      local qname = decl.name
+      if not qname then
+        -- parser already emitted an error; skip silently
+      elseif seen[qname] then
+        diags:push_error(ast.E.DUPLICATE_NAME,
+          "duplicate quest '" .. qname .. "'",
+          decl.pos or ast.pos(filename, 0, 0))
+      else
+        seen[qname] = true
+
+        local qpos = decl.pos or ast.pos(filename, 0, 0)
+        local line = qpos.line or 0
+
+        local function mk_pos() return ast.pos(filename, line, 0) end
+
+        -- ── State declarations ─────────────────────────────────────
+        local function emit_state(seg_step)
+          local segs = { "quests", qname }
+          if seg_step then segs[#segs+1] = seg_step end
+          extras[#extras+1] = ast.state_scalar(
+            ast.path_expr(segs, mk_pos()),
+            ast.type_bool(mk_pos()),
+            _qbool_lit(false, filename, line),
+            nil,
+            mk_pos())
+        end
+
+        emit_state("active")
+        emit_state("complete")
+        local step_step_names = {}  -- canonical step path segments, in order
+        local seen_steps = {}
+        for _, st in ipairs(decl.steps or {}) do
+          local sname = st.name
+          if sname and not seen_steps[sname] then
+            seen_steps[sname] = true
+            step_step_names[#step_step_names+1] = sname
+            emit_state(sname)
+          elseif sname and seen_steps[sname] then
+            diags:push_error(ast.E.DUPLICATE_NAME,
+              "duplicate step '" .. sname .. "' in quest '" .. qname .. "'",
+              st.pos or mk_pos())
+          end
+        end
+
+        -- ── Pure helper fns: quest-Q-active? / -complete? / -step-s? ──
+        local function emit_query(fname, segs)
+          extras[#extras+1] = ast.fn_decl(
+            fname, {}, {}, {}, {},
+            { ast.expr_stmt(ast.path_expr(segs, mk_pos()), mk_pos()) },
+            nil, mk_pos())
+        end
+        emit_query("quest-" .. qname .. "-active?",
+                   { "quests", qname, "active" })
+        emit_query("quest-" .. qname .. "-complete?",
+                   { "quests", qname, "complete" })
+        for _, sname in ipairs(step_step_names) do
+          emit_query("quest-" .. qname .. "-step-" .. sname .. "?",
+                     { "quests", qname, sname })
+        end
+
+        -- ── Mutator: quest-Q-start! ──────────────────────────────
+        do
+          local pos = mk_pos()
+          local cond = _and(
+            _not(_path_read(filename, line, "quests", qname, "active"), pos),
+            _not(_path_read(filename, line, "quests", qname, "complete"), pos),
+            pos)
+          if decl.prereq then
+            cond = _and(cond, decl.prereq, pos)
+          end
+          local body = {
+            ast.set_mut(
+              _qpath(filename, line, "quests", qname, "active"),
+              _qbool_lit(true, filename, line), pos),
+          }
+          local when_node = ast.when_stmt(cond, body, pos)
+          extras[#extras+1] = ast.fn_decl(
+            "quest-" .. qname .. "-start!",
+            {}, {}, {}, {},
+            { when_node }, nil, pos)
+        end
+
+        -- ── Mutator per step: quest-Q-do-<s> ──────────────────────
+        for _, st in ipairs(decl.steps or {}) do
+          local sname = st.name
+          if sname then
+            local pos = st.pos or mk_pos()
+
+            -- Inner "all steps complete?" conjunction (computed at the
+            -- moment of completion, so the just-set step contributes).
+            local all_done = nil
+            for _, other in ipairs(step_step_names) do
+              local lit = _path_read(filename, pos.line or line,
+                                     "quests", qname, other)
+              all_done = _and(all_done, lit, pos)
+            end
+
+            local completion_body = {
+              ast.set_mut(
+                _qpath(filename, pos.line or line,
+                       "quests", qname, "complete"),
+                _qbool_lit(true, filename, pos.line or line), pos),
+              ast.set_mut(
+                _qpath(filename, pos.line or line,
+                       "quests", qname, "active"),
+                _qbool_lit(false, filename, pos.line or line), pos),
+            }
+            for _, rs in ipairs(decl.reward or {}) do
+              completion_body[#completion_body+1] = rs
+            end
+            local completion_when = ast.when_stmt(all_done, completion_body, pos)
+
+            -- Step body: <step body>; set! flag true; when all: complete
+            local step_body = {}
+            for _, sb in ipairs(st.body or {}) do
+              step_body[#step_body+1] = sb
+            end
+            step_body[#step_body+1] = ast.set_mut(
+              _qpath(filename, pos.line or line,
+                     "quests", qname, sname),
+              _qbool_lit(true, filename, pos.line or line), pos)
+            step_body[#step_body+1] = completion_when
+
+            -- Guard
+            local guard = _and(
+              _path_read(filename, pos.line or line,
+                         "quests", qname, "active"),
+              _not(_path_read(filename, pos.line or line,
+                              "quests", qname, sname), pos),
+              pos)
+            if st.requires then
+              guard = _and(guard, st.requires, pos)
+            end
+
+            local when_node = ast.when_stmt(guard, step_body, pos)
+            extras[#extras+1] = ast.fn_decl(
+              "quest-" .. qname .. "-do-" .. sname,
+              {}, {}, {}, {},
+              { when_node }, nil, pos)
+          end
+        end
+      end
+    end
+  end
+
+  if #extras > 0 then
+    local new_decls = {}
+    for _, d in ipairs(ast_root.decls or {}) do
+      new_decls[#new_decls+1] = d
+    end
+    for _, d in ipairs(extras) do
+      new_decls[#new_decls+1] = d
+    end
+    ast_root.decls = new_decls
+  end
+end
+
 --- Compile StoryBase source text.
 ---
 --- Returns (game_table, diags):
@@ -968,6 +1193,10 @@ function M.compile(source, filename, opts)
 
   -- ── Pass 2.6: Macro expansion ────────────────────────────────
   expand_macros(ast_root, diags, filename)
+  if diags:has_errors() then return nil, diags end
+
+  -- ── Pass 2.7: Quest desugar (§E1) ────────────────────────────
+  expand_quests(ast_root, diags, filename)
   if diags:has_errors() then return nil, diags end
 
   -- ── Pass 3: Check (multiple sub-passes inside checker) ───────
@@ -1008,6 +1237,9 @@ function M.parse_and_check(source, filename)
   if diags:has_errors() then return nil, diags end
 
   expand_macros(ast_root, diags, filename)
+  if diags:has_errors() then return nil, diags end
+
+  expand_quests(ast_root, diags, filename)
   if diags:has_errors() then return nil, diags end
 
   local typed_ast, check_diags = checker.check(ast_root, filename)

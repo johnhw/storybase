@@ -1,0 +1,89 @@
+# demo24_lost_relic.sb — the §E1 `quest` declaration in action.
+#
+# Three-step quest with a prereq, per-step gates, and a reward block.
+# The compiler auto-emits "quest 'lost-relic' is reachable to completion"
+# as a verify-eventually block, so storybase verify proves at compile time
+# that the player can actually finish the quest as wired.
+#
+# Run with:   storybase run demos/demo24_lost_relic.sb
+# Verify:     storybase verify demos/demo24_lost_relic.sb
+
+module lost-relic
+  version: 1.0
+
+engine-config:
+  entry-scene: village
+
+state player:
+  has-torch:    Bool         = false
+  has-relic:    Bool         = false
+  ready:        Bool         = false
+  gold:         Int(0, 1000) = 0
+  reputation:   Int(0, 100)  = 50
+
+state world:
+  quest-done:   Bool = false
+
+# ── Quest declaration ────────────────────────────────────────────────
+# Desugars to:
+#   state quests/lost-relic/{active,complete,find-elder,light-torch,
+#                            return-relic}: Bool = false
+#   fn   quest-lost-relic-{active?,complete?,step-N?,start!,do-N}
+# Plus auto-verify: "quest 'lost-relic' is reachable to completion"
+
+quest lost-relic:
+  description: "Recover the village relic from the cave."
+  prereq:      player/ready
+
+  step find-elder:
+    pass
+
+  step light-torch:
+    requires: player/has-torch
+    pass
+
+  step return-relic:
+    requires: player/has-relic
+    pass
+
+  reward:
+    inc! player/gold       250
+    inc! player/reputation 20
+    set! world/quest-done  true
+
+# ── Scenes ────────────────────────────────────────────────────────────
+
+scene village:
+  "You stand in the village square."
+
+  * Begin the quest
+    set! player/ready true
+    quest-lost-relic-start!
+    -> hub
+
+scene hub:
+  "Village hub.  Quest active: {quest-lost-relic-active?}."
+
+  * [not (quest-lost-relic-step-find-elder?)] Talk to the elder
+    quest-lost-relic-do-find-elder
+    -> hub
+
+  * [not player/has-torch] Take a torch from the shrine
+    set! player/has-torch true
+    quest-lost-relic-do-light-torch
+    -> hub
+
+  * [quest-lost-relic-step-light-torch?  and  not player/has-relic] Recover the relic
+    set! player/has-relic true
+    -> hub
+
+  * [player/has-relic  and  not (quest-lost-relic-step-return-relic?)] Return the relic
+    quest-lost-relic-do-return-relic
+    -> hub
+
+  * [quest-lost-relic-complete?] Visit the finale
+    -> finale
+
+scene finale:
+  "The relic is restored. The village rejoices."
+  "Gold: {player/gold}  Reputation: {player/reputation}"

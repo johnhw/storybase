@@ -722,6 +722,61 @@ the same constructs that work inside an ordinary scene narration block.
 Choices in an ending body are accepted by the parser but ignored at
 render time (the game exits immediately after the body renders).
 
+### `quest` (§E1)
+
+Declares a multi-step quest with an optional prereq, per-step gates, and a
+reward block.  The compiler desugars the declaration into a fixed set of
+state paths and helper fns (so the rest of the language sees only the
+expanded form) and auto-emits a `verify-eventually` block proving the
+quest is reachable to completion under the wiring of the surrounding
+scenes/fns.
+
+```
+quest find-the-crown:
+  description: "Recover the lost crown."
+  prereq:      player/has-permit
+  step talk-king:
+    pass
+  step explore-dungeon:
+    requires: player/has-torch
+    pass
+  step retrieve-crown:
+    requires: player/has-crown
+    pass
+  reward:
+    inc! player/gold 500
+```
+
+#### Desugar
+
+Each `quest <Q>:` with steps `[s₁, s₂, …, sₙ]` desugars to:
+
+| Kind   | Path / Name | Type / Body |
+|--------|-------------|-------------|
+| state  | `quests/<Q>/active`               | `Bool = false` |
+| state  | `quests/<Q>/complete`             | `Bool = false` |
+| state  | `quests/<Q>/<sᵢ>` (per step)      | `Bool = false` |
+| fn     | `quest-<Q>-active?`               | returns `quests/<Q>/active` |
+| fn     | `quest-<Q>-complete?`             | returns `quests/<Q>/complete` |
+| fn     | `quest-<Q>-step-<sᵢ>?`            | returns `quests/<Q>/<sᵢ>` |
+| fn     | `quest-<Q>-start!`                | `when not active and not complete [and prereq]: set! active true` |
+| fn     | `quest-<Q>-do-<sᵢ>`               | `when active and not <sᵢ> [and requires]: <step body>; set! <sᵢ> true; when all-steps: set! complete true; set! active false; <reward body>` |
+
+The original `quest` AST node is retained so codegen can attach the
+auto-verify entry; the surrounding compiler/runtime infrastructure
+otherwise only ever sees the desugared state and fns.
+
+#### Auto-verify
+
+| Auto-verify | Clause | Meaning |
+|-------------|--------|---------|
+| `quest '<Q>' is reachable to completion` | `verify-eventually (quest-<Q>-complete?)` | EF: some reachable state satisfies the quest's completion condition |
+
+Wire `quest-<Q>-start!` and the `quest-<Q>-do-<sᵢ>` fns into your scene
+choices.  If the wiring leaves a step or the reward unreachable, the
+auto-verify fails with a `condition not reachable from initial state`
+diagnostic at compile time.
+
 ---
 
 ## Type Expressions

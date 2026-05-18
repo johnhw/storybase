@@ -128,7 +128,10 @@ EMIT_MUT         -- engine/emit event [args]
 - `M.emit(typed_ast, opts?)` → `(game_table, diags[])`
 - `opts.production = true` → strips verifies and watches from game_table; sets `game_table.production = true`
 - Produces the **game_table** structure (see below)
-- Local emitters: `emit_types`, `emit_states`, `emit_relations`, `emit_engine_config`, `emit_time_model`, `emit_fns`, `emit_scenes`, `emit_actors`, `emit_schedules`, `emit_verifies`, `emit_watches`, `emit_bounded`, `emit_migrations`
+- Local emitters: `emit_types`, `emit_states`, `emit_relations`, `emit_engine_config`, `emit_time_model`, `emit_fns`, `emit_scenes`, `emit_actors`, `emit_schedules`, `emit_verifies`, `emit_watches`, `emit_bounded`, `emit_migrations`, `emit_quests` (§E1)
+- §E1 auto-verify: `emit_quest_verifies` synthesises one
+  `verify-eventually (quest-<name>-complete?)` clause per `QUEST_DECL`,
+  appended to `game_table.verifies` (skipped in production builds).
 
 ---
 
@@ -178,6 +181,14 @@ EMIT_MUT         -- engine/emit event [args]
   raised by the checker (or any later pass) against expanded nodes are
   auto-decorated with `"expanded from macro 'NAME' at FILE:LINE"`
   inside `ast._diag` — no checker-side change needed.
+- §E1 `expand_quests` (between `expand_macros` and the checker) walks
+  the top-level decl list; for every `QUEST_DECL` it emits a fixed set
+  of state/fn AST nodes (`quests/<Q>/active`, `quests/<Q>/complete`,
+  `quests/<Q>/<sᵢ>`, plus `quest-<Q>-active?` / `-complete?` /
+  `-step-<sᵢ>?` / `-start!` / `-do-<sᵢ>`) and splices them into the
+  program.  The original `QUEST_DECL` is retained so codegen can attach
+  the auto-verify entry.  Reports `DUPLICATE_NAME` for two quests with
+  the same name or two steps with the same name in one quest.
 
 ---
 
@@ -228,6 +239,7 @@ game_table = {
   bounded    = { [name] = {reads, body} },
   generates  = [ {name, seed_path, body, doc} ],            -- §F1
   endings    = [ {name, when_expr, body, doc} ],            -- §F2
+  quests     = [ {name, description, steps=[{name}], doc} ],-- §E1
   production = bool,  -- true if compiled with opts.production
 }
 ```
@@ -818,6 +830,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/generate_spec.lua` | §F1 `generate` decl: parser (with/without seed_path, error paths), codegen (game_table.generates entry, duplicate-name diag), checker (UNDEFINED_PATH / UNDEFINED_FN propagate into body) (8 tests) |
 | `tests/compiler/ending_spec.lua` | §F2 `ending` decl: parser (with/without when:), codegen (game_table.endings, auto-emit reachability + pairwise exclusivity verify, production strip), duplicate-name diag (9 tests) |
 | `tests/compiler/macro_decl_spec.lua` | §E0 decl-macro substrate, all stages: Stage 1 lexer + parser into `DECL_MACRO_DECL`; Stage 2 lexer `$param` / composite identifiers; Stage 2b/3 parser name-interpolation + expansion pass; Stage 4 `expanded_from` diag decoration; Stage 5 cross-import + `@stdlib/` resolver; Stage 6 acceptance + single-pass restriction (62 tests) |
+| `tests/compiler/quest_spec.lua` | §E1 `quest` decl: parser (description/prereq/step/requires/reward shape), desugar (state paths emitted, helper fns emitted, metadata in game_table.quests, duplicate quest + duplicate step diags), auto-verify (label, clause shape, production strip), runtime (start! / do-N / query fns / reward fires when all steps complete) (15 tests) |
 | `tests/runtime/tests_spec.lua` | runtime/tests.lua: basic pass/fail, setup/run sections, multiple expects, fresh-state isolation, multiple tests (19 tests) |
 | `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
 | `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |
@@ -882,6 +895,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo21_merchants_reckoning.sb` | `query-history path` (full ledger via `for` loop), `query-changes path last-n: N` (last 3 locations), `query-at path time: {axis: val}` (gold at named day via `fn gold-on-day d:`), wildcard `query-history player/*` (broad audit); `time-model` single `day` axis, `time-inc! day: 1`; `for…else:` over query results in scene bodies; multi-segment path access `{entry/time/day}` in loop narration; `verify-always`, `after (earn-gold 30)` post-condition verify |
 | `demo22_quest_temporal.sb` | Temporal-logic verify showcase (§C3): all four CTL operators on a forced-completion three-task quest — `verify-always` (AG safety), `verify-eventually` (EF reachability), `verify-always-eventually` (AF forced outcome), `verify-until p until q` (AU "p holds until q"). Pairs with `cli/verify_cache.lua` to demonstrate `[cached]` re-runs. |
 | `demo23_procedural_dungeon.sb` | §F1 + §F2: a procedurally-generated 3–5 room dungeon. `generate dungeon-layout seed: world/seed` spawns rooms via `random-int`; two `ending` declarations (`escape`, `lost`) drive the auto-emitted reachability + pairwise-exclusivity verify blocks. |
+| `demo24_lost_relic.sb` | §E1 `quest` declaration: prereq + three steps (one bare, two with `requires:`) + reward; demonstrates desugar (state paths and helper fns emitted by `compiler.expand_quests`) and the auto-emitted `verify-eventually (quest-lost-relic-complete?)`. Five-choice forward path so verify passes under the default CTL depth. |
 | `demo02_merchant_tests.sb` | Test suite for demo02_merchant.sb: 11 test blocks covering buy/sell fns, port bonus, round-trip, and defaults; uses `import`, `setup:`/`run:`/`expect:` sections |
 
 ---

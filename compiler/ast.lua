@@ -229,6 +229,7 @@ M.K.HOOK_DECL           = "hook_decl"  -- hook tag_name: pre:/post: body
 M.K.TEST_DECL           = "test_decl"  -- test "label": setup/run/expect
 M.K.GENERATE_DECL       = "generate_decl"  -- generate name [seed: path]: body  (§F1)
 M.K.ENDING_DECL         = "ending_decl"    -- ending name when: cond: body      (§F2)
+M.K.QUEST_DECL          = "quest_decl"     -- quest name: prereq/step/reward    (§E1)
 
 -- ── Type expressions ──────────────────────────────────────────
 M.K.TYPE_BOOL           = "type_bool"
@@ -374,6 +375,7 @@ local DECL_KINDS = {
   [M.K.TEST_DECL]      = true,
   [M.K.GENERATE_DECL]  = true,
   [M.K.ENDING_DECL]    = true,
+  [M.K.QUEST_DECL]     = true,
 }
 
 local MUT_KINDS = {
@@ -670,6 +672,29 @@ function M.ending_decl(name, when_expr, body, doc, pos)
     when_expr = when_expr,
     body      = body or {},
     doc       = doc,
+  }, pos)
+end
+
+--- quest_decl: a structured quest declaration (§E1).
+---   name        string   Identifier (e.g. "find-the-crown")
+---   description string?  Optional one-line description.
+---   prereq      table?   Optional expression that must be true for the quest
+---                        to be eligible to start.
+---   steps       table    Ordered list of step descriptors. Each step is a
+---                        plain Lua table (NOT a typed AST node) shaped
+---                        { name=str, requires=expr|nil, body=[stmt],
+---                          pos=pos_tbl }.
+---   reward      table?   Optional list of mutation-statement AST nodes
+---                        executed once all steps complete.
+---   doc         string?  Optional documentation string.
+function M.quest_decl(name, description, prereq, steps, reward, doc, pos)
+  return M.node(M.K.QUEST_DECL, {
+    name        = name,
+    description = description,
+    prereq      = prereq,
+    steps       = steps or {},
+    reward      = reward,
+    doc         = doc,
   }, pos)
 end
 

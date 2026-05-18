@@ -28,7 +28,7 @@ for _, kw in ipairs({
   "relation", "actor", "schedule", "bounded", "macro", "decl-macro", "verify",
   "watch", "watch-when", "pre", "post", "tags", "pass",
   "tag", "hook", "say", "speaker",
-  "generate", "ending",
+  "generate", "ending", "quest",
   "and", "or", "not",
 }) do
   KEYWORDS[kw] = true

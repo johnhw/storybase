@@ -37,6 +37,7 @@ local function new_symtab()
     actors    = {},  -- name → ACTOR_DECL node (AV-1)
     generates = {},  -- name → GENERATE_DECL node (§F1)
     endings   = {},  -- name → ENDING_DECL node   (§F2)
+    quests    = {},  -- name → QUEST_DECL node    (§E1)
   }
 end
 
@@ -246,6 +247,18 @@ local function pass1_collect(acc, symtab, program)
             "previous declaration at line " .. symtab.endings[node.name].pos.line)
         else
           symtab.endings[node.name] = node
+        end
+      end
+
+    elseif kind == k.QUEST_DECL then
+      if node.name then
+        if symtab.quests[node.name] then
+          err(acc, ast.E.DUPLICATE_NAME,
+            "quest '" .. node.name .. "' already declared",
+            node.pos,
+            "previous declaration at line " .. symtab.quests[node.name].pos.line)
+        else
+          symtab.quests[node.name] = node
         end
       end
 

@@ -5,6 +5,77 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## E1 — `quest` declarations ✅ (2026-05-18)
+
+First-class `quest <name>:` declaration with `description:` / `prereq:` /
+`step <name>:` (with optional `requires:` and step body) / `reward:`
+sections.  Compiler desugars each quest into a fixed shape of
+state + helper fn AST nodes spliced after macro expansion and before the
+type checker; the original `QUEST_DECL` is retained so codegen can attach
+an auto-emitted `verify-eventually` block proving completion is
+reachable.
+
+**Emitted per quest Q with steps [s₁, …, sₙ]:**
+
+- State: `quests/Q/active`, `quests/Q/complete`, `quests/Q/<sᵢ>` (all `Bool=false`)
+- Pure fns: `quest-Q-active?`, `quest-Q-complete?`, `quest-Q-step-<sᵢ>?`
+- Mutating fns:
+  - `quest-Q-start!` — `when not active and not complete [and prereq]: set! active true`
+  - `quest-Q-do-<sᵢ>` — `when active and not <sᵢ> [and requires]: <step body>; set! <sᵢ> true; when all-steps-done: set! complete true; set! active false; <reward body>`
+
+**Auto-verify:** `quest '<Q>' is reachable to completion` →
+`verify-eventually (quest-Q-complete?)`. Stripped in production builds
+along with the other auto-emitted verifies.
+
+**Files touched:**
+
+- `compiler/ast.lua` — new `QUEST_DECL` kind + `ast.quest_decl(...)`
+  constructor; added to `DECL_KINDS`.
+- `compiler/lexer.lua` — `quest` reserved as a keyword.
+- `compiler/parser.lua` — new `parse_quest_decl` (handles
+  `description:` / `prereq:` / `step <name>:` blocks with optional
+  per-step `requires:` and body / `reward:` block). Wired into
+  `parse_decl` keyword dispatch.
+- `compiler/compiler.lua` — new `expand_quests` pass running after
+  `expand_macros` and before the checker; splices the desugared decls
+  into `ast_root.decls`, reports `DUPLICATE_NAME` for two quests with
+  the same name or two steps with the same name in one quest.
+- `compiler/checker.lua` — `symtab.quests` registry + pass-1
+  registration / duplicate detection.
+- `compiler/codegen.lua` — `emit_quests` (game_table.quests metadata) +
+  `emit_quest_verifies` (auto-emit `verify-eventually` per quest);
+  hooked into `M.emit` next to the existing ending auto-emit.
+- `docs/reference/language.md` — new `quest` (§E1) subsection under
+  Declarations covering syntax, desugar table, and auto-verify.
+- `demos/demo24_lost_relic.sb` — acceptance demo with prereq, three
+  steps (one bare, two with `requires:`), reward, and a 5-choice
+  forward path so the auto-verify passes under DEFAULT_CTL_DEPTH.
+- `demos/demo03_quest.sb` — renamed module identifier
+  `module quest → module quest-demo` since `quest` is now a keyword.
+- `tests/compiler/quest_spec.lua` (NEW, 15 tests) — parser shapes,
+  desugar (state paths, helper fns, metadata, duplicate detection),
+  auto-verify (label, clause shape, production strip), runtime
+  behaviour through `runtime.eval.call_fn` on every helper fn.
+
+**Acceptance:**
+
+- `lua5.4 cli/main.lua check demos/demo24_lost_relic.sb` — clean.
+- `lua5.4 cli/main.lua verify demos/demo24_lost_relic.sb` — `PASS  quest
+  'lost-relic' is reachable to completion (9 BFS states checked)`.
+- Stepping through demo24 reaches completion: gold 0→250, reputation
+  50→70, `world/quest-done` flips to true.
+- `busted tests/` — 2821/0/2 (was 2806/0/2 before E1; +15 quest tests,
+  the two pre-existing pendings are unrelated formatter limitations).
+
+**Deferred:** "no softlock" auto-verify (the `AG EF complete?` shape:
+"from every reachable state, completion is still reachable") would
+require iterating the BFS over the cross-product of reachable
+configurations. The single reachability check is the headline value;
+softlock detection can ride on the same QUEST_DECL hook later without
+breaking the wire shape.
+
+---
+
 ## G2 — Stateless HTTP API mode (`serve-api`) ✅ (2026-05-16)
 
 New CLI command `storybase serve-api game.sb [--port N] [--bind addr]

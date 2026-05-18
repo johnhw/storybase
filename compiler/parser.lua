@@ -3788,6 +3788,132 @@ local function parse_ending_decl(p, doc)
   return ast.ending_decl(name, when_expr, body, doc, tpos)
 end
 
+-- ── Quest declaration (§E1) ─────────────────────────────────────────────────
+-- Syntax:
+--   quest <name>:
+--     description: "..."           (optional)
+--     prereq:      <expr>          (optional)
+--     step <step-name>:
+--       requires: <expr>           (optional; per-step guard)
+--       <stmt>                     (optional; step body, mutation statements)
+--       ...
+--     ...
+--     reward:                      (optional; runs once all steps complete)
+--       <stmt>
+--       ...
+local function parse_quest_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume KEYWORD("quest")
+
+  local name
+  if p:at("NAMED_ARG") then
+    name = p:adv().value
+  elseif p:at("IDENT") then
+    name = p:adv().value
+    p:expect("OP", ":", "expected ':' after quest name")
+  else
+    p:emit_err(ast.E.BAD_DECLARATION,
+      "expected quest name after 'quest'", p:cur().pos)
+    p:skip_to_eol(); p:skip_block(); return nil
+  end
+
+  p:match("NEWLINE")
+
+  local description, prereq, reward = nil, nil, nil
+  local steps = {}
+
+  if not p:at("INDENT") then
+    return ast.quest_decl(name, description, prereq, steps, reward, doc, tpos)
+  end
+  p:adv()  -- consume INDENT
+
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    local bt = p:cur()
+
+    if bt.kind == "NAMED_ARG" and bt.value == "description" then
+      p:adv()
+      if p:at("STRING") then
+        description = p:adv().value
+      elseif p:at("MULTILINE_STRING") then
+        description = p:adv().value
+      else
+        p:emit_err(ast.E.BAD_DECLARATION,
+          "expected string after 'description:'", p:cur().pos)
+      end
+      p:skip_to_eol()
+
+    elseif bt.kind == "NAMED_ARG" and bt.value == "prereq" then
+      p:adv()
+      prereq = parse_expr(p)
+      p:skip_to_eol()
+
+    elseif bt.kind == "NAMED_ARG" and bt.value == "reward" then
+      p:adv()
+      p:skip_to_eol()
+      if p:at("INDENT") then
+        reward = parse_body_items(p, false)  -- code mode: mutation statements
+      else
+        reward = {}
+      end
+
+    elseif (bt.kind == "IDENT" or bt.kind == "KEYWORD") and bt.value == "step" then
+      local spos = bt.pos
+      p:adv()  -- consume IDENT("step")
+      local step_name
+      if p:at("NAMED_ARG") then
+        step_name = p:adv().value
+      elseif p:at("IDENT") then
+        step_name = p:adv().value
+        p:expect("OP", ":", "expected ':' after step name")
+      else
+        p:emit_err(ast.E.BAD_DECLARATION,
+          "expected step name after 'step'", p:cur().pos)
+        p:skip_to_eol(); p:skip_block(); break
+      end
+      p:match("NEWLINE")
+
+      local step_requires
+      local step_body = {}
+
+      if p:at("INDENT") then
+        p:adv()  -- consume INDENT for step body
+        while not p:at("DEDENT") and not p:at("EOF") do
+          p:skip_newlines()
+          if p:at("DEDENT") or p:at("EOF") then break end
+          local st = p:cur()
+          if st.kind == "NAMED_ARG" and st.value == "requires" then
+            p:adv()
+            step_requires = parse_expr(p)
+            p:skip_to_eol()
+          else
+            local stmt = parse_stmt(p)
+            p:skip_to_eol()
+            if stmt then step_body[#step_body+1] = stmt end
+          end
+        end
+        if p:at("DEDENT") then p:adv() end
+      end
+
+      steps[#steps+1] = {
+        name     = step_name,
+        requires = step_requires,
+        body     = step_body,
+        pos      = spos,
+      }
+
+    else
+      p:emit_err(ast.E.BAD_DECLARATION,
+        "unexpected '" .. tostring(bt.value) .. "' in quest body", bt.pos)
+      p:skip_to_eol()
+    end
+  end
+
+  if p:at("DEDENT") then p:adv() end
+  return ast.quest_decl(name, description, prereq, steps, reward, doc, tpos)
+end
+
 -- ============================================================
 -- Top-level dispatch
 -- ============================================================
@@ -3816,6 +3942,7 @@ parse_decl = function(p, doc)
     elseif t.value == "speaker"    then return parse_speaker_decl(p, doc)
     elseif t.value == "generate"   then return parse_generate_decl(p, doc)
     elseif t.value == "ending"     then return parse_ending_decl(p, doc)
+    elseif t.value == "quest"      then return parse_quest_decl(p, doc)
     else
       p:skip_to_eol()
       p:skip_block()

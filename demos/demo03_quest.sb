@@ -13,7 +13,7 @@
 #
 # Run with:  storybase run demos/demo03_quest.sb
 
-module quest
+module quest-demo
   version: 1.0
 
 engine-config:

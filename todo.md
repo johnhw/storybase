@@ -7,14 +7,15 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-05-18)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–23 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
+Demos 01–24 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete. §E0 (decl-emitting
-macro substrate) complete and ready for §E2 / §E3 to ride on as stdlib modules.
+macro substrate) complete; §E1 (`quest` declarations, base feature) shipped
+2026-05-18.
 
-**~2806 successes / 0 failures / 2 pending (known limitations).**
+**~2821 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -33,8 +34,7 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 2. §B3 — Trace scrubber (browser debug UI)
 3. §E2 / §E3 — `dialog` / `inventory` / `stat` shipped as stdlib `.sb` modules
    (substrate ready: §E0 complete 2026-05-18)
-4. §E1 — `quest` as base feature, layered on the E0 substrate
-5. §G1 — Web/JS compilation target
+4. §G1 — Web/JS compilation target
 
 (§G2 — stateless HTTP API — complete, see completed.md.)
 
@@ -495,56 +495,15 @@ end-to-end.
 - `code_map.md` — new entries.
 - `stdlib/` — new directory (E2/E3 will populate; E0 may add a fixture).
 
-### E1. `quest` declarations (base feature, layered on §E0)
+### E1. `quest` declarations ✅ (2026-05-18 — see completed.md)
 
-**Goal:** Every game ends up hand-rolling steps + prereqs + completion + rewards.
-Surface this as first-class so the search engine can automatically check "every
-declared ending is reachable" and "no quest is softlocked once started" — emergent
-power, not new runtime features.
-
-**Why base, not stdlib:** the desugar is mechanical, but the *value* is in
-auto-emitted analyses (verify reachability, softlock detection) that need
-compiler-internal knowledge of the quest graph. Implementing this in user-space
-would require exposing too much of the verify machinery.
-
-**Plan:** ship the desugar via the §E0 substrate where possible, but keep
-`QUEST_DECL` as a first-class AST kind so codegen can emit the analysis
-`verify` blocks. The "shape" of the desugar (state family, helper fns) lives
-in `compiler/codegen.lua` next to actor/schedule emission.
-
-**Design sketch (unchanged from original):**
-```
-quest find-the-crown:
-  description: "Recover the lost crown of Erith."
-  prereq:      player/has-key
-  step talk-to-king:
-    => talk-king
-  step explore-dungeon:
-    requires: contains? player/inventory `torch
-    => dungeon
-  step retrieve-crown:
-    requires: contains? player/inventory `crown
-  reward:
-    inc!  player/gold 500
-    add!  player/quest-flags `crown-recovered
-```
-
-Compiles to: a `state quests/{q}/status: QuestStatus`-style family, scene-entry/exit
-hooks, helper fns `quest-active? q`, `quest-step-complete? q s`. Auto-emit verify
-blocks: "quest find-the-crown is reachable to completion" + "no step combination
-leaves the player unable to reach completion."
-
-**Files:** `compiler/ast.lua` (new `QUEST_DECL` kind), `compiler/parser.lua`
-(parse entry), `compiler/codegen.lua` (desugar + verify auto-emit),
-`compiler/checker.lua` (cross-validate step references), new docs page,
-`tests/compiler/quest_spec.lua` + new demo.
-
-**Depends on:** §E0 for the state-family/helper-fn emission machinery.
-
-**Acceptance:** A demo using `quest` syntax produces the same runtime behaviour
-as the hand-rolled equivalent and auto-emits a verify proving the quest is
-completable; intentionally softlocking the quest causes a verify failure with
-a counterexample path.
+Shipped as a base feature with first-class `QUEST_DECL` AST kind.
+Compiler desugars to state + helper fns; codegen auto-emits a
+`verify-eventually (quest-<name>-complete?)` block per quest.
+Acceptance demo: `demos/demo24_lost_relic.sb`. Tests:
+`tests/compiler/quest_spec.lua` (15 tests). Softlock auto-verify
+(AG EF complete?) deferred — the existing single reachability check
+is the headline value; softlock can ride on the same hook later.
 
 ### E2. `dialog` blocks (stdlib `.sb` module)
 

@@ -846,6 +846,61 @@ local function emit_endings(decls)
   return endings
 end
 
+--- Emit quest declarations into game_table.quests (§E1).
+--- Mostly informational — the runtime behaviour is carried entirely by the
+--- desugared state + fn declarations spliced in by `compiler.expand_quests`.
+--- Codegen keeps an entry per quest so tooling (docs, LSP) can list them.
+local function emit_quests(decls)
+  local quests = {}
+  for _, node in ipairs(decls) do
+    if node.kind == ast.K.QUEST_DECL then
+      local steps = {}
+      for _, st in ipairs(node.steps or {}) do
+        steps[#steps+1] = { name = st.name }
+      end
+      quests[#quests+1] = {
+        name        = node.name,
+        description = node.description,
+        steps       = steps,
+        doc         = node.doc,
+      }
+    end
+  end
+  return quests
+end
+
+--- Synthesise an auto-verify entry per quest declaration (§E1):
+---   "quest '<name>' is reachable to completion" →
+---     verify-eventually (quest-<name>-complete?)
+---
+--- This is the "emergent power" of §E1 — every declared quest gets a
+--- reachability check for free, exposing wiring bugs (a quest is declared
+--- but the player can't actually advance through its steps) at compile
+--- time rather than at playtest time.
+local function emit_quest_verifies(decls)
+  local k = ast.K
+  local out = {}
+
+  local function make_clause(kind, expr)
+    return { kind = kind, condition = expr, body = {} }
+  end
+
+  for _, node in ipairs(decls) do
+    if node.kind == k.QUEST_DECL and node.name then
+      local pos = node.pos
+      -- condition: quest-<name>-complete?
+      local cond = ast.fn_call("quest-" .. node.name .. "-complete?", {}, pos)
+      out[#out+1] = {
+        label   = "quest '" .. node.name .. "' is reachable to completion",
+        clauses = { make_clause("eventually", cond) },
+        _auto   = true,
+      }
+    end
+  end
+
+  return out
+end
+
 --- Synthesise auto-verify entries for every ending declaration (§F2):
 ---  - "ending '<name>' is reachable"          → verify-eventually <when_expr>
 ---  - "endings '<a>' and '<b>' are exclusive" → verify-always not (a and b)
@@ -1001,6 +1056,7 @@ function M.emit(typed_ast, opts)
     hooks      = emit_hooks(decls),
     generates  = emit_generates(decls),
     endings    = emit_endings(decls),
+    quests     = emit_quests(decls),
     production = opts.production or false,
   }
 
@@ -1008,6 +1064,15 @@ function M.emit(typed_ast, opts)
   -- Skipped in production (since verifies are stripped anyway).
   if not opts.production and #game_table.endings > 0 then
     local auto_v = emit_ending_verifies(game_table.endings)
+    for _, v in ipairs(auto_v) do
+      game_table.verifies[#game_table.verifies+1] = v
+    end
+  end
+
+  -- §E1: auto-emit "quest is reachable to completion" verify blocks.
+  -- Skipped in production (since verifies are stripped anyway).
+  if not opts.production and #game_table.quests > 0 then
+    local auto_v = emit_quest_verifies(decls)
     for _, v in ipairs(auto_v) do
       game_table.verifies[#game_table.verifies+1] = v
     end
