@@ -181,6 +181,21 @@ quest twin:
     assert.is_not_nil(got)
   end)
 
+  it("rejects a quest with zero steps", function()
+    local _, diags = compile([[
+quest empty:
+  description: "nothing to do"
+]])
+    local got
+    for _, d in ipairs(diags.all or {}) do
+      if d.code == ast.E.BAD_DECLARATION and d.message:match("no steps") then
+        got = d
+      end
+    end
+    assert.is_not_nil(got)
+    assert.matches("empty", got.message)
+  end)
+
   it("reports duplicate step names within a quest", function()
     local _, diags = compile([[
 quest mini:

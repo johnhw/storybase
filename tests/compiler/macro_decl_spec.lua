@@ -1391,6 +1391,44 @@ scene s:
     assert.is_truthy(d.message:find("inner", 1, true))
   end)
 
+  -- §E4-bug-3 regression: a decl-macro call written *inside* a fn body
+  -- of another decl-macro must also raise MACRO_DECL_EMIT (the call
+  -- parses as FN_CALL or MACRO_CALL_STMT, not MACRO_CALL_DECL).
+  it("regression #E4-bug-3: nested decl-macro call inside fn body is caught", function()
+    local main = tmpfile([[
+module main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+decl-macro inner $p:
+  state $p: Int(0, 10) = 0
+
+decl-macro outer $p:
+  fn $p-doit:
+    inner $p
+
+outer foo
+
+scene s:
+  -> s
+]])
+    local _, diags = compiler.compile_file(main)
+    os.remove(main)
+    assert.is_true(diags:has_errors())
+
+    local d
+    for _, e in ipairs(diags.errors or {}) do
+      if e.code == ast.E.MACRO_DECL_EMIT
+         and tostring(e.message):find("nested decl-macro", 1, true) then
+        d = e; break
+      end
+    end
+    assert.is_not_nil(d, "expected MACRO_DECL_EMIT for nested decl-macro call in fn body")
+    assert.is_truthy(d.message:find("outer", 1, true))
+    assert.is_truthy(d.message:find("inner", 1, true))
+  end)
+
   -- Regression: the stmt-level `macro` keyword still works (no
   -- false-positive nested-call diag for stmt-level macro calls).
   it("regression: stmt-level macro inside a decl-macro body works", function()
@@ -1609,5 +1647,133 @@ scene main:
     -- Note string should mention the macro by name (Stage 4 contract).
     assert.is_truthy(tostring(saw.note or ""):find("expanded from macro 'alias'", 1, true),
       "expected expanded-from note; got: " .. tostring(saw.note))
+  end)
+end)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- §E4-bug-1 — multi-segment paths with $param slots
+--
+-- The lexer's path scanner stops at `/$...`, so `npcs/$kind` lexes as three
+-- tokens (IDENT, OP /, MACRO_PARAM). The parser now re-fuses the run into a
+-- single multi-segment PATH_EXPR at state-decl and mut-path positions, with
+-- the macro_param slot resolved at expansion time.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+describe("decl-macro — §E4-bug-1 dynamic /$param path segments", function()
+  local function compile_ok(src)
+    local gt, diags = compiler.compile(src, "test.sb")
+    local errs = (diags and diags.errors) or {}
+    return gt, errs
+  end
+
+  local function find_state(gt, path)
+    for _, st in ipairs(gt.schema.states or {}) do
+      if st.path == path then return st end
+    end
+    return nil
+  end
+
+  it("state head/$slot:  IDENT '/' MACRO_PARAM lexes split, parses fused", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro tracker $kind:
+  state npcs/$kind: Int(0, 10) = 0
+tracker goblin
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.is_not_nil(gt, errs[1] and errs[1].message or "?")
+    assert.equal(0, #errs)
+    assert.is_not_nil(find_state(gt, "npcs/goblin"),
+      "expected state at npcs/goblin")
+  end)
+
+  it("mut path head/$slot:  inc! and set! reach the right cell", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro tracker $kind:
+  state npcs/$kind: Int(0, 10) = 0
+  fn bump-$kind:
+    inc! npcs/$kind 1
+  fn reset-$kind:
+    set! npcs/$kind 0
+tracker goblin
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.is_not_nil(gt, errs[1] and errs[1].message or "?")
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt.fns["bump-goblin"])
+    assert.is_not_nil(gt.fns["reset-goblin"])
+  end)
+
+  it("$slot/tail: MACRO_PARAM '/' IDENT also fuses", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro hp $owner:
+  state $owner/hp: Int(0, 100) = 100
+hp player
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.is_not_nil(gt, errs[1] and errs[1].message or "?")
+    assert.equal(0, #errs)
+    assert.is_not_nil(find_state(gt, "player/hp"),
+      "expected state at player/hp")
+  end)
+
+  it("three segments head/$slot/tail fuses end-to-end", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro hp $kind:
+  state npcs/$kind/health: Int(0, 100) = 100
+hp goblin
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.is_not_nil(gt, errs[1] and errs[1].message or "?")
+    assert.equal(0, #errs)
+    assert.is_not_nil(find_state(gt, "npcs/goblin/health"),
+      "expected state at npcs/goblin/health")
+  end)
+
+  it("regression: division in fn-body expressions is untouched by the splicer", function()
+    -- The dynamic-path splicer fires only at state-decl / mut-path
+    -- positions. A `score / 2` arithmetic expression in a fn body must
+    -- still parse as binary division, not as a path attempt.
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+
+state score: Int(0, 100) = 50
+
+fn half-score:
+  score / 2
+
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.is_not_nil(gt, errs[1] and errs[1].message or "?")
+    assert.equal(0, #errs)
+    assert.is_not_nil(gt.fns["half-score"])
   end)
 end)

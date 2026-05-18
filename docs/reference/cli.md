@@ -373,7 +373,7 @@ All diagnostics use the format:
   note: <additional context>     (optional)
 ```
 
-`<level>` is `error` or `warning`. `<CODE>` is an `UPPER_SNAKE_CASE` identifier (e.g. `UNDEFINED_TYPE`, `DUPLICATE_DECL`, `PERCEIVES_VIOLATION`).
+`<level>` is `error` or `warning`. `<CODE>` is an `UPPER_SNAKE_CASE` identifier (e.g. `UNDEFINED_TYPE`, `DUPLICATE_NAME`, `PERCEIVES_VIOLATION`).
 
 **Common error codes:**
 
@@ -381,7 +381,7 @@ All diagnostics use the format:
 |------|---------|
 | `UNDEFINED_TYPE` | Reference to a type name that was not declared |
 | `UNDEFINED_NAME` | Reference to an undeclared function, scene, or variable |
-| `DUPLICATE_DECL` | Two declarations with the same name |
+| `DUPLICATE_NAME` | Two declarations with the same name |
 | `IMPORT_CYCLE` | Circular import between modules |
 | `FILE_NOT_FOUND` | `import` target file does not exist |
 | `TYPE_MISMATCH` | Value used where a different type is expected |

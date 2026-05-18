@@ -923,24 +923,51 @@ local function expand_decl_macros(ast_root, diags, filename)
           ast.pos(filename, decl.pos and decl.pos.line or 0,
                             decl.pos and decl.pos.col or 0))
       else
-        -- Single-pass restriction: a decl-macro body may not itself
-        -- invoke another decl-macro. Expansion is one level deep, so
-        -- a nested call would otherwise survive into the typed program
-        -- and fail downstream with a confusing UNDEFINED_NAME.
-        for _, body_decl in ipairs(decl.body or {}) do
-          if body_decl and body_decl.kind == ast.K.MACRO_CALL_DECL then
-            diags:push_error(ast.E.MACRO_DECL_EMIT,
-              "decl-macro '" .. decl.name ..
-              "' body invokes another decl-macro ('" ..
-              tostring(body_decl.name) ..
-              "'); nested decl-macro calls are not supported",
-              ast.pos(filename,
-                body_decl.pos and body_decl.pos.line or 0,
-                body_decl.pos and body_decl.pos.col or 0))
-          end
-        end
         decl_macros[decl.name] = decl
       end
+    end
+  end
+
+  -- 1b. Single-pass restriction: a decl-macro body may not itself invoke
+  -- another decl-macro. Expansion is one level deep, so any nested call
+  -- would survive into the typed program and fail downstream with a
+  -- confusing UNDEFINED_NAME. The top-level form is a MACRO_CALL_DECL.
+  -- A nested call written inside a fn / scene / actor body parses as
+  -- either MACRO_CALL_STMT or FN_CALL — walk the whole body recursively
+  -- so those forms are caught too.
+  local function flag_if_decl_macro(node, owner_name)
+    if not node or type(node) ~= "table" then return end
+    local nname = nil
+    if node.kind == ast.K.MACRO_CALL_DECL
+       or node.kind == ast.K.MACRO_CALL_STMT
+       or node.kind == ast.K.FN_CALL then
+      nname = node.name
+    end
+    if nname and decl_macros[nname] then
+      diags:push_error(ast.E.MACRO_DECL_EMIT,
+        "decl-macro '" .. owner_name ..
+        "' body invokes another decl-macro ('" ..
+        tostring(nname) ..
+        "'); nested decl-macro calls are not supported",
+        ast.pos(filename,
+          node.pos and node.pos.line or 0,
+          node.pos and node.pos.col or 0))
+    end
+  end
+  local function walk_for_nested(node, owner_name, seen)
+    if not node or type(node) ~= "table" then return end
+    if seen[node] then return end
+    seen[node] = true
+    flag_if_decl_macro(node, owner_name)
+    for k, v in pairs(node) do
+      if k ~= "pos" and k ~= "expanded_from" and type(v) == "table" then
+        walk_for_nested(v, owner_name, seen)
+      end
+    end
+  end
+  for mname, m in pairs(decl_macros) do
+    for _, body_decl in ipairs(m.body or {}) do
+      walk_for_nested(body_decl, mname, {})
     end
   end
 
@@ -1124,6 +1151,13 @@ local function expand_quests(ast_root, diags, filename)
         diags:push_error(ast.E.DUPLICATE_NAME,
           "duplicate quest '" .. qname .. "'",
           decl.pos or ast.pos(filename, 0, 0))
+      elseif not decl.steps or #decl.steps == 0 then
+        diags:push_error(ast.E.BAD_DECLARATION,
+          "quest '" .. qname .. "' has no steps; "
+          .. "a quest needs at least one 'step <name>:' block "
+          .. "(otherwise quest-" .. qname .. "-complete? is unreachable)",
+          decl.pos or ast.pos(filename, 0, 0))
+        seen[qname] = true
       else
         seen[qname] = true
 

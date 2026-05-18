@@ -138,6 +138,50 @@ local function split_interp_path(val)
   return segs
 end
 
+-- §E4-bug-1: dynamic-path extension.
+-- After a first path-shaped token has been consumed, look ahead for
+-- `OP / (IDENT|MACRO_PARAM|COMPOSITE_IDENT|NAMED_ARG)` runs and return
+-- them as a list of *additional* segments to splice onto the head
+-- segment list. Each entry is either a plain string (IDENT / NAMED_ARG)
+-- or a macro-param / composite placeholder table that
+-- `subst_path_segments` resolves at expansion time. The lexer's path
+-- scanner stops at `/$…` because `$param` is not a static path segment;
+-- this parser-side splicer reassembles `npcs/$kind`, `$kind/foo`,
+-- `players/$kind/hp`, etc. into a single multi-segment path with
+-- substitutable slots.
+--
+-- NAMED_ARG handling: in a state decl like `state $owner/hp:`, the lexer
+-- emits the trailing `hp:` as a single NAMED_ARG token (its ':' is
+-- already consumed). The second return value `ate_colon` tells the
+-- caller (parse_state_decl) it should *not* expect another ':'.
+local function try_extend_dynamic_path(p)
+  local extras = {}
+  local ate_colon = false
+  while p:at("OP", "/") and not ate_colon do
+    local nx = p:peek(1)
+    if nx.kind == "IDENT" then
+      p:adv()  -- consume "/"
+      extras[#extras + 1] = p:adv().value
+    elseif nx.kind == "NAMED_ARG" then
+      -- Final segment absorbed the trailing ':' (state-decl tail).
+      p:adv()  -- consume "/"
+      extras[#extras + 1] = p:adv().value
+      ate_colon = true
+    elseif nx.kind == "MACRO_PARAM" then
+      p:adv()  -- consume "/"
+      local v = p:adv()
+      extras[#extras + 1] = { kind = "macro_param", name = v.value }
+    elseif nx.kind == "COMPOSITE_IDENT" then
+      p:adv()  -- consume "/"
+      local v = p:adv()
+      extras[#extras + 1] = { kind = "composite", parts = v.value }
+    else
+      break
+    end
+  end
+  return extras, ate_colon
+end
+
 -- ============================================================
 -- §E0 Stage 2b helpers — composite-ident / macro-param tokens
 -- ============================================================
@@ -740,6 +784,8 @@ local function parse_state_decl(p, doc)
 
   local t = p:cur()
   local path_kind, path_val, path_pos
+  local extras = nil  -- §E4-bug-1: dynamic /$param extension segments
+  local ate_colon = false
 
   if t.kind == "NAMED_ARG" then
     path_kind, path_val, path_pos = "simple", t.value, t.pos
@@ -747,7 +793,10 @@ local function parse_state_decl(p, doc)
   elseif t.kind == "PATH" then
     path_kind, path_val, path_pos = "path", t.value, t.pos
     p:adv()
-    p:expect("OP", ":", "expected ':' after path")
+    extras, ate_colon = try_extend_dynamic_path(p)
+    if not ate_colon then
+      p:expect("OP", ":", "expected ':' after path")
+    end
   elseif t.kind == "INTERP_PATH" then
     path_kind, path_val, path_pos = "interp", t.value, t.pos
     p:adv()
@@ -755,17 +804,26 @@ local function parse_state_decl(p, doc)
   elseif t.kind == "IDENT" then
     path_kind, path_val, path_pos = "simple", t.value, t.pos
     p:adv()
-    p:expect("OP", ":", "expected ':' after state name")
+    extras, ate_colon = try_extend_dynamic_path(p)
+    if not ate_colon then
+      p:expect("OP", ":", "expected ':' after state name")
+    end
   elseif t.kind == "MACRO_PARAM" then
     -- `state $path:` — single-segment path that is a substitution slot.
     path_kind, path_val, path_pos = "macro_param", t.value, t.pos
     p:adv()
-    p:expect("OP", ":", "expected ':' after state name")
+    extras, ate_colon = try_extend_dynamic_path(p)
+    if not ate_colon then
+      p:expect("OP", ":", "expected ':' after state name")
+    end
   elseif t.kind == "COMPOSITE_IDENT" then
     -- `state $path-sub:` or `state foo-$bar:` — single-segment composite.
     path_kind, path_val, path_pos = "composite", t.value, t.pos
     p:adv()
-    p:expect("OP", ":", "expected ':' after state name")
+    extras, ate_colon = try_extend_dynamic_path(p)
+    if not ate_colon then
+      p:expect("OP", ":", "expected ':' after state name")
+    end
   else
     p:emit_err(ast.E.BAD_DECLARATION, "expected state path")
     p:skip_to_eol()
@@ -785,6 +843,13 @@ local function parse_state_decl(p, doc)
     path_node = ast.path_expr({ { kind = "composite", parts = path_val } }, path_pos)
   else
     path_node = ast.interp_path(split_interp_path(path_val), path_pos)
+  end
+
+  -- Splice §E4-bug-1 dynamic extension segments.
+  if extras and #extras > 0 and path_node.kind == ast.K.PATH_EXPR then
+    for _, s in ipairs(extras) do
+      table.insert(path_node.segments, s)
+    end
   end
 
   -- Check for inline record block
@@ -1947,6 +2012,17 @@ local function parse_mut_path(p)
   else
     p:emit_err(ast.E.BAD_EXPRESSION, "expected state path", t.pos)
     return ast.path_expr({}, t.pos)
+  end
+  -- §E4-bug-1: dynamic /$param extension. The lexer can't fuse
+  -- `path/$slot/segment` into a single PATH token because `$` ends the
+  -- path scan; reassemble it here.
+  if base_node.kind == ast.K.PATH_EXPR then
+    local extras = try_extend_dynamic_path(p)
+    if #extras > 0 then
+      for _, s in ipairs(extras) do
+        table.insert(base_node.segments, s)
+      end
+    end
   end
   -- Check for indexed write: path[n] in mutation position
   if p:at("OP", "[") then

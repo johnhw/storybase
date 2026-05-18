@@ -621,21 +621,26 @@ configuration constants through both type and expression positions
 with one parameter.
 
 A `$` followed by anything other than an identifier is a lex error
-(`ILLEGAL_CHAR`). A composite run breaks at whitespace and at `/`, so
-`npcs/$kind` is parsed as the path `npcs/` followed by the macro
-parameter `$kind` (used inside a path expression).
+(`ILLEGAL_CHAR`). A composite-ident run (the `-` joiner) breaks at
+whitespace and at `/`, but **path expressions** at state-decl and
+mutation-target positions reassemble `IDENT/$param/IDENT` runs into a
+single multi-segment `PATH_EXPR` with substitutable slots — so
+`state npcs/$kind:` and `inc! npcs/$kind 1` both work, with `$kind`
+substituted into a single segment of the path at expansion time. The
+splicer never fires in expression position, so `score / 2` in a fn
+body is still binary division.
 
 #### Hygiene and collisions
 
 `decl-macro` does **not** rewrite names for hygiene — the caller is
 expected to supply a path that is unique across the module. Two call
 sites that emit the same path are caught by the existing
-`DUPLICATE_DECL` check, with the error pointing at the **second** call
+`DUPLICATE_NAME` check, with the error pointing at the **second** call
 site:
 
 ```
 counter player/health
-counter player/health        # error: DUPLICATE_DECL, points here
+counter player/health        # error: DUPLICATE_NAME, points here
 ```
 
 #### `expanded from` diagnostic note
@@ -1663,7 +1668,7 @@ Import cycles are a compile error.
 |------|-------|-------------|
 | `UNDEFINED_TYPE` | error | Reference to an undeclared type |
 | `UNDEFINED_NAME` | error | Reference to an undeclared function, scene, or variable |
-| `DUPLICATE_DECL` | error | Two declarations with the same name |
+| `DUPLICATE_NAME` | error | Two declarations with the same name |
 | `IMPORT_CYCLE` | error | Circular import |
 | `FILE_NOT_FOUND` | error | `import` target not found |
 | `TYPE_MISMATCH` | error | Value used where a different type is expected |

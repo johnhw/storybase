@@ -27,6 +27,12 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
 - §A2 — Inelegance #7 — BFS expansion duplication (deferred; documented).
+- §E4 — E-series review fixes. **Bugs 1–4 fixed 2026-05-18.** Remaining:
+  E4-bug-5 (quest reward AST node sharing), E4-gap-1..4 (quest decoration
+  / metadata exposure / empty exports / quest-name MACRO_PARAM),
+  E4-test-1..3 (boundary / unreachable / coverage gaps), E4-doc-1 partial
+  (the `npcs/$kind` and `DUPLICATE_DECL` claims are now resolved; only
+  the §E1 desugar table generic-`quest/complete` mention remains).
 
 **Future Features and Extensions (large):** Suggested ordering for impact:
 
@@ -559,6 +565,146 @@ into a small loot-loop game whose
 `verify-eventually (player-bag-full?)` clause proves winnability.
 Tests: `tests/stdlib/inventory_spec.lua` (9) and
 `tests/stdlib/stat_spec.lua` (8).
+
+### E4. E-series review fixes (2026-05-18)
+
+Follow-up items from a post-merge code review of E0–E3. Grouped by
+severity. Each entry names files + lines so a future agent can act
+without re-deriving the context. None block the existing demos
+(demo24/demo25) — both still verify cleanly.
+
+#### E4-bug-1. `npcs/$kind` path syntax: docs claim a feature the parser doesn't support  ✅ **Fixed 2026-05-18**
+
+`parser.lua:try_extend_dynamic_path` now slurps an
+`(IDENT|MACRO_PARAM|COMPOSITE_IDENT) (/ IDENT|MACRO_PARAM|COMPOSITE_IDENT|NAMED_ARG)+`
+run after the first segment of a state-decl path or a mut-path, and
+splices the extras (strings + `{kind="macro_param"}` slots) onto the
+PATH_EXPR. The trailing NAMED_ARG case handles `state $owner/hp:`
+where the lexer absorbed `hp:` into one token. The
+`subst_path_segments` machinery already flattens macro_param values
+into segments at expansion time, so a `$kind` slot bound to a symbol /
+single-segment path expands to one new segment, and a multi-segment
+path value flattens into several.
+
+The splicer fires only in state-decl and mut-path positions, leaving
+expression-level `score / 2` alone as binary division. Tests in
+`tests/compiler/macro_decl_spec.lua` (describe "decl-macro — §E4-bug-1
+dynamic /$param path segments"). Docs at `language.md:623-630`
+updated.
+
+#### E4-bug-2. Docs reference `DUPLICATE_DECL`; the code is `DUPLICATE_NAME`  ✅ **Fixed 2026-05-18**
+
+All five references (language.md L633, L638, L1666; cli.md L376, L384)
+renamed to `DUPLICATE_NAME`. `grep -rn DUPLICATE_DECL` across docs +
+compiler + tests now returns no matches.
+
+#### E4-bug-3. Single-pass restriction misses stmt-position calls  ✅ **Fixed 2026-05-18**
+
+`expand_decl_macros` (`compiler/compiler.lua`) now collects all
+decl-macro names first, then runs a recursive `walk_for_nested` pass
+over each decl-macro body that flags any `MACRO_CALL_DECL`,
+`MACRO_CALL_STMT`, or `FN_CALL` whose name matches a known decl-macro.
+Top-level *and* fn/scene/actor-body nested calls now raise
+`MACRO_DECL_EMIT`. Regression test added at
+`tests/compiler/macro_decl_spec.lua` ("regression #E4-bug-3: nested
+decl-macro call inside fn body is caught").
+
+#### E4-bug-4. Zero-step quest compiles but always fails verification  ✅ **Fixed 2026-05-18**
+
+`expand_quests` now emits `BAD_DECLARATION` at the quest's position
+when `decl.steps` is empty, with a message naming the quest and
+explaining that at least one `step <name>:` is required. The
+desugar skips emitting state/fn/verify nodes for the malformed
+quest so downstream passes don't compound the error. Regression
+test at `tests/compiler/quest_spec.lua` ("rejects a quest with zero
+steps").
+
+#### E4-bug-5. Quest reward AST nodes are shared across N completion sites
+
+`compiler/compiler.lua:1227-1229` appends each `decl.reward` item by
+reference into the `completion_body` of *every* step's do-fn. Runtime
+correctness is preserved by the `active`-gate (only the last step's
+fire wins), but the shared references make the desugar fragile —
+any future pass that decorates AST nodes per-occurrence (typing
+cache, inline transforms) would silently corrupt all N references at
+once. Deep-copy `decl.reward` per step's completion_body.
+
+#### E4-gap-1. Quest-emitted decls lack `expanded_from` decoration
+
+Unlike decl-macro expansions, quest-emitted state/fn nodes have no
+`pos.expanded_from` info, so checker diagnostics on auto-emitted
+fns don't carry an `auto-emitted by quest 'X'` note. Mirror the §E0
+Stage 4 pattern in `expand_quests` (`compiler/compiler.lua:1136-1199`):
+attach `{ source = "quest", quest_name = qname, quest_pos = qpos }`
+to the new `pos` on each emitted decl, and teach `ast._diag` /
+`ast.format_expanded_from` (or a sibling helper) to format it.
+
+Also: `mk_pos()` hardcodes `col=0` — diagnostics on quest-emitted
+decls always point at column 0 rather than the keyword column.
+
+#### E4-gap-2. `emit_quests` drops `prereq` and `reward` on the floor
+
+`compiler/codegen.lua:861-866` exposes only `{name, description,
+steps[].name, doc}` on `game_table.quests`. Tooling that wants to
+introspect a quest's prereq or reward must re-parse. Either expose
+the AST nodes (simple, but couples tooling to AST internals) or
+expose a stable summary (`prereq_str`, `reward_paths[]`). Document
+the choice in code_map.md whichever way it goes.
+
+#### E4-gap-3. Empty `exports: []` silently exports everything
+
+`compiler/compiler.lua:265` gates exports-filtering on
+`#d.exports > 0`, so a module declaring `exports: []` falls through
+to the "no filter" branch — counter-intuitive. Drop the `> 0` and
+let an empty list filter out everything (matches user expectation;
+matches set-theoretic semantics).
+
+#### E4-gap-4. Quest name cannot be a `MACRO_PARAM`
+
+`parse_quest_decl` (`compiler/parser.lua:3840`) accepts only
+`NAMED_ARG` / `IDENT` for the quest name. A decl-macro that wants to
+emit a parameterised quest fails at parse time. Feature gap rather
+than a bug; add a `MACRO_PARAM` / `COMPOSITE_IDENT` branch if
+quest-templates inside decl-macros become a use case.
+
+#### E4-test-1. `inventory full?` boundary is never actually exercised
+
+`tests/stdlib/inventory_spec.lua:121` is named "full? flips true at
+capacity" but uses `Enum(sword, shield, potion)` with `max=4`, so
+the bag tops out at 3 items and `full?` is always false. The test
+only asserts the negative case. Add a test where the enum's
+cardinality exactly matches `$max` so the `(size $name) = $max`
+comparison can flip true.
+
+#### E4-test-2. No test that an unreachable quest produces a failing auto-verify
+
+`tests/compiler/quest_spec.lua` proves the auto-verify entry is
+emitted with the right shape, but never runs the verifier and asserts
+a failure when a step's `requires:` is unsatisfiable. Add a test that
+calls into `cli/verify` (or the verify runtime directly) on a
+deliberately-unreachable quest and asserts the expected
+`condition not reachable` failure.
+
+#### E4-test-3. Other missing test cases
+
+- Zero-step quest (couples with E4-bug-4 above).
+- `MULTILINE_STRING` description in a quest (`parser.lua:3875` branch
+  is uncovered).
+- A decl-macro call inside a fn body of another decl-macro
+  (couples with E4-bug-3).
+- `STORYBASE_STDLIB_DIR` env-var resolution (only the test-hook
+  override is exercised).
+- `@stdlib/<name>` with an explicit `.sb` suffix (only the
+  implicit-append path is covered).
+
+#### E4-doc-1. `docs/reference/language.md` cleanup
+
+- Fix `DUPLICATE_DECL` → `DUPLICATE_NAME` (see E4-bug-2).
+- Fix or remove the `npcs/$kind` claim (see E4-bug-1).
+- §E1 desugar table mentions `quest/complete` as a generic path
+  earlier in the file (line ~415) — make sure nothing reads as if
+  that's where the auto-emitted state lands (the real path is
+  `quests/<Q>/complete`, plural).
 
 ### E-alt. Fast-win alternative (if §E0 is too speculative)
 
