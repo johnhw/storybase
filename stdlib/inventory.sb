@@ -1,0 +1,51 @@
+module inventory
+  version: 1.0
+
+# A capped Set-backed inventory at the given state name.
+#
+#   import "@stdlib/inventory"
+#   type ItemKind = Enum(sword, shield, potion)
+#   inventory player-bag ItemKind 8
+#
+# emits:
+#   state player-bag: Set(ItemKind, 8) = (set)
+#   fn player-bag-give item:    add!    player-bag item
+#   fn player-bag-take item:    remove! player-bag item
+#   fn player-bag-has? item:    contains? player-bag item
+#   fn player-bag-count:        size  player-bag
+#   fn player-bag-empty?:       empty? player-bag
+#   fn player-bag-full?:        (size player-bag) = 8
+#   fn player-bag-clear!:       clear! player-bag
+#
+# The first argument (`$name`) is the state path *and* the prefix used
+# for the emitted function names, so it must be a single-segment
+# kebab-case identifier (no `/`). Authors who want a nested family path
+# such as `player/inventory` should write the boilerplate by hand or
+# layer their own wrapper macro on top.
+#
+# `$T` is the item type (any previously declared discrete type).
+# `$max` is the integer capacity.
+
+decl-macro inventory $name $T $max:
+  state $name: Set($T, $max) = (set)
+
+  fn $name-give item:
+    add! $name item
+
+  fn $name-take item:
+    remove! $name item
+
+  fn $name-has? item:
+    contains? $name item
+
+  fn $name-count:
+    size $name
+
+  fn $name-empty?:
+    empty? $name
+
+  fn $name-full?:
+    (size $name) = $max
+
+  fn $name-clear!:
+    clear! $name

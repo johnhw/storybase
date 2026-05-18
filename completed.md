@@ -5,6 +5,108 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## E3 — `inventory` and `stat` stdlib modules ✅ (2026-05-18)
+
+Two reusable `decl-macro`-based stdlib modules shipped as `.sb` files
+importable through the `@stdlib/<name>` resolver (substrate from §E0).
+The author API stays positional, mirroring the existing
+`stdlib/counter.sb` convention.
+
+**Modules:**
+
+- `stdlib/inventory.sb`:
+  `inventory $name $T $max` emits `state $name: Set($T, $max) = (set)`
+  plus 7 helper fns: `$name-give item`, `-take item`, `-has? item`,
+  `-count`, `-empty?`, `-full?`, `-clear!`.
+- `stdlib/stat.sb`:
+  `stat $name $min $max` emits `state $name: Int($min, $max) = $max`
+  plus 8 helper fns: `$name-heal n`, `-hurt n`, `-set v`, `-restore`,
+  `-deplete`, `-full?`, `-empty?`, `-current`.
+
+`$name` must be a single-segment kebab-case identifier (same
+constraint as `counter` — the macro reuses it inside composite fn-name
+slots). Authors who want a family-style path write the state
+declaration by hand.
+
+**Substrate extension (Stage A):** §E0 as shipped could substitute a
+`$param` only into path segments and composite-identifier names. The
+inventory/stat macros also need a `$param` to land in three new
+positions:
+
+- **Type-name slot:** `state $p: $T`, `Set($T, …)`, `List($T, …)`. The
+  `TYPE_NAMED.name` field accepts a placeholder table; substitution
+  via `_resolve_type_name_param` requires the bound argument to
+  resolve to a single identifier.
+- **Integer-bound slot:** `Int($lo, $hi)`, `Set(T, $max)`, `List(T,
+  $max)`. The `TYPE_INT.{min,max}`, `TYPE_SET.max`, `TYPE_LIST.max`
+  fields accept a placeholder; substitution via `_resolve_int_param`
+  requires an `INT_LIT` bound.
+- **Default-value slot:** `state $p: T = $max`. `parse_default_value`
+  was extended to emit a single-segment placeholder PATH_EXPR for
+  `MACRO_PARAM`; substitution's literal-into-expression rule converts
+  it to the bound literal.
+
+Plus the literal-into-expression-context rule itself: when a
+`PATH_EXPR` whose only segment is a `$param` placeholder is being
+expanded and the bound argument is a literal node (INT_LIT, FLOAT_LIT,
+BOOL_LIT, STRING_LIT, SYMBOL_LIT), the whole PATH_EXPR is replaced by
+the literal in place. This is what makes `set! $path $max`,
+`if $count > 0`, and similar idioms work.
+
+All three slots produce `MACRO_DECL_EMIT` with a slot-aware message
+("Int min bound", "Set capacity", "type-name slot") when the bound
+value doesn't fit.
+
+**Files touched:**
+
+- `compiler/parser.lua` — new `parse_int_bound` helper; `parse_type_expr`
+  accepts `MACRO_PARAM` at the leading type-name position and in
+  `Int`/`Set`/`List` bound slots; `parse_default_value` accepts
+  `MACRO_PARAM`, emitting a placeholder PATH_EXPR.
+- `compiler/compiler.lua` — new `_resolve_int_param`,
+  `_resolve_type_name_param`, and `_literal_substitution` helpers;
+  `substitute_decl_node` resolves the new placeholder shapes inside
+  `TYPE_INT`, `TYPE_SET`, `TYPE_LIST`, `TYPE_NAMED`, and short-circuits
+  literal-PATH_EXPR substitution before the segment walk.
+- `stdlib/inventory.sb` — new module.
+- `stdlib/stat.sb` — new module.
+- `tests/compiler/macro_decl_spec.lua` — new §E3 describe block with
+  7 tests covering each new substitution site, the call-site
+  expanded-from diag note, and the error paths.
+- `tests/stdlib/inventory_spec.lua` — 9 tests (compile shape, runtime
+  give/take/has?/count/empty?/full?/clear!, two-instance non-collision,
+  multi-segment-name error, non-int-$max error).
+- `tests/stdlib/stat_spec.lua` — 8 tests (compile shape with default
+  = $max, runtime heal/hurt/restore/deplete/set, two-instance,
+  multi-segment-name error, non-int-$min error).
+- `demos/demo25_dungeon_loot.sb` — acceptance demo wiring both
+  modules into a small dungeon loop with a
+  `verify-eventually (player-bag-full?)` correctness clause that
+  passes under bounded BFS (55 states checked).
+- `docs/howto/stdlib_inventory_stat.md` — combined how-to with the
+  expansion tables.
+- `docs/reference/language.md` — updated the decl-macro `$param`
+  interpolation section with the three new slots, and the import
+  example list to include the new stdlib entries.
+- `code_map.md` — stdlib entries for inventory.sb/stat.sb, compiler
+  §E3 substrate note, test/demo entries.
+
+**Acceptance:**
+
+- `busted tests/` passes 2842 tests (was 2821) / 0 failures (HTTP
+  transient ignored) / 2 pre-existing pending (formatter known limits).
+- `lua5.4 cli/main.lua verify demos/demo25_dungeon_loot.sb` →
+  `PASS loot loop is winnable (55 BFS states checked)`.
+- End-to-end `--cli` step-through of demo25 shows correct
+  `Bag: N/3`, `HP M/10` interpolation and the inventory/stat
+  helpers driving state.
+
+**Deferred:** E2 (`dialog` blocks) remains open — same substrate
+suffices, but the author API needs `topic … once / always / when:`
+modelling that goes beyond this commit. Tracked in todo.md.
+
+---
+
 ## E1 — `quest` declarations ✅ (2026-05-18)
 
 First-class `quest <name>:` declaration with `description:` / `prereq:` /

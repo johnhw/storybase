@@ -625,6 +625,77 @@ local function _resolve_name_parts(parts, param_map)
   return table.concat(out)
 end
 
+--- Resolve a macro-param placeholder used in an integer-bound slot (e.g.
+--- `Int(0, $max)`, `Set(T, $max)`). Returns (integer, nil) on success or
+--- (nil, err) when the bound param value is not a concrete int literal.
+local function _resolve_int_param(val)
+  if val == nil then return nil, "param value is missing" end
+  if type(val) == "number" then return val end
+  if type(val) == "table" and val.kind == ast.K.INT_LIT then
+    return val.value
+  end
+  return nil, "param value of kind '" ..
+    tostring(type(val) == "table" and val.kind or type(val)) ..
+    "' cannot supply an integer bound (expected an integer literal)"
+end
+
+--- Resolve a macro-param placeholder used in a type-name slot (e.g.
+--- `Set($item-type, …)` or `state $path: $T`). Returns (typename_string,
+--- nil) on success or (nil, err) when the bound param value does not
+--- reduce to a single identifier. Same constraint as
+--- `_stringify_param_for_segment` — a multi-segment path cannot be used
+--- as a type name.
+local function _resolve_type_name_param(val)
+  if val == nil then return nil, "param value is missing" end
+  if type(val) == "string" then
+    if val:find("/", 1, true) then
+      return nil, "type-name param value '" .. val .. "' contains '/'"
+    end
+    return val
+  end
+  if type(val) == "table" and val.kind == ast.K.PATH_EXPR then
+    local segs = val.segments or {}
+    if #segs ~= 1 or type(segs[1]) ~= "string" then
+      return nil, "type-name param must resolve to a single identifier"
+    end
+    return segs[1]
+  end
+  if type(val) == "table" and val.kind == ast.K.FN_CALL
+     and (#(val.args or {}) == 0) then
+    return val.name
+  end
+  return nil, "param value of kind '" ..
+    tostring(type(val) == "table" and val.kind or type(val)) ..
+    "' cannot supply a type name"
+end
+
+--- If a single-segment PATH_EXPR whose lone segment is a `$param`
+--- placeholder is being used in an expression context, and the bound
+--- argument is a literal (int/float/bool/string/symbol), substitute the
+--- literal node in place. Returns the substituted literal node or nil
+--- when the path doesn't match the shape (caller falls through to the
+--- normal segment substitution).
+local LITERAL_KINDS = {
+  [ast.K.INT_LIT]    = true,
+  [ast.K.FLOAT_LIT]  = true,
+  [ast.K.BOOL_LIT]   = true,
+  [ast.K.STRING_LIT] = true,
+  [ast.K.SYMBOL_LIT] = true,
+}
+local function _literal_substitution(path_expr, param_map)
+  local segs = path_expr and path_expr.segments
+  if type(segs) ~= "table" or #segs ~= 1 then return nil end
+  local s = segs[1]
+  if type(s) ~= "table" or s.kind ~= "macro_param" then return nil end
+  local val = param_map[s.name]
+  if type(val) ~= "table" or not LITERAL_KINDS[val.kind] then return nil end
+  -- Shallow copy so we don't accidentally alias the param-side node into
+  -- the expanded AST (the copy still carries a fresh pos via the caller).
+  local copy = {}
+  for k, v in pairs(val) do copy[k] = v end
+  return copy
+end
+
 --- Given a path-expr param value, return its segments as a list of
 --- strings (so they can be spliced into the surrounding segments list).
 local function _path_segments_of(val)
@@ -705,6 +776,31 @@ local function substitute_decl_node(node, param_map, diags, call_pos, filename, 
     return out
   end
 
+  -- Resolve a `{kind="macro_param", name=X}` placeholder used in a
+  -- scalar field (integer bound or type name). Returns the resolved
+  -- value, or leaves the placeholder intact + emits an error.
+  local function resolve_scalar(placeholder, resolver, what)
+    if type(placeholder) ~= "table" or placeholder.kind ~= "macro_param" then
+      return placeholder
+    end
+    local val = param_map[placeholder.name]
+    if val == nil then
+      diags:push_error(ast.E.MACRO_DECL_EMIT,
+        "decl-macro: no value bound for $" .. placeholder.name,
+        ast.pos(filename, call_pos.line or 0, call_pos.col or 0))
+      return placeholder
+    end
+    local resolved, err = resolver(val)
+    if not resolved then
+      diags:push_error(ast.E.MACRO_DECL_EMIT,
+        "decl-macro: cannot substitute $" .. placeholder.name ..
+        " into " .. what .. ": " .. err,
+        ast.pos(filename, call_pos.line or 0, call_pos.col or 0))
+      return placeholder
+    end
+    return resolved
+  end
+
   subst = function(n)
     if type(n) ~= "table" then return n end
 
@@ -715,6 +811,15 @@ local function substitute_decl_node(node, param_map, diags, call_pos, filename, 
       return copy
     end
 
+    -- §E3: single-segment PATH_EXPR over a $param bound to a literal
+    -- (`set! $path $max`, `if $count > 0`) substitutes the literal AST
+    -- node in place of the path expression. The literal still gets a
+    -- fresh pos stamp below.
+    if n.kind == ast.K.PATH_EXPR then
+      local lit = _literal_substitution(n, param_map)
+      if lit then n = lit end
+    end
+
     -- AST node: shallow-copy
     local copy = {}
     for k, v in pairs(n) do copy[k] = v end
@@ -722,6 +827,18 @@ local function substitute_decl_node(node, param_map, diags, call_pos, filename, 
     -- PATH_EXPR with macro_param / composite segments → substitute
     if n.kind == ast.K.PATH_EXPR and type(n.segments) == "table" then
       copy.segments = subst_path_segments(n.segments)
+    end
+
+    -- §E3: scalar-field placeholder resolution in type expressions.
+    if n.kind == ast.K.TYPE_INT then
+      copy.min = resolve_scalar(n.min, _resolve_int_param, "Int min bound")
+      copy.max = resolve_scalar(n.max, _resolve_int_param, "Int max bound")
+    elseif n.kind == ast.K.TYPE_SET or n.kind == ast.K.TYPE_LIST then
+      copy.max = resolve_scalar(n.max, _resolve_int_param,
+        (n.kind == ast.K.TYPE_SET and "Set" or "List") .. " capacity")
+    elseif n.kind == ast.K.TYPE_NAMED then
+      copy.name = resolve_scalar(n.name, _resolve_type_name_param,
+        "type-name slot")
     end
 
     -- Resolve `name_parts` field on decl-name-bearing nodes

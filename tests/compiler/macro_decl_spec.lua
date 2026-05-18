@@ -1422,3 +1422,192 @@ scene s:
     assert.is_not_nil(gt.fns["player-health-bump"])
   end)
 end)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- §E3 substrate extension: type-name + integer-bound $param substitution.
+-- Before this extension, decl-macro params could only substitute path segments
+-- and identifier-name parts. inventory/stat stdlib modules need:
+--   - inner type names:  Set($item-type, …)
+--   - integer bounds:    Int(0, $max), Set(T, $max), List(T, $max)
+--   - literal values used in expression contexts: set! $path $max
+-- ─────────────────────────────────────────────────────────────────────────────
+
+describe("decl-macro — §E3 type-name + int-bound substitution", function()
+  local function compile_ok(src)
+    local gt, diags = compiler.compile(src, "test.sb")
+    local errs = (diags and diags.errors) or {}
+    return gt, errs
+  end
+
+  local function find_state(gt, path)
+    for _, st in ipairs(gt.schema.states or {}) do
+      if st.path == path then return st end
+    end
+    return nil
+  end
+
+  it("substitutes $T as a leading type-name slot (`state $p: $T`)", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+type ItemKind = Enum(sword, shield)
+decl-macro alias $p $T:
+  state $p: $T = `sword
+alias hero-wield ItemKind
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    local st = find_state(gt, "hero-wield")
+    assert.is_not_nil(st)
+    -- The state was registered against the named ItemKind type.
+    assert.equal("ItemKind", st.type_desc and st.type_desc.name)
+  end)
+
+  it("substitutes $max into Int(0, $max) and emits the right bound", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro gauge $path $max:
+  state $path: Int(0, $max) = 0
+gauge player-stamina 42
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    local st = find_state(gt, "player-stamina")
+    assert.is_not_nil(st)
+    assert.equal("int", st.type_desc and st.type_desc.tag)
+    assert.equal(0,  st.type_desc.min)
+    assert.equal(42, st.type_desc.max)
+  end)
+
+  it("substitutes inner type + capacity into Set($T, $n)", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+type ItemKind = Enum(sword, shield, potion)
+decl-macro bag $path $T $n:
+  state $path: Set($T, $n) = (set)
+bag player-inventory ItemKind 8
+scene main:
+  the end
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    local st = find_state(gt, "player-inventory")
+    assert.is_not_nil(st)
+    assert.equal("set", st.type_desc and st.type_desc.tag)
+    assert.equal(8, st.type_desc.max)
+    -- inner type resolved to ItemKind
+    assert.equal("ItemKind", st.type_desc.inner and st.type_desc.inner.name)
+  end)
+
+  it("substitutes int-literal $param into expression context (set!)", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro gauge $path $max:
+  state $path: Int(0, $max) = 0
+  fn $path-restore:
+    set! $path $max
+gauge player-stamina 7
+scene main:
+  ready
+  * tick
+    player-stamina-restore
+    -> main
+]]
+    local gt, errs = compile_ok(src)
+    assert.equal(0, #errs)
+    local engine = require("runtime.engine")
+    local eval   = require("runtime.eval")
+    local g = engine.new(gt)
+    g:init()
+    assert.equal(0, g._state:get("player-stamina"))
+    local ctx = eval.new_ctx(g._state, gt.fns, "test", gt)
+    eval.call_fn("player-stamina-restore", {}, ctx)
+    assert.equal(7, g._state:get("player-stamina"))
+  end)
+
+  it("raises MACRO_DECL_EMIT when $max bound to a non-int (e.g. ident)", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro gauge $path $max:
+  state $path: Int(0, $max) = 0
+gauge player-stamina foo
+scene main:
+  the end
+]]
+    local _, errs = compile_ok(src)
+    local saw = nil
+    for _, e in ipairs(errs) do
+      if e.code == "MACRO_DECL_EMIT" and e.message:find("integer bound", 1, true) then
+        saw = e
+      end
+    end
+    assert.is_not_nil(saw, "expected MACRO_DECL_EMIT about integer bound")
+  end)
+
+  it("raises MACRO_DECL_EMIT when $T bound to a multi-segment path", function()
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro bag $path $T $n:
+  state $path: Set($T, $n) = (set)
+bag player/inventory a/b 4
+scene main:
+  the end
+]]
+    local _, errs = compile_ok(src)
+    local saw = nil
+    for _, e in ipairs(errs) do
+      if e.code == "MACRO_DECL_EMIT" and e.message:find("single identifier", 1, true) then
+        saw = e
+      end
+    end
+    assert.is_not_nil(saw,
+      "expected MACRO_DECL_EMIT about single-identifier type name")
+  end)
+
+  it("checker errors on an expanded body decorate with `expanded from macro`", function()
+    -- A wrong type-name argument should produce UNDEFINED_TYPE at the
+    -- call site, with the standard expanded-from note (Stage 4 wiring
+    -- still applies even though the resolved name was a $param).
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+decl-macro alias $p $T:
+  state $p: $T = 0
+alias hero-wield Nope
+scene main:
+  the end
+]]
+    local _, errs = compile_ok(src)
+    local saw = nil
+    for _, e in ipairs(errs) do
+      if e.code == "UNDEFINED_TYPE" then saw = e end
+    end
+    assert.is_not_nil(saw)
+    -- Note string should mention the macro by name (Stage 4 contract).
+    assert.is_truthy(tostring(saw.note or ""):find("expanded from macro 'alias'", 1, true),
+      "expected expanded-from note; got: " .. tostring(saw.note))
+  end)
+end)

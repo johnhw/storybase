@@ -181,6 +181,22 @@ EMIT_MUT         -- engine/emit event [args]
   raised by the checker (or any later pass) against expanded nodes are
   auto-decorated with `"expanded from macro 'NAME' at FILE:LINE"`
   inside `ast._diag` — no checker-side change needed.
+- §E3 substrate extension (drove inventory / stat): three new
+  substitution sites inside `substitute_decl_node`:
+    * `TYPE_NAMED.name` resolves a `{kind="macro_param", name=X}`
+      placeholder to a single identifier via `_resolve_type_name_param`.
+    * `TYPE_INT.{min,max}`, `TYPE_SET.max`, `TYPE_LIST.max` accept
+      the same placeholder and resolve via `_resolve_int_param`
+      (must bind to an `INT_LIT`).
+    * A single-segment `PATH_EXPR` whose lone segment is a
+      `$param` and whose bound value is a literal node is replaced
+      in place by that literal via `_literal_substitution` — supports
+      `set! $path $max`, `state $p: T = $max`, `if $count > 0`, etc.
+  Parser side: `parse_type_expr` learns a `parse_int_bound` helper
+  that accepts either `INTEGER` or `MACRO_PARAM` for `Int` / `Set` /
+  `List` bounds, plus `MACRO_PARAM` as a leading type-name token.
+  `parse_default_value` accepts `MACRO_PARAM`, emitting a
+  single-segment placeholder PATH_EXPR.
 - §E1 `expand_quests` (between `expand_macros` and the checker) walks
   the top-level decl list; for every `QUEST_DECL` it emits a fixed set
   of state/fn AST nodes (`quests/<Q>/active`, `quests/<Q>/complete`,
@@ -204,8 +220,22 @@ A reference decl-macro: `counter $path` emits a bounded-int state at
 `$path` plus `$path-inc`, `$path-dec`, `$path-reset` mutating fns. Used
 by the §E0 Stage 5 cross-import acceptance tests and the §E0 Stage 6
 end-to-end acceptance test; serves as a template for the larger E2/E3
-stdlib modules (dialog / inventory / stat). Authored in line with the
+stdlib modules. Authored in line with the
 "Decl-emitting macros" section of `docs/reference/language.md`.
+
+### `stdlib/inventory.sb` (§E3)
+`inventory $name $T $max` emits a `Set($T, $max)` state at `$name`
+plus 7 helper fns (`$name-give`, `-take`, `-has?`, `-count`,
+`-empty?`, `-full?`, `-clear!`).  Relies on the §E3 substrate
+extension that lets `$T` slot into a type-name position and `$max`
+slot into both the `Set` capacity and the `full?` comparison literal.
+
+### `stdlib/stat.sb` (§E3)
+`stat $name $min $max` emits an `Int($min, $max) = $max` state plus 8
+helper fns (`$name-heal`, `-hurt`, `-set`, `-restore`, `-deplete`,
+`-full?`, `-empty?`, `-current`).  Default-value slot in
+`= $max` and the `set! $name $max` body lean on the §E3 literal-into-
+expression-context substitution rule.
 
 ---
 
@@ -829,8 +859,10 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/test_decl_spec.lua` | TEST_DECL parser (label forms, sections, multiple blocks, 'test' as ident); codegen (game_table.tests, production strip) (14 tests) |
 | `tests/compiler/generate_spec.lua` | §F1 `generate` decl: parser (with/without seed_path, error paths), codegen (game_table.generates entry, duplicate-name diag), checker (UNDEFINED_PATH / UNDEFINED_FN propagate into body) (8 tests) |
 | `tests/compiler/ending_spec.lua` | §F2 `ending` decl: parser (with/without when:), codegen (game_table.endings, auto-emit reachability + pairwise exclusivity verify, production strip), duplicate-name diag (9 tests) |
-| `tests/compiler/macro_decl_spec.lua` | §E0 decl-macro substrate, all stages: Stage 1 lexer + parser into `DECL_MACRO_DECL`; Stage 2 lexer `$param` / composite identifiers; Stage 2b/3 parser name-interpolation + expansion pass; Stage 4 `expanded_from` diag decoration; Stage 5 cross-import + `@stdlib/` resolver; Stage 6 acceptance + single-pass restriction (62 tests) |
+| `tests/compiler/macro_decl_spec.lua` | §E0 decl-macro substrate, all stages (Stage 1 lexer + parser into `DECL_MACRO_DECL`; Stage 2 lexer `$param` / composite identifiers; Stage 2b/3 parser name-interpolation + expansion pass; Stage 4 `expanded_from` diag decoration; Stage 5 cross-import + `@stdlib/` resolver; Stage 6 acceptance + single-pass restriction); plus §E3 type-name + int-bound substitution (Stage A: `Set($T, $n)`, `Int($lo, $hi)`, default-slot `= $max`, literal-into-expression context) (69 tests) |
 | `tests/compiler/quest_spec.lua` | §E1 `quest` decl: parser (description/prereq/step/requires/reward shape), desugar (state paths emitted, helper fns emitted, metadata in game_table.quests, duplicate quest + duplicate step diags), auto-verify (label, clause shape, production strip), runtime (start! / do-N / query fns / reward fires when all steps complete) (15 tests) |
+| `tests/stdlib/inventory_spec.lua` | §E3 `@stdlib/inventory`: compile (state shape, 7 emitted fns, two-instance non-collision), runtime (start empty, give/take/has?/full? round-trip, clear!), error paths (multi-segment $name, non-int $max) (9 tests) |
+| `tests/stdlib/stat_spec.lua` | §E3 `@stdlib/stat`: compile (Int state shape with default=$max, 8 emitted fns), runtime (start at $max, heal/hurt clamping, restore/deplete/set jumps), error paths (multi-segment $name, non-int $min) (8 tests) |
 | `tests/runtime/tests_spec.lua` | runtime/tests.lua: basic pass/fail, setup/run sections, multiple expects, fresh-state isolation, multiple tests (19 tests) |
 | `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
 | `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |
@@ -896,6 +928,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo22_quest_temporal.sb` | Temporal-logic verify showcase (§C3): all four CTL operators on a forced-completion three-task quest — `verify-always` (AG safety), `verify-eventually` (EF reachability), `verify-always-eventually` (AF forced outcome), `verify-until p until q` (AU "p holds until q"). Pairs with `cli/verify_cache.lua` to demonstrate `[cached]` re-runs. |
 | `demo23_procedural_dungeon.sb` | §F1 + §F2: a procedurally-generated 3–5 room dungeon. `generate dungeon-layout seed: world/seed` spawns rooms via `random-int`; two `ending` declarations (`escape`, `lost`) drive the auto-emitted reachability + pairwise-exclusivity verify blocks. |
 | `demo24_lost_relic.sb` | §E1 `quest` declaration: prereq + three steps (one bare, two with `requires:`) + reward; demonstrates desugar (state paths and helper fns emitted by `compiler.expand_quests`) and the auto-emitted `verify-eventually (quest-lost-relic-complete?)`. Five-choice forward path so verify passes under the default CTL depth. |
+| `demo25_dungeon_loot.sb` | §E3 stdlib showcase: `import "@stdlib/inventory"` + `import "@stdlib/stat"` instantiated as `inventory player-bag LootKind 3` and `stat player-health 0 10`. Three-item loot loop with quaff-potion healing and an unlock gated on `player-bag-full?`; `verify-eventually (player-bag-full?)` proves the loop is winnable under bounded BFS. |
 | `demo02_merchant_tests.sb` | Test suite for demo02_merchant.sb: 11 test blocks covering buy/sell fns, port bonus, round-trip, and defaults; uses `import`, `setup:`/`run:`/`expect:` sections |
 
 ---

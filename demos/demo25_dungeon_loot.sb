@@ -1,0 +1,83 @@
+# demo25_dungeon_loot.sb — the §E3 `inventory` and `stat` stdlib
+# decl-macros in action.
+#
+# Both modules ship as `.sb` files under `stdlib/` and import via the
+# `@stdlib/<name>` prefix.  Each decl-macro expands to the conventional
+# state + helper-fn boilerplate at compile time (see the macro
+# definitions for the exact emit list).
+#
+# Run with:   storybase run demos/demo25_dungeon_loot.sb
+# Verify:     storybase verify demos/demo25_dungeon_loot.sb
+
+module dungeon-loot
+  version: 1.0
+
+engine-config:
+  entry-scene: rest
+
+import "@stdlib/inventory"
+import "@stdlib/stat"
+
+# ── Domain types ─────────────────────────────────────────────────────
+
+type LootKind = Enum(potion, scroll, ring)
+
+# ── Stdlib decl-macro instantiations ─────────────────────────────────
+#
+# `inventory player-bag LootKind 3` emits:
+#   state player-bag: Set(LootKind, 3) = (set)
+#   fn   player-bag-{give,take,has?,count,empty?,full?,clear!}
+#
+# `stat player-health 0 10` emits:
+#   state player-health: Int(0, 10) = 10
+#   fn   player-health-{heal,hurt,set,restore,deplete,full?,empty?,current}
+
+inventory player-bag    LootKind  3
+stat      player-health 0         10
+
+# ── Scenes ───────────────────────────────────────────────────────────
+
+scene rest:
+  You are resting at camp. HP {player-health-current}/10. Bag: {player-bag-count}/3.
+
+  * Descend into the dungeon
+    -> hall
+
+scene hall:
+  A long hallway. HP {player-health-current}/10. Bag: {player-bag-count}/3.
+
+  * [not (player-bag-has? `potion)] Grab a potion
+    player-bag-give `potion
+    -> hall
+
+  * [not (player-bag-has? `scroll)] Read a glowing scroll
+    player-bag-give `scroll
+    -> hall
+
+  * [not (player-bag-has? `ring)] Pry a ring from a statue
+    player-bag-give `ring
+    -> hall
+
+  * Step on a trap (lose 3 HP)
+    player-health-hurt 3
+    -> hall
+
+  * [player-bag-has? `potion] Quaff a potion (+4 HP)
+    player-bag-take `potion
+    player-health-heal 4
+    -> hall
+
+  * [player-bag-full?] Open the treasure room
+    -> treasure
+
+scene treasure:
+  All three relics in hand, you reach the inner sanctum.
+  Final HP {player-health-current}/10. Loot complete.
+
+# ── Compile-time correctness check ───────────────────────────────────
+# Both the bag-full state and the treasure-room ending are reachable
+# from the initial state under bounded BFS, so the loot loop has no
+# dead-end before the player can claim victory.
+
+verify "loot loop is winnable":
+  verify-eventually (player-bag-full?)

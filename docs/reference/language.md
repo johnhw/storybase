@@ -602,6 +602,24 @@ a single segment — passing a path-valued argument (`a/b/c`) where the slot
 forms part of a name raises `MACRO_DECL_EMIT`. As a bare segment slot,
 multi-segment substitution is permitted.
 
+A `$param` may also appear in three additional slots that the
+substitution pass rewrites at expand time:
+
+- **Type-name slot:** `state $p: $T`, `Set($T, …)`, `List($T, …)`. The
+  bound value must reduce to a single identifier; the substitution
+  emits `type_named($T)`.
+- **Integer-bound slot:** `Int($min, $max)`, `Set(T, $max)`,
+  `List(T, $max)`. The bound value must be an integer literal.
+- **Default-value slot:** `state $p: T = $max`. The placeholder is
+  replaced by the bound literal in the state's default expression.
+
+When a `$param` appears as a *whole* expression (`set! $p $max`,
+`if $count > 0`), and the bound argument is a literal
+(int/float/bool/string/symbol), the substitution replaces the path
+expression with that literal node directly. This lets a macro thread
+configuration constants through both type and expression positions
+with one parameter.
+
 A `$` followed by anything other than an identifier is a lex error
 (`ILLEGAL_CHAR`). A composite run breaks at whitespace and at `/`, so
 `npcs/$kind` is parsed as the path `npcs/` followed by the macro
@@ -645,15 +663,25 @@ that emits both sets of decls inline.
 
 A `decl-macro` is exported and imported like any other top-level name.
 The `@stdlib/<name>` prefix resolves into the bundled standard library
-directory (`stdlib/counter.sb`, `stdlib/dialog.sb`, …):
+directory (`stdlib/counter.sb`, `stdlib/inventory.sb`,
+`stdlib/stat.sb`, …):
 
 ```
 import "@stdlib/counter"             # all names unqualified
-counter player/health
+counter player-health
+
+import "@stdlib/inventory"
+inventory player-bag ItemKind 8
+
+import "@stdlib/stat"
+stat player-mana 0 50
 
 import "@stdlib/counter" as C        # namespaced
-C.counter enemies/dragon/hp
+C.counter enemy-rage
 ```
+
+See [`docs/howto/stdlib_inventory_stat.md`](../howto/stdlib_inventory_stat.md)
+for the inventory/stat expansion details.
 
 Resolution order for `@stdlib/<n>` is: the `M._stdlib_dir_override`
 compiler-test hook, the `STORYBASE_STDLIB_DIR` environment variable,

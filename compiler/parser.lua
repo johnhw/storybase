@@ -182,9 +182,36 @@ end
 -- Type expression parser
 -- ============================================================
 
+--- Accept either an INTEGER token or a MACRO_PARAM token for a numeric
+--- bound slot inside a type expression. Returns either a number (concrete)
+--- or a placeholder table `{kind="macro_param", name=X}` that
+--- `substitute_decl_node` will resolve at decl-macro expansion time. The
+--- placeholder is illegal outside a `decl-macro` body; the substitution
+--- pass leaves it intact and the checker treats it as a `BAD_TYPE_EXPR`
+--- after that point.
+local function parse_int_bound(p, what)
+  local tok = p:cur()
+  if tok.kind == "INTEGER" then
+    p:adv(); return tok.value
+  elseif tok.kind == "MACRO_PARAM" then
+    p:adv(); return { kind = "macro_param", name = tok.value }
+  end
+  p:expect("INTEGER", nil, what or "expected integer bound")
+  return 0
+end
+
 local function parse_type_expr(p)
   local t = p:cur()
   local tpos = t.pos
+
+  -- §E3: `$T` as a leading type-name slot. The decl-macro substitution
+  -- pass replaces the placeholder name with the bound argument's segment
+  -- (a single identifier); the checker treats any unresolved placeholder
+  -- as an `UNDEFINED_TYPE`.
+  if t.kind == "MACRO_PARAM" then
+    p:adv()
+    return ast.type_named({ kind = "macro_param", name = t.value }, tpos)
+  end
 
   if t.kind == "IDENT" then
     local name = t.value
@@ -205,11 +232,11 @@ local function parse_type_expr(p)
 
     elseif name == "Int" then
       p:expect("OP", "(")
-      local lo = p:expect("INTEGER", nil, "expected min bound")
+      local lo = parse_int_bound(p, "expected min bound")
       p:expect("OP", ",")
-      local hi = p:expect("INTEGER", nil, "expected max bound")
+      local hi = parse_int_bound(p, "expected max bound")
       p:expect("OP", ")")
-      return ast.type_int(lo and lo.value or 0, hi and hi.value or 0, tpos)
+      return ast.type_int(lo, hi, tpos)
 
     elseif name == "Enum" then
       p:expect("OP", "(")
@@ -233,17 +260,17 @@ local function parse_type_expr(p)
       p:expect("OP", "(")
       local inner = parse_type_expr(p)
       p:expect("OP", ",")
-      local mx = p:expect("INTEGER", nil, "expected max bound")
+      local mx = parse_int_bound(p, "expected max bound")
       p:expect("OP", ")")
-      return ast.type_set(inner, mx and mx.value or 0, tpos)
+      return ast.type_set(inner, mx, tpos)
 
     elseif name == "List" then
       p:expect("OP", "(")
       local inner = parse_type_expr(p)
       p:expect("OP", ",")
-      local mx = p:expect("INTEGER", nil, "expected max bound")
+      local mx = parse_int_bound(p, "expected max bound")
       p:expect("OP", ")")
-      return ast.type_list(inner, mx and mx.value or 0, tpos)
+      return ast.type_list(inner, mx, tpos)
 
     elseif name == "Symbol" then
       return ast.type_symbol(tpos)
@@ -340,6 +367,15 @@ parse_default_value = function(p)
       return parse_record_constructor(p, name, tpos)
     end
     return ast.type_named(name, tpos)
+
+  elseif t.kind == "MACRO_PARAM" then
+    -- §E3: `state $path: T = $max` — the default value is a $param
+    -- bound at call time. Emit a single-segment path_expr placeholder
+    -- whose macro_param segment gets resolved to a literal by
+    -- substitute_decl_node._literal_substitution. Outside a decl-macro
+    -- body the checker will flag the un-substituted placeholder.
+    p:adv()
+    return ast.path_expr({ { kind = "macro_param", name = t.value } }, tpos)
 
   elseif t.kind == "OP" and t.value == "(" then
     p:adv()

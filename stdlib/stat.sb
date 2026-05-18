@@ -1,0 +1,56 @@
+module stat
+  version: 1.0
+
+# A bounded integer stat (health, stamina, mana, …) at the given state
+# name with min/max bounds and a set of conventional accessor /
+# mutator fns.
+#
+#   import "@stdlib/stat"
+#   stat player-health 0 100
+#
+# emits:
+#   state player-health: Int(0, 100) = 100
+#   fn player-health-heal n:  inc! player-health n
+#   fn player-health-hurt n:  dec! player-health n
+#   fn player-health-set v:   set! player-health v
+#   fn player-health-restore: set! player-health 100
+#   fn player-health-deplete: set! player-health 0
+#   fn player-health-full?:   player-health = 100
+#   fn player-health-empty?:  player-health = 0
+#   fn player-health-current: player-health
+#
+# `$name` is the state name and prefix for the emitted fns; must be a
+# single-segment kebab-case identifier (no `/`). Authors who need a
+# family-style path (`player/health`) should write the boilerplate by
+# hand or wrap this macro.
+#
+# The initial value is `$max` — most stats start "full". Use
+# `*-set v` if you want a different starting value at runtime, or
+# `set!` directly in a generate / on-enter block.
+
+decl-macro stat $name $min $max:
+  state $name: Int($min, $max) = $max
+
+  fn $name-heal n:
+    inc! $name n
+
+  fn $name-hurt n:
+    dec! $name n
+
+  fn $name-set v:
+    set! $name v
+
+  fn $name-restore:
+    set! $name $max
+
+  fn $name-deplete:
+    set! $name $min
+
+  fn $name-full?:
+    $name = $max
+
+  fn $name-empty?:
+    $name = $min
+
+  fn $name-current:
+    $name

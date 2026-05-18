@@ -7,15 +7,15 @@ Completed work has been moved to [completed.md](completed.md).
 ## Current Status (2026-05-18)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–24 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
+Demos 01–25 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete. §E0 (decl-emitting
-macro substrate) complete; §E1 (`quest` declarations, base feature) shipped
-2026-05-18.
+macro substrate) complete; §E1 (`quest` declarations) and §E3
+(`inventory` + `stat` stdlib modules) shipped 2026-05-18.
 
-**~2821 successes / 0 failures / 2 pending (known limitations).**
+**~2842 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -32,8 +32,8 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 
 1. §D1 — LLM-bounded handler standard module
 2. §B3 — Trace scrubber (browser debug UI)
-3. §E2 / §E3 — `dialog` / `inventory` / `stat` shipped as stdlib `.sb` modules
-   (substrate ready: §E0 complete 2026-05-18)
+3. §E2 — `dialog` blocks shipped as a stdlib `.sb` module
+   (substrate ready: §E0 + §E3 substrate extensions complete 2026-05-18)
 4. §G1 — Web/JS compilation target
 
 (§G2 — stateless HTTP API — complete, see completed.md.)
@@ -545,44 +545,20 @@ docs page in `docs/howto/dialog.md`.
 using the `dialog` macro at roughly 1/3 the line count; behaviour identical;
 all of demo20's verify blocks still pass.
 
-### E3. `inventory` and `stat` (stdlib `.sb` module)
+### E3. `inventory` and `stat` (stdlib `.sb` module) ✅ (2026-05-18 — see completed.md)
 
-**Goal:** `Set(ItemKind, 10)` is the de-facto inventory pattern; hand-written
-`give!`, `take!`, `has?`, `count-of` are common. Same for stat blocks with
-base + modifiers + clamped derived values.
-
-**Plan:** ships as `stdlib/inventory.sb` and `stdlib/stat.sb`. No new compiler
-AST kinds.
-
-**Design sketch (author API unchanged):**
-```
-import "@stdlib/inventory"
-import "@stdlib/stat"
-
-inventory player/inventory:
-  contents: ItemKind
-  max:      10
-  # macro emits: state player/inventory: Set(ItemKind, 10)
-  #              fn give-player-inventory item: add! player/inventory item
-  #              fn take-player-inventory item: remove! player/inventory item
-  #              fn has-player-inventory? item: contains? player/inventory item
-  #              fn player-inventory-size: size player/inventory
-  #              fn player-inventory-empty?: empty? player/inventory
-
-stat player/health:
-  base:    Int(0, 100) = 100
-  buffs:   Set(BuffKind, 4) = (set)
-  derived: base + (buff-bonus buffs)
-```
-
-**Files:** new `stdlib/inventory.sb`, `stdlib/stat.sb`;
-`tests/stdlib/inventory_spec.lua` + `tests/stdlib/stat_spec.lua`;
-`docs/howto/inventory.md`.
-
-**Depends on:** §E0.
-
-**Acceptance:** Replace `Set(ItemKind, 10)` boilerplate in three demos with
-`inventory` declarations; resulting tests + verify blocks pass unchanged.
+Shipped as `stdlib/inventory.sb` (`inventory $name $T $max`) and
+`stdlib/stat.sb` (`stat $name $min $max`) via the §E0 decl-macro
+substrate, with one small substrate extension (§E3 Stage A) to allow
+`$param` to land in type-name and integer-bound slots. The original
+named-arg author API (`contents: ItemKind` / `max: 10`) gave way to
+positional args mirroring the existing `stdlib/counter.sb`
+convention, since the substrate only carries positional `$params`.
+Acceptance demo `demos/demo25_dungeon_loot.sb` wires both modules
+into a small loot-loop game whose
+`verify-eventually (player-bag-full?)` clause proves winnability.
+Tests: `tests/stdlib/inventory_spec.lua` (9) and
+`tests/stdlib/stat_spec.lua` (8).
 
 ### E-alt. Fast-win alternative (if §E0 is too speculative)
 
