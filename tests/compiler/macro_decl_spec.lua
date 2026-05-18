@@ -904,3 +904,353 @@ describe("compile — Stage 4 expanded_from diag decoration", function()
     assert.is_truthy(s:match("expanded from macro 'x' at %?:0"))
   end)
 end)
+
+-- ── §E0 Stage 5: cross-import wiring ─────────────────────────────────────────
+--
+-- A `decl-macro` declared in an imported module can be called from the
+-- importing file: unaliased (plain `import "..."`), namespaced
+-- (`import "..." as Foo`), or via the `@stdlib/...` resolver.  Diagnostics
+-- on the expanded decls still point at the call site in the *importing*
+-- file (call-site pos stamping is preserved across files).
+
+describe("E0 Stage 5 — cross-import decl-macro", function()
+  local engine = require("runtime.engine")
+  local eval   = require("runtime.eval")
+
+  -- Write source to a temp .sb file; caller is responsible for os.remove.
+  local function tmpfile(src)
+    local path = os.tmpname() .. ".sb"
+    local f = io.open(path, "w"); f:write(src); f:close()
+    return path
+  end
+
+  -- Same dir for both files so the relative import in `main` reaches `lib`.
+  local function tmp_pair(lib_src, main_src_fmt)
+    local lib  = tmpfile(lib_src)
+    local main = tmpfile(string.format(main_src_fmt, lib))
+    return lib, main
+  end
+
+  it("plain import: imported decl-macro is callable in the importing file", function()
+    local lib, main = tmp_pair([[
+module counter-lib
+  version: 1.0
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+]], [[
+module counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+counter player-health
+
+scene s:
+  -> s
+]])
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- State path emitted by the macro must exist
+    local found = false
+    for _, s in ipairs(gt.schema and gt.schema.states or {}) do
+      if s.path == "player-health" then found = true end
+    end
+    assert.is_true(found, "expected state 'player-health' emitted by imported decl-macro")
+    -- And the composite fn name
+    assert.is_not_nil(gt.fns and gt.fns["player-health-inc"])
+  end)
+
+  it("plain import: expanded fn runs and mutates the state at runtime", function()
+    local lib, main = tmp_pair([[
+module counter-lib
+  version: 1.0
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+]], [[
+module counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+counter player-health
+
+scene s:
+  -> s
+]])
+    local gt = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt)
+    local eng = engine.new(gt, {})
+    eng:init()
+    assert.equal(0, eng._state:get("player-health"))
+    local ctx = eng:make_ctx("player-health-inc")
+    eval.call_fn("player-health-inc", {}, ctx)
+    assert.equal(1, eng._state:get("player-health"))
+  end)
+
+  it("namespaced import: imported decl-macro callable as Alias.name", function()
+    local lib, main = tmp_pair([[
+module counter-lib
+  version: 1.0
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+]], [[
+module counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as C
+
+C.counter player-health
+
+scene s:
+  -> s
+]])
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- State paths remain global even under namespaced import
+    local found = false
+    for _, s in ipairs(gt.schema and gt.schema.states or {}) do
+      if s.path == "player-health" then found = true end
+    end
+    assert.is_true(found, "expected state 'player-health' from C.counter")
+    -- Fn names emitted from the macro body are *unqualified* — the
+    -- macro body's `fn $path-inc:` resolves before namespace rename
+    -- would apply (rename is on the imported module's own decls, not
+    -- on the substituted output of its decl-macro).
+    assert.is_not_nil(gt.fns and gt.fns["player-health-inc"])
+  end)
+
+  it("two different aliased imports of the same decl-macro do not conflict", function()
+    local lib = tmpfile([[
+module counter-lib
+  version: 1.0
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+]])
+    local main = tmpfile(string.format([[
+module counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q as A
+import %q as B
+
+A.counter player-health
+B.counter monster-rage
+
+scene s:
+  -> s
+]], lib, lib))
+    local gt, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    local paths = {}
+    for _, s in ipairs(gt.schema and gt.schema.states or {}) do
+      paths[s.path] = true
+    end
+    assert.is_true(paths["player-health"])
+    assert.is_true(paths["monster-rage"])
+  end)
+
+  it("exports: filter allows whitelisting a decl-macro", function()
+    -- `counter` is exported, `secret` is not.  The main file may only call
+    -- `counter`; calling `secret` produces UNDEFINED_NAME.
+    local lib = tmpfile([[
+module exp-lib
+  version: 1.0
+  exports: [counter]
+
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+
+decl-macro secret $path:
+  state $path: Int(0, 100) = 0
+]])
+    -- Positive case: `counter` is whitelisted and works.
+    local main_ok = tmpfile(string.format([[
+module exp-ok
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+counter player-health
+
+scene s:
+  -> s
+]], lib))
+    local gt, diags = compiler.compile_file(main_ok)
+    os.remove(main_ok)
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+
+    -- Negative case: `secret` is filtered out → call site fails.
+    local main_bad = tmpfile(string.format([[
+module exp-bad
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+secret monster-rage
+
+scene s:
+  -> s
+]], lib))
+    local _, diags2 = compiler.compile_file(main_bad)
+    os.remove(lib); os.remove(main_bad)
+    assert.is_true(diags2:has_errors())
+    local found
+    for _, e in ipairs(diags2.errors or {}) do
+      if e.code == "UNDEFINED_NAME" then found = e end
+    end
+    assert.is_not_nil(found, "expected UNDEFINED_NAME for filtered-out 'secret'")
+  end)
+
+  it("checker errors on expanded decl from imported macro point at call site", function()
+    local lib, main = tmp_pair([[
+module bad-counter-lib
+  version: 1.0
+decl-macro counter $path:
+  state $path: BadType = 0
+]], [[
+module bad-counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+counter player-health
+
+scene s:
+  -> s
+]])
+    local _, diags = compiler.compile_file(main)
+    -- Capture filenames before deletion for assertions
+    local main_basename = main
+    os.remove(lib); os.remove(main)
+    assert.is_true(diags:has_errors())
+    local e
+    for _, x in ipairs(diags.errors or {}) do
+      if x.code == "UNDEFINED_TYPE" then e = x end
+    end
+    assert.is_not_nil(e, "expected UNDEFINED_TYPE on expanded decl")
+    -- The diagnostic must be stamped at the call site (line 8 of the main
+    -- file, which is the `counter player-health` line).
+    assert.equal(8, e.line)
+    -- And it must originate in the main file, not the lib.
+    assert.equal(main_basename, e.file)
+    -- The "expanded from macro" note carries the lib's file/line.
+    assert.is_not_nil(e.note)
+    assert.is_truthy(e.note:match("expanded from macro 'counter'"))
+  end)
+
+  it("@stdlib/ resolver respects the override hook (fixture stdlib)", function()
+    -- Build an isolated fixture directory and a `counter.sb` inside it,
+    -- then point compiler._stdlib_dir_override at that dir.  We use a
+    -- *different* macro shape so we can confirm the resolver picked the
+    -- fixture (not the shipped stdlib/counter.sb).
+    local tmpdir = os.tmpname()
+    os.remove(tmpdir)
+    os.execute('mkdir -p "' .. tmpdir .. '"')
+    local fixture_path = tmpdir .. "/counter.sb"
+    local f = io.open(fixture_path, "w")
+    f:write([[
+module counter-lib
+  version: 1.0
+decl-macro counter $path:
+  state $path: Int(0, 50) = 7
+]])
+    f:close()
+
+    local prev = compiler._stdlib_dir_override
+    compiler._stdlib_dir_override = tmpdir
+
+    local main = tmpfile([[
+module counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import "@stdlib/counter"
+
+counter player-health
+
+scene s:
+  -> s
+]])
+    local gt, diags = compiler.compile_file(main)
+    os.remove(main)
+    os.remove(fixture_path)
+    os.execute('rmdir "' .. tmpdir .. '"')
+
+    compiler._stdlib_dir_override = prev
+
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- Confirm the *fixture* macro was used: its state initialises to 7
+    -- (shipped stdlib/counter.sb initialises to 0).
+    local eng = engine.new(gt, {})
+    eng:init()
+    assert.equal(7, eng._state:get("player-health"))
+  end)
+
+  it("@stdlib/ resolver falls back to <repo>/stdlib/ when no override is set", function()
+    -- Confirm the shipped stdlib/counter.sb resolves cleanly without any
+    -- override.  This depends on the shipped fixture; if it ever changes
+    -- shape (e.g. adds required params), update this test.
+    local prev = compiler._stdlib_dir_override
+    compiler._stdlib_dir_override = nil
+
+    local main = tmpfile([[
+module stdlib-counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import "@stdlib/counter"
+
+counter player-score
+
+scene s:
+  -> s
+]])
+    local gt, diags = compiler.compile_file(main)
+    os.remove(main)
+
+    compiler._stdlib_dir_override = prev
+
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    -- Shipped stdlib/counter.sb emits `$path-inc` / `$path-dec` /
+    -- `$path-reset` fns; sanity-check that at least one exists.
+    assert.is_not_nil(gt.fns and gt.fns["player-score-inc"])
+  end)
+end)

@@ -3237,6 +3237,17 @@ local function parse_macro_call_decl(p, doc)
   local name_tok = p:adv()
   local name = name_tok.value
 
+  -- Namespace-qualified call: Alias.macro-name (parallels parse_atom /
+  -- parse_fn_call handling for `L.add-ten`).
+  if p:at("OP", ".") then
+    local nx = p:peek()
+    if nx and nx.kind == "IDENT" then
+      p:adv()  -- consume "."
+      local member = p:adv().value  -- consume member name
+      name = name .. "." .. member
+    end
+  end
+
   -- Collect positional args (atoms): IDENT, PATH, INTERP_PATH, MACRO_PARAM,
   -- COMPOSITE_IDENT, literals.
   local args = {}

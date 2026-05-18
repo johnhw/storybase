@@ -23,13 +23,54 @@ local codegen = require("compiler.codegen")
 -- Import resolver
 -- ============================================================
 
+--- Locate the project's stdlib directory.
+--- Resolution order:
+---   1. `M._stdlib_dir_override` (test hook; nil in normal use)
+---   2. `STORYBASE_STDLIB_DIR` env var (absolute or relative to cwd)
+---   3. `<repo>/stdlib/`, where `<repo>` is the directory two levels
+---      above this file (`<repo>/compiler/compiler.lua` → `<repo>/`).
+--- Returns a string ending in a single trailing slash.
+local function _stdlib_dir()
+  local override = M._stdlib_dir_override
+  if override and override ~= "" then
+    if override:sub(-1) ~= "/" and override:sub(-1) ~= "\\" then
+      override = override .. "/"
+    end
+    return override
+  end
+  local env = os.getenv("STORYBASE_STDLIB_DIR")
+  if env and env ~= "" then
+    if env:sub(-1) ~= "/" and env:sub(-1) ~= "\\" then env = env .. "/" end
+    return env
+  end
+  -- Derive from this file's source path: `<repo>/compiler/compiler.lua`.
+  local info = debug.getinfo(1, "S")
+  local src  = info and info.source or ""
+  if src:sub(1,1) == "@" then src = src:sub(2) end
+  local repo = src:match("^(.*[/\\])compiler[/\\]compiler%.lua$")
+  if not repo or repo == "" then
+    -- Fallback: relative to cwd.
+    return "stdlib/"
+  end
+  return repo .. "stdlib/"
+end
+
 --- Resolve the absolute path of an imported file.
 --- Imported paths are relative to the importing file's directory.
 --- e.g. importing "lib/npc.sb" from "/games/main.sb" → "/games/lib/npc.sb"
+---
+--- A leading `@stdlib/` prefix routes to the stdlib directory (see
+--- `_stdlib_dir`); the file extension `.sb` is appended if missing.
 ---@param import_path string  Path from import declaration
 ---@param source_file string  Path of the file containing the import
 ---@return string  resolved absolute path
 local function resolve_import_path(import_path, source_file)
+  -- @stdlib/<name> → <stdlib_dir>/<name>(.sb)
+  if import_path:sub(1, 8) == "@stdlib/" then
+    local rest = import_path:sub(9)
+    if not rest:match("%.sb$") then rest = rest .. ".sb" end
+    return _stdlib_dir() .. rest
+  end
   -- Extract directory of the source file
   local dir = source_file:match("^(.*[/\\])") or "./"
   -- If import_path is already absolute, return it unchanged
@@ -49,16 +90,17 @@ local SKIP_ON_IMPORT = {
 --- Declaration kinds that are subject to exports: filtering.
 --- State/relation/grid/speaker/verify/hook declarations are always exported.
 local EXPORTS_FILTERABLE = {
-  [ast.K.FN_DECL]       = true,
-  [ast.K.SCENE_DECL]    = true,
-  [ast.K.ACTOR_DECL]    = true,
-  [ast.K.SCHEDULE_DECL] = true,
-  [ast.K.BOUNDED_DECL]  = true,
-  [ast.K.MACRO_DECL]    = true,
-  [ast.K.TYPE_ENUM]     = true,
-  [ast.K.TYPE_ALIAS]    = true,
-  [ast.K.TYPE_RECORD]   = true,
-  [ast.K.TYPE_VARIANT]  = true,
+  [ast.K.FN_DECL]         = true,
+  [ast.K.SCENE_DECL]      = true,
+  [ast.K.ACTOR_DECL]      = true,
+  [ast.K.SCHEDULE_DECL]   = true,
+  [ast.K.BOUNDED_DECL]    = true,
+  [ast.K.MACRO_DECL]      = true,
+  [ast.K.DECL_MACRO_DECL] = true,
+  [ast.K.TYPE_ENUM]       = true,
+  [ast.K.TYPE_ALIAS]      = true,
+  [ast.K.TYPE_RECORD]     = true,
+  [ast.K.TYPE_VARIANT]    = true,
 }
 
 --- Apply namespace prefix to all non-state declarations from a namespaced import.
@@ -70,7 +112,7 @@ local EXPORTS_FILTERABLE = {
 local function apply_import_namespace(imp_ast, alias)
   local k = ast.K
 
-  -- Collect names to prefix (type/fn/scene/actor/schedule/bounded/macro)
+  -- Collect names to prefix (type/fn/scene/actor/schedule/bounded/macro/decl-macro)
   local rename = {}
   for _, decl in ipairs(imp_ast.decls or {}) do
     local dk = decl.kind
@@ -78,7 +120,8 @@ local function apply_import_namespace(imp_ast, alias)
         dk == k.TYPE_RECORD or dk == k.TYPE_VARIANT or
         dk == k.FN_DECL or dk == k.SCENE_DECL or
         dk == k.ACTOR_DECL or dk == k.SCHEDULE_DECL or
-        dk == k.BOUNDED_DECL or dk == k.MACRO_DECL)
+        dk == k.BOUNDED_DECL or dk == k.MACRO_DECL or
+        dk == k.DECL_MACRO_DECL)
        and decl.name then
       rename[decl.name] = alias .. "." .. decl.name
     end
@@ -113,7 +156,8 @@ local function apply_import_namespace(imp_ast, alias)
         nk == k.TYPE_RECORD or nk == k.TYPE_VARIANT or
         nk == k.FN_DECL or nk == k.SCENE_DECL or
         nk == k.ACTOR_DECL or nk == k.SCHEDULE_DECL or
-        nk == k.BOUNDED_DECL or nk == k.MACRO_DECL) then
+        nk == k.BOUNDED_DECL or nk == k.MACRO_DECL or
+        nk == k.DECL_MACRO_DECL) then
       copy.name = rename[copy.name]
     end
 
@@ -122,8 +166,8 @@ local function apply_import_namespace(imp_ast, alias)
       copy.name = rename[copy.name]
     end
 
-    -- Rename FN_CALL and MACRO_CALL_STMT names
-    if (nk == k.FN_CALL or nk == k.MACRO_CALL_STMT)
+    -- Rename FN_CALL, MACRO_CALL_STMT, and MACRO_CALL_DECL names
+    if (nk == k.FN_CALL or nk == k.MACRO_CALL_STMT or nk == k.MACRO_CALL_DECL)
        and copy.name and rename[copy.name] then
       copy.name = rename[copy.name]
     end

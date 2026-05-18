@@ -1,0 +1,26 @@
+module counter
+  version: 1.0
+
+# A simple bounded-integer counter at the given state path.
+#
+#   import "@stdlib/counter"
+#   counter player-health
+#
+# emits:
+#   state player-health: Int(0, 100) = 0
+#   fn player-health-inc:    inc! player-health 1
+#   fn player-health-dec:    dec! player-health 1
+#   fn player-health-reset:  set! player-health 0
+#
+# The path argument may be any single-segment identifier or a multi-
+# segment state path; substitution flattens it into the surrounding
+# segments list. See docs/reference/language.md, §"Decl-emitting macros".
+
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+  fn $path-dec:
+    dec! $path 1
+  fn $path-reset:
+    set! $path 0

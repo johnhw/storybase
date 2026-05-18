@@ -105,6 +105,10 @@ EMIT_MUT         -- engine/emit event [args]
   / `{kind="composite",parts=...}` until Stage 3 expansion substitutes
   them. `parse_decl`'s IDENT branch falls through to
   `parse_macro_call_decl` (new) for unknown idents.
+- §E0 Stage 5: `parse_macro_call_decl` consumes an optional `.` +
+  IDENT after the leading name so `Alias.macro-name` from a
+  namespaced import (`import "lib" as Alias`) parses cleanly (mirrors
+  the existing `parse_atom` fn-call branch at line 1200).
 
 ---
 
@@ -135,14 +139,28 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/compiler.lua` (672 lines)
+### `compiler/compiler.lua` (~700 lines)
 - `M.compile(source, filename, opts?)` → `(game_table, diags)`
 - `M.compile_file(filepath, opts?)` → `(game_table, diags)`
 - `M.parse_and_check(source, filename)` → `(typed_ast, diags)` — stops before codegen; returns AST with `.decls`
 - `M.parse_and_check_file(filepath)` → `(typed_ast, diags)`
+- `M._stdlib_dir_override` → test hook; takes precedence over the env
+  var when set (see §E0 Stage 5 below)
 - `opts.production = true` → passed to codegen to strip debug-only content
 - Runs lexer → parser → resolve_imports → checker → codegen in sequence
-- `resolve_imports` splices imported declarations (from `import "file.sb"`) before type-check; cycle detection via IMPORT_CYCLE error
+- `resolve_imports` splices imported declarations (from `import "file.sb"`) before type-check; cycle detection via IMPORT_CYCLE error.
+- §E0 Stage 5 import resolver extensions:
+  - `resolve_import_path` recognises `@stdlib/<name>` and routes to the
+    stdlib dir. Resolution order: `M._stdlib_dir_override` →
+    `STORYBASE_STDLIB_DIR` env var → repo-relative `<repo>/stdlib/`
+    (derived from this file's `debug.getinfo` source). `.sb` is
+    appended automatically if absent.
+  - `apply_import_namespace` renames `DECL_MACRO_DECL.name` and
+    `MACRO_CALL_DECL.name` (so `import "lib" as C` rewrites both the
+    template name and any internal call site).
+  - `EXPORTS_FILTERABLE` includes `DECL_MACRO_DECL`, so
+    `module ... exports: [name]` whitelist filtering works for
+    decl-macros.
 - `expand_macros` runs two sub-passes: §E0 Stage 3 `expand_decl_macros`
   splices `MACRO_CALL_DECL` sites with `DECL_MACRO_DECL` bodies (deep-copy
   + `$param` substitution into `PATH_EXPR.segments` and `name_parts`),
@@ -157,6 +175,21 @@ EMIT_MUT         -- engine/emit event [args]
   raised by the checker (or any later pass) against expanded nodes are
   auto-decorated with `"expanded from macro 'NAME' at FILE:LINE"`
   inside `ast._diag` — no checker-side change needed.
+
+---
+
+## stdlib/
+
+Shipped `.sb` modules importable via the `@stdlib/<name>` prefix
+(resolved by `compiler/compiler.lua:resolve_import_path`, §E0 Stage 5).
+The resolver looks up `M._stdlib_dir_override` first (test hook), then
+`STORYBASE_STDLIB_DIR` env var, then defaults to `<repo>/stdlib/`.
+
+### `stdlib/counter.sb`
+A reference decl-macro: `counter $path` emits a bounded-int state at
+`$path` plus `$path-inc`, `$path-dec`, `$path-reset` mutating fns. Used
+by the §E0 Stage 5 cross-import acceptance tests; serves as a template
+for the larger E2/E3 stdlib modules (dialog / inventory / stat).
 
 ---
 

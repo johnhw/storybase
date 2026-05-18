@@ -13,7 +13,7 @@ silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through A
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete.
 
-**~2794 successes / 0 failures / 2 pending (known limitations).**
+**~2802 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -377,23 +377,40 @@ diagnostic emitter already funnels through `ast.error` / `ast.warning` /
 No regressions: full suite 2794 passing / 0 failures / 2 pre-existing
 pending (unrelated formatter known-limitations).
 
-#### Stage 5 — Cross-import wiring
+#### Stage 5 — Cross-import wiring ✅ (2026-05-18)
 
-Goal: `import "@stdlib/inventory"` followed by `inventory player/inventory:`
-works; namespaced `import ... as Foo` still renames cleanly.
+`import "@stdlib/counter"` followed by `counter player-health` works;
+namespaced `import ... as C` (calling `C.counter ...`) renames cleanly.
 
-- `compiler/compiler.lua:apply_import_namespace`: extend the rename walker
-  to handle the new `DECL_MACRO_DECL.name` and `MACRO_CALL_DECL.name`
-  (mirror the existing `MACRO_CALL_STMT` branch at line 126).
-- `compiler/compiler.lua:EXPORTS_FILTERABLE`: add `DECL_MACRO_DECL` so
-  `exports:` whitelist filtering works for it.
-- `compiler/compiler.lua:resolve_import_path` (line 32): add `@stdlib/`
-  prefix handling — map to a known dir, default `<repo>/stdlib/`,
-  overridable via `STORYBASE_STDLIB_DIR` env var (so tests can point at a
-  fixture directory).
-- Tests: imported module exports a `decl-macro`; downstream file uses it
-  unaliased and via `import ... as Inv`. Checker errors at the call site
-  point at the call site.
+- `compiler/compiler.lua:EXPORTS_FILTERABLE`: added `DECL_MACRO_DECL`
+  so `module ... exports: [name]` whitelist filtering covers
+  decl-macros.
+- `compiler/compiler.lua:apply_import_namespace`: rename walker now
+  handles `DECL_MACRO_DECL.name` (decl-level alias prefix) and
+  `MACRO_CALL_DECL.name` (call-site reference inside an imported
+  module's body).
+- `compiler/parser.lua:parse_macro_call_decl`: accepts the
+  `Alias.macro-name` form by consuming an optional `.` + IDENT after
+  the leading name token (parallels the existing fn-call handling at
+  `compiler/parser.lua:1200`).
+- `compiler/compiler.lua:resolve_import_path`: new `@stdlib/<name>`
+  prefix branch. Resolution order is (1) `M._stdlib_dir_override`
+  test hook, (2) `STORYBASE_STDLIB_DIR` env var, (3) the repo-relative
+  `<repo>/stdlib/` derived from `debug.getinfo(1,"S").source`.
+  The `.sb` extension is appended automatically when absent.
+- New `stdlib/` directory + `stdlib/counter.sb` fixture: a small
+  `counter $path` decl-macro that emits state + inc/dec/reset fns,
+  used by Stage 5 acceptance tests and as a reference shape for E2/E3.
+- `tests/compiler/macro_decl_spec.lua`: 7 new Stage 5 tests covering
+  plain-import call + runtime execution, namespaced call (`C.counter`),
+  two namespaced imports of the same file with different paths,
+  `exports:` filter inclusion / exclusion of a `decl-macro`, checker
+  errors stamping the call-site line/file with the `expanded from
+  macro` note, and the `@stdlib/` resolver via both the override hook
+  and the default `<repo>/stdlib/` fallback.
+
+Open (Stage 6 only):
+- Docs page in `docs/reference/language.md` + acceptance demo.
 
 #### Stage 6 — Docs, acceptance demo, code-map
 
