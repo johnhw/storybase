@@ -5,6 +5,103 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## E4 — E-series review fixes ✅ (2026-05-18)
+
+Two-pass cleanup of follow-ups from the post-merge code review of E0–E3.
+Bugs 1–4 + doc cleanup landed in commit `7ed1751`; bug 5, gaps 1–4,
+tests 1–3, and doc-1 closeout landed in `8b7391e`. None of these
+blocked existing demos (demo24/demo25 still verified cleanly throughout).
+
+**Bugs:**
+
+- **E4-bug-1** (`npcs/$kind` path-syntax docs vs. parser mismatch):
+  `parser.lua:try_extend_dynamic_path` now slurps an
+  `(IDENT|MACRO_PARAM|COMPOSITE_IDENT) (/ IDENT|MACRO_PARAM|COMPOSITE_IDENT|NAMED_ARG)+`
+  run after the first segment of a state-decl or mut-path, splicing the
+  extras (strings + `{kind="macro_param"}` slots) onto the PATH_EXPR.
+  Fires only in those two contexts so expression-level `score / 2`
+  stays binary division.
+- **E4-bug-2** (`DUPLICATE_DECL` → `DUPLICATE_NAME`): all five doc
+  references renamed; `grep -rn DUPLICATE_DECL` now empty.
+- **E4-bug-3** (single-pass restriction missed stmt-position calls):
+  `expand_decl_macros` now collects every decl-macro name first, then
+  walks each decl-macro body via `walk_for_nested` flagging any
+  `MACRO_CALL_DECL` / `MACRO_CALL_STMT` / `FN_CALL` whose name matches
+  a known decl-macro. Top-level *and* fn/scene/actor body nested calls
+  raise `MACRO_DECL_EMIT`.
+- **E4-bug-4** (zero-step quest): `expand_quests` now emits
+  `BAD_DECLARATION` for a quest whose `steps` list is empty and skips
+  emitting the desugared decls so downstream passes don't compound the
+  error.
+- **E4-bug-5** (shared reward AST across N completion sites): new
+  `_deep_copy_ast` helper in `compiler/compiler.lua`; each step's
+  `completion_body` now gets its own clone of every `decl.reward` item.
+
+**Gaps:**
+
+- **E4-gap-1** (quest-emitted decls lacked `expanded_from`):
+  `ast.format_expanded_from` recognises a `source = "quest"` info shape
+  and emits an `auto-emitted by quest '<name>' at FILE:LINE` note;
+  `expand_quests` stamps one `{source, quest_name, quest_pos}` table on
+  every fresh pos (state decls, helper-query fns, start! fn, each
+  per-step `quest-Q-do-<s>` fn). Per-step fn pos clones `st.pos` so
+  diagnostics still point at user source while carrying the quest info.
+  `mk_pos()` now honours `qpos.col` (was hardcoded 0).
+- **E4-gap-2** (`emit_quests` dropped `prereq`/`reward`): `game_table.quests`
+  entries now expose `prereq`, `reward`, and per-step `requires` as raw
+  AST nodes. Choice documented in `code_map.md` — downstream tools
+  should treat the fields as opaque or dispatch on `ast.K.*`.
+- **E4-gap-3** (`exports: []` silently exported everything): the
+  `#d.exports > 0` guard in `resolve_imports` is gone; the empty-list
+  case now filters out everything (matches set semantics).
+- **E4-gap-4** (quest name couldn't be a `MACRO_PARAM`):
+  `parse_quest_decl` accepts `MACRO_PARAM` / `COMPOSITE_IDENT` for the
+  quest name, stores `name_parts` on the AST, and the existing
+  `substitute_decl_node` machinery resolves it before `expand_quests`
+  runs — so a `decl-macro` can emit a parameterised quest.
+
+**Tests:**
+
+- **E4-test-1**: real `inventory full?` boundary in
+  `tests/stdlib/inventory_spec.lua` — `Enum(sword, shield, potion)`
+  with `$max=3` so the bag actually fills and `full?` flips true and
+  back.
+- **E4-test-2**: new `quest decl — auto-verify execution` describe
+  block in `tests/compiler/quest_spec.lua` invokes `verify.run_all` on
+  a quest whose step `requires: player/has-crown` (a never-true path)
+  and asserts the auto-emitted reachability verify fails with
+  `not reachable` / budget-truncated.
+- **E4-test-3**: covers MULTILINE_STRING quest description,
+  `STORYBASE_STDLIB_DIR` env-var resolution (via child `lua5.4`
+  process — Lua 5.4 has no built-in setenv), and explicit
+  `@stdlib/<name>.sb` suffix.
+
+**Doc (E4-doc-1):** `docs/reference/language.md` temporal-logic example
+no longer uses `quest/complete` (which could read as the §E1
+auto-emitted path — the real path is `quests/<Q>/complete`, plural).
+The example uses `world/objective-met`, with a clarifying paragraph
+noting the reserved `quests/<Q>/...` namespace.
+
+**Files touched (summary):**
+
+- `compiler/ast.lua` — `format_expanded_from` handles quest source info.
+- `compiler/codegen.lua` — `emit_quests` exposes prereq/reward/requires.
+- `compiler/compiler.lua` — `_deep_copy_ast`, quest `expanded_from`
+  stamping, empty-exports filter fix, nested decl-macro walker.
+- `compiler/parser.lua` — `parse_quest_decl` accepts MACRO_PARAM /
+  COMPOSITE_IDENT; `try_extend_dynamic_path` splicer (E4-bug-1).
+- `docs/reference/language.md` — `quest/complete` cleanup, doc fixes.
+- `code_map.md` — documented `emit_quests` exposure choice.
+- `tests/compiler/quest_spec.lua` — 16 → 24 tests.
+- `tests/compiler/import_spec.lua` — +1 test.
+- `tests/compiler/macro_decl_spec.lua` — +2 tests.
+- `tests/stdlib/inventory_spec.lua` — 10 → 11 tests.
+
+Full suite at closeout: 2863 successes / 0 failures / 2 pre-existing
+pending (unrelated formatter limitations).
+
+---
+
 ## E3 — `inventory` and `stat` stdlib modules ✅ (2026-05-18)
 
 Two reusable `decl-macro`-based stdlib modules shipped as `.sb` files
@@ -175,6 +272,125 @@ require iterating the BFS over the cross-product of reachable
 configurations. The single reachability check is the headline value;
 softlock detection can ride on the same QUEST_DECL hook later without
 breaking the wire shape.
+
+---
+
+## E0 — Decl-emitting macro substrate ✅ (2026-05-17 / 2026-05-18)
+
+A six-stage extension to the macro system that lets `dialog` /
+`inventory` / `stat` (and any future "pattern every game reinvents")
+live as stdlib `.sb` modules instead of bespoke AST kinds. Before E0,
+macros (`compiler/compiler.lua`) expanded statements only, and the
+imports' `exports:` filter excluded `state`, so neither mechanism could
+deliver a reusable state-family template. After E0 they can.
+
+**Design pillars:**
+
+- **New keyword `decl-macro`** for declaration-emitting macros, parallel
+  to the existing `macro`. AST gets new `DECL_MACRO_DECL` and
+  `MACRO_CALL_DECL` kinds — no `body_kind` discriminator; the AST kind
+  encodes it. The existing `macro` keyword stays stmt-level only.
+- **Lexer-level `$param` support.** `$IDENT` becomes a new
+  `MACRO_PARAM` token. Adjacent `IDENT` / `-` / `MACRO_PARAM` runs with
+  no whitespace produce a `COMPOSITE_IDENT` token, so
+  `fn give-$path item:`, `fn $path-init`, and `has-$path?` all work as
+  written. `$` was previously illegal outside string literals, so no
+  existing test regressed.
+
+**Stage 1 (2026-05-17) — decl-bodied `decl-macro` parsing + AST.**
+`decl-macro NAME params...:` whose body is a list of decls (`state`,
+`fn`, `scene`, `verify`, `actor`, `schedule`, `bounded`, `relation`,
+`type`). Params accepted but not yet substituted. 11 lex/parse/pipeline
+tests in `tests/compiler/macro_decl_spec.lua`.
+
+**Stage 2 (2026-05-17) — lexer `$param` + composite identifiers.**
+`$IDENT` → `MACRO_PARAM`. No-whitespace runs collapse into
+`COMPOSITE_IDENT` whose value is a parts list of strings +
+`{kind="macro_param", name=...}` entries. Trailing `!`/`?` appended to
+the last string part. `/` ends the composite (`npcs/$kind` is three
+tokens). Bare `$` raises `ILLEGAL_CHAR`. 16 lex-level tests added.
+
+**Stages 2b + 3 (2026-05-17) — parser plumbing + decl-level expansion.**
+`parse_fn_decl`, `parse_state_decl`, `parse_mut_path`, `parse_atom`,
+`can_start_arg`, and `parse_decl_macro_decl` all accept `MACRO_PARAM`
+and `COMPOSITE_IDENT`; the parts list is stored on `name_parts` until
+expansion resolves it. New `parse_macro_call_decl` handles top-level
+IDENT decls that don't match any decl keyword.
+
+Compiler ships `expand_decl_macros`, which collects every
+`DECL_MACRO_DECL` into a registry, walks top-level `MACRO_CALL_DECL`s,
+builds a `param_map`, and deep-copies the body via
+`substitute_decl_node`. The substitution handles two `PATH_EXPR.segments`
+placeholder shapes (`{kind="macro_param", name=X}` and
+`{kind="composite", parts=...}`), plus `name_parts` on any decl-name
+field — multi-segment paths flatten into segments but a multi-segment
+substitution into a composite name slot raises `MACRO_DECL_EMIT`.
+16 new tests.
+
+**Stage 4 (2026-05-17) — position propagation + checker hookup.**
+`ast.format_expanded_from(info)` renders an `expanded from macro 'NAME'
+at FILE:LINE` note; `_diag` calls it when `pos.expanded_from` is
+present. `substitute_decl_node` attaches the info table to every
+freshly-minted pos. Zero changes needed in `checker.lua` — every
+diagnostic emitter funnels through `ast.error`/`warning`/`hint`, so
+the decoration is uniform. 7 new Stage-4 tests covering call-site
+line reporting, the `DUPLICATE_NAME` "previous declaration + expanded
+from" note join, and `format_expanded_from` tolerance.
+
+**Stage 5 (2026-05-18) — cross-import wiring.** `EXPORTS_FILTERABLE`
+includes `DECL_MACRO_DECL`. `apply_import_namespace` renames
+`DECL_MACRO_DECL.name` and `MACRO_CALL_DECL.name`.
+`parse_macro_call_decl` accepts the `Alias.macro-name` form.
+`resolve_import_path` has a new `@stdlib/<name>` branch with
+resolution order:
+
+1. `M._stdlib_dir_override` (test hook),
+2. `STORYBASE_STDLIB_DIR` env var,
+3. repo-relative `<repo>/stdlib/` derived from
+   `debug.getinfo(1,"S").source`.
+
+`.sb` is appended when absent. New `stdlib/` directory + `stdlib/counter.sb`
+fixture. 7 Stage-5 tests.
+
+**Stage 6 (2026-05-18) — docs, acceptance, single-pass restriction.**
+New `decl-macro` subsection in `docs/reference/language.md` covers the
+keyword, `$param` interpolation rules (whole-ident, composite-ident,
+path-segment slots, multi-segment flatten-vs-stringify), hygiene model
+(no rewriting; relies on `DUPLICATE_NAME`), the single-pass restriction
+(nested calls raise `MACRO_DECL_EMIT`), the `expanded from` diag note
+shape, and the `@stdlib/<name>` import prefix. `MACRO_DECL_EMIT` added
+to the error-code table.
+
+`expand_decl_macros` now scans every decl-macro body for nested
+`MACRO_CALL_DECL` children at template-registration time and raises
+`MACRO_DECL_EMIT` ("nested decl-macro calls are not supported"),
+closing the spec edge case that was previously documented but
+unenforced. (E4-bug-3 later extended this to stmt-position calls too.)
+4 acceptance tests covering end-to-end `import "@stdlib/counter"`,
+imported-decl error reporting, nested-call rejection, and the
+regression that stmt-level `macro` inside a `decl-macro` body still
+works.
+
+**Files touched (summary):**
+
+- `compiler/lexer.lua` — `decl-macro` keyword, `$IDENT` MACRO_PARAM,
+  composite-identifier emission.
+- `compiler/ast.lua` — `DECL_MACRO_DECL`, `MACRO_CALL_DECL` kinds + ctors;
+  `E.MACRO_DECL_EMIT` / `E.UNDEFINED_NAME`; `expanded_from` convention.
+- `compiler/parser.lua` — `parse_decl_macro_decl`,
+  `parse_macro_call_decl`, composite-identifier handling at every
+  name-consuming site.
+- `compiler/compiler.lua` — `expand_decl_macros`, `substitute_decl_node`,
+  `@stdlib/` resolver, namespace renamer extension, single-pass
+  nested-call check, `EXPORTS_FILTERABLE` update.
+- `tests/compiler/macro_decl_spec.lua` — new spec, ~62 tests across the
+  six stages.
+- `docs/reference/language.md` — new subsection.
+- `code_map.md` — new entries.
+- `stdlib/` — new directory with `stdlib/counter.sb` fixture.
+
+Suite at Stage 6 closeout: 2806 successes / 0 failures / 2 pre-existing
+pending.
 
 ---
 
