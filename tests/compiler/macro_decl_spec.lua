@@ -1221,6 +1221,132 @@ scene s:
     assert.equal(7, eng._state:get("player-health"))
   end)
 
+  it("E4-test-3: @stdlib/ resolver honours STORYBASE_STDLIB_DIR env var", function()
+    -- The env var is consulted only when the test hook is unset.
+    -- Build a fixture stdlib directory with a counter macro whose
+    -- initialiser is a distinctive value, point the env var at it,
+    -- and confirm the value lands in the compiled state.
+    local tmpdir = os.tmpname()
+    os.remove(tmpdir)
+    os.execute('mkdir -p "' .. tmpdir .. '"')
+    local fixture_path = tmpdir .. "/counter.sb"
+    local f = io.open(fixture_path, "w")
+    f:write([[
+module counter-lib
+  version: 1.0
+decl-macro counter $path:
+  state $path: Int(0, 99) = 42
+]])
+    f:close()
+
+    local prev_override = compiler._stdlib_dir_override
+    local prev_env      = os.getenv("STORYBASE_STDLIB_DIR")
+    compiler._stdlib_dir_override = nil
+    -- Lua 5.4 doesn't have setenv built-in; use os.execute via a child
+    -- shell won't help since the env propagates only downward. Instead
+    -- shell out to lua5.4 itself with the env set, capturing the
+    -- value via the resolver's behaviour.
+    -- Simpler approach: set via posix-style hack — use a wrapper
+    -- through the C runtime if available. Fall back: just set
+    -- _stdlib_dir_override (the env-var branch is what we're trying
+    -- to exercise though). Lua's `os.execute` runs a subprocess, so
+    -- we instead force the env var by writing a tiny wrapper script.
+
+    -- Cleanest way: invoke the resolver directly via a child Lua proc.
+    local lua_script = string.format([[
+package.path = %q .. ';' .. package.path
+local compiler = require("compiler.compiler")
+local gt, diags = compiler.compile([==[
+module counter-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import "@stdlib/counter"
+
+counter player-health
+
+scene s:
+  -> s
+]==], "test.sb")
+if diags:has_errors() then
+  io.write("ERR:" .. (diags.errors[1] and diags.errors[1].message or "?"))
+else
+  local engine = require("runtime.engine")
+  local eng = engine.new(gt, {})
+  eng:init()
+  io.write("OK:" .. tostring(eng._state:get("player-health")))
+end
+]], package.path:gsub("'", "'\\''"))
+
+    local script_path = os.tmpname()
+    local sf = io.open(script_path, "w"); sf:write(lua_script); sf:close()
+    local cmd = string.format(
+      'STORYBASE_STDLIB_DIR=%q lua5.4 %q 2>&1',
+      tmpdir, script_path)
+    local proc = io.popen(cmd, "r")
+    local output = proc:read("*a")
+    proc:close()
+    os.remove(script_path)
+    os.remove(fixture_path)
+    os.execute('rmdir "' .. tmpdir .. '"')
+
+    compiler._stdlib_dir_override = prev_override
+    -- (env var doesn't leak back since it was only set in the child)
+
+    assert.is_truthy(output:match("OK:42"),
+      "expected the fixture's init value (42) to land via env-var-resolved stdlib; got: " ..
+      tostring(output))
+  end)
+
+  it("E4-test-3: @stdlib/ resolves explicit .sb suffix the same as no suffix", function()
+    -- The resolver appends `.sb` if absent but should also accept an
+    -- explicit `.sb`. Compile two main files, one with `@stdlib/counter`
+    -- and one with `@stdlib/counter.sb`, and confirm both succeed.
+    local prev = compiler._stdlib_dir_override
+    compiler._stdlib_dir_override = nil
+
+    local main_no_ext = tmpfile([[
+module m
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import "@stdlib/counter"
+
+counter score-a
+
+scene s:
+  -> s
+]])
+    local gt1, d1 = compiler.compile_file(main_no_ext)
+    os.remove(main_no_ext)
+    assert.is_not_nil(gt1, tostring(d1.errors and d1.errors[1] and d1.errors[1].message))
+    assert.is_false(d1:has_errors())
+
+    local main_with_ext = tmpfile([[
+module m
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import "@stdlib/counter.sb"
+
+counter score-b
+
+scene s:
+  -> s
+]])
+    local gt2, d2 = compiler.compile_file(main_with_ext)
+    os.remove(main_with_ext)
+    compiler._stdlib_dir_override = prev
+
+    assert.is_not_nil(gt2, tostring(d2.errors and d2.errors[1] and d2.errors[1].message))
+    assert.is_false(d2:has_errors(),
+      "explicit @stdlib/<name>.sb suffix should resolve as well as the implicit form")
+    assert.is_not_nil(gt2.fns and gt2.fns["score-b-inc"])
+  end)
+
   it("@stdlib/ resolver falls back to <repo>/stdlib/ when no override is set", function()
     -- Confirm the shipped stdlib/counter.sb resolves cleanly without any
     -- override.  This depends on the shipped fixture; if it ever changes

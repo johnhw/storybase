@@ -850,19 +850,39 @@ end
 --- Mostly informational — the runtime behaviour is carried entirely by the
 --- desugared state + fn declarations spliced in by `compiler.expand_quests`.
 --- Codegen keeps an entry per quest so tooling (docs, LSP) can list them.
+---
+--- Each entry exposes:
+---   - name         string         the quest's identifier
+---   - description  string?        author-supplied description (if any)
+---   - doc          string?        author doc-string (if any)
+---   - steps        table[]        per-step summaries (each: {name, requires})
+---   - prereq       table?         AST node for the `prereq:` expression
+---   - reward       table[]?       AST node list for the `reward:` body
+---
+--- §E4-gap-2: `prereq` and `reward` (and `steps[].requires`) are raw AST
+--- nodes — sufficient for tooling that walks the AST shape directly. They
+--- are documented as AST-shaped values; downstream tools should treat
+--- them as opaque or use ast.K constants to dispatch on them. If a more
+--- stable summary becomes necessary, build it from these AST nodes
+--- without changing the field names.
 local function emit_quests(decls)
   local quests = {}
   for _, node in ipairs(decls) do
     if node.kind == ast.K.QUEST_DECL then
       local steps = {}
       for _, st in ipairs(node.steps or {}) do
-        steps[#steps+1] = { name = st.name }
+        steps[#steps+1] = {
+          name     = st.name,
+          requires = st.requires,
+        }
       end
       quests[#quests+1] = {
         name        = node.name,
         description = node.description,
         steps       = steps,
         doc         = node.doc,
+        prereq      = node.prereq,
+        reward      = node.reward,
       }
     end
   end

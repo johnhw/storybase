@@ -3917,9 +3917,25 @@ local function parse_quest_decl(p, doc)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD("quest")
 
+  -- §E4-gap-4: accept MACRO_PARAM / COMPOSITE_IDENT so a decl-macro can
+  -- emit a parameterised quest (e.g. `quest $name:` inside a decl-macro
+  -- body). The substitute_decl_node pass resolves `name_parts` to a
+  -- concrete string before the checker sees the QUEST_DECL.
   local name
+  local name_parts = nil
   if p:at("NAMED_ARG") then
     name = p:adv().value
+  elseif p:at("COMPOSITE_IDENT") then
+    local t = p:adv()
+    name_parts = t.value
+    name = compose_name_placeholder(name_parts)
+    -- COMPOSITE_IDENT never fuses ':' into the token; eat it.
+    p:expect("OP", ":", "expected ':' after quest name")
+  elseif p:at("MACRO_PARAM") then
+    local t = p:adv()
+    name_parts = { { kind = "macro_param", name = t.value } }
+    name = "$" .. t.value
+    p:expect("OP", ":", "expected ':' after quest name")
   elseif p:at("IDENT") then
     name = p:adv().value
     p:expect("OP", ":", "expected ':' after quest name")
@@ -3935,7 +3951,9 @@ local function parse_quest_decl(p, doc)
   local steps = {}
 
   if not p:at("INDENT") then
-    return ast.quest_decl(name, description, prereq, steps, reward, doc, tpos)
+    local qd = ast.quest_decl(name, description, prereq, steps, reward, doc, tpos)
+    if name_parts then qd.name_parts = name_parts end
+    return qd
   end
   p:adv()  -- consume INDENT
 
@@ -4023,7 +4041,9 @@ local function parse_quest_decl(p, doc)
   end
 
   if p:at("DEDENT") then p:adv() end
-  return ast.quest_decl(name, description, prereq, steps, reward, doc, tpos)
+  local qd = ast.quest_decl(name, description, prereq, steps, reward, doc, tpos)
+  if name_parts then qd.name_parts = name_parts end
+  return qd
 end
 
 -- ============================================================

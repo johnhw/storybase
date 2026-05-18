@@ -259,10 +259,14 @@ local function resolve_imports(ast_root, source_file, diags, in_progress)
               in_progress[imp_path] = true
               resolve_imports(imp_ast, imp_path, diags, in_progress)
               in_progress[imp_path] = nil
-              -- Apply exports: filtering before namespace renaming (names are originals here)
+              -- Apply exports: filtering before namespace renaming (names are originals here).
+              -- §E4-gap-3: an empty `exports: []` list now means "export nothing"
+              -- (matches set semantics + user expectation). Previously the
+              -- `#d.exports > 0` guard fell through to the "no filter" branch
+              -- and silently exported everything.
               local exports_set = nil
               for _, d in ipairs(imp_ast.decls or {}) do
-                if d.kind == ast.K.MODULE_DECL and d.exports and #d.exports > 0 then
+                if d.kind == ast.K.MODULE_DECL and d.exports then
                   exports_set = {}
                   for _, n in ipairs(d.exports) do exports_set[n] = true end
                   break
@@ -1131,6 +1135,18 @@ local function _path_read(file, line, ...)
   return _qpath(file, line, ...)
 end
 
+--- Deep-copy an AST subtree (tables only). Scalars are left as-is.
+--- Used by the quest desugar to clone `reward` AST nodes per step so
+--- the same AST table isn't shared across N completion sites (E4-bug-5).
+local function _deep_copy_ast(node)
+  if type(node) ~= "table" then return node end
+  local copy = {}
+  for k, v in pairs(node) do
+    copy[k] = _deep_copy_ast(v)
+  end
+  return copy
+end
+
 --- Expand every QUEST_DECL in the program by appending desugared state +
 --- fn declarations.  The QUEST_DECL nodes themselves are *kept* so that
 --- codegen can emit auto-verify blocks referencing them.  Reports
@@ -1163,8 +1179,22 @@ local function expand_quests(ast_root, diags, filename)
 
         local qpos = decl.pos or ast.pos(filename, 0, 0)
         local line = qpos.line or 0
+        local col  = qpos.col or 0
 
-        local function mk_pos() return ast.pos(filename, line, 0) end
+        -- §E4-gap-1: stamp every quest-emitted node's pos with an
+        -- `expanded_from` info table so the diagnostic constructor can
+        -- decorate errors on auto-emitted decls with an
+        -- "auto-emitted by quest 'X' at file:line" note.
+        local expansion_info = {
+          source     = "quest",
+          quest_name = qname,
+          quest_pos  = qpos,
+        }
+        local function mk_pos()
+          local p = ast.pos(filename, line, col)
+          p.expanded_from = expansion_info
+          return p
+        end
 
         -- ── State declarations ─────────────────────────────────────
         local function emit_state(seg_step)
@@ -1237,7 +1267,18 @@ local function expand_quests(ast_root, diags, filename)
         for _, st in ipairs(decl.steps or {}) do
           local sname = st.name
           if sname then
-            local pos = st.pos or mk_pos()
+            -- Build a fresh pos for the emitted fn decl: preserves the
+            -- source line/col of the `step` block (so diagnostics point
+            -- at the user's code) but stamps the quest-source
+            -- expansion_info so checker errors against quest-Q-do-<s>
+            -- carry the "auto-emitted by quest 'Q'" note (§E4-gap-1).
+            local pos
+            if st.pos then
+              pos = ast.pos(st.pos.file, st.pos.line, st.pos.col)
+              pos.expanded_from = expansion_info
+            else
+              pos = mk_pos()
+            end
 
             -- Inner "all steps complete?" conjunction (computed at the
             -- moment of completion, so the just-set step contributes).
@@ -1258,8 +1299,13 @@ local function expand_quests(ast_root, diags, filename)
                        "quests", qname, "active"),
                 _qbool_lit(false, filename, pos.line or line), pos),
             }
+            -- §E4-bug-5: deep-copy each reward AST so the same node isn't
+            -- shared across every step's completion_body. Without this,
+            -- any later pass that decorates AST nodes per-occurrence
+            -- (type cache, inline transform) would silently corrupt all
+            -- N references at once.
             for _, rs in ipairs(decl.reward or {}) do
-              completion_body[#completion_body+1] = rs
+              completion_body[#completion_body+1] = _deep_copy_ast(rs)
             end
             local completion_when = ast.when_stmt(all_done, completion_body, pos)
 

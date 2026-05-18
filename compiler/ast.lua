@@ -42,8 +42,20 @@ local NO_POS = M.pos("?", 0, 0)
 --- malformed. See §E0 Stage 4: the substitution pass attaches an info
 --- table to every emitted node's `pos`, so any diagnostic whose `pos`
 --- traces back to a decl-macro body can be decorated automatically.
+---
+--- §E4-gap-1: also handles `source = "quest"` info tables produced by the
+--- quest desugar pass, formatted as
+--- "auto-emitted by quest '<name>' at FILE:LINE".
 function M.format_expanded_from(info)
   if type(info) ~= "table" then return nil end
+  if info.source == "quest" then
+    local name = info.quest_name or "?"
+    local qp   = info.quest_pos or {}
+    local file = qp.file or "?"
+    local line = qp.line or 0
+    return string.format(
+      "auto-emitted by quest '%s' at %s:%d", name, file, line)
+  end
   local name = info.macro_name or "?"
   local mp   = info.macro_pos or {}
   local file = mp.file or "?"

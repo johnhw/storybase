@@ -132,6 +132,13 @@ EMIT_MUT         -- engine/emit event [args]
 - §E1 auto-verify: `emit_quest_verifies` synthesises one
   `verify-eventually (quest-<name>-complete?)` clause per `QUEST_DECL`,
   appended to `game_table.verifies` (skipped in production builds).
+- §E4-gap-2: `emit_quests` exposes `prereq` and `reward` (and
+  `steps[].requires`) on each `game_table.quests` entry as raw AST
+  nodes — sufficient for tooling that walks the AST shape directly.
+  Downstream tools should treat them as opaque or dispatch on
+  `ast.K.*` constants. If a more stable representation becomes
+  necessary later, build it on top of these fields without renaming
+  them.
 
 ---
 

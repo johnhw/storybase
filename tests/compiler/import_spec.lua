@@ -695,6 +695,36 @@ scene s:
     assert.is_false(diags:has_errors())
   end)
 
+  it("E4-gap-3: empty exports: [] filters out everything", function()
+    local lib = tmpfile([[
+module empty-exports-lib
+  version: 1.0
+  exports: []
+
+type Color = red | green
+fn the-answer:
+  -> 42
+]])
+    local main = tmpfile(string.format([[
+module empty-exports-main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+scene s:
+  let x = (the-answer):
+    Done.
+]], lib))
+    local _, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    -- Empty exports list means the importing file sees neither Color
+    -- nor the-answer; calling the-answer should fail.
+    assert.is_true(diags:has_errors(),
+      "expected error: nothing is exported when exports: [] is empty")
+  end)
+
   it("module exports: list is parsed and stored in AST", function()
     local src = [[
 module parsed-exports

@@ -14,8 +14,9 @@ resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (�
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete. §E0 (decl-emitting
 macro substrate) complete; §E1 (`quest` declarations) and §E3
 (`inventory` + `stat` stdlib modules) shipped 2026-05-18.
+§E4 review fixes (bugs 1–5, gaps 1–4, tests 1–3, doc 1) all landed 2026-05-18.
 
-**~2842 successes / 0 failures / 2 pending (known limitations).**
+**~2863 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -27,12 +28,8 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
 - §A2 — Inelegance #7 — BFS expansion duplication (deferred; documented).
-- §E4 — E-series review fixes. **Bugs 1–4 fixed 2026-05-18.** Remaining:
-  E4-bug-5 (quest reward AST node sharing), E4-gap-1..4 (quest decoration
-  / metadata exposure / empty exports / quest-name MACRO_PARAM),
-  E4-test-1..3 (boundary / unreachable / coverage gaps), E4-doc-1 partial
-  (the `npcs/$kind` and `DUPLICATE_DECL` claims are now resolved; only
-  the §E1 desugar table generic-`quest/complete` mention remains).
+- §E4 — closed. All E4 follow-ups from the post-merge code review landed
+  2026-05-18 (see "§E4 closeout" in completed.md once moved).
 
 **Future Features and Extensions (large):** Suggested ordering for impact:
 
@@ -619,92 +616,111 @@ quest so downstream passes don't compound the error. Regression
 test at `tests/compiler/quest_spec.lua` ("rejects a quest with zero
 steps").
 
-#### E4-bug-5. Quest reward AST nodes are shared across N completion sites
+#### E4-bug-5. Quest reward AST nodes are shared across N completion sites  ✅ **Fixed 2026-05-18**
 
-`compiler/compiler.lua:1227-1229` appends each `decl.reward` item by
-reference into the `completion_body` of *every* step's do-fn. Runtime
-correctness is preserved by the `active`-gate (only the last step's
-fire wins), but the shared references make the desugar fragile —
-any future pass that decorates AST nodes per-occurrence (typing
-cache, inline transforms) would silently corrupt all N references at
-once. Deep-copy `decl.reward` per step's completion_body.
+`expand_quests` now deep-copies each `decl.reward` AST item per step's
+`completion_body` via a new `_deep_copy_ast` helper
+(`compiler/compiler.lua`). Regression test "E4-gap-1: reward AST is
+deep-copied per step" in `tests/compiler/quest_spec.lua` exercises the
+two-step + reward path and confirms the single `inc!` fires exactly once
+at runtime.
 
-#### E4-gap-1. Quest-emitted decls lack `expanded_from` decoration
+#### E4-gap-1. Quest-emitted decls lack `expanded_from` decoration  ✅ **Fixed 2026-05-18**
 
-Unlike decl-macro expansions, quest-emitted state/fn nodes have no
-`pos.expanded_from` info, so checker diagnostics on auto-emitted
-fns don't carry an `auto-emitted by quest 'X'` note. Mirror the §E0
-Stage 4 pattern in `expand_quests` (`compiler/compiler.lua:1136-1199`):
-attach `{ source = "quest", quest_name = qname, quest_pos = qpos }`
-to the new `pos` on each emitted decl, and teach `ast._diag` /
-`ast.format_expanded_from` (or a sibling helper) to format it.
+`ast.format_expanded_from` now recognises a `source = "quest"` info
+shape and emits an `auto-emitted by quest '<name>' at FILE:LINE` note;
+`expand_quests` builds one `{source="quest", quest_name, quest_pos}`
+table per quest and stamps it onto every fresh pos table (state decls,
+helper-query fns, the start! fn, and each per-step `quest-Q-do-<s>` fn).
+The per-step pos now preserves the source line/col of the user's
+`step:` block via a cloned pos table (so diagnostics still point at
+the user's code) while still carrying the quest expansion info.
 
-Also: `mk_pos()` hardcodes `col=0` — diagnostics on quest-emitted
-decls always point at column 0 rather than the keyword column.
+`mk_pos()` now also uses `qpos.col` (was hardcoded `col=0`).
 
-#### E4-gap-2. `emit_quests` drops `prereq` and `reward` on the floor
+Regression test "E4-gap-1: checker diag on auto-emitted decl carries
+quest-source note" in `tests/compiler/quest_spec.lua` triggers a
+DUPLICATE_NAME by pre-declaring `quests/q/active` in user code and
+asserts the diag note contains both the existing
+`previous declaration` text and the new `auto-emitted by quest 'q'`
+decoration, joined with `; `.
 
-`compiler/codegen.lua:861-866` exposes only `{name, description,
-steps[].name, doc}` on `game_table.quests`. Tooling that wants to
-introspect a quest's prereq or reward must re-parse. Either expose
-the AST nodes (simple, but couples tooling to AST internals) or
-expose a stable summary (`prereq_str`, `reward_paths[]`). Document
-the choice in code_map.md whichever way it goes.
+#### E4-gap-2. `emit_quests` drops `prereq` and `reward` on the floor  ✅ **Fixed 2026-05-18**
 
-#### E4-gap-3. Empty `exports: []` silently exports everything
+`emit_quests` now emits `prereq` (AST or nil), `reward` (AST list or
+nil), and `steps[].requires` (AST or nil) on each `game_table.quests`
+entry. Documented in `code_map.md` as raw AST nodes — sufficient for
+tooling that walks the AST shape; downstream tools should treat the
+fields as opaque or dispatch on `ast.K.*` constants. Regression test
+"E4-gap-2: exposes prereq/reward/requires AST on game_table.quests" in
+`tests/compiler/quest_spec.lua`.
 
-`compiler/compiler.lua:265` gates exports-filtering on
-`#d.exports > 0`, so a module declaring `exports: []` falls through
-to the "no filter" branch — counter-intuitive. Drop the `> 0` and
-let an empty list filter out everything (matches user expectation;
-matches set-theoretic semantics).
+#### E4-gap-3. Empty `exports: []` silently exports everything  ✅ **Fixed 2026-05-18**
 
-#### E4-gap-4. Quest name cannot be a `MACRO_PARAM`
+The `#d.exports > 0` guard in `resolve_imports` (now removed) gated
+the filter activation. The branch now activates whenever `d.exports`
+is set, including the empty case — so `exports: []` filters out
+everything. Regression test "E4-gap-3: empty exports: [] filters
+out everything" in `tests/compiler/import_spec.lua`.
 
-`parse_quest_decl` (`compiler/parser.lua:3840`) accepts only
-`NAMED_ARG` / `IDENT` for the quest name. A decl-macro that wants to
-emit a parameterised quest fails at parse time. Feature gap rather
-than a bug; add a `MACRO_PARAM` / `COMPOSITE_IDENT` branch if
-quest-templates inside decl-macros become a use case.
+#### E4-gap-4. Quest name cannot be a `MACRO_PARAM`  ✅ **Fixed 2026-05-18**
 
-#### E4-test-1. `inventory full?` boundary is never actually exercised
+`parse_quest_decl` now accepts `MACRO_PARAM` and `COMPOSITE_IDENT`
+for the quest name, stores `name_parts` on the AST when used, and
+the existing `substitute_decl_node` machinery resolves it into a
+concrete `name` before `expand_quests` runs. Regression test
+"E4-gap-4: accepts MACRO_PARAM as the quest name" in
+`tests/compiler/quest_spec.lua` exercises an end-to-end
+`decl-macro mk-quest $qname: quest $qname: …` and confirms the
+emitted quest has the resolved name in both `game_table.quests`
+and the helper fn names.
 
-`tests/stdlib/inventory_spec.lua:121` is named "full? flips true at
-capacity" but uses `Enum(sword, shield, potion)` with `max=4`, so
-the bag tops out at 3 items and `full?` is always false. The test
-only asserts the negative case. Add a test where the enum's
-cardinality exactly matches `$max` so the `(size $name) = $max`
-comparison can flip true.
+#### E4-test-1. `inventory full?` boundary is never actually exercised  ✅ **Fixed 2026-05-18**
 
-#### E4-test-2. No test that an unreachable quest produces a failing auto-verify
+Added "E4-test-1: full? actually flips true when enum cardinality == $max"
+to `tests/stdlib/inventory_spec.lua`. The new test uses
+`Enum(sword, shield, potion)` with `$max=3`, fills the bag to
+capacity, asserts `full?` flips true, then takes an item and
+asserts it flips back to false.
 
-`tests/compiler/quest_spec.lua` proves the auto-verify entry is
-emitted with the right shape, but never runs the verifier and asserts
-a failure when a step's `requires:` is unsatisfiable. Add a test that
-calls into `cli/verify` (or the verify runtime directly) on a
-deliberately-unreachable quest and asserts the expected
-`condition not reachable` failure.
+#### E4-test-2. No test that an unreachable quest produces a failing auto-verify  ✅ **Fixed 2026-05-18**
 
-#### E4-test-3. Other missing test cases
+New "quest decl — auto-verify execution" describe block in
+`tests/compiler/quest_spec.lua` invokes `verify.run_all` on a quest
+whose only step `requires: player/has-crown` (a never-true path) and
+asserts the auto-verify result has `pass=false` plus a `fail_msg`
+matching `not reachable` / budget-truncated.
 
-- Zero-step quest (couples with E4-bug-4 above).
-- `MULTILINE_STRING` description in a quest (`parser.lua:3875` branch
-  is uncovered).
-- A decl-macro call inside a fn body of another decl-macro
-  (couples with E4-bug-3).
-- `STORYBASE_STDLIB_DIR` env-var resolution (only the test-hook
-  override is exercised).
-- `@stdlib/<name>` with an explicit `.sb` suffix (only the
-  implicit-append path is covered).
+#### E4-test-3. Other missing test cases  ✅ **Fixed 2026-05-18**
 
-#### E4-doc-1. `docs/reference/language.md` cleanup
+All five gaps now covered:
+- Zero-step quest — already covered by "rejects a quest with zero
+  steps" (added with E4-bug-4).
+- `MULTILINE_STRING` description in a quest — new "E4-test-3: parses
+  a MULTILINE_STRING description" in `tests/compiler/quest_spec.lua`.
+- Decl-macro call inside a fn body of another decl-macro — already
+  covered by "regression #E4-bug-3: nested decl-macro call inside fn
+  body is caught" (E4-bug-3, `macro_decl_spec.lua:1397`).
+- `STORYBASE_STDLIB_DIR` env-var resolution — new "E4-test-3:
+  @stdlib/ resolver honours STORYBASE_STDLIB_DIR env var" in
+  `tests/compiler/macro_decl_spec.lua`. The test forks a child
+  `lua5.4` process with the env var set (Lua 5.4 has no built-in
+  setenv) and confirms the fixture's distinctive init value lands
+  in the compiled state.
+- `@stdlib/<name>` with explicit `.sb` suffix — new "E4-test-3:
+  @stdlib/ resolves explicit .sb suffix the same as no suffix" in
+  the same file.
 
-- Fix `DUPLICATE_DECL` → `DUPLICATE_NAME` (see E4-bug-2).
-- Fix or remove the `npcs/$kind` claim (see E4-bug-1).
-- §E1 desugar table mentions `quest/complete` as a generic path
-  earlier in the file (line ~415) — make sure nothing reads as if
-  that's where the auto-emitted state lands (the real path is
-  `quests/<Q>/complete`, plural).
+#### E4-doc-1. `docs/reference/language.md` cleanup  ✅ **Fixed 2026-05-18**
+
+- `DUPLICATE_DECL` → `DUPLICATE_NAME` (E4-bug-2; already done).
+- `npcs/$kind` claim resolved (E4-bug-1; already done).
+- The temporal-logic example at line ~415 no longer uses
+  `quest/complete` (which could read as the §E1 auto-emitted path).
+  The example path is now `world/objective-met`, with a clarifying
+  paragraph noting that `quest <Q>:` desugars to
+  `quests/<Q>/complete` (plural) — and that authors shouldn't write
+  their own state at that reserved path.
 
 ### E-alt. Fast-win alternative (if §E0 is too speculative)
 

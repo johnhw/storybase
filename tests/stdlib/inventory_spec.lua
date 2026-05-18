@@ -130,6 +130,35 @@ describe("stdlib/inventory — runtime", function()
     assert.equal(3, call_fn(gt, g, "player-bag-count"))
   end)
 
+  it("E4-test-1: full? actually flips true when enum cardinality == $max",
+     function()
+    -- Match the enum cardinality to $max so the bag can actually fill
+    -- up and the (size $name) = $max comparison fires.
+    local src = [[
+module test
+  version: 1.0
+engine-config:
+  entry-scene: main
+type ItemKind = Enum(sword, shield, potion)
+import "@stdlib/inventory"
+inventory player-bag ItemKind 3
+scene main:
+  the end
+]]
+    local gt, g = fresh(src)
+    call_fn(gt, g, "player-bag-give", {"sword"})
+    assert.equal(false, call_fn(gt, g, "player-bag-full?"))
+    call_fn(gt, g, "player-bag-give", {"shield"})
+    assert.equal(false, call_fn(gt, g, "player-bag-full?"))
+    call_fn(gt, g, "player-bag-give", {"potion"})
+    assert.equal(3,    call_fn(gt, g, "player-bag-count"))
+    assert.equal(true, call_fn(gt, g, "player-bag-full?"),
+      "full? should flip true when size == max")
+    -- Taking an item drops below capacity → full? back to false.
+    call_fn(gt, g, "player-bag-take", {"sword"})
+    assert.equal(false, call_fn(gt, g, "player-bag-full?"))
+  end)
+
   it("clear! empties the inventory", function()
     local gt, g = fresh(SRC)
     call_fn(gt, g, "player-bag-give", {"sword"})

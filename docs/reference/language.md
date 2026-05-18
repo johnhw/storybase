@@ -412,15 +412,22 @@ Clause kinds:
 **Temporal-logic clauses (CTL subset):**
 
 ```
-verify "quest is reachable":
-  verify-eventually quest/complete
+verify "objective is reachable":
+  verify-eventually world/objective-met
 
 verify "every game ends":
   verify-always-eventually game/over
 
 verify "no harm before objective":
-  verify-until player/health > 0 until quest/complete
+  verify-until player/health > 0 until world/objective-met
 ```
+
+(The `world/objective-met` path here is just a stand-in user state path.
+The first-class `quest <Q>:` declaration in §E1 auto-emits its completion
+state at `quests/<Q>/complete` — plural `quests/`, with the quest name in
+the middle — and synthesises an equivalent reachability verify
+automatically. Don't write your own user state path at
+`quests/<Q>/complete`; that's reserved by the desugar.)
 
 `verify-always-eventually` and `verify-until` are bounded model-checks (depth
 5 by default). They expand the reachable state graph and compute a CTL
