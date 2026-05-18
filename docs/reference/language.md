@@ -152,9 +152,10 @@ Optional. One per file. Declares the module name, schema version, and exported n
 import "combat.sb"              # flat — all names available unqualified
 import "enemies.sb" as E        # namespaced — E.Npc, E.spawn-enemy
 import "shared/items.sb"        # relative path from importing file
+import "@stdlib/counter"        # bundled stdlib module (resolves to stdlib/counter.sb)
 ```
 
-Import cycles are a compile error (`IMPORT_CYCLE`). State paths declared in imported modules are always global.
+Import cycles are a compile error (`IMPORT_CYCLE`). State paths declared in imported modules are always global. The `@stdlib/<name>` prefix resolves into the compiler's bundled standard-library directory; see [`decl-macro`](#decl-macro) for the resolution order.
 
 ### `schema-version`
 
@@ -552,7 +553,115 @@ macro hurt-player amount:
     set! player/status 'dead
 ```
 
-Macros are inlined at each call site. They may not be recursive.
+Macros are inlined at each call site. They may not be recursive. The body
+must be a list of statements; for templates that emit whole declarations
+(state, fn, verify, …) use [`decl-macro`](#decl-macro) instead.
+
+### `decl-macro`
+
+```
+decl-macro counter $path:
+  state $path: Int(0, 100) = 0
+  fn $path-inc:
+    inc! $path 1
+  fn $path-dec:
+    dec! $path 1
+  fn $path-reset:
+    set! $path 0
+```
+
+A `decl-macro` is a top-level template that expands into a list of
+**declarations** (`state`, `fn`, `verify`, `actor`, `schedule`, `bounded`,
+`relation`, `type`, …). Each parameter starts with `$` and is bound by
+position at the call site:
+
+```
+counter player/health
+counter enemies/dragon/hp
+```
+
+Expansion happens after `import` resolution and before type checking, so
+the resulting state paths, function names, and verify blocks are visible
+to the checker and codegen exactly as if the author had written them by
+hand. Both the template (`decl-macro`) and the call (`counter ...`) are
+stripped from the AST after expansion.
+
+#### `$param` interpolation
+
+A `$ident` token may appear:
+
+- as a whole identifier (`$path`),
+- inside a kebab-joined composite identifier (`$path-inc`, `give-$path`,
+  `has-$path?`, `$a-$b`),
+- as a path segment (`state $path:` produces a single-segment state path;
+  a multi-segment argument like `npcs/dragon/hp` flattens into the
+  surrounding path).
+
+Inside a composite identifier, every substituted parameter must resolve to
+a single segment — passing a path-valued argument (`a/b/c`) where the slot
+forms part of a name raises `MACRO_DECL_EMIT`. As a bare segment slot,
+multi-segment substitution is permitted.
+
+A `$` followed by anything other than an identifier is a lex error
+(`ILLEGAL_CHAR`). A composite run breaks at whitespace and at `/`, so
+`npcs/$kind` is parsed as the path `npcs/` followed by the macro
+parameter `$kind` (used inside a path expression).
+
+#### Hygiene and collisions
+
+`decl-macro` does **not** rewrite names for hygiene — the caller is
+expected to supply a path that is unique across the module. Two call
+sites that emit the same path are caught by the existing
+`DUPLICATE_DECL` check, with the error pointing at the **second** call
+site:
+
+```
+counter player/health
+counter player/health        # error: DUPLICATE_DECL, points here
+```
+
+#### `expanded from` diagnostic note
+
+When the checker reports an error on a node emitted by a `decl-macro`,
+the diagnostic's `pos` is the **call site** (not the macro body), and the
+diagnostic's `note` is appended with:
+
+```
+expanded from macro 'counter' at stdlib/counter.sb:19
+```
+
+so the author can jump from the call site to the template that produced
+the offending decl. Existing notes (e.g. `previous declaration at line
+N`) are preserved and joined with `; `.
+
+#### Single-pass restriction
+
+A `decl-macro` body is **not** macro-expanded. It may not invoke another
+`decl-macro` (or a statement-level `macro`); doing so raises
+`MACRO_DECL_EMIT`. If you need composition, write a second wrapper macro
+that emits both sets of decls inline.
+
+#### Importing decl-macros
+
+A `decl-macro` is exported and imported like any other top-level name.
+The `@stdlib/<name>` prefix resolves into the bundled standard library
+directory (`stdlib/counter.sb`, `stdlib/dialog.sb`, …):
+
+```
+import "@stdlib/counter"             # all names unqualified
+counter player/health
+
+import "@stdlib/counter" as C        # namespaced
+C.counter enemies/dragon/hp
+```
+
+Resolution order for `@stdlib/<n>` is: the `M._stdlib_dir_override`
+compiler-test hook, the `STORYBASE_STDLIB_DIR` environment variable,
+then the repo-relative `stdlib/` directory shipped with the compiler.
+
+Decl-macros honour the importing module's `exports:` whitelist: a macro
+absent from that list is filtered out and a call site referencing it
+errors as `UNDEFINED_NAME`.
 
 ### `generate` (§F1)
 
@@ -1480,4 +1589,5 @@ Import cycles are a compile error.
 | `SUPERFICIAL_IN_COND` | error | Superficial type in a conditional expression |
 | `PERCEIVES_VIOLATION` | warning | Actor reads a path outside its `perceives:` list |
 | `UNTYPED_SYMBOL` | warning | `Symbol` used where `SymbolOf(F)` would give better bounds |
+| `MACRO_DECL_EMIT` | error | Illegal substitution in a `decl-macro` body (e.g. multi-segment value in a composite name slot, or nested decl-macro call) |
 | `UNSUPPORTED_FEATURE` | error | Feature not yet implemented (e.g., `import "f" as Alias` — use flat import) |

@@ -1254,3 +1254,171 @@ scene s:
     assert.is_not_nil(gt.fns and gt.fns["player-score-inc"])
   end)
 end)
+
+-- ── §E0 Stage 6: acceptance criteria + single-pass restriction ────────────────
+--
+-- Stage 6 is mostly docs + code-map; the only new behaviour is the
+-- "decl-macro body may not invoke another decl-macro" check. The
+-- acceptance criteria themselves are re-stated here as a self-contained
+-- triplet so a future reader can verify §E0 against the spec without
+-- crawling the per-stage describes above.
+
+describe("E0 Stage 6 — acceptance + single-pass restriction", function()
+  local engine = require("runtime.engine")
+  local eval   = require("runtime.eval")
+
+  local function tmpfile(src)
+    local path = os.tmpname() .. ".sb"
+    local f = io.open(path, "w"); f:write(src); f:close()
+    return path
+  end
+
+  -- Acceptance #1: shipped stdlib/counter.sb emits a working state path,
+  --                $path-inc / $path-dec / $path-reset fns, compiles,
+  --                type-checks, and runs end-to-end.
+  it("acceptance #1: stdlib/counter.sb compiles, type-checks, and runs", function()
+    local main = tmpfile([[
+module main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import "@stdlib/counter"
+
+counter player-health
+
+scene s:
+  -> s
+]])
+    local gt, diags = compiler.compile_file(main)
+    os.remove(main)
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+
+    -- State + three fns all emitted
+    local state_found = false
+    for _, s in ipairs(gt.schema and gt.schema.states or {}) do
+      if s.path == "player-health" then state_found = true end
+    end
+    assert.is_true(state_found)
+    assert.is_not_nil(gt.fns["player-health-inc"])
+    assert.is_not_nil(gt.fns["player-health-dec"])
+    assert.is_not_nil(gt.fns["player-health-reset"])
+
+    -- And they actually mutate state when called.
+    local eng = engine.new(gt, {})
+    eng:init()
+    assert.equal(0, eng._state:get("player-health"))
+    eval.call_fn("player-health-inc", {}, eng:make_ctx("player-health-inc"))
+    assert.equal(1, eng._state:get("player-health"))
+    eval.call_fn("player-health-reset", {}, eng:make_ctx("player-health-reset"))
+    assert.equal(0, eng._state:get("player-health"))
+  end)
+
+  -- Acceptance #2: a checker error on a node emitted by an imported
+  --                decl-macro points at the call site (not the macro body)
+  --                and carries an "expanded from macro" note.
+  it("acceptance #2: checker error on imported decl-macro decl points at call site", function()
+    local lib = tmpfile([[
+module lib
+  version: 1.0
+decl-macro broken $path:
+  state $path: NotARealType = 0
+]])
+    local main = tmpfile(string.format([[
+module main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+import %q
+
+broken player-score
+
+scene s:
+  -> s
+]], lib))
+    local _, diags = compiler.compile_file(main)
+    os.remove(lib); os.remove(main)
+    assert.is_true(diags:has_errors())
+
+    -- Find the UNDEFINED_TYPE diag from the expansion.
+    local d
+    for _, e in ipairs(diags.errors or {}) do
+      if e.code == ast.E.UNDEFINED_TYPE then d = e; break end
+    end
+    assert.is_not_nil(d, "expected UNDEFINED_TYPE diag")
+    -- file must be the importing file (call site), not the lib
+    assert.equal(main, d.file)
+    assert.is_truthy(d.note and d.note:find("expanded from macro 'broken'", 1, true))
+  end)
+
+  -- Acceptance #3: nested decl-macro calls are forbidden, emit
+  --                MACRO_DECL_EMIT at the nested call site.
+  it("acceptance #3: nested decl-macro call raises MACRO_DECL_EMIT", function()
+    local main = tmpfile([[
+module main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+decl-macro inner $p:
+  state $p: Int(0, 10) = 0
+
+decl-macro outer $p:
+  inner $p
+
+outer player-score
+
+scene s:
+  -> s
+]])
+    local _, diags = compiler.compile_file(main)
+    os.remove(main)
+    assert.is_true(diags:has_errors())
+
+    local d
+    for _, e in ipairs(diags.errors or {}) do
+      if e.code == ast.E.MACRO_DECL_EMIT
+         and tostring(e.message):find("nested decl-macro", 1, true) then
+        d = e; break
+      end
+    end
+    assert.is_not_nil(d, "expected MACRO_DECL_EMIT for nested decl-macro call")
+    -- Message should name both the enclosing and the inner macro.
+    assert.is_truthy(d.message:find("outer", 1, true))
+    assert.is_truthy(d.message:find("inner", 1, true))
+  end)
+
+  -- Regression: the stmt-level `macro` keyword still works (no
+  -- false-positive nested-call diag for stmt-level macro calls).
+  it("regression: stmt-level macro inside a decl-macro body works", function()
+    local main = tmpfile([[
+module main
+  version: 1.0
+engine-config:
+  entry-scene: s
+
+macro bump amount:
+  inc! score amount
+
+decl-macro counter-with-bump $path:
+  state $path: Int(0, 100) = 0
+  fn $path-bump:
+    bump 1
+
+state score: Int(0, 100) = 0
+counter-with-bump player-health
+
+scene s:
+  -> s
+]])
+    local gt, diags = compiler.compile_file(main)
+    os.remove(main)
+    assert.is_not_nil(gt,
+      tostring(diags.errors and diags.errors[1] and diags.errors[1].message))
+    assert.is_false(diags:has_errors())
+    assert.is_not_nil(gt.fns["player-health-bump"])
+  end)
+end)

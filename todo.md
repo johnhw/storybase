@@ -4,16 +4,17 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-16)
+## Current Status (2026-05-18)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–23 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
-complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete.
+complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete. §E0 (decl-emitting
+macro substrate) complete and ready for §E2 / §E3 to ride on as stdlib modules.
 
-**~2802 successes / 0 failures / 2 pending (known limitations).**
+**~2806 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -30,10 +31,10 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 
 1. §D1 — LLM-bounded handler standard module
 2. §B3 — Trace scrubber (browser debug UI)
-3. §E0 — Decl-emitting macro substrate (unlocks E2/E3 as stdlib)
-4. §E2 / §E3 — `dialog` / `inventory` / `stat` shipped as stdlib `.sb` modules
-5. §E1 — `quest` as base feature, layered on the E0 substrate
-6. §G1 — Web/JS compilation target
+3. §E2 / §E3 — `dialog` / `inventory` / `stat` shipped as stdlib `.sb` modules
+   (substrate ready: §E0 complete 2026-05-18)
+4. §E1 — `quest` as base feature, layered on the E0 substrate
+5. §G1 — Web/JS compilation target
 
 (§G2 — stateless HTTP API — complete, see completed.md.)
 
@@ -412,25 +413,46 @@ namespaced `import ... as C` (calling `C.counter ...`) renames cleanly.
 Open (Stage 6 only):
 - Docs page in `docs/reference/language.md` + acceptance demo.
 
-#### Stage 6 — Docs, acceptance demo, code-map
+#### Stage 6 — Docs, acceptance, single-pass restriction ✅ (2026-05-18)
 
-- `docs/reference/language.md`: new section "Decl-emitting macros". Cover
-  the `decl-macro` keyword, `$param` interpolation rules (where it works,
-  where it doesn't), hygiene model (path collisions are the caller's
-  problem; same `DUPLICATE_DECL` catches them), single-pass restriction
-  (a `decl-macro` body may not invoke another `decl-macro`), and the
-  `expanded from` error-note behaviour.
-- Acceptance demo or test fixture exercising the three E0 acceptance
-  criteria (`tests/compiler/macro_decl_spec.lua`):
-  1. `decl-macro counter $path:` emits a `state $path: Int(0,100)`,
-     `fn $path-inc:`, `fn $path-reset:` — compiles, type-checks, runs.
-  2. Imported `decl-macro` works; checker errors at the call site point
-     at the call site.
-  3. Existing `tests/compiler/macro_spec.lua` all still pass (no
-     regression on the stmt-level `macro`).
-- `code_map.md`: add the new AST kinds, the new parser entry, the new
-  expansion pass, the `stdlib/` directory convention, and the
-  `STORYBASE_STDLIB_DIR` env var.
+§E0 closed out. Docs landed, acceptance criteria captured as test
+fixtures, and the design-spec single-pass restriction got the missing
+checker enforcement it called for.
+
+- `docs/reference/language.md`: new "`decl-macro`" subsection under
+  Declarations covering the keyword, `$param` interpolation rules
+  (whole-ident, composite-ident, path-segment slots, multi-segment
+  flatten-vs-stringify behaviour), hygiene model (no rewriting; relies
+  on existing `DUPLICATE_DECL`), single-pass restriction (nested
+  `decl-macro` calls raise `MACRO_DECL_EMIT`), `expanded from` diag
+  note shape, and the `@stdlib/<name>` import prefix + its
+  resolution order. The `import` subsection got the `@stdlib/` example;
+  `MACRO_DECL_EMIT` added to the error-code table.
+- `compiler/compiler.lua:expand_decl_macros`: at template-registration
+  time the body is now scanned for `MACRO_CALL_DECL` children and any
+  nested decl-macro call raises `MACRO_DECL_EMIT` ("nested decl-macro
+  calls are not supported"). Closes the design-spec edge case that
+  was previously documented but unenforced — without the check, a
+  nested call would silently survive expansion and fail downstream
+  with a confusing `UNDEFINED_NAME` from the checker.
+- `tests/compiler/macro_decl_spec.lua`: new "E0 Stage 6 — acceptance +
+  single-pass restriction" describe block. Four tests: end-to-end
+  `import "@stdlib/counter"` + state+fns emitted + fns mutate state
+  at runtime; imported `decl-macro` with an `UNDEFINED_TYPE` body
+  reports against the call-site file with the `expanded from macro`
+  note; nested decl-macro call raises `MACRO_DECL_EMIT` with both
+  macro names in the message; regression test that stmt-level `macro`
+  calls inside a `decl-macro` body still expand cleanly (no
+  false-positive nested-call diag).
+- `code_map.md`: documented the Stage 6 single-pass check on the
+  compiler entry; rolled the `tests/compiler/macro_decl_spec.lua`
+  description forward to cover all six stages (62 tests); cross-linked
+  `stdlib/counter.sb` to the new language-reference section.
+- Acceptance criterion #3 (existing `tests/compiler/macro_spec.lua`
+  still passes) verified: 14/14 unchanged.
+
+No regressions: full suite 2806 passing / 0 failures / 2 pre-existing
+pending (unrelated formatter known-limitations).
 
 #### Edge cases (apply across stages)
 

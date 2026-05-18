@@ -806,6 +806,22 @@ local function expand_decl_macros(ast_root, diags, filename)
           ast.pos(filename, decl.pos and decl.pos.line or 0,
                             decl.pos and decl.pos.col or 0))
       else
+        -- Single-pass restriction: a decl-macro body may not itself
+        -- invoke another decl-macro. Expansion is one level deep, so
+        -- a nested call would otherwise survive into the typed program
+        -- and fail downstream with a confusing UNDEFINED_NAME.
+        for _, body_decl in ipairs(decl.body or {}) do
+          if body_decl and body_decl.kind == ast.K.MACRO_CALL_DECL then
+            diags:push_error(ast.E.MACRO_DECL_EMIT,
+              "decl-macro '" .. decl.name ..
+              "' body invokes another decl-macro ('" ..
+              tostring(body_decl.name) ..
+              "'); nested decl-macro calls are not supported",
+              ast.pos(filename,
+                body_decl.pos and body_decl.pos.line or 0,
+                body_decl.pos and body_decl.pos.col or 0))
+          end
+        end
         decl_macros[decl.name] = decl
       end
     end

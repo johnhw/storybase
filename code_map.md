@@ -167,7 +167,10 @@ EMIT_MUT         -- engine/emit event [args]
   then the legacy stmt-level walker expands `MACRO_CALL_STMT`. Both
   `DECL_MACRO_DECL`/`MACRO_CALL_DECL` and `MACRO_DECL` nodes are stripped
   before the checker runs. Errors: `UNDEFINED_NAME` for unknown macro;
-  `MACRO_DECL_EMIT` for arity/substitution mismatch.
+  `MACRO_DECL_EMIT` for arity/substitution mismatch. §E0 Stage 6 adds
+  the single-pass restriction: at template-registration time the body is
+  scanned for `MACRO_CALL_DECL` children and any nested decl-macro call
+  raises `MACRO_DECL_EMIT` ("nested decl-macro calls are not supported").
 - §E0 Stage 4: every emitted node gets a fresh pos table stamped with the
   call site's `(file, line, col)` plus a `pos.expanded_from =
   { macro_name, macro_pos }`. The node itself also carries
@@ -188,8 +191,10 @@ The resolver looks up `M._stdlib_dir_override` first (test hook), then
 ### `stdlib/counter.sb`
 A reference decl-macro: `counter $path` emits a bounded-int state at
 `$path` plus `$path-inc`, `$path-dec`, `$path-reset` mutating fns. Used
-by the §E0 Stage 5 cross-import acceptance tests; serves as a template
-for the larger E2/E3 stdlib modules (dialog / inventory / stat).
+by the §E0 Stage 5 cross-import acceptance tests and the §E0 Stage 6
+end-to-end acceptance test; serves as a template for the larger E2/E3
+stdlib modules (dialog / inventory / stat). Authored in line with the
+"Decl-emitting macros" section of `docs/reference/language.md`.
 
 ---
 
@@ -812,7 +817,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/test_decl_spec.lua` | TEST_DECL parser (label forms, sections, multiple blocks, 'test' as ident); codegen (game_table.tests, production strip) (14 tests) |
 | `tests/compiler/generate_spec.lua` | §F1 `generate` decl: parser (with/without seed_path, error paths), codegen (game_table.generates entry, duplicate-name diag), checker (UNDEFINED_PATH / UNDEFINED_FN propagate into body) (8 tests) |
 | `tests/compiler/ending_spec.lua` | §F2 `ending` decl: parser (with/without when:), codegen (game_table.endings, auto-emit reachability + pairwise exclusivity verify, production strip), duplicate-name diag (9 tests) |
-| `tests/compiler/macro_decl_spec.lua` | §E0 Stage 1 `decl-macro`: lexer keyword, parser into `DECL_MACRO_DECL` (zero/one/many params, state/fn/verify bodies, doc-string, source position), pipeline-strip placeholder (11 tests) |
+| `tests/compiler/macro_decl_spec.lua` | §E0 decl-macro substrate, all stages: Stage 1 lexer + parser into `DECL_MACRO_DECL`; Stage 2 lexer `$param` / composite identifiers; Stage 2b/3 parser name-interpolation + expansion pass; Stage 4 `expanded_from` diag decoration; Stage 5 cross-import + `@stdlib/` resolver; Stage 6 acceptance + single-pass restriction (62 tests) |
 | `tests/runtime/tests_spec.lua` | runtime/tests.lua: basic pass/fail, setup/run sections, multiple expects, fresh-state isolation, multiple tests (19 tests) |
 | `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
 | `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |
