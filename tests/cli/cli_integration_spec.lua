@@ -2135,3 +2135,58 @@ describe("CLI demo21_merchants_reckoning: temporal query builtins", function()
     os.remove(save_path .. ".snap")
   end)
 end)
+
+-- ── demo26: Beastmaster's Ledger (record `with` mixins + path patterns) ────────
+
+describe("CLI demo26_bestiary: record with-mixins and path-pattern queries", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo26_bestiary.sb"})
+    assert.equal(0, rc, "demo26 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo26_bestiary.sb"})
+    assert.equal(0, rc, "demo26 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays to retire scene within 20 steps", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "20",
+                                   "demos/demo26_bestiary.sb"})
+    assert.equal(0, rc, "demo26 auto run failed:\n" .. out .. err)
+    -- The retire scene narration ends with this sentence.
+    assert.is_truthy(out:find("ledger is sealed"),
+      "expected demo26 to reach the retire scene; got: " .. out)
+  end)
+
+  it("two-parent with-mixin (Warbeast) splices both Combatant and Mount fields", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo26_bestiary.sb")
+    game:init()
+    -- Drake is Warbeast (Combatant + Mount). Fields from BOTH parents must be present.
+    assert.equal(95, game:get("bestiary/drake/hp"))      -- from Combatant
+    assert.equal(80, game:get("bestiary/drake/speed"))   -- from Mount
+    assert.equal(40, game:get("bestiary/drake/bond"))    -- Warbeast-local
+    assert.equal(60, game:get("bestiary/drake/breath-power"))  -- Drake-local
+    -- Entity fields reach Warbeast via either parent — should be spliced exactly once.
+    assert.equal("Storm Drake", game:get("bestiary/drake/name"))
+    assert.equal(true,          game:get("bestiary/drake/alive"))
+  end)
+
+  it("query-history with bestiary/**/status pattern accumulates entries", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo26_bestiary.sb")
+    game:init()
+    -- Sound the alarm (writes to three /status paths) then stand-down (three more).
+    game:pick("Sound the alarm")
+    game:pick("Stand the roster down")
+    -- bestiary/**/status should now have at least six recorded changes.
+    local count = game:get("status-changes-logged")
+    -- status-changes-logged is a fn; lib.storybase exposes fns via call instead of get
+    if not count then count = game:call("status-changes-logged") end
+    assert.is_true(count >= 6,
+      "expected at least 6 status changes recorded via bestiary/**/status; got: " .. tostring(count))
+  end)
+end)

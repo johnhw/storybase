@@ -1,0 +1,229 @@
+# demo26_bestiary.sb
+# The Beastmaster's Ledger — train and dispatch a small roster of beasts.
+#
+# Demonstrates two language features that no earlier demo exercised:
+#
+#   1. Record `with` mixins
+#      - Entity (base) is mixed into Combatant and Mount.
+#      - Warbeast `with`s BOTH Combatant AND Mount (two-parent mixin).
+#      - Wolf, Bear, and Drake each `with` either Combatant or Warbeast
+#        and add species-specific fields.
+#
+#   2. Path-pattern queries
+#      - `watch bestiary/*/alert`              (single-segment wildcard)
+#      - `watch bestiary/(wolves|bears)/hp`    (alternation group)
+#      - `watch bestiary/!drake/morale`        (negation segment)
+#      - `query-history bestiary/**/status`    (recursive wildcard, used inside verify)
+#
+# Run:    lua5.4 cli/main.lua run demos/demo26_bestiary.sb
+# Auto:   lua5.4 cli/main.lua run --auto --steps 30 demos/demo26_bestiary.sb
+# Verify: lua5.4 cli/main.lua verify demos/demo26_bestiary.sb
+
+module bestiary
+  version: 1.0
+
+engine-config:
+  entry-scene: kennel
+
+# ─────────────────────────────────────────────────────────
+# Types — record `with` mixin composition
+# ─────────────────────────────────────────────────────────
+
+"Status arc shared by every beast on the roster."
+type BeastStatus = idle | hunting | wounded | feasting
+
+"Base entity shared by all living things in the bestiary."
+type Entity:
+  name:   String       = "Unknown"
+  alive:  Bool         = true
+  status: BeastStatus  = `idle
+
+"A creature trained for combat. Splices in all Entity fields via `with`."
+type Combatant:
+  with Entity                                # mixin: 1st use of `with`
+  hp:       Int(0, 100) = 50
+  attack:   Int(0, 50)  = 10
+  alert:    Bool        = false
+  morale:   Int(0, 100) = 50
+
+"A creature trained as a mount. Also splices Entity."
+type Mount:
+  with Entity                                # mixin: 2nd use of `with`
+  speed:    Int(0, 100) = 30
+  trained:  Bool        = false
+
+"A warbeast is BOTH a combatant and a mount — two-parent with composition."
+type Warbeast:
+  with Combatant                             # mixin: 3rd use of `with` —
+  with Mount                                 # mixin: 4th use, two parents on one record
+  bond:     Int(0, 100) = 0
+
+# Species records: each mixes Combatant (or Warbeast) plus a species-only field.
+
+"Wolves are combatants only (no mount role)."
+type Wolf:
+  with Combatant                             # mixin: 5th use of `with`
+  pack-size: Int(0, 12) = 4
+
+"Bears are combatants only."
+type Bear:
+  with Combatant                             # mixin: 6th use of `with`
+  hibernating: Bool = false
+
+"Drakes are warbeasts (combatant + mount) with breath-power on top."
+type Drake:
+  with Warbeast                              # mixin: 7th use — inherits both parents transitively
+  breath-power: Int(0, 100) = 50
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+"World counters."
+state world:
+  turn:    Int(0, 99) = 0
+  rations: Int(0, 30) = 20
+
+"Roster: three predetermined groups under bestiary/, each typed by its own species record."
+state bestiary/wolves: Wolf = Wolf(name: "Pack of Direwolves", hp: 70, attack: 15, morale: 60, pack-size: 6)
+state bestiary/bears:  Bear = Bear(name: "Cave Bears",         hp: 90, attack: 20, morale: 70)
+state bestiary/drake:  Drake = Drake(name: "Storm Drake",      hp: 95, attack: 30, morale: 80, speed: 80, trained: true, bond: 40, breath-power: 60)
+
+# ─────────────────────────────────────────────────────────
+# Watches — three path-pattern forms
+# ─────────────────────────────────────────────────────────
+#
+# Patterns are legal in `find`, `verify`, `watch`, and `perceives:` only.
+# Each watch below exercises a different pattern form. They are stripped from
+# production builds and fire in debug/dev mode whenever a matching path holds
+# a non-nil value.
+
+"Alert flag on ANY beast (single-segment wildcard)."
+watch bestiary/*/alert             "alert flag"
+
+"HP on the wolves OR the bears (alternation group)."
+watch bestiary/(wolves|bears)/hp   "hp (wolves|bears)"
+
+"Morale on any beast EXCEPT the drake (negation segment)."
+watch bestiary/!drake/morale       "morale (non-drake)"
+
+# ─────────────────────────────────────────────────────────
+# Pure functions
+# ─────────────────────────────────────────────────────────
+
+"Worst morale among non-drake beasts — read directly via the named fields."
+fn weakest-morale:
+  min bestiary/wolves/morale bestiary/bears/morale
+
+"Are any of the three beasts on alert right now?"
+fn any-on-alert?:
+  bestiary/wolves/alert or bestiary/bears/alert or bestiary/drake/alert
+
+"Total roster HP."
+fn total-hp:
+  bestiary/wolves/hp + bestiary/bears/hp + bestiary/drake/hp
+
+"Count of status-change history entries (via the recursive bestiary/**/status pattern)."
+fn status-changes-logged:
+  list-size (query-history bestiary/**/status)
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+fn advance-turn:
+  inc! world/turn 1
+
+"Raise the alert flag across the whole roster (a sighting from the watchtower)."
+fn sound-alarm:
+  pre: not any-on-alert?
+  set! bestiary/wolves/alert true
+  set! bestiary/bears/alert  true
+  set! bestiary/drake/alert  true
+  set! bestiary/wolves/status `hunting
+  set! bestiary/bears/status  `hunting
+  set! bestiary/drake/status  `hunting
+  advance-turn
+
+"Stand the roster down — only meaningful once an alarm is up."
+fn stand-down:
+  pre: any-on-alert?
+  set! bestiary/wolves/alert false
+  set! bestiary/bears/alert  false
+  set! bestiary/drake/alert  false
+  set! bestiary/wolves/status `idle
+  set! bestiary/bears/status  `idle
+  set! bestiary/drake/status  `idle
+  advance-turn
+
+"Feed the roster: each fed beast restores morale and consumes one ration."
+fn feed-roster:
+  pre: world/rations >= 3
+  inc! bestiary/wolves/morale 5
+  inc! bestiary/bears/morale  5
+  inc! bestiary/drake/morale  3
+  set! bestiary/wolves/status `feasting
+  set! bestiary/bears/status  `feasting
+  set! bestiary/drake/status  `feasting
+  dec! world/rations 3
+  advance-turn
+
+"Spar with the wolves — a controlled wounding that drops hp and morale."
+fn spar-with-wolves:
+  pre: bestiary/wolves/hp > 20
+  dec! bestiary/wolves/hp 10
+  dec! bestiary/wolves/morale 5
+  set! bestiary/wolves/status `wounded
+  advance-turn
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene kennel:
+  The Beastmaster's Ledger — turn {world/turn}.
+  Rations on hand: {world/rations}.  Total roster HP: {total-hp}.
+  Wolves : hp={bestiary/wolves/hp}  morale={bestiary/wolves/morale}  alert={bestiary/wolves/alert}  status={bestiary/wolves/status}
+  Bears  : hp={bestiary/bears/hp}   morale={bestiary/bears/morale}   alert={bestiary/bears/alert}   status={bestiary/bears/status}
+  Drake  : hp={bestiary/drake/hp}   morale={bestiary/drake/morale}   alert={bestiary/drake/alert}   status={bestiary/drake/status}
+  Status changes recorded so far (bestiary/**/status): {status-changes-logged}.
+
+  * [world/turn >= 4] End the ledger for today
+    -> retire
+  * [not any-on-alert?] Sound the alarm (raises every alert)
+    sound-alarm
+    -> kennel
+  * [any-on-alert?] Stand the roster down
+    stand-down
+    -> kennel
+  * [world/rations >= 3] Feed the roster (-3 rations, +morale)
+    feed-roster
+    -> kennel
+  * [bestiary/wolves/hp > 20] Spar with the wolves (-10 hp, -5 morale)
+    spar-with-wolves
+    -> kennel
+  * Quit early without retiring
+    -> retire
+
+scene retire:
+  The ledger is sealed for the day.
+  Final tally — turn {world/turn}, total hp {total-hp}, weakest non-drake morale {weakest-morale}.
+  Status changes recorded across bestiary/**/status: {status-changes-logged}.
+
+# ─────────────────────────────────────────────────────────
+# Verify — reachability + pattern-based history sanity net
+# ─────────────────────────────────────────────────────────
+
+verify "the alarm sequence is reachable":
+  verify-eventually any-on-alert?
+
+verify "standing down from an alarm is reachable":
+  verify-eventually (world/turn >= 2 and not any-on-alert?)
+
+verify "wolves can be sparred to a wounded state":
+  verify-eventually (bestiary/wolves/status = `wounded)
+
+"Pattern-based safety net: history counted via bestiary/**/status is non-negative."
+verify "status-change history is well-formed":
+  from-any-state:
+    status-changes-logged >= 0

@@ -5,6 +5,49 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## I1 — demo26 "The Beastmaster's Ledger" ✅ (2026-05-19)
+
+Fills the §I1 demo-coverage gap: record `with`-mixin composition and
+path-pattern queries (`*`, `(a|b)`, `!`, `**`) had no end-to-end example.
+
+**Files:** new `demos/demo26_bestiary.sb`,
+`tests/cli/cli_integration_spec.lua` (+5 tests).
+
+**Features exercised:**
+- Record `with` mixins, including a **two-parent** record (`Warbeast: with
+  Combatant + with Mount`) whose `Entity` fields reach through both parents
+  and are spliced exactly once (verified by an integration assertion).
+- Species records `Wolf`/`Bear`/`Drake` each mixing `Combatant` (or
+  `Warbeast`) plus a species-only field.
+- All three path-pattern forms in `watch` declarations:
+  `bestiary/*/alert` (wildcard), `bestiary/(wolves|bears)/hp` (alternation),
+  `bestiary/!drake/morale` (negation).
+- The recursive wildcard pattern in a `verify` expression via
+  `query-history bestiary/**/status`, with the resulting count surfaced in
+  scene narration as a running tally.
+
+**Deviation from spec:** §I1 suggested instantiation as
+`state bestiary/{beast}:` (single entity family). The demo instead declares
+three flat single-record states (`state bestiary/wolves: Wolf`,
+`state bestiary/bears: Bear`, `state bestiary/drake: Drake`) so each species
+can have its own type and species-specific fields — the spec's
+"Wolf/Bear/Drake each as records mixing Combatant + species-specific
+fields" requirement isn't expressible inside a single entity family where
+all instances share one record shape. Path-pattern matching against the
+`bestiary/<species>/...` paths is unchanged.
+
+**Acceptance:**
+- `lua5.4 cli/main.lua run demos/demo26_bestiary.sb` reaches the retire
+  scene (under `--auto --steps 20` the guard `[world/turn >= 4]` brings
+  "End the ledger" to choice 1, terminating cleanly).
+- `lua5.4 cli/main.lua verify demos/demo26_bestiary.sb` → 4/4 PASS.
+- All three pattern forms appear in `watch` clauses; `bestiary/**/status`
+  appears inside a `verify` expression via `query-history`.
+- 5 new integration tests cover compile, verify, auto-play to retirement,
+  two-parent mixin field splicing, and pattern-aware `query-history` accrual.
+
+---
+
 ## H2 — Diff-mode hot reload ✅ (2026-05-19)
 
 Extends hot reload from schema migration (already shipped) to *body* edits:

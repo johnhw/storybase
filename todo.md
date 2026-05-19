@@ -16,7 +16,7 @@ substrate, E1 quests, E2 dialog-topic, E3 inventory+stat, E4 review fixes) all
 complete. §G2 (stateless HTTP API) and §H2 (diff-mode hot reload) also complete.
 See completed.md.
 
-**~2886 successes / 0 failures / 2 pending (known limitations).**
+**~2891 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -35,12 +35,13 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
 
-**Demo coverage gaps (smaller, parallelisable):** §I1–I6 add demos 26–31 for
-language features that ship today but have no end-to-end example: record
-`with` mixins, user-authored `decl-macro`, `counterfactual from:` /
+**Demo coverage gaps (smaller, parallelisable):** §I2–I6 add demos 27–31 for
+language features that ship today but have no end-to-end example:
+user-authored `decl-macro`, `counterfactual from:` /
 `distribution: conditioned-on`, computed `-> (expr)` + imperative scene nav,
 the `changes` hook binding, and a Lua embedded-host walkthrough. See §I for
-specs.
+specs. (I1 / demo26 — record `with` mixins + path patterns — complete; see
+completed.md.)
 
 ---
 
@@ -284,36 +285,13 @@ strategy beats a uniform-random policy in 1000 sampled rollouts.
 
 ---
 
-## I. Demo Coverage Gaps (new demos 26–31)
+## I. Demo Coverage Gaps (new demos 27–31)
 
 A 2026-05-19 audit of `demos/demo01–25` against `docs/reference/language.md`
 found a handful of supported language features that no current demo exercises
-end-to-end. Six new demos below fill those gaps. Each item names the specific
+end-to-end. Five new demos below fill those gaps. Each item names the specific
 features to showcase, the suggested theme, and an acceptance criterion. Implement
-in order; each is independent.
-
-### I1. demo26 — "The Beastmaster's Ledger" (`demo26_bestiary.sb`)
-
-**Primary gap:** Record `with` mixins and query-context path patterns. Neither
-is shown in any current demo despite being documented.
-
-**Features demonstrated:**
-- `type Entity:` / `type Combatant: with Entity` / `type Mount: with Entity` —
-  record mixin composition, including a record that `with`s two parents
-- `Wolf` / `Bear` / `Drake` each as records mixing `Combatant` + species-specific
-  fields, instantiated as `state bestiary/{beast}: ...`
-- Path patterns in `find` and `watch`: `bestiary/*/alert`, `bestiary/(wolves|bears)/hp`,
-  `bestiary/!drake/morale` (wildcard, alternation, negation)
-- Path patterns in a `verify` block (`bestiary/**/status`) as a sanity safety net
-
-**Story sketch:** Tame, train, and dispatch a small roster of beasts (wolves,
-bears, a drake). Each species inherits `Entity` fields via `with`; the
-ledger view runs path-pattern queries to report group health and morale.
-
-**Acceptance:** `storybase run demo26_bestiary.sb` is playable to an end state;
-`storybase verify` passes; all three pattern forms (`*`, `(a|b)`, `!`) appear
-at least once in a `find` or `watch` clause; comments call out each `with`
-usage.
+in order; each is independent. (I1 / demo26 complete; see completed.md.)
 
 ### I2. demo27 — "The Apprentice's Grimoire" (`demo27_grimoire.sb`)
 
