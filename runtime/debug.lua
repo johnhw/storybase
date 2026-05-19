@@ -17,6 +17,7 @@
 --   set-breakpoint {condition} → id
 --   clear-breakpoint {id}
 --   reload     {src}      → outcome
+--   get-replay-diff {src} → { ok, diffs, final_diff, choices_replayed, aborted? }
 --
 -- Emitted events (delivered to registered handlers):
 --   mutation    {path, old, new, fn, tick}
@@ -964,6 +965,27 @@ function M.new(engine, opts)
       srv:emit("reload", { file = payload.file, outcome = outcome,
                             changes = #changes, tick = tick })
       return { ok = true, outcome = outcome, changes = #changes }
+
+    elseif cmd == "get-replay-diff" then
+      -- H2: replay the recorded player inputs against a freshly compiled
+      -- game table and report per-tick state divergences. The live engine
+      -- is untouched; only a throwaway engine runs the new code.
+      local src = payload.src
+      if not src then return { error = "missing 'src'" } end
+      if not eng then return { error = "no engine" } end
+
+      local compiler_mod = require("compiler.compiler")
+      local ok_c, new_gt = pcall(compiler_mod.compile, src)
+      if not ok_c or not new_gt then
+        return { ok = false, error = "compile error: " .. tostring(new_gt) }
+      end
+
+      local diff_mod = require("runtime.diff_replay")
+      local ok_r, result = pcall(diff_mod.replay, eng, new_gt, {})
+      if not ok_r then
+        return { ok = false, error = "replay error: " .. tostring(result) }
+      end
+      return result
 
     elseif cmd == "get-schema" then
       if not eng or not eng._game then

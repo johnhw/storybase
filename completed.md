@@ -5,6 +5,59 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## H2 — Diff-mode hot reload ✅ (2026-05-19)
+
+Extends hot reload from schema migration (already shipped) to *body* edits:
+an author can edit a fn (e.g. `take-damage`) and ask the engine to re-run the
+recorded playthrough against the new fn body, getting back a divergence
+report instead of switching the live engine over. The live engine and its
+log are not modified — a throwaway engine runs the new code in parallel.
+
+**New log entry kind `kind = "choice"`** added by `engine:do_choice` carrying
+`{scene, idx, tick, time}`. Marked `SKIP_ON_REPLAY` so `state.replay` ignores
+it (cache projection unchanged) and old saves predating the entry stay
+loadable. BFS/verify engines (`_in_bfs == true`) skip the append so their
+throwaway logs don't gain extra seqs.
+
+**New module `runtime/diff_replay.lua`:**
+- `M.replay(eng, new_gt, opts?)` — collects `choice` and `random` entries from
+  the live log, builds a fresh engine from `new_gt` with the same seed,
+  installs a random provider that feeds recorded results in order, then
+  re-runs each recorded choice + `post_action`. After each tick it projects
+  the old log up to the matching seq boundary, compares per-path values, and
+  emits `{step, tick, path, old_value, new_value}` entries for each new
+  divergence (paths that re-converge are dropped from running state).
+- Also returns a `final_diff` summarising the cumulative state difference,
+  plus `aborted` if the new code's scene/choice indices diverge mid-replay.
+
+**Wired into `runtime/debug.lua`** as the new command:
+- `get-replay-diff {src}` compiles the source, calls `diff_replay.replay`,
+  returns `{ok, diffs, final_diff, choices_replayed, aborted?, new_cache,
+  new_scene_stack}`.
+
+**Edge cases handled:**
+- Old saves without choice entries return `{ok=true, aborted="no choices..."}`.
+- New code with a different choice count or scene names: replay aborts mid-way
+  with an `aborted` message; partial diff is still returned.
+- Random-draw desync (new code calls more/fewer random fns than original):
+  unrecorded draws fall through to PCG; replay continues, diff may be noisier.
+- Schema mismatches are out of scope — authors should `reload` first, then
+  `get-replay-diff` against the new schema.
+
+**Files:** `runtime/engine.lua` (`do_choice` append), `runtime/state.lua`
+(`SKIP_ON_REPLAY` adds `choice` and `random`), new `runtime/diff_replay.lua`,
+`runtime/debug.lua` (`get-replay-diff` command + header comment),
+`tests/runtime/diff_replay_spec.lua` (12 tests),
+`tests/runtime/engine_spec.lua` (one cache-projection test guard for
+path-less marker entries), `code_map.md`.
+
+**Acceptance:** the 50-tick acceptance test plays 50 `take-damage 2` hits
+under v1, edits the fn body to halve damage in v2 via `int-div`, calls
+`diff_mod.replay`, and verifies the divergence report lists ~50 per-tick
+health entries plus a final-state diff of `0 → 50`. All 12 new tests pass.
+
+---
+
 ## E4 — E-series review fixes ✅ (2026-05-18)
 
 Two-pass cleanup of follow-ups from the post-merge code review of E0–E3.

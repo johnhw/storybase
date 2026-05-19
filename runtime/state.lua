@@ -680,6 +680,8 @@ local SKIP_ON_REPLAY = {
   schedule_fired   = true,
   cancel_schedule  = true,
   schedule_created = true,
+  choice           = true,  -- player-input marker; replayed by H2 diff-mode, not by state replay
+  random           = true,  -- result is replayed via random provider, not as a path mutation
 }
 
 --- Restore state directly from a snapshot then replay only entries after snapshot.seq.

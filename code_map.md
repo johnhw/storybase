@@ -603,10 +603,11 @@ srv:handle_command(cmd, payload)     -- dispatch incoming command
 
 **HTTP routes:** `GET /` → HTML UI, `GET /events` → SSE stream, `POST /command` → JSON API, `OPTIONS *` → CORS preflight
 **Built-in events:** `mutation`, `scene-change`, `clamp-event`, `spawn-event`, `despawn-event`, `message-sent`, `schedule-fired`, `fn-call`, `reload`, `watch-fired`
-**Commands (TCP + HTTP):** `get-state`, `get-scene`, `do-choice`, `get-tick`, `get-mode`, `get-schema`, `eval`, `get-log`, `time-travel`, `set-breakpoint`, `clear-breakpoint`, `reload`, `get-state-graph`, `get-watches`
+**Commands (TCP + HTTP):** `get-state`, `get-scene`, `do-choice`, `get-tick`, `get-mode`, `get-schema`, `eval`, `get-log`, `time-travel`, `set-breakpoint`, `clear-breakpoint`, `reload`, `get-replay-diff`, `get-state-graph`, `get-watches`
 **`get-state-graph` payload:** `{depth?, max_nodes?, budget?}` → `{nodes, edges, node_count, edge_count, truncated, current_node_id}`; uses `M.expand_graph` from `runtime/search.lua`
 **HTTP server state:** `_http_socket`, `_http_clients`, `_sse_clients`, `_serve_mode`
 **Hot reload schema migration:** `reload` command validates Int range, enum values, adds new fields, drops removed fields atomically
+**H2 diff-mode hot reload:** `get-replay-diff {src}` compiles new source, runs `runtime/diff_replay.replay` against the live engine's log, and returns `{ok, diffs, final_diff, choices_replayed, aborted?}`. Live engine is untouched.
 
 ---
 
@@ -674,6 +675,28 @@ rng:weighted(weights, list) → value
 ### `runtime/migrate.lua` (182 lines)
 - `M.migrate(cache, migrations, save_version, game_version, game_table)` → migrated cache
 - Runs migration blocks in version order from `save_version` up to `game_version`
+
+---
+
+### `runtime/diff_replay.lua` (~210 lines)
+H2: diff-mode hot reload. Re-runs the recorded player inputs against a freshly
+compiled game table and reports per-tick state divergence vs the original
+playthrough. The live engine and its log are untouched; a throwaway engine
+runs the new fn bodies.
+
+- `M.replay(eng, new_gt, opts?)` → `{ok, diffs, final_diff, choices_replayed, aborted?, new_cache, new_scene_stack}`
+
+**Inputs to the replay come from the live engine's log:**
+- `kind == "choice"` entries (added by `engine:do_choice`) carry `{scene, idx}`
+- `kind == "random"` entries are fed back via `rng:set_provider` so deterministic
+  draws stay aligned; calls past the recorded sequence fall through to PCG
+- Schema is assumed to match (use the existing `reload` for schema migration)
+
+**Diff entry shape:** `{step, tick, path, old_value, new_value}` — emitted at
+each tick where (old, new) for that path changes. Paths that re-converge to
+equality are dropped from running state, so a fresh divergence will be re-reported.
+
+**Wired into `runtime/debug.lua`** as the `get-replay-diff {src}` command.
 
 ---
 
@@ -859,6 +882,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/debug_spec.lua` | TCP server, clamp-event, JSON codec; hot reload schema migration; spawn/despawn events |
 | `tests/runtime/debug_http_spec.lua` | HTTP/SSE transport: lifecycle, GET /, POST /command, get-scene/do-choice, SSE events (23 tests) |
 | `tests/runtime/debug_demo19_spec.lua` | Debug feature integration tests using demo19 (signal tower): get-state, get-log, time-travel, watch-when, mutation events, clamp-event, hot reload, get-schema (26 tests) |
+| `tests/runtime/diff_replay_spec.lua` | H2 diff-mode hot reload: choice logging, core replay, 50-tick acceptance, random-draw replay, get-replay-diff debug command (12 tests) |
 | `tests/runtime/migrate_spec.lua` | Migration runner unit tests (all op kinds, chain ordering) |
 | `tests/runtime/migrate_demo14_spec.lua` | Integration test for demo14's full 1→4 migration chain |
 | `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |

@@ -13,9 +13,10 @@ silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through A
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2, and the full §E series (E0 decl-macro
 substrate, E1 quests, E2 dialog-topic, E3 inventory+stat, E4 review fixes) all
-complete. §G2 (stateless HTTP API) also complete. See completed.md.
+complete. §G2 (stateless HTTP API) and §H2 (diff-mode hot reload) also complete.
+See completed.md.
 
-**~2874 successes / 0 failures / 2 pending (known limitations).**
+**~2886 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -260,26 +261,6 @@ hasn't changed.
 
 **Acceptance:** A demo NPC successfully navigates a 6-room maze toward a goal item
 without any imperative behavior code.
-
-### H2. Diff-mode hot reload
-
-**Goal:** Hot reload already works for schema (add/remove fields). Extend to *body*
-edits where the *log* is re-played against the new fn bodies — let an author edit
-`take-damage` and instantly see how a past playthrough would have differed.
-
-**Design sketch:**
-- On reload command: if no schema changes, re-execute the log against the new fn
-  table from a fresh `state.new`, producing a divergence report
-  `[{tick, path, old_value, new_value}]`.
-- Optional: switch to the new playthrough state, or stay on the old one and show
-  side-by-side.
-
-**Files:** `runtime/debug.lua` reload command extension; new HTTP command
-`get-replay-diff`; UI panel in browser debug.
-
-**Acceptance:** Save a 50-tick playthrough; edit `take-damage` to halve damage;
-reload; observe the divergence report listing every health-related tick where the
-new playthrough diverges.
 
 ### H3. Strategy synthesis (on top of `optimal-path`)
 

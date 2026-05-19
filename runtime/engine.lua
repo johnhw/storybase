@@ -406,6 +406,26 @@ function M.new(game_table, opts)
     local scene = self._scenes[scene_name]
     if not scene then return nil end
 
+    -- Record a "choice" log entry so diff-replay (H2) can re-run the player's
+    -- inputs against modified fn bodies. Skipped under BFS/verify because those
+    -- engines exhaustively probe choices; their throwaway logs do not need
+    -- player-input markers and the extra seqs would inflate replay cost.
+    if not self._in_bfs and self._log then
+      local tick = self._state and self._state._time and self._state._time.tick or 0
+      local time_snap = nil
+      if self._state and self._state._time then
+        time_snap = {}
+        for k, v in pairs(self._state._time) do time_snap[k] = v end
+      end
+      self._log:append({
+        kind  = "choice",
+        scene = scene_name,
+        idx   = choice_idx,
+        tick  = tick,
+        time  = time_snap,
+      })
+    end
+
     local ctx     = self:make_ctx("scene:" .. scene_name)
     local visible = 0
 

@@ -631,7 +631,8 @@ scene main:
     local migrate_mod = require("runtime.migrate")
     local cache = {}
     for _, e in ipairs(save_data.entries or {}) do
-      cache[e.path] = e["new"]
+      -- Skip marker entries (choice, random, checkpoint) that lack a path.
+      if e.path then cache[e.path] = e["new"] end
     end
     local diags = migrate_mod.migrate(cache, gt2.migrations, 1, 2, gt2)
     assert.equal(0, #(diags.errors or {}))
