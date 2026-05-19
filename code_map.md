@@ -244,6 +244,17 @@ helper fns (`$name-heal`, `-hurt`, `-set`, `-restore`, `-deplete`,
 `= $max` and the `set! $name $max` body lean on the §E3 literal-into-
 expression-context substitution rule.
 
+### `stdlib/dialog.sb` (§E2)
+`dialog-topic $owner $topic` emits a `{$owner}-asked-{$topic}: Bool`
+state and four conventional helpers (`$owner-asked-$topic?`,
+`$owner-not-asked-$topic?`, `mark-$owner-$topic-asked!`, and
+`$owner-reset-$topic!`). Compresses the per-topic asked-flag
+boilerplate that talk-style scenes (`demos/demo20_harrow_house.sb`)
+hand-roll today. Uses only the §E0 COMPOSITE_IDENT substrate;
+state path is a single fused segment because the PATH lexer
+doesn't currently scan `/$param` chains. Both args must be
+single-segment kebab-case.
+
 ---
 
 ## Game Table Structure
@@ -870,6 +881,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/quest_spec.lua` | §E1 `quest` decl: parser (description/prereq/step/requires/reward shape), desugar (state paths emitted, helper fns emitted, metadata in game_table.quests, duplicate quest + duplicate step diags), auto-verify (label, clause shape, production strip), runtime (start! / do-N / query fns / reward fires when all steps complete) (15 tests) |
 | `tests/stdlib/inventory_spec.lua` | §E3 `@stdlib/inventory`: compile (state shape, 7 emitted fns, two-instance non-collision), runtime (start empty, give/take/has?/full? round-trip, clear!), error paths (multi-segment $name, non-int $max) (9 tests) |
 | `tests/stdlib/stat_spec.lua` | §E3 `@stdlib/stat`: compile (Int state shape with default=$max, 8 emitted fns), runtime (start at $max, heal/hurt clamping, restore/deplete/set jumps), error paths (multi-segment $name, non-int $min) (8 tests) |
+| `tests/stdlib/dialog_spec.lua` | §E2 `@stdlib/dialog`: compile (Bool state shape with default=false, 4 emitted fns), non-collision across two topics per owner and across two owners with the same topic, runtime mark!/reset! flag round-trip and helper tracking, scene with choice guards bound to the emitted helpers compiles, error paths (multi-segment $owner, multi-segment $topic, wrong arity) (11 tests) |
 | `tests/runtime/tests_spec.lua` | runtime/tests.lua: basic pass/fail, setup/run sections, multiple expects, fresh-state isolation, multiple tests (19 tests) |
 | `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
 | `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |
@@ -936,6 +948,7 @@ Example games demonstrating progressive language features. All runnable with `st
 | `demo23_procedural_dungeon.sb` | §F1 + §F2: a procedurally-generated 3–5 room dungeon. `generate dungeon-layout seed: world/seed` spawns rooms via `random-int`; two `ending` declarations (`escape`, `lost`) drive the auto-emitted reachability + pairwise-exclusivity verify blocks. |
 | `demo24_lost_relic.sb` | §E1 `quest` declaration: prereq + three steps (one bare, two with `requires:`) + reward; demonstrates desugar (state paths and helper fns emitted by `compiler.expand_quests`) and the auto-emitted `verify-eventually (quest-lost-relic-complete?)`. Five-choice forward path so verify passes under the default CTL depth. |
 | `demo25_dungeon_loot.sb` | §E3 stdlib showcase: `import "@stdlib/inventory"` + `import "@stdlib/stat"` instantiated as `inventory player-bag LootKind 3` and `stat player-health 0 10`. Three-item loot loop with quaff-potion healing and an unlock gated on `player-bag-full?`; `verify-eventually (player-bag-full?)` proves the loop is winnable under bounded BFS. |
+| `demo_dialog_smith.sb` | §E2 stdlib showcase: three `dialog-topic` calls (`family-history`, `deliver-ore`, `forge-secret`) drive a small blacksmith conversation, with later topics gated on earlier ones via the emitted `*-asked?` helpers. Per-topic `verify-eventually` blocks prove each topic is reachable to its asked state under bounded BFS (10 states checked). |
 | `demo02_merchant_tests.sb` | Test suite for demo02_merchant.sb: 11 test blocks covering buy/sell fns, port bonus, round-trip, and defaults; uses `import`, `setup:`/`run:`/`expect:` sections |
 
 ---

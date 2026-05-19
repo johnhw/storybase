@@ -4,7 +4,7 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-18)
+## Current Status (2026-05-19)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–25 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
@@ -12,11 +12,12 @@ UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) a
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete. §E0 (decl-emitting
-macro substrate) complete; §E1 (`quest` declarations) and §E3
-(`inventory` + `stat` stdlib modules) shipped 2026-05-18.
-§E4 review fixes (bugs 1–5, gaps 1–4, tests 1–3, doc 1) all landed 2026-05-18.
+macro substrate) complete; §E1 (`quest` declarations), §E3
+(`inventory` + `stat` stdlib modules), and §E4 review fixes all shipped
+2026-05-18. §E2 (`dialog-topic` stdlib module) shipped 2026-05-19 at
+a narrower scope than the original sketch — see completed.md.
 
-**~2863 successes / 0 failures / 2 pending (known limitations).**
+**~2874 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -33,11 +34,17 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 
 1. §D1 — LLM-bounded handler standard module
 2. §B3 — Trace scrubber (browser debug UI)
-3. §E2 — `dialog` blocks shipped as a stdlib `.sb` module
-   (substrate ready: §E0 + §E3 substrate extensions complete 2026-05-18)
-4. §G1 — Web/JS compilation target
+3. §G1 — Web/JS compilation target
 
-(§G2 — stateless HTTP API — complete, see completed.md.)
+(§E2 — `dialog-topic` stdlib module — complete, see completed.md.
+§G2 — stateless HTTP API — complete, see completed.md.)
+
+**Demo coverage gaps (smaller, parallelisable):** §I1–I6 add demos 26–31 for
+language features that ship today but have no end-to-end example: record
+`with` mixins, user-authored `decl-macro`, `counterfactual from:` /
+`distribution: conditioned-on`, computed `-> (expr)` + imperative scene nav,
+the `changes` hook binding, and a Lua embedded-host walkthrough. See §I for
+specs.
 
 ---
 
@@ -202,45 +209,19 @@ Acceptance demo: `demos/demo24_lost_relic.sb`. Tests:
 (AG EF complete?) deferred — the existing single reachability check
 is the headline value; softlock can ride on the same hook later.
 
-### E2. `dialog` blocks (stdlib `.sb` module)
+### E2. `dialog-topic` stdlib module ✅ (2026-05-19 — see completed.md)
 
-**Goal:** Demo20 hand-rolls `state asked:` flags, re-entry semantics, and
-"already-said" branches. Surface as a stdlib import.
-
-**Plan:** ships as `stdlib/dialog.sb` exporting a `dialog` macro built on §E0.
-No new compiler AST kinds.
-
-**Design sketch (author API unchanged from original):**
-```
-import "@stdlib/dialog"
-
-dialog blacksmith-talk:
-  speaker: blacksmith
-  reentry: from talk-blacksmith
-  topic family-history once:
-    "I came here as a boy."
-    -> reply
-  topic deliver-ore when: contains? player/inventory `iron-ore:
-    "You brought the ore. Excellent."
-    deliver-ore
-  topic farewell always:
-    "Farewell, traveller."
-    <-
-```
-
-The macro expands to a scene + `state asked/blacksmith-talk/{topic}: Bool` +
-conditional choices. `once` topics auto-set the flag after entry; `always`
-topics never set; `when:` adds a guard.
-
-**Files:** new `stdlib/dialog.sb`; resolver entry for `@stdlib/...` import
-prefix in `compiler/compiler.lua:resolve_imports`; `tests/stdlib/dialog_spec.lua`;
-docs page in `docs/howto/dialog.md`.
-
-**Depends on:** §E0.
-
-**Acceptance:** Re-implement the dialog portion of `demo20_harrow_house.sb`
-using the `dialog` macro at roughly 1/3 the line count; behaviour identical;
-all of demo20's verify blocks still pass.
+Shipped as `stdlib/dialog.sb`. A single
+`decl-macro dialog-topic $owner $topic` emits the
+`{owner}-asked-{topic}` Bool state and four conventional helper fns
+(asked?, not-asked?, mark-asked!, reset!). The original sketch (a
+block-level `dialog blacksmith-talk:` with nested `topic … once /
+always / when:`) would have needed another substrate extension; the
+shipped narrower form fits the existing substrate with zero compiler
+changes and removes the same per-topic boilerplate. Acceptance demo
+`demos/demo_dialog_smith.sb` with three topics + a per-topic
+`verify-eventually` block. Tests: `tests/stdlib/dialog_spec.lua`
+(11 tests).
 
 ### E3. `inventory` and `stat` (stdlib `.sb` module) ✅ (2026-05-18 — see completed.md)
 
@@ -388,11 +369,166 @@ new builtin. Tests.
 **Acceptance:** On a stochastic demo (e.g. dice-based combat), the synthesised
 strategy beats a uniform-random policy in 1000 sampled rollouts.
 
-### H4. Inventory / dialog / quest stubs
+### H4. Inventory / dialog / quest stubs ✅ (all shipped — see completed.md)
 
 Folded into §E. E0 (decl-macro substrate), E1 (`quest` declarations),
-and E3 (`inventory` + `stat` stdlib modules) shipped 2026-05-18; only
-E2 (`dialog` stdlib module) remains open.
+E3 (`inventory` + `stat` stdlib modules) shipped 2026-05-18; E2
+(`dialog-topic` stdlib module) shipped 2026-05-19.
+
+---
+
+## I. Demo Coverage Gaps (new demos 26–31)
+
+A 2026-05-19 audit of `demos/demo01–25` against `docs/reference/language.md`
+found a handful of supported language features that no current demo exercises
+end-to-end. Six new demos below fill those gaps. Each item names the specific
+features to showcase, the suggested theme, and an acceptance criterion. Implement
+in order; each is independent.
+
+### I1. demo26 — "The Beastmaster's Ledger" (`demo26_bestiary.sb`)
+
+**Primary gap:** Record `with` mixins and query-context path patterns. Neither
+is shown in any current demo despite being documented.
+
+**Features demonstrated:**
+- `type Entity:` / `type Combatant: with Entity` / `type Mount: with Entity` —
+  record mixin composition, including a record that `with`s two parents
+- `Wolf` / `Bear` / `Drake` each as records mixing `Combatant` + species-specific
+  fields, instantiated as `state bestiary/{beast}: ...`
+- Path patterns in `find` and `watch`: `bestiary/*/alert`, `bestiary/(wolves|bears)/hp`,
+  `bestiary/!drake/morale` (wildcard, alternation, negation)
+- Path patterns in a `verify` block (`bestiary/**/status`) as a sanity safety net
+
+**Story sketch:** Tame, train, and dispatch a small roster of beasts (wolves,
+bears, a drake). Each species inherits `Entity` fields via `with`; the
+ledger view runs path-pattern queries to report group health and morale.
+
+**Acceptance:** `storybase run demo26_bestiary.sb` is playable to an end state;
+`storybase verify` passes; all three pattern forms (`*`, `(a|b)`, `!`) appear
+at least once in a `find` or `watch` clause; comments call out each `with`
+usage.
+
+### I2. demo27 — "The Apprentice's Grimoire" (`demo27_grimoire.sb`)
+
+**Primary gap:** User-authored `decl-macro`. All §E0-using demos so far
+(`demo24`, `demo25`) import macros from `@stdlib/`; none defines its own.
+
+**Features demonstrated:**
+- A file-local `decl-macro spell $name cost: $c power: $p` (positional args
+  per the §E0 convention) that emits, per spell:
+  - `state player/spells/$name/learned: Bool = false`
+  - `state player/spells/$name/uses: Int(0, $max) = 0`
+  - `fn cast-$name`: precondition guards (`player/mana >= $c`), mutations,
+    `say` line, optional `engine/emit`
+  - one `verify-eventually (cast-$name-once?)` reachability check per spell
+- Three `spell` calls (`fireball`, `mend`, `ward`) at the top level
+- A bonus: a `$param` used in a type slot (`Int(0, $max)`) and in an integer
+  bound, exercising the §E3 Stage-A substrate extension on the author side
+- A scene that wires each emitted `cast-<name>` fn into a choice
+
+**Acceptance:** Three full spell systems materialise from three single-line
+macro calls; `storybase verify` proves each spell is castable from the
+initial state; adding a fourth spell is genuinely one line in the source.
+
+### I3. demo28 — "The Seer's Chamber" (`demo28_seers_chamber.sb`)
+
+**Primary gap:** `counterfactual from: <past-tick>` (log-replay-then-fork) and
+`distribution: conditioned-on <path>` in a `bounded` declaration. Neither is
+exercised in any demo.
+
+**Features demonstrated:**
+- `counterfactual from: (world/turn - 3) do: …` — rewinds the log three turns,
+  applies a hypothetical mutation, and reports the divergence in narration
+- A second `counterfactual` with `from:` *and* `simulate: true` (replay,
+  fork, and run one tick of actors/scheduler)
+- `bounded omen-of-season:` with `distribution: conditioned-on world/season` —
+  the search engine branches non-uniformly based on season; document the
+  resulting branching factor
+- A scene that lets the player preview two rewound futures before committing
+  to an action in the present
+
+**Acceptance:** A counterfactual that reaches back 3 turns produces visibly
+different state from one with `from: world/turn` (no rewind); the
+`conditioned-on` distribution shows up in the bounded codegen output and
+the search engine branches over it correctly. Verify still passes.
+
+### I4. demo29 — "Caravan Dispatch" (`demo29_caravan_dispatch.sb`)
+
+**Primary gap:** Computed `-> (expr)` goto and imperative scene navigation
+(`goto-scene!` / `enter-scene!` / `exit-scene!`). Both are documented in
+`language.md` §Scene Syntax but no demo uses either form.
+
+**Features demonstrated:**
+- `-> (next-stop-for player/route)` — the destination scene is computed at
+  runtime from a pure helper fn returning a scene-name symbol
+- Side errands use `=> errand-name` to push the scene stack and `<-` to pop,
+  paired with `enter-scene! 'name` / `exit-scene!` from inside a fn body
+  (proving both syntactic forms target the same machinery)
+- `goto-scene! 'name` from a fn called by a choice, as the explicit
+  imperative equivalent of `-> name`
+- A `Scene = SymbolOf(...)` (or named-enum) discipline for the computed-goto
+  expression's return type, so the route table is type-checked
+
+**Acceptance:** Routing a caravan through five stops requires only one
+top-level `-> (...)` form; an errand `=>` cleanly returns via `<-` with the
+scene stack matching before/after; `storybase verify` proves every reachable
+route reaches a final scene.
+
+### I5. demo30 — "The Quartermaster's Audit" (`demo30_quartermaster.sb`)
+
+**Primary gap:** The `changes` binding inside `after:` / `post:` hooks (the
+per-mutation diff list). Also a chance to highlight `strict-contracts: true`
+and a real `post:` contract with `path@before`.
+
+**Features demonstrated:**
+- `tags: [transaction]` on every gameplay fn, and a single
+  `hook transaction: post:` body that walks `changes` to render a per-turn
+  ledger (`"3 gold spent, 1 herb consumed, morale -2"`)
+- Inside the hook body, iterate `changes` with `for entry in changes:`,
+  reading `entry/path`, `entry/old`, `entry/new`
+- A `post:` contract on a `spend` fn using `player/gold@before` for a numerical
+  postcondition
+- `engine-config: strict-contracts: true` so the contract survives a production
+  build, with a comment noting the implication
+- A second `hook after: spend:` (function-level) that double-checks against
+  the tag-level hook running
+
+**Acceptance:** Running the demo yields a visible ledger at the end of each
+turn driven entirely by `changes`; the `post:` contract triggers a clear
+error when intentionally violated (a test fixture demonstrates the failure).
+
+### I6. demo31 — Embedded host example (`demo31_embedded_host.sb` + `examples/demo31_host.lua`)
+
+**Primary gap:** The Lua embedding host story. `engine/emit` fires in
+`demo08` / `demo09` / `demo10`, but no end-to-end example shows a Lua host
+consuming those events via `game:on("event-name", handler)`. This is the
+operational counterpart to the language-feature demos above.
+
+**Features demonstrated (StoryBase side, in `demo31_embedded_host.sb`):**
+- Several `engine/emit` sites tagged with structured payloads
+  (e.g. `engine/emit 'door-opened {room: ..., key: ...}`)
+- A tiny `state` / `scene` shell sufficient to drive a few interesting events
+
+**Features demonstrated (host side, in `examples/demo31_host.lua`):**
+- `local game = require("storybase").load("demo31_embedded_host.sb")`
+- `game:on("door-opened", function(payload) … end)` for every event the demo emits
+- A driver loop that calls `game:render()` / `game:choose(n)` and prints
+  attributed dialogue objects vs. plain narration lines (the type-table check
+  from `docs/reference/language.md` §Dialogue)
+- A demonstration of save/load round-tripping through the host API
+
+**Acceptance:** `lua5.4 examples/demo31_host.lua` runs the game to completion
+without using the `storybase` CLI; every `engine/emit` call lands in a
+registered handler; the printed transcript shows speaker attribution working
+through the host. Add a brief `docs/howto/lua_embedding.md` cross-reference.
+
+### I7. Coverage tracker
+
+Once all six land, the language features without demo coverage drop to a
+small residue worth documenting (not necessarily demoing): `Set` operations
+(`union` / `intersect` / `difference`), `(set)` empty literal, `engine/checkpoint!`
+with an explicit label argument, and lambda expressions outside a `find`
+clause. Add a note in `completed.md` if/when that residue is acceptable.
 
 ---
 
@@ -415,5 +551,6 @@ E2 (`dialog` stdlib module) remains open.
   — only inline `Int(0,N)` types do. Pre-existing limitation of `state.lua`'s type
   index (`lookup_type` returns `{tag="named"}`, not `{tag="int"}`). E1/E3 shipped
   without this fix; stat/quest demos work fine in practice because inline
-  `Int(min, max)` is what they emit. Revisit if E2 (`dialog`) or user-written
-  decl-macros run into it.
+  `Int(min, max)` is what they emit. E2 (`dialog-topic`) only emits `Bool` so it
+  didn't hit this limitation either; revisit if a future user-written decl-macro
+  runs into it.

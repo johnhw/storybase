@@ -676,7 +676,7 @@ that emits both sets of decls inline.
 A `decl-macro` is exported and imported like any other top-level name.
 The `@stdlib/<name>` prefix resolves into the bundled standard library
 directory (`stdlib/counter.sb`, `stdlib/inventory.sb`,
-`stdlib/stat.sb`, …):
+`stdlib/stat.sb`, `stdlib/dialog.sb`, …):
 
 ```
 import "@stdlib/counter"             # all names unqualified
@@ -688,12 +688,17 @@ inventory player-bag ItemKind 8
 import "@stdlib/stat"
 stat player-mana 0 50
 
+import "@stdlib/dialog"
+dialog-topic smith family-history    # emits asked-flag + 4 helpers
+
 import "@stdlib/counter" as C        # namespaced
 C.counter enemy-rage
 ```
 
 See [`docs/howto/stdlib_inventory_stat.md`](../howto/stdlib_inventory_stat.md)
-for the inventory/stat expansion details.
+for the inventory/stat expansion details, and
+[`docs/howto/dialog.md`](../howto/dialog.md) for the `dialog-topic`
+expansion.
 
 Resolution order for `@stdlib/<n>` is: the `M._stdlib_dir_override`
 compiler-test hook, the `STORYBASE_STDLIB_DIR` environment variable,

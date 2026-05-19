@@ -1,0 +1,44 @@
+module dialog
+  version: 1.0
+
+# A single "have we asked about this yet?" dialog topic flag with the
+# conventional accessor / mark / reset helpers used by talk-style scenes.
+#
+#   import "@stdlib/dialog"
+#   dialog-topic meredith family-history
+#
+# emits:
+#   state meredith-asked-family-history: Bool = false
+#   fn meredith-asked-family-history?:      meredith-asked-family-history
+#   fn meredith-not-asked-family-history?:  not meredith-asked-family-history
+#   fn mark-meredith-family-history-asked!: set! meredith-asked-family-history true
+#   fn meredith-reset-family-history!:      set! meredith-asked-family-history false
+#
+# Typical use inside a `talk-X` scene:
+#
+#   * [meredith-receptive? and meredith-not-asked-family-history?] Ask about ...
+#     mark-meredith-family-history-asked!
+#     say Meredith: ...
+#     <-
+#
+# Both $owner and $topic must be single-segment kebab-case identifiers
+# (no `/`). The macro substrate's composite-identifier slot rejects
+# multi-segment paths because the resulting name is one fused
+# identifier. To partition flags under a family path like
+# `npcs/meredith/...`, layer your own wrapper macro on top or write the
+# boilerplate by hand.
+
+decl-macro dialog-topic $owner $topic:
+  state $owner-asked-$topic: Bool = false
+
+  fn $owner-asked-$topic?:
+    $owner-asked-$topic
+
+  fn $owner-not-asked-$topic?:
+    not $owner-asked-$topic
+
+  fn mark-$owner-$topic-asked!:
+    set! $owner-asked-$topic true
+
+  fn $owner-reset-$topic!:
+    set! $owner-asked-$topic false

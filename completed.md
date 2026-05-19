@@ -198,9 +198,96 @@ value doesn't fit.
   `Bag: N/3`, `HP M/10` interpolation and the inventory/stat
   helpers driving state.
 
-**Deferred:** E2 (`dialog` blocks) remains open — same substrate
-suffices, but the author API needs `topic … once / always / when:`
-modelling that goes beyond this commit. Tracked in todo.md.
+**Deferred:** E2 (`dialog` blocks) shipped at a narrower scope on
+2026-05-19 (see below) — the `topic … once / always / when:` author
+API was traded for a per-topic positional `dialog-topic` macro that
+fits the existing decl-macro substrate without further compiler
+changes.
+
+---
+
+## E2 — `dialog-topic` stdlib module ✅ (2026-05-19)
+
+A single `decl-macro dialog-topic $owner $topic` shipped as
+`stdlib/dialog.sb`, importable through the `@stdlib/<name>` resolver
+already wired in §E0. The macro handles the "have we raised this
+question yet?" boilerplate that every talk-style scene re-invents
+(see `demos/demo20_harrow_house.sb`'s `state asked: ...` block and
+the seven `ask-about-*` fns built around it).
+
+**Scope trade-off:** The original §E2 sketch in todo.md described a
+block-level `dialog blacksmith-talk:` form with nested `topic … once
+/ always / when:` sub-clauses that would expand into a whole scene
+plus per-topic state and choice. Implementing that block form would
+have required a second substrate extension (nested-keyword
+sub-declarations, scene-emitting macros with choice splicing). The
+shipped narrower form fits the existing substrate with **zero
+compiler changes** and still removes the per-topic boilerplate the
+sketch was motivated by; the per-topic body — say lines, knowledge
+mutations, rapport adjustments — stays hand-written because it is
+exactly the unique content the author cares about. Documented as a
+deliberate deviation in todo.md.
+
+**Author API:**
+
+```
+import "@stdlib/dialog"
+dialog-topic smith family-history
+```
+
+emits per call:
+
+```
+state smith-asked-family-history: Bool = false
+fn smith-asked-family-history?:        smith-asked-family-history
+fn smith-not-asked-family-history?:    not smith-asked-family-history
+fn mark-smith-family-history-asked!:   set! smith-asked-family-history true
+fn smith-reset-family-history!:        set! smith-asked-family-history false
+```
+
+The state path is a single fused segment (`{owner}-asked-{topic}`)
+rather than a hierarchical `asked/{owner}/{topic}`, because the
+lexer does not currently scan `$param` segments after `/` inside a
+PATH token. Fusing into one segment uses only the COMPOSITE_IDENT
+machinery §E0 already supports. Both `$owner` and `$topic` must be
+single-segment kebab-case (no `/`); the substrate emits
+`MACRO_DECL_EMIT` otherwise (`dialog-topic npcs/meredith ...` is
+rejected, same constraint as `counter`, `stat`, and `inventory`).
+
+**Files:**
+
+- `stdlib/dialog.sb` — new module, single decl-macro.
+- `tests/stdlib/dialog_spec.lua` — 11 tests covering compile shape
+  (state path + four helper fns), runtime mark!/reset! round-trip,
+  two-topics-one-owner and one-owner-two-topics non-collision,
+  scenes guarded on the emitted helpers, and three error paths
+  (multi-segment `$owner`, multi-segment `$topic`, wrong arity).
+- `demos/demo_dialog_smith.sb` — acceptance demo: a tiny
+  three-topic blacksmith conversation with a
+  `verify-eventually` block per topic (10 BFS states checked,
+  all reach the asked state).
+- `code_map.md` — new stdlib + test + demo entries.
+
+**Acceptance:**
+
+- `busted tests/` → 2874 successes / 0 failures (up from 2863).
+- `lua5.4 cli/main.lua verify demos/demo_dialog_smith.sb` →
+  `PASS every topic is reachable to the asked state` (10 BFS
+  states).
+- `--auto` run plays the demo to its end scene without hitting
+  any precondition violation.
+
+**Limitations / follow-ups:**
+
+- No `topic-once` or `topic-when` variants; the author writes the
+  guard expression in the scene's `*` choice directly, calling
+  `mark-X-asked!` inside the body to flip the flag. This is the
+  same idiom demo20 already uses, with the boilerplate factored
+  out.
+- The state path is flat. A future substrate extension that lets
+  `/` precede a `$param` in a PATH token would unlock
+  `state asked/$owner/$topic: Bool = false`; tracked alongside
+  the existing demo20-style hierarchical paths.
 
 ---
 

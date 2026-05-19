@@ -1,0 +1,72 @@
+# demo_dialog_smith.sb
+#
+# Acceptance demo for §E2 — the `dialog-topic` decl-macro from
+# `stdlib/dialog.sb`. A tiny conversation with the village blacksmith
+# that demonstrates the three patterns the macro shortens:
+#
+#   * `not-asked` guards on choice predicates
+#   * `mark-asked!` mutations inside choice bodies
+#   * `asked?` guards on follow-up choices that depend on earlier ones
+#
+# Each `dialog-topic` call expands to one Bool state path and four
+# helper fns (asked?, not-asked?, mark-asked!, reset!). Hand-rolling
+# the same boilerplate per topic is what demos20-style talk-scenes do
+# today; this file shows the macro version side-by-side.
+#
+# Run:        lua5.4 cli/main.lua run demos/demo_dialog_smith.sb
+# Auto:       lua5.4 cli/main.lua run --auto --steps 10 demos/demo_dialog_smith.sb
+# Verify:     lua5.4 cli/main.lua verify demos/demo_dialog_smith.sb
+
+module demo-dialog-smith
+  version: 1.0
+
+engine-config:
+  entry-scene: forge
+
+import "@stdlib/dialog"
+
+# One macro call per topic — replaces five hand-written declarations
+# (one state + four fns) per topic with one line of source.
+dialog-topic smith family-history
+dialog-topic smith deliver-ore
+dialog-topic smith forge-secret
+
+state player:
+  has-ore:  Bool = true
+  has-coin: Bool = false
+
+scene forge:
+  THE FORGE
+
+  The blacksmith looks up from his anvil and nods.
+
+  * [smith-not-asked-family-history?] Ask where he learned the trade.
+    mark-smith-family-history-asked!
+    say smith: My grandfather built this forge in 1882. I have been swinging this hammer since I was nine.
+    -> forge
+
+  * [smith-not-asked-deliver-ore? and player/has-ore] Hand him the iron ore.
+    mark-smith-deliver-ore-asked!
+    set! player/has-ore false
+    set! player/has-coin true
+    say smith: Good steel in this. Here is your fee.
+    -> forge
+
+  * [smith-asked-family-history? and smith-asked-deliver-ore? and smith-not-asked-forge-secret?] Press him about the forge's other reputation.
+    mark-smith-forge-secret-asked!
+    say smith: I do not sharpen blades that go north of the river. I will not start today.
+    -> forge
+
+  * [smith-asked-forge-secret?] You have learned what you came for.
+    -> done
+
+  * Leave the forge.
+    -> done
+
+scene done:
+  You step away from the anvil's heat. The conversation is over.
+
+verify "every topic is reachable to the asked state":
+  verify-eventually smith-asked-family-history?
+  verify-eventually smith-asked-deliver-ore?
+  verify-eventually smith-asked-forge-secret?
