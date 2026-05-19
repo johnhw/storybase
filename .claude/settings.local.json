@@ -69,7 +69,13 @@
       "Bash(grep -n \"\\\\`\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/test04_control_flow.sb)",
       "Bash(awk '{print $6, $7, $8}')",
       "Bash(grep -n \"^### \\\\`\" /mnt/c/Users/John/Dropbox/devel/storybase/docs/reference/cli.md)",
-      "Bash(awk *)"
+      "Bash(awk *)",
+      "Bash(grep -rn \"^[ \\\\t]*module quest[ \\\\t]*$\\\\|^[ \\\\t]*quest[ \\\\t]*$\\\\|state quest:\\\\|fn quest\\\\b\" /mnt/c/Users/John/Dropbox/devel/storybase/demos/ /mnt/c/Users/John/Dropbox/devel/storybase/tests/ /mnt/c/Users/John/Dropbox/devel/storybase/examples/ /mnt/c/Users/John/Dropbox/devel/storybase/stdlib/)",
+      "Bash(grep -n \"\\\\\\\\$\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/compiler/macro_decl_spec.lua)",
+      "Bash(grep -n \"^end\\)\\\\s*$\\\\|^end\\)\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/compiler/macro_decl_spec.lua)",
+      "Bash(grep -rn \"asked/\\\\$\\\\|state \\\\$.*/\\\\$\\\\|\\\\$.*/\\\\$\" /mnt/c/Users/John/Dropbox/devel/storybase/stdlib/ /mnt/c/Users/John/Dropbox/devel/storybase/tests/)",
+      "Bash(grep -n \"ending \\\\|scene ending\\\\|done$\" /mnt/c/Users/John/Dropbox/devel/storybase/demos/demo01_wanderer.sb)",
+      "Bash(grep -n \"runtime/debug\\\\|runtime/state\\\\|^### runtime/\\\\|^- \\\\`runtime/\\\\|runtime/log.lua\\\\|runtime/migrate\" /mnt/c/Users/John/Dropbox/devel/storybase/code_map.md)"
     ]
   }
 }

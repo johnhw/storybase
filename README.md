@@ -1,5 +1,7 @@
 # StoryBase
 
+**WARNING: This is an experimental project exploring vibecoded development. All code is authored by Claude! This is not intended for production use. It's a learning exercise and a sandbox for trying out new ideas.**
+
 **StoryBase** is a domain-specific language for authoring adventure and RPG games. It gives you:
 
 - A **typed, discrete-state engine** that is fully searchable and verifiable.
