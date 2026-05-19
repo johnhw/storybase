@@ -11,11 +11,9 @@ Demos 01–25 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
 UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
 silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
 resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
-complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2 all complete. §E0 (decl-emitting
-macro substrate) complete; §E1 (`quest` declarations), §E3
-(`inventory` + `stat` stdlib modules), and §E4 review fixes all shipped
-2026-05-18. §E2 (`dialog-topic` stdlib module) shipped 2026-05-19 at
-a narrower scope than the original sketch — see completed.md.
+complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2, and the full §E series (E0 decl-macro
+substrate, E1 quests, E2 dialog-topic, E3 inventory+stat, E4 review fixes) all
+complete. §G2 (stateless HTTP API) also complete. See completed.md.
 
 **~2874 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
@@ -35,9 +33,6 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 1. §D1 — LLM-bounded handler standard module
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
-
-(§E2 — `dialog-topic` stdlib module — complete, see completed.md.
-§G2 — stateless HTTP API — complete, see completed.md.)
 
 **Demo coverage gaps (smaller, parallelisable):** §I1–I6 add demos 26–31 for
 language features that ship today but have no end-to-end example: record
@@ -183,70 +178,14 @@ on-the-fly prose for every scene, varying between runs (recorded for replay).
 
 ## E. Built-in Patterns Every Game Reinvents
 
-Three patterns (quest / dialog / inventory+stat) appear in every nontrivial demo.
-Originally planned as base-language declarations; revised 2026-05-16 to a staged
-plan that prefers **stdlib `.sb` modules** over compiler-internal AST kinds,
-backed by a one-time extension to the macro system (§E0). E1 stays partly base
-because its value is in *analyses* (verify auto-emission), not desugaring.
-
-### E0. Decl-emitting macro substrate ✅ (2026-05-17 / 2026-05-18 — see completed.md)
-
-Six-stage extension that landed the `decl-macro` keyword, lexer-level
-`$param` + composite identifiers, decl-level expansion via
-`substitute_decl_node`, position propagation with `expanded from macro`
-diag notes, cross-import wiring + `@stdlib/<name>` resolver, and a
-single-pass nested-call restriction. Tests:
-`tests/compiler/macro_decl_spec.lua` (~62 tests). Reference fixture:
-`stdlib/counter.sb`.
-
-### E1. `quest` declarations ✅ (2026-05-18 — see completed.md)
-
-Shipped as a base feature with first-class `QUEST_DECL` AST kind.
-Compiler desugars to state + helper fns; codegen auto-emits a
-`verify-eventually (quest-<name>-complete?)` block per quest.
-Acceptance demo: `demos/demo24_lost_relic.sb`. Tests:
-`tests/compiler/quest_spec.lua` (15 tests). Softlock auto-verify
-(AG EF complete?) deferred — the existing single reachability check
-is the headline value; softlock can ride on the same hook later.
-
-### E2. `dialog-topic` stdlib module ✅ (2026-05-19 — see completed.md)
-
-Shipped as `stdlib/dialog.sb`. A single
-`decl-macro dialog-topic $owner $topic` emits the
-`{owner}-asked-{topic}` Bool state and four conventional helper fns
-(asked?, not-asked?, mark-asked!, reset!). The original sketch (a
-block-level `dialog blacksmith-talk:` with nested `topic … once /
-always / when:`) would have needed another substrate extension; the
-shipped narrower form fits the existing substrate with zero compiler
-changes and removes the same per-topic boilerplate. Acceptance demo
-`demos/demo_dialog_smith.sb` with three topics + a per-topic
-`verify-eventually` block. Tests: `tests/stdlib/dialog_spec.lua`
-(11 tests).
-
-### E3. `inventory` and `stat` (stdlib `.sb` module) ✅ (2026-05-18 — see completed.md)
-
-Shipped as `stdlib/inventory.sb` (`inventory $name $T $max`) and
-`stdlib/stat.sb` (`stat $name $min $max`) via the §E0 decl-macro
-substrate, with one small substrate extension (§E3 Stage A) to allow
-`$param` to land in type-name and integer-bound slots. The original
-named-arg author API (`contents: ItemKind` / `max: 10`) gave way to
-positional args mirroring the existing `stdlib/counter.sb`
-convention, since the substrate only carries positional `$params`.
-Acceptance demo `demos/demo25_dungeon_loot.sb` wires both modules
-into a small loot-loop game whose
-`verify-eventually (player-bag-full?)` clause proves winnability.
-Tests: `tests/stdlib/inventory_spec.lua` (9) and
-`tests/stdlib/stat_spec.lua` (8).
-
-### E4. E-series review fixes ✅ (2026-05-18 — see completed.md)
-
-Two-pass cleanup of follow-ups from the post-merge code review of E0–E3.
-Bugs 1–4 + early doc fixes in commit `7ed1751`; bug 5, gaps 1–4,
-tests 1–3, doc-1 in `8b7391e`. None blocked existing demos.
+(E0 decl-macro substrate, E1 quests, E2 dialog-topic, E3 inventory+stat,
+E4 review fixes — all complete; see completed.md.)
 
 ---
 
 ## G. Reach Beyond Lua
+
+(G2 — stateless HTTP API — complete; see completed.md.)
 
 ### G1. Web/JS compilation target
 
@@ -269,15 +208,6 @@ documentation.
 **Acceptance:** `storybase bundle --target web demo01_wanderer.sb` produces a single
 `.html` file that runs the demo in any modern browser.
 
-### G2. HTTP API mode (stateless `/step`) ✅ (2026-05-16 — see completed.md)
-
-Shipped as `storybase serve-api`. Endpoints `GET /`, `GET /schema`,
-`POST /step`, `POST /reset`, `OPTIONS *`. Client-held opaque `save_log`
-round-trips through JSON; the server is stateless. 22 tests
-(`tests/cli/serve_api_spec.lua`). Compaction was not added to the API
-itself — clients can replay saves through `storybase compact` offline
-if logs grow large; revisit if real usage shows it needs to be inline.
-
 ### G3. Engine adapters (Löve2D, Godot, etc.)
 
 **Goal:** StoryBase as the logic layer; host engine handles graphics, audio,
@@ -298,6 +228,8 @@ sprites + audio.
 ---
 
 ## H. Smaller Language / Runtime Polish
+
+(H4 — inventory/dialog/quest stubs — folded into §E; all complete, see completed.md.)
 
 ### H1. Goal-directed actors
 
@@ -368,12 +300,6 @@ new builtin. Tests.
 
 **Acceptance:** On a stochastic demo (e.g. dice-based combat), the synthesised
 strategy beats a uniform-random policy in 1000 sampled rollouts.
-
-### H4. Inventory / dialog / quest stubs ✅ (all shipped — see completed.md)
-
-Folded into §E. E0 (decl-macro substrate), E1 (`quest` declarations),
-E3 (`inventory` + `stat` stdlib modules) shipped 2026-05-18; E2
-(`dialog-topic` stdlib module) shipped 2026-05-19.
 
 ---
 
@@ -543,7 +469,7 @@ clause. Add a note in `completed.md` if/when that residue is acceptable.
   new analyses.
 - New top-level declarations follow a stable pattern: AST kind → parser entry →
   codegen emitter → game-table consumer. See §6 of `idea.md` and the `quest`/`dialog`
-  sketches in §E for templates.
+  sketches in completed.md for templates.
 - All new features must add per-feature tests under `tests/` and update `code_map.md`.
 - Update `idea.md` whenever syntax is added; update `docs/reference/language.md`
   whenever semantics change.
