@@ -5,6 +5,69 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## I4 — demo29 "Caravan Dispatch" ✅ (2026-05-20)
+
+Fills the §I4 demo-coverage gap: computed `-> (expr)` and the three imperative
+scene-navigation mutation primitives (`goto-scene!` / `enter-scene!` /
+`exit-scene!`). Of those primitives, only the AST kinds existed; the parser
+had no MUTATION_TABLE entries and the runtime had no eval handlers, so any
+author trying to use them per `docs/reference/language.md` §1191 would have
+hit "unknown call" or silent fall-through. I4 wires them up end-to-end and
+ships a demo that uses every form.
+
+**Language wiring (filling spec gaps):**
+- `compiler/parser.lua` MUTATION_TABLE now contains `goto-scene!`,
+  `enter-scene!`, `exit-scene!`. Each accepts a `SYMBOL` (e.g. `` `name ``), a
+  bare `IDENT`, or a parenthesised expression for the computed form.
+- `runtime/eval.lua` adds `GOTO_SCENE_MUT` / `ENTER_SCENE_MUT` /
+  `EXIT_SCENE_MUT` handlers that set the same `ctx.signal` table the sigil
+  forms (`->` / `=>` / `<-`) already produce. The bang and sigil forms target
+  the same engine machinery — verified by the demo's tests.
+- `compiler/checker.lua` extends the AV-2 undefined-scene pass to walk the
+  bang forms (`walk_nav_targets` + `pass_check_scene_targets`) so a literal
+  `goto-scene! 'nope` warns at compile time, matching the existing `-> nope`
+  diagnostic.
+- `runtime/verify.lua` (BFS) and `runtime/search.lua` (`expand_graph`) now
+  follow an unconditional scene-body `nav_signal` (e.g. `-> (expr)` at scene-
+  body top level) as a free transition that does not burn against the depth
+  budget. The engine's step loop already did this; the analysis layer was
+  silently treating dispatcher scenes as terminals, so any `verify-eventually`
+  past such a scene would fail with a misleading "not reachable". With the
+  fix, computed dispatchers route through `verify` cleanly.
+- `lib/storybase.lua` `choose()` now follows the same scene-navigation chain
+  after applying the choice's signal, so embedded-host callers see the
+  settled post-dispatch scene (e.g. `:current_scene()` returns `riverbend`,
+  not the transient `leg-arrival`).
+
+**Demo (`demos/demo29_caravan_dispatch.sb`):**
+- `type Stop = depot | riverbend | midmoor | pass-watch | highmarket`
+  (named enum), `state caravan/at: Stop` — the route table is type-checked.
+- `scene leg-arrival: -> (caravan/at)` — the only `-> (expr)` form in the
+  file; routes the caravan through five stop scenes from a single dispatcher.
+- Errand `=> inspect-cargo` (scene-body push) / `<-` (scene-body pop) on the
+  depot and midmoor stops.
+- `pump-water-errand` (fn-body `enter-scene! \`water-refill`) and
+  `finish-errand` (fn-body `exit-scene!`) on the riverbend and pass-watch
+  stops — proving both syntactic forms target the same machinery.
+- `shortcut-to-highmarket` (fn-body `` goto-scene! `highmarket ``) jumps
+  across the route, demonstrating the imperative goto.
+- Three `verify` blocks: `verify-eventually at-end?` (proves every reachable
+  route reaches high market), plus two route-length invariants.
+
+**Files:** new `demos/demo29_caravan_dispatch.sb`;
+`compiler/parser.lua` (+3 MUTATION_TABLE entries);
+`compiler/checker.lua` (extended scene-target undefined check);
+`runtime/eval.lua` (+3 mutation handlers + K kind aliases);
+`runtime/verify.lua` (nav_signal follow in `bfs_states`);
+`runtime/search.lua` (nav_signal follow in `expand_graph`);
+`lib/storybase.lua` (`choose` settles via auto-advance);
+`tests/cli/cli_integration_spec.lua` (8 new demo29 tests).
+
+**Test count:** 2912 successes / 0 failures / 2 pending (20 transient
+HTTP/debug failures excluded per CLAUDE.md guidance).
+
+---
+
 ## state_space_log2 — inexact state-space enumerator ✅ (2026-05-20)
 
 `compiler/types.state_space_size` and `compiler/codegen.compute_total_state_space`

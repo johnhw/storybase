@@ -2324,3 +2324,103 @@ describe("CLI demo28_seers_chamber: counterfactual from: + conditioned-on", func
     assert.equal(20, game:get("world/wisdom"))
   end)
 end)
+
+-- ── demo29: Caravan Dispatch (computed -> (expr) + goto-scene!/enter-scene!/exit-scene!)
+--
+-- I4 — exercises every form of scene navigation: the computed `-> (expr)`
+-- dispatcher and all three imperative mutation primitives.
+
+describe("CLI demo29_caravan_dispatch: computed goto + imperative scene-nav", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo29_caravan_dispatch.sb"})
+    assert.equal(0, rc, "demo29 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo29_caravan_dispatch.sb",
+                                  "--no-cache"})
+    assert.equal(0, rc, "demo29 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays the route from depot to highmarket without error", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "12",
+                                   "demos/demo29_caravan_dispatch.sb"})
+    assert.equal(0, rc, "demo29 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("HIGH MARKET"),
+      "expected demo29 to reach high market; got: " .. out)
+  end)
+
+  it("type Stop carries every named stop value", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo29_caravan_dispatch.sb")
+    game:init()
+    -- caravan/at defaults to `depot
+    assert.equal("depot", game:get("caravan/at"))
+    -- next-stop-for marches through the route table
+    assert.equal("riverbend",  game:call("next-stop-for", "depot"))
+    assert.equal("midmoor",    game:call("next-stop-for", "riverbend"))
+    assert.equal("pass-watch", game:call("next-stop-for", "midmoor"))
+    assert.equal("highmarket", game:call("next-stop-for", "pass-watch"))
+    assert.equal("highmarket", game:call("next-stop-for", "highmarket"))
+  end)
+
+  it("scene-body => / <- pushes and pops the errand stack symmetrically", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo29_caravan_dispatch.sb")
+    game:init()
+    -- Depot, choice 2 is "Inspect the cargo before leaving (=>)" — pushes
+    game:pick("Inspect the cargo")
+    assert.equal("inspect-cargo", game:current_scene())
+    -- The single choice in inspect-cargo uses <- to pop
+    game:pick("Note the count and return")
+    assert.equal("depot", game:current_scene())
+    -- errands-run counter records the side trip
+    assert.equal(1, game:get("caravan/errands-run"))
+  end)
+
+  it("fn-body enter-scene!/exit-scene! match scene-body =>/<- semantics", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo29_caravan_dispatch.sb")
+    game:init()
+    -- Travel to riverbend so the pump-water choice is gated open
+    game:pick("Set out toward")
+    assert.equal("riverbend", game:current_scene())
+    -- Pump water — choice body invokes pump-water-errand which calls enter-scene!
+    game:pick("Pump water at the bend")
+    assert.equal("water-refill", game:current_scene())
+    assert.equal(1, game:get("caravan/errands-run"))
+    -- finish-errand uses exit-scene! to pop
+    game:pick("Cap the barrels and return")
+    assert.equal("riverbend", game:current_scene())
+    assert.equal(20, game:get("caravan/water"))
+  end)
+
+  it("fn-body goto-scene! short-circuits to a non-adjacent stop", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo29_caravan_dispatch.sb")
+    game:init()
+    game:pick("Set out toward")       -- depot   -> riverbend
+    game:pick("Drive on toward")      -- riverbend -> midmoor
+    assert.equal("midmoor", game:current_scene())
+    assert.equal(2, game:get("caravan/legs-completed"))
+    -- The shortcut uses goto-scene! 'highmarket — pass-watch is skipped
+    game:pick("Cut over the moor")
+    assert.equal("highmarket",  game:current_scene())
+    assert.equal("highmarket",  game:get("caravan/at"))
+    assert.equal(3, game:get("caravan/legs-completed"))
+  end)
+
+  it("source contains exactly one computed `-> (expr)` form", function()
+    local f = io.open("demos/demo29_caravan_dispatch.sb")
+    local src = f:read("*a"); f:close()
+    -- Strip comments so the documentation in the header doesn't count.
+    src = src:gsub("\n#[^\n]*", "\n")
+    local count = 0
+    for _ in src:gmatch("%-> %(") do count = count + 1 end
+    assert.equal(1, count,
+      "spec asks for exactly one `-> (expr)` form; saw " .. count)
+  end)
+end)

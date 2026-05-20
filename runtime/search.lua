@@ -1239,15 +1239,57 @@ function M.expand_graph(game_table, initial_cache, initial_stack, opts)
     eng._in_bfs = true
     restore_engine(eng, item.cache, item.stack)
 
-    local ok_r, choices_or_err = pcall(function()
-      local _, choices = eng:render_scene(scene_name)
-      return choices
+    local ok_r, choices_or_err, nav_signal = pcall(function()
+      local _, choices, sig = eng:render_scene(scene_name)
+      return choices, sig
     end)
     if not ok_r then
       if from_node then from_node.terminal = true end
       goto next_eg_item
     end
     local choices = choices_or_err or {}
+
+    -- Unconditional scene navigation in the scene body (e.g. -> (expr) at
+    -- top level) acts as a free transition in the engine's step loop. Mirror
+    -- that here so the reachability graph follows it as an edge with no
+    -- player choice.
+    if nav_signal then
+      local new_cache = clone_cache(eng._state, eng._scheduler, game_table)
+      local new_stack = {}
+      for _, s in ipairs(item.stack) do new_stack[#new_stack + 1] = s end
+      apply_signal(new_stack, nav_signal)
+      if #new_stack > 0 then
+        local new_hash  = hash_state(new_cache, new_stack)
+        local new_scene = new_stack[#new_stack]
+        local to_id     = seen[new_hash]
+        if not to_id then
+          if #nodes_list >= max_nodes then
+            truncated = true
+          else
+            to_id = new_id()
+            seen[new_hash] = to_id
+            nodes_list[#nodes_list + 1] = {
+              id            = to_id,
+              scene         = new_scene,
+              depth         = item.d,    -- free transition: doesn't count against depth
+              terminal      = false,
+              cache_summary = make_summary(new_cache),
+              cache         = public_cache(new_cache),
+            }
+            queue[#queue + 1] = { cache = new_cache, stack = new_stack, d = item.d }
+          end
+        end
+        if to_id then
+          edges[#edges + 1] = {
+            from         = from_id,
+            to           = to_id,
+            label        = "(auto)",
+            choice_index = 0,
+          }
+        end
+      end
+      goto next_eg_item
+    end
 
     if #choices == 0 then
       if from_node then from_node.terminal = true end

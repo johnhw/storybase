@@ -1,0 +1,209 @@
+# demo29_caravan_dispatch.sb — "Caravan Dispatch"
+#
+# Features demonstrated:
+#   -> (next-stop-for caravan/at)    — computed goto: scene chosen at runtime
+#   => errand-name                   — scene-body form: push stack, run errand
+#   <-                               — scene-body form: pop stack, return
+#   enter-scene! 'errand             — fn-body form: equivalent to =>
+#   exit-scene!                      — fn-body form: equivalent to <-
+#   goto-scene! `highmarket          — fn-body form: equivalent to ->
+#   type Stop  (named enum)          — typed cursor for the computed goto
+#   state caravan/at: Stop           — type-checked route table
+#
+# A wagon train rolls from the depot, through the river bend, the moor camp,
+# and the pass-watch tower, before arriving at high market. A single
+# dispatcher scene (`leg-arrival`) routes the caravan to the correct stop
+# at runtime with one `-> (expr)`. Two side errands (`inspect-cargo`,
+# `water-refill`) push/pop the scene stack via both syntactic forms so the
+# scene stack matches before and after the errand.
+#
+# Run:    storybase run        demos/demo29_caravan_dispatch.sb
+# Auto:   storybase run --auto --steps 30 demos/demo29_caravan_dispatch.sb
+# Check:  storybase check      demos/demo29_caravan_dispatch.sb
+# Verify: storybase verify     demos/demo29_caravan_dispatch.sb
+
+module caravan-dispatch
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene: depot
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+"Named stops on the caravan route — each value is also a scene name."
+type Stop = depot | riverbend | midmoor | pass-watch | highmarket
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+"The caravan's running state."
+state caravan:
+  at:              Stop          = `depot
+  legs-completed:  Int(0, 4)     = 0
+  cargo:           Int(0, 100)   = 60
+  water:           Int(0, 20)    = 12
+  errands-run:     Int(0, 10)    = 0
+  delivered:       Bool          = false
+
+# ─────────────────────────────────────────────────────────
+# Pure helpers
+# ─────────────────────────────────────────────────────────
+
+"Return the next stop symbol after the given one — typed Stop, used as the computed-goto target."
+fn next-stop-for current:
+  pure
+  match current:
+    `depot:      `riverbend
+    `riverbend:  `midmoor
+    `midmoor:    `pass-watch
+    `pass-watch: `highmarket
+    `highmarket: `highmarket
+
+"True once the caravan has reached the final stop."
+fn at-end?:
+  pure
+  caravan/at = `highmarket
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+"Advance the route cursor by one stop and consume travel supplies."
+fn advance-leg:
+  pre: not at-end?
+  set! caravan/at (next-stop-for caravan/at)
+  inc! caravan/legs-completed 1
+  dec! caravan/water           2
+  dec! caravan/cargo           5
+
+"Restock water at a wayhouse cistern (fn-body enter-scene!; equiv => water-refill)."
+fn pump-water-errand:
+  inc! caravan/errands-run 1
+  enter-scene! `water-refill
+
+"Cap the barrels and pop the errand (fn-body exit-scene!; equiv <-)."
+fn finish-errand:
+  set! caravan/water 20
+  exit-scene!
+
+"Skip the pass-watch leg (fn-body goto-scene!; equiv -> highmarket)."
+fn shortcut-to-highmarket:
+  set! caravan/at         `highmarket
+  inc! caravan/legs-completed 1
+  goto-scene! `highmarket
+
+# ─────────────────────────────────────────────────────────
+# Verify
+# ─────────────────────────────────────────────────────────
+
+verify "every reachable route reaches high market":
+  verify-eventually at-end?
+
+verify "the route only advances forward":
+  verify-always caravan/legs-completed <= 4
+
+verify "the caravan never runs the manifest past the route length":
+  verify-always caravan/legs-completed >= 0
+
+# ─────────────────────────────────────────────────────────
+# Scenes — five stops + one dispatcher + two errands
+# ─────────────────────────────────────────────────────────
+
+"Computed-goto dispatcher: the destination scene is caravan/at, picked at runtime."
+scene leg-arrival:
+  The wagons roll on. Now at {caravan/at}.
+  Cargo {caravan/cargo}, water {caravan/water}, errands {caravan/errands-run}.
+
+  -> (caravan/at)
+
+scene depot:
+  THE DEPOT
+
+  The yard smells of oats and oiled axles. Wagons line up under torchlight.
+
+  * [not at-end?] Set out toward {next-stop-for caravan/at}
+    advance-leg
+    -> leg-arrival
+
+  * [caravan/cargo >= 50] Inspect the cargo before leaving (scene-body =>)
+    => inspect-cargo
+
+scene riverbend:
+  THE RIVERBEND
+
+  A narrow ford. The current is cold and dark.
+
+  * [not at-end?] Drive on toward {next-stop-for caravan/at}
+    advance-leg
+    -> leg-arrival
+
+  * [caravan/water < 16] Pump water at the bend (fn-body enter-scene!)
+    pump-water-errand
+
+scene midmoor:
+  THE MOOR CAMP
+
+  Heather hisses against the wagon wheels.
+
+  * [not at-end?] Continue toward {next-stop-for caravan/at}
+    advance-leg
+    -> leg-arrival
+
+  * [caravan/cargo >= 30] Check the load (scene-body =>)
+    => inspect-cargo
+
+  * [caravan/legs-completed >= 2] Cut over the moor — skip pass-watch (fn-body goto-scene!)
+    shortcut-to-highmarket
+
+scene pass-watch:
+  THE PASS-WATCH TOWER
+
+  A guard waves the manifest through. Snow is coming.
+
+  * [not at-end?] Push on toward {next-stop-for caravan/at}
+    advance-leg
+    -> leg-arrival
+
+  * [caravan/water < 12] Top up at the tower cistern (fn-body enter-scene!)
+    pump-water-errand
+
+scene highmarket:
+  HIGH MARKET
+
+  The wagons clatter onto the cobbles. Bells ring out across the square.
+
+  [not caravan/delivered] You have arrived. Cargo remaining: {caravan/cargo}.
+  [caravan/delivered]     The market closes for the night.
+
+  * [not caravan/delivered] Hand over the manifest
+    set! caravan/delivered true
+    -> highmarket
+
+  * [caravan/delivered] Reflect on the journey
+    -> highmarket
+
+# ─────────────────────────────────────────────────────────
+# Errand scenes — pushed via =>/enter-scene!, popped via <-/exit-scene!
+# ─────────────────────────────────────────────────────────
+
+scene inspect-cargo:
+  INSPECTING THE CARGO
+
+  Crates of salt and dried fish, all tagged and roped.
+
+  * Note the count and return (scene-body <-)
+    inc! caravan/errands-run 1
+    <-
+
+scene water-refill:
+  REFILLING WATER
+
+  Cold water glugs into the barrels.
+
+  * Cap the barrels and return (fn-body exit-scene!)
+    finish-errand

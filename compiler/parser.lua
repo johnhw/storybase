@@ -2139,6 +2139,38 @@ MUTATION_TABLE = {
                  or "?"
     p:skip_to_eol(); return ast.cancel_schedule_mut(name, pos)
   end,
+  ["goto-scene!"]  = function(p, pos)
+    -- goto-scene! 'name   |   goto-scene! name   |   goto-scene! (expr)
+    local target
+    if p:at("SYMBOL") then
+      target = p:adv().value
+    elseif p:at("OP", "(") then
+      p:adv(); target = parse_expr(p); p:expect("OP", ")")
+    elseif p:at("IDENT") or p:at("KEYWORD") then
+      target = p:adv().value
+    else
+      p:emit_err(ast.E.BAD_EXPRESSION, "expected scene name after 'goto-scene!'", p:cur().pos)
+      target = "?"
+    end
+    p:skip_to_eol(); return ast.goto_scene_mut(target, pos)
+  end,
+  ["enter-scene!"] = function(p, pos)
+    local target
+    if p:at("SYMBOL") then
+      target = p:adv().value
+    elseif p:at("OP", "(") then
+      p:adv(); target = parse_expr(p); p:expect("OP", ")")
+    elseif p:at("IDENT") or p:at("KEYWORD") then
+      target = p:adv().value
+    else
+      p:emit_err(ast.E.BAD_EXPRESSION, "expected scene name after 'enter-scene!'", p:cur().pos)
+      target = "?"
+    end
+    p:skip_to_eol(); return ast.enter_scene_mut(target, pos)
+  end,
+  ["exit-scene!"]  = function(p, pos)
+    p:skip_to_eol(); return ast.exit_scene_mut(pos)
+  end,
   ["schedule!"] = function(p, pos)
     -- schedule! 'name every: [tick: +N] fn: fn-name
     -- or: schedule! name every: [tick: +N] fn: fn-name

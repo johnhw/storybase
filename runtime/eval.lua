@@ -90,6 +90,9 @@ local K = {
   SCENE_GOTO         = "scene_goto",
   SCENE_ENTER        = "scene_enter",
   SCENE_EXIT         = "scene_exit",
+  GOTO_SCENE_MUT     = "goto_scene_mut",
+  ENTER_SCENE_MUT    = "enter_scene_mut",
+  EXIT_SCENE_MUT     = "exit_scene_mut",
   SAY_STMT           = "say_stmt",
 }
 
@@ -2599,6 +2602,30 @@ eval_stmt = function(node, ctx)
     ctx.signal = { type = "enter", target = tostring(target or "?") }
 
   elseif k == K.SCENE_EXIT then
+    ctx.signal = { type = "exit" }
+
+  -- Imperative scene navigation mutation primitives — semantically identical
+  -- to scene_goto / scene_enter / scene_exit; the sigil and bang forms target
+  -- the same engine signal machinery.
+  elseif k == K.GOTO_SCENE_MUT then
+    local target
+    if type(node.target) == "string" then
+      target = node.target
+    else
+      target = eval_expr(node.target, ctx)
+    end
+    ctx.signal = { type = "goto", target = tostring(target or "?") }
+
+  elseif k == K.ENTER_SCENE_MUT then
+    local target
+    if type(node.target) == "string" then
+      target = node.target
+    else
+      target = eval_expr(node.target, ctx)
+    end
+    ctx.signal = { type = "enter", target = tostring(target or "?") }
+
+  elseif k == K.EXIT_SCENE_MUT then
     ctx.signal = { type = "exit" }
   end
 end

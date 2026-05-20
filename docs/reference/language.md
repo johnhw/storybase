@@ -1191,12 +1191,14 @@ Create or cancel a dynamic (runtime) schedule.
 ### `goto-scene!` / `enter-scene!` / `exit-scene!`
 
 ```
-goto-scene!  'combat
-enter-scene! 'talk-npc
+goto-scene!  `combat
+enter-scene! `talk-npc
 exit-scene!
+
+goto-scene!  (next-stop-for caravan/at)   # computed form
 ```
 
-Imperative scene navigation from inside a transaction function. Equivalent to `->`, `=>`, `<-` in scene bodies.
+Imperative scene navigation from inside a transaction function. Equivalent to `->`, `=>`, `<-` in scene bodies; both forms target the same engine signal machinery. The target may be a symbol literal (`` `name ``), a bare identifier, or a parenthesised expression that resolves to a scene name at runtime — useful inside fns called from a choice body when the destination is computed.
 
 ### `undo!`
 

@@ -238,6 +238,26 @@ function M._make_game(game_table)
       end
     end
 
+    -- Settle on the next stable scene by following any unconditional scene-
+    -- body navigation (e.g. -> (expr) in a dispatcher scene). The engine's
+    -- step loop does this implicitly; the embedded host has to do it
+    -- explicitly so callers see the post-dispatch scene name.
+    for _ = 1, 100 do
+      local cur = self._eng:current_scene()
+      if not cur then break end
+      local _, _, nav = self._eng:render_scene(cur)
+      if not nav then break end
+      if nav.type == "goto" and nav.target then
+        self._eng:goto_scene(nav.target)
+      elseif nav.type == "enter" and nav.target then
+        self._eng:enter_scene(nav.target)
+      elseif nav.type == "exit" then
+        self._eng:exit_scene()
+      else
+        break
+      end
+    end
+
     -- Post-action lifecycle
     pcall(function() self._eng:post_action() end)
 

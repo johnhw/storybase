@@ -187,7 +187,37 @@ local function bfs_states(game_table, max_depth)
           eng._scene_stack[#eng._scene_stack+1] = s
         end
 
-        local _, choices = eng:render_scene(scene_name)
+        local _, choices, nav_signal = eng:render_scene(scene_name)
+
+        -- Unconditional scene navigation (e.g. -> (expr) at scene-body top
+        -- level) acts as a free transition: the engine's step loop follows
+        -- it before any choice is presented. Mirror that here so reachability
+        -- analysis treats it as an automatic edge.
+        if nav_signal then
+          local new_cache = clone_cache(eng._state)
+          local new_stack = {}
+          for _, s in ipairs(item.stack) do new_stack[#new_stack+1] = s end
+          if nav_signal.type == "goto" and nav_signal.target then
+            if #new_stack > 0 then new_stack[#new_stack] = nav_signal.target
+            else new_stack[1] = nav_signal.target end
+          elseif nav_signal.type == "enter" and nav_signal.target then
+            new_stack[#new_stack+1] = nav_signal.target
+          elseif nav_signal.type == "exit" then
+            new_stack[#new_stack] = nil
+          end
+          if #new_stack > 0 then
+            -- Depth budget counts player choices, not free transitions, so
+            -- a scene-body computed goto doesn't burn a step.
+            queue[#queue+1] = {
+              stack = new_stack,
+              cache = new_cache,
+              depth = item.depth,
+              path  = item.path,
+            }
+          end
+          choices = {}  -- skip choice expansion, matching engine behaviour
+        end
+
         for _, ch in ipairs(choices) do
           -- Apply choice on a fresh copy of the engine state
           local eng2 = engine_mod.new(game_table, { io_out = { write = function() end } })

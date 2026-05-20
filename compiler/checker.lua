@@ -2830,7 +2830,10 @@ end
 local function walk_nav_targets(node, fn)
   if not node or type(node) ~= "table" or not node.kind then return end
   local k = ast.K
-  if node.kind == k.SCENE_GOTO or node.kind == k.SCENE_ENTER then fn(node) end
+  if node.kind == k.SCENE_GOTO or node.kind == k.SCENE_ENTER
+     or node.kind == k.GOTO_SCENE_MUT or node.kind == k.ENTER_SCENE_MUT then
+    fn(node)
+  end
   local LIST_FIELDS = { "body", "then_body", "else_body", "arms", "choices",
                         "clauses", "bindings" }
   for _, field in ipairs(LIST_FIELDS) do
@@ -2882,10 +2885,15 @@ local function pass_check_scene_targets(acc, symtab, program)
     local target = node.target
     if target == "?" then return end  -- parse error placeholder
     if not symtab.scenes[target] then
-      local arrow = (node.kind == k.SCENE_GOTO) and "->" or "=>"
+      local form
+      if     node.kind == k.SCENE_GOTO      then form = "->"
+      elseif node.kind == k.SCENE_ENTER     then form = "=>"
+      elseif node.kind == k.GOTO_SCENE_MUT  then form = "goto-scene!"
+      elseif node.kind == k.ENTER_SCENE_MUT then form = "enter-scene!"
+      end
       table.insert(acc.diags, ast.warning(
         ast.E.UNDEFINED_SCENE,
-        arrow .. " '" .. target .. "' is not a declared scene",
+        form .. " '" .. target .. "' is not a declared scene",
         node.pos))
     end
   end

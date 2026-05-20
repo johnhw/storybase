@@ -15,10 +15,12 @@ complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2, and the full §E series (E0 dec
 substrate, E1 quests, E2 dialog-topic, E3 inventory+stat, E4 review fixes) all
 complete. §G2 (stateless HTTP API) and §H2 (diff-mode hot reload) also complete.
 I1 (demo26 — record `with` mixins + path-pattern queries), I2 (demo27 — file-local
-user-authored `decl-macro`), and I3 (demo28 — counterfactual `from:` rewind +
-`distribution: conditioned-on` bounded) all complete. See completed.md.
+user-authored `decl-macro`), I3 (demo28 — counterfactual `from:` rewind +
+`distribution: conditioned-on` bounded), and I4 (demo29 — computed `-> (expr)`
++ `goto-scene!`/`enter-scene!`/`exit-scene!` imperative scene navigation) all
+complete. See completed.md.
 
-**~2924 successes / 0 failures / 2 pending (known limitations).**
+**~2932 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -37,13 +39,13 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
 
-**Demo coverage gaps (smaller, parallelisable):** §I4–I6 add demos 29–31 for
-language features that ship today but have no end-to-end example: computed
-`-> (expr)` + imperative scene nav, the `changes` hook binding, and a Lua
-embedded-host walkthrough. See §I for specs. (I1 / demo26 — record `with`
-mixins + path patterns, I2 / demo27 — user-authored `decl-macro`, and
-I3 / demo28 — counterfactual `from:` + conditioned-on bounded — all
-complete; see completed.md.)
+**Demo coverage gaps (smaller, parallelisable):** §I5–I6 add demos 30–31 for
+language features that ship today but have no end-to-end example: the
+`changes` hook binding, and a Lua embedded-host walkthrough. See §I for
+specs. (I1 / demo26 — record `with` mixins + path patterns, I2 / demo27 —
+user-authored `decl-macro`, I3 / demo28 — counterfactual `from:` +
+conditioned-on bounded, and I4 / demo29 — computed `-> (expr)` + imperative
+scene navigation — all complete; see completed.md.)
 
 ---
 
@@ -293,30 +295,8 @@ A 2026-05-19 audit of `demos/demo01–25` against `docs/reference/language.md`
 found a handful of supported language features that no current demo exercises
 end-to-end. Four new demos below fill those gaps. Each item names the specific
 features to showcase, the suggested theme, and an acceptance criterion. Implement
-in order; each is independent. (I1 / demo26, I2 / demo27, and I3 / demo28 all
-complete; see completed.md.)
-
-### I4. demo29 — "Caravan Dispatch" (`demo29_caravan_dispatch.sb`)
-
-**Primary gap:** Computed `-> (expr)` goto and imperative scene navigation
-(`goto-scene!` / `enter-scene!` / `exit-scene!`). Both are documented in
-`language.md` §Scene Syntax but no demo uses either form.
-
-**Features demonstrated:**
-- `-> (next-stop-for player/route)` — the destination scene is computed at
-  runtime from a pure helper fn returning a scene-name symbol
-- Side errands use `=> errand-name` to push the scene stack and `<-` to pop,
-  paired with `enter-scene! 'name` / `exit-scene!` from inside a fn body
-  (proving both syntactic forms target the same machinery)
-- `goto-scene! 'name` from a fn called by a choice, as the explicit
-  imperative equivalent of `-> name`
-- A `Scene = SymbolOf(...)` (or named-enum) discipline for the computed-goto
-  expression's return type, so the route table is type-checked
-
-**Acceptance:** Routing a caravan through five stops requires only one
-top-level `-> (...)` form; an errand `=>` cleanly returns via `<-` with the
-scene stack matching before/after; `storybase verify` proves every reachable
-route reaches a final scene.
+in order; each is independent. (I1 / demo26, I2 / demo27, I3 / demo28, and
+I4 / demo29 all complete; see completed.md.)
 
 ### I5. demo30 — "The Quartermaster's Audit" (`demo30_quartermaster.sb`)
 
