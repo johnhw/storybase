@@ -314,7 +314,17 @@ eval_expr = function(node, ctx)
       end
       return nil
     end
-    return ctx.state:get(path)
+    local val = ctx.state:get(path)
+    -- Fn-call fallback for single-segment paths whose state value is nil
+    -- but a fn of the same name exists. This restores symmetry between
+    -- `cast-fireball-once?` (a plain IDENT, parsed as fn_call) and
+    -- `cast-$name-once?` after substitution (a single-segment path_expr).
+    -- A state path with a declared default returns its declared value here
+    -- (e.g. `false`, `0`, `""`), so fns can never shadow a real state path.
+    if val == nil and #segs == 1 and ctx.fns and ctx.fns[segs[1]] then
+      return call_fn(segs[1], {}, ctx)
+    end
+    return val
 
   elseif k == K.INTERP_PATH then
     return ctx.state:get(eval_path(node, ctx))

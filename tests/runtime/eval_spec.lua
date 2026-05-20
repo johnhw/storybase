@@ -142,6 +142,32 @@ describe("eval_expr: path read", function()
     local node = interp_path("party", {interp="m"}, "health")
     assert.equal(80, eval.eval_expr(node, c))
   end)
+
+  it("single-segment path falls back to fn call when state value is nil", function()
+    -- After decl-macro substitution, an expression like `cast-$name-once?`
+    -- becomes a single-segment path_expr {"cast-fireball-once?"} — but the
+    -- name resolves to a fn, not a state path. The fn-fallback restores
+    -- symmetry with the plain-IDENT fn_call form.
+    local c = ctx({}, {
+      ["lone-fn?"] = {
+        params = {},
+        body   = { { kind="expr_stmt", expr = bool_lit(true) } },
+      },
+    })
+    assert.is_true(eval.eval_expr(path("lone-fn?"), c))
+  end)
+
+  it("declared state path shadows a same-named fn (state wins for non-nil values)", function()
+    -- A state path with value false (or 0, or "") must NOT be overridden
+    -- by a fn-fallback — only a *missing* state path triggers the fallback.
+    local c = ctx({ ["flag"] = false }, {
+      ["flag"] = {
+        params = {},
+        body   = { { kind="expr_stmt", expr = bool_lit(true) } },
+      },
+    })
+    assert.is_false(eval.eval_expr(path("flag"), c))
+  end)
 end)
 
 describe("eval_expr: binary operators", function()

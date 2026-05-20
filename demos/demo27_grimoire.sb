@@ -28,18 +28,6 @@
 # the per-spell scene choice has to be added by hand, since scene choice
 # lists aren't yet emittable from inside a decl-macro body).
 #
-# A note on $-bearing names inside the macro body
-# ────────────────────────────────────────────────
-# COMPOSITE_IDENT tokens (anything with a literal `$ident` segment) parse
-# into `path_expr` nodes in expression position — they never become fn
-# calls. So inside the macro body we
-#   • call helper fns via $-less names at the call site (the scene below
-#     uses `fireball-exhausted?` directly, not `$name-exhausted?`), and
-#   • write the `verify-eventually` condition against the emitted *state
-#     path* (`spell-$name-uses > 0`) rather than a fn name like
-#     `cast-$name-once?`, since the latter would expand to a single-
-#     segment path lookup that finds no state.
-#
 # Run with:   storybase run demos/demo27_grimoire.sb
 # Verify:     storybase verify demos/demo27_grimoire.sb
 
@@ -91,14 +79,17 @@ decl-macro spell $name $cost $power $max:
 
   fn cast-$name:
     pre: player/mana >= $cost
-    pre: spell-$name-uses < $max
+    pre: not ($name-exhausted?)
     dec! player/mana $cost
     inc! spell-$name-uses 1
     set! spell-$name-learned true
     inc! world/total-casts 1
 
+  fn cast-$name-once?:
+    spell-$name-uses > 0
+
   verify "spell is reachable from initial state":
-    verify-eventually (spell-$name-uses > 0)
+    verify-eventually (cast-$name-once?)
 
 # ── Three spells from three single-line calls ────────────────────────
 #

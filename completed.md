@@ -33,17 +33,17 @@ the file scope — `demo24`/`demo25` only *import* macros from `@stdlib/`.
   `ward 10 4 3`) materialise three independent spell subsystems whose
   per-spell `verify-eventually` blocks all pass under bounded BFS.
 
-**Limitation discovered while authoring (documented in the demo header):**
-COMPOSITE_IDENT tokens (anything with a literal `$ident` segment) parse
-into `path_expr` nodes in expression position — they never become
-`fn_call` nodes. So a `verify-eventually (cast-$name-once?)` form (as
-sketched in the original §I2 spec) would substitute into a single-segment
-path lookup that finds no matching state and never succeeds. The
-demo works around this by writing the verify condition against the
-emitted state path directly (`verify-eventually (spell-$name-uses > 0)`),
-and by calling helper fns from the scene via $-less names at the call
-site (`fireball-exhausted?`, not `$name-exhausted?`). Worth revisiting
-as a future polish item if multiple decl-macro authors hit it.
+**Eval fix bundled with this demo:** while authoring it became clear
+that `cast-$name-once?` substituted to a single-segment `path_expr`
+lookup that hit the state store and found nothing — even though a fn
+of that name existed. `runtime/eval.lua`'s single-segment `PATH_EXPR`
+read now falls back to a 0-arg fn call when the state read returns
+nil and a fn of the same name is registered, restoring symmetry with
+the plain-IDENT fn_call form (`cast-fireball-once?` worked already).
+A declared state path with any non-nil value (including `false`, `0`,
+`""`) still shadows a same-named fn, so the fallback only fires for
+genuinely-missing state. Unit test in `tests/runtime/eval_spec.lua`
+(`eval_expr: path read`) covers both directions.
 
 **Acceptance:**
 - `lua5.4 cli/main.lua run demos/demo27_grimoire.sb` reaches the rest
