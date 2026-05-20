@@ -142,10 +142,16 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/types.lua` (60 lines)
+### `compiler/types.lua` (~170 lines)
 - `M.DISCRETE` / `M.SUPERFICIAL` — type category constants
 - `M.is_discrete(ty)` / `M.is_superficial(ty)` — classify a type descriptor
-- `M.state_space_size(ty)` → number — cardinality of a type
+- `M.state_space_size(ty)` → number — cardinality of a type (exact integer
+  for small types; loses precision past 2^53 — use `state_space_log2` instead)
+- `M.state_space_log2(ty)` → float — log2 of cardinality, accurate for
+  arbitrarily large finite state spaces. Composite types accept either size
+  (`inner_size`/`elem_size`/`product_size`/`sum_size`) or pre-computed log2
+  (`inner_l2`/`elem_l2`/`product_l2`/`sum_l2`) inputs.
+- `M._log2(x)` / `M._log2_add(a, b)` — helpers re-exported for codegen
 
 ---
 
@@ -269,7 +275,8 @@ game_table = {
     path_count       = number,
     scene_count      = number,
     relation_count   = number,
-    state_space_size = number|"unbounded",
+    state_space_size = number|"unbounded",   -- exact int when ≤ 2^53; else "unbounded"
+    state_space_log2 = number,               -- log2 of cardinality, always finite-float
     types            = { [name] = type_desc },
     states           = { [path] = {type_desc, default_desc} },
     relations        = { [name] = {edges=...} },
@@ -897,7 +904,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, multi-axis at:/every:, cancel-during-tick, end-to-end pipeline (22 tests) |
 | `tests/runtime/generate_spec.lua` | §F1 generate at runtime: body runs during eng:init, seed_path reseeds RNG, declaration-order execution, spawn! populates families, save/load determinism via state.replay (6 tests) |
 | `tests/runtime/ending_spec.lua` | §F2 ending at runtime: check_ending nil/first-match, _render_ending narration, eng:step termination (post-action + pre-prompt), auto-verify pass/fail round-trip via verify.run_all (9 tests) |
-| `tests/compiler/types_spec.lua` | compiler/types.lua state_space_size arithmetic (bool/int/enum/symbol/option/set/list/record/variant) (30 tests) |
+| `tests/compiler/types_spec.lua` | compiler/types.lua state_space_size + state_space_log2 arithmetic (bool/int/enum/symbol/option/set/list/record/variant; log-sum-exp; > 2^53 inputs) (43 tests) |
 | `tests/compiler/test_decl_spec.lua` | TEST_DECL parser (label forms, sections, multiple blocks, 'test' as ident); codegen (game_table.tests, production strip) (14 tests) |
 | `tests/compiler/generate_spec.lua` | §F1 `generate` decl: parser (with/without seed_path, error paths), codegen (game_table.generates entry, duplicate-name diag), checker (UNDEFINED_PATH / UNDEFINED_FN propagate into body) (8 tests) |
 | `tests/compiler/ending_spec.lua` | §F2 `ending` decl: parser (with/without when:), codegen (game_table.endings, auto-emit reachability + pairwise exclusivity verify, production strip), duplicate-name diag (9 tests) |

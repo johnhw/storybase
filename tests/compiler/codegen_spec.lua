@@ -282,6 +282,78 @@ describe("codegen — state-space size", function()
 end)
 
 -- ============================================================
+-- State-space log2 (the "inexact" enumerator)
+-- ============================================================
+
+describe("codegen — state-space log2", function()
+  it("log2(Bool) = 1", function()
+    local sc = schema("state x: Bool")
+    assert.are.equal(1, sc.state_space_log2)
+  end)
+
+  it("log2(Bool * Bool * Bool) = 3", function()
+    local sc = schema("state a: Bool\nstate b: Bool\nstate c: Bool")
+    assert.are.equal(3, sc.state_space_log2)
+  end)
+
+  it("log2(Int(0,3)) = 2 (4 values)", function()
+    local sc = schema("state n: Int(0, 3)")
+    assert.are.equal(2, sc.state_space_log2)
+  end)
+
+  it("log2(unbounded String) = +inf", function()
+    local sc = schema("state s: String")
+    assert.are.equal(math.huge, sc.state_space_log2)
+  end)
+
+  it("stays finite when state space exceeds 2^53 (List of Bool, max=60 → 3^60)", function()
+    -- 3^60 has log2 = 60 * log2(3) ≈ 95.098
+    local sc = schema("state slots: List(Bool, 60)")
+    assert.are.equal("unbounded", sc.state_space_size,
+      "exact size should be reported as unbounded past 2^53")
+    assert.is_near(60 * math.log(3, 2), sc.state_space_log2, 1e-9)
+  end)
+
+  it("stays finite when float64 would overflow to inf (List of Bool, max=2000 → 3^2000)", function()
+    -- 3^2000 has log2 ≈ 3169.9 — well below float64's 1024-bit exponent limit
+    local sc = schema("state slots: List(Bool, 2000)")
+    assert.are.equal("unbounded", sc.state_space_size)
+    assert.is_near(2000 * math.log(3, 2), sc.state_space_log2, 1e-6)
+  end)
+
+  it("Set log2 matches log2 of binomial sum", function()
+    -- Set(T, 2) over |T|=4 → 1 + 4 + 6 = 11 → log2 ≈ 3.4594
+    local sc = schema("type T = a | b | c | d\nstate s: Set(T, 2)")
+    assert.is_near(math.log(11, 2), sc.state_space_log2, 1e-9)
+  end)
+end)
+
+-- ============================================================
+-- Integer overflow no longer wraps mod 2^64
+-- ============================================================
+
+describe("codegen — state-space overflow saturation", function()
+  it("64 Bool fields no longer wrap to 0 — exact size saturates to 'unbounded'", function()
+    -- Before the fix, integer multiplication of 64 twos wrapped mod 2^64
+    -- and the schema reported state_space_size = 0.
+    local lines = {}
+    for i = 1, 64 do lines[i] = "state b" .. i .. ": Bool" end
+    local sc = schema(table.concat(lines, "\n"))
+    assert.are.equal("unbounded", sc.state_space_size,
+      "must saturate, not wrap to 0")
+    assert.are.equal(64, sc.state_space_log2)
+  end)
+
+  it("53 Bool fields = 2^53 (exact-int boundary) — exact size still reported", function()
+    local lines = {}
+    for i = 1, 53 do lines[i] = "state b" .. i .. ": Bool" end
+    local sc = schema(table.concat(lines, "\n"))
+    assert.are.equal(2^53, sc.state_space_size)
+    assert.are.equal(53, sc.state_space_log2)
+  end)
+end)
+
+-- ============================================================
 -- Discrete / superficial tag on type descriptors
 -- ============================================================
 

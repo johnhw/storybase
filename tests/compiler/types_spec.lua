@@ -179,3 +179,85 @@ describe("types.state_space_size — record / variant", function()
     assert.equals(1, types.state_space_size({kind = "variant"}))
   end)
 end)
+
+-- ============================================================
+-- state_space_log2 — the "inexact" enumerator
+-- ============================================================
+
+describe("types.state_space_log2 — primitives", function()
+  it("nil → -inf (log2 of zero)", function()
+    assert.equals(-math.huge, types.state_space_log2(nil))
+  end)
+
+  it("bool → 1", function()
+    assert.equals(1, types.state_space_log2({kind = "bool"}))
+  end)
+
+  it("int → log2(span)", function()
+    assert.is_near(math.log(11, 2), types.state_space_log2(
+      {kind = "int", min = 0, max = 10}), 1e-12)
+    assert.equals(0, types.state_space_log2(
+      {kind = "int", min = 5, max = 5}))   -- log2(1) = 0
+    assert.equals(-math.huge, types.state_space_log2(
+      {kind = "int", min = 10, max = 0}))  -- log2(0) = -inf
+  end)
+
+  it("enum → log2(count); empty → -inf", function()
+    assert.is_near(math.log(3, 2), types.state_space_log2(
+      {kind = "enum", values = {"a", "b", "c"}}), 1e-12)
+    assert.equals(-math.huge, types.state_space_log2({kind = "enum"}))
+  end)
+
+  it("plain symbol is +inf (unbounded)", function()
+    assert.equals(math.huge, types.state_space_log2({kind = "symbol"}))
+  end)
+
+  it("symbol_of uses family size", function()
+    assert.equals(3, types.state_space_log2(
+      {kind = "symbol_of", family_size = 8}))  -- log2(8) = 3
+  end)
+end)
+
+describe("types.state_space_log2 — composite", function()
+  it("option(T) = log2(|T| + 1)", function()
+    -- inner_size = 3 → 4 states → log2(4) = 2
+    assert.is_near(2, types.state_space_log2(
+      {kind = "option", inner_size = 3}), 1e-12)
+  end)
+
+  it("set Σ C(n,i) matches direct computation", function()
+    -- Set(T,2) over |T|=4 → 1+4+6 = 11 → log2 ≈ 3.4594
+    assert.is_near(math.log(11, 2), types.state_space_log2(
+      {kind = "set", elem_size = 4, max = 2}), 1e-12)
+    -- Set(T,5) over |T|=3 clamps to |T| → 1+3+3+1 = 8 → log2 = 3
+    assert.is_near(3, types.state_space_log2(
+      {kind = "set", elem_size = 3, max = 5}), 1e-12)
+  end)
+
+  it("list = max * log2(|T| + 1)", function()
+    -- List(T,3) over |T|=2 → (2+1)^3 = 27 → log2 = 3*log2(3)
+    assert.is_near(3 * math.log(3, 2), types.state_space_log2(
+      {kind = "list", elem_size = 2, max = 3}), 1e-12)
+  end)
+
+  it("list handles 3^1000 without overflowing", function()
+    -- (2+1)^1000 would overflow as a float (2^1024 is the inf threshold).
+    -- log2 form returns ~1585 cleanly.
+    assert.is_near(1000 * math.log(3, 2), types.state_space_log2(
+      {kind = "list", elem_size = 2, max = 1000}), 1e-9)
+  end)
+
+  it("record reads product_l2 or falls back to log2(product_size)", function()
+    assert.equals(64, types.state_space_log2(
+      {kind = "record", product_l2 = 64}))
+    assert.is_near(math.log(42, 2), types.state_space_log2(
+      {kind = "record", product_size = 42}), 1e-12)
+  end)
+
+  it("variant reads sum_l2 or falls back to log2(sum_size)", function()
+    assert.equals(10, types.state_space_log2(
+      {kind = "variant", sum_l2 = 10}))
+    assert.is_near(math.log(7, 2), types.state_space_log2(
+      {kind = "variant", sum_size = 7}), 1e-12)
+  end)
+end)

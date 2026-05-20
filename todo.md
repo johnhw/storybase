@@ -18,7 +18,7 @@ I1 (demo26 — record `with` mixins + path-pattern queries), I2 (demo27 — file
 user-authored `decl-macro`), and I3 (demo28 — counterfactual `from:` rewind +
 `distribution: conditioned-on` bounded) all complete. See completed.md.
 
-**~2903 successes / 0 failures / 2 pending (known limitations).**
+**~2924 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.

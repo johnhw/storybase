@@ -426,6 +426,7 @@ local function schema_summary(game_table)
     path_count       = sc.path_count,
     scene_count      = sc.scene_count,
     state_space_size = sc.state_space_size,
+    state_space_log2 = sc.state_space_log2,
     entry_scene      = (sc.engine_config or {})["entry-scene"],
     states           = states,
     scenes           = scenes,

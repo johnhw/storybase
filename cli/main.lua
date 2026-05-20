@@ -223,6 +223,10 @@ local function cmd_compile(args)
       io.stdout:write(string.format("  State-space size: %s\n",
         tostring(sc.state_space_size)))
     end
+    if sc.state_space_log2 and sc.state_space_log2 ~= -math.huge then
+      io.stdout:write(string.format("  State-space log2: %s\n",
+        tostring(sc.state_space_log2)))
+    end
   end
 
   return 0

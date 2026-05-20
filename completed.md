@@ -5,6 +5,41 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## state_space_log2 — inexact state-space enumerator ✅ (2026-05-20)
+
+`compiler/types.state_space_size` and `compiler/codegen.compute_total_state_space`
+both lost meaningful answers past 2^53: the codegen accumulator started at
+integer `1` and Lua 5.4 silently wrapped multiplication mod 2^64 (so a record
+of 64 Bools reported a total state space of **0**), and any path through `^`
+saturated to `math.huge` — indistinguishable from a genuinely unbounded
+`Symbol`.
+
+**Fix:**
+- All exact-size accumulators in `compiler/codegen.lua` now start at `1.0`
+  (float), so overflow surfaces as `math.huge` instead of wrapping mod 2^64.
+  The schema reports `state_space_size = "unbounded"` once the value exceeds
+  `2^53` (the float64 exact-integer limit) or saturates.
+- New `state_space_log2` parallel computation in `compiler/types.lua` and
+  `compiler/codegen.lua`, walking the type tree in log-space (multiplications
+  become additions; powers become scalar multiplications; sums use base-2
+  log-sum-exp). Stays accurate for arbitrarily large finite spaces — e.g.
+  `List(Bool, 2000)` now returns log2 ≈ 3169.9 instead of `inf`.
+- Schema gains a `state_space_log2: number` field alongside the existing
+  `state_space_size`. CLI `compile` and `serve-api` both surface the new
+  field. Existing consumers of `state_space_size` see no semantic change for
+  small games.
+
+**Files:** `compiler/types.lua` (+log-sum-exp + `state_space_log2`),
+`compiler/codegen.lua` (float accumulators + `state_space_log2` path +
+`compute_total_state_space_log2` + schema emission), `cli/main.lua` (display),
+`cli/serve_api_cmd.lua` (API field), `tests/compiler/types_spec.lua` (+13
+tests), `tests/compiler/codegen_spec.lua` (+9 tests including the 64-Bool
+overflow regression and `List(Bool, 2000)`).
+
+**Test count:** 2924 successes / 0 failures / 2 pending.
+
+---
+
 ## I3 — demo28 "The Seer's Chamber" ✅ (2026-05-20)
 
 Fills the §I3 demo-coverage gap: `counterfactual from: <past-tick>` (log-replay

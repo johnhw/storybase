@@ -12,16 +12,32 @@
 
 local M = {}
 
-local ast = require("compiler.ast")
+local ast   = require("compiler.ast")
+local types = require("compiler.types")
 
 -- ============================================================
 -- State-space size computation
 -- ============================================================
+--
+-- Two parallel computations are emitted into the schema:
+--   * `state_space_size`  — the exact integer count, or "unbounded" once it
+--     exceeds 2^53 (the float64 exact-integer limit) or hits an unbounded
+--     type. All arithmetic here is done in float so that an overflow shows
+--     up as math.huge / loss of integerness rather than silently wrapping
+--     mod 2^64 the way Lua 5.4 integer multiplication would.
+--   * `state_space_log2`  — log2 of the same count, computed entirely in
+--     log space (additions / log-sum-exp). Stays accurate for arbitrarily
+--     large finite state spaces.
+
+local EXACT_INT_LIMIT = 2^53     -- 9007199254740992
+local log2     = types._log2
+local log2_add = types._log2_add
 
 --- Compute the state-space size of a type expression node.
 local state_space_size_of_decl  -- forward declaration (mutual recursion)
+local state_space_log2_of_decl  -- forward declaration (mutual recursion)
 
---- Returns a non-negative integer, or math.huge for unbounded types.
+--- Returns a non-negative number (float), or math.huge for unbounded types.
 --- Returns 0 for types that cannot be resolved (undefined references).
 local function state_space_size(texpr, symtab)
   if not texpr then return 0 end
@@ -49,18 +65,19 @@ local function state_space_size(texpr, symtab)
   elseif texpr.kind == k.TYPE_OPTION then
     local inner = state_space_size(texpr.inner, symtab)
     if inner == math.huge then return math.huge end
-    return inner + 1
+    return inner + 1.0
 
   elseif texpr.kind == k.TYPE_SET then
     -- |Set(T, max)| = Σ C(|T|, i) for i = 0..max
     local t = state_space_size(texpr.inner, symtab)
     local mx = texpr.max or 0
     if t == math.huge then return math.huge end
-    local total = 0
-    local c = 1
+    local total = 0.0
+    local c = 1.0
     for i = 0, math.min(mx, t) do
       total = total + c
       if i < mx then
+        -- floor division on floats keeps c integer-valued while it fits
         c = c * (t - i) // (i + 1)
       end
     end
@@ -71,7 +88,7 @@ local function state_space_size(texpr, symtab)
     local t = state_space_size(texpr.inner, symtab)
     local mx = texpr.max or 0
     if t == math.huge then return math.huge end
-    return (t + 1) ^ mx
+    return (t + 1.0) ^ mx
 
   elseif texpr.kind == k.TYPE_STRING or texpr.kind == k.TYPE_FLOAT
       or texpr.kind == k.TYPE_ULIST or texpr.kind == k.TYPE_UMAP then
@@ -105,29 +122,31 @@ state_space_size_of_decl = function(decl, symtab)
     return state_space_size(decl.type_expr, symtab)
 
   elseif decl.kind == k.TYPE_RECORD then
-    -- Product of all field sizes
-    local product = 1
+    -- Product of all field sizes (float so we never wrap mod 2^64)
+    local product = 1.0
     for _, field in ipairs(decl.fields or {}) do
       if field.kind == k.RECORD_FIELD then
         local fs = state_space_size(field.type_expr, symtab)
         if fs == math.huge then return math.huge end
         product = product * fs
+        if product == math.huge then return math.huge end
       end
       -- WITH_MIXIN fields are already spliced in the checker; skip here
     end
     return product
 
   elseif decl.kind == k.TYPE_VARIANT then
-    -- Sum of branch sizes
-    local total = 0
+    -- Sum of branch sizes (float so we never wrap mod 2^64)
+    local total = 0.0
     for _, branch in ipairs(decl.branches or {}) do
       if branch.kind == k.VARIANT_BRANCH then
-        local bsize = 1
+        local bsize = 1.0
         for _, field in ipairs(branch.fields or {}) do
           if field.kind == k.RECORD_FIELD then
             local fs = state_space_size(field.type_expr, symtab)
             if fs == math.huge then return math.huge end
             bsize = bsize * fs
+            if bsize == math.huge then return math.huge end
           end
         end
         total = total + bsize
@@ -137,6 +156,119 @@ state_space_size_of_decl = function(decl, symtab)
   end
 
   return 0
+end
+
+--- Returns log2(|texpr|) as a float. Mirrors state_space_size but works
+--- entirely in log space — large but finite state spaces (e.g. 3^1000)
+--- come back as a finite float (~1585) instead of saturating to inf.
+local function state_space_log2(texpr, symtab)
+  if not texpr then return -math.huge end
+  local k = ast.K
+
+  if texpr.kind == k.TYPE_BOOL then
+    return 1
+
+  elseif texpr.kind == k.TYPE_INT then
+    local lo = texpr.min or 0
+    local hi = texpr.max or 0
+    if hi < lo then return -math.huge end
+    return log2(hi - lo + 1)
+
+  elseif texpr.kind == k.TYPE_ENUM_INLINE then
+    return log2(#(texpr.values or {}))
+
+  elseif texpr.kind == k.TYPE_SYMBOL    then return math.huge
+  elseif texpr.kind == k.TYPE_SYMBOL_OF then return math.huge
+
+  elseif texpr.kind == k.TYPE_OPTION then
+    local inner_l2 = state_space_log2(texpr.inner, symtab)
+    if inner_l2 == math.huge then return math.huge end
+    return log2_add(inner_l2, 0)   -- log2(2^inner + 1)
+
+  elseif texpr.kind == k.TYPE_SET then
+    -- Σ C(|T|, i) for i = 0..max
+    local t = state_space_size(texpr.inner, symtab)
+    local mx = texpr.max or 0
+    if t == math.huge then return math.huge end
+    if t == 0 then return 0 end   -- only the empty set
+    local upper = math.min(mx, t)
+    local log_c = 0                 -- log2(C(t,0)) = 0
+    local total_l2 = 0              -- log2(running sum)
+    for i = 1, upper do
+      log_c = log_c + log2(t - i + 1) - log2(i)
+      total_l2 = log2_add(total_l2, log_c)
+    end
+    return total_l2
+
+  elseif texpr.kind == k.TYPE_LIST then
+    local t = state_space_size(texpr.inner, symtab)
+    local mx = texpr.max or 0
+    if t == math.huge then return math.huge end
+    if mx == 0 then return 0 end
+    return mx * log2(t + 1)
+
+  elseif texpr.kind == k.TYPE_STRING or texpr.kind == k.TYPE_FLOAT
+      or texpr.kind == k.TYPE_ULIST or texpr.kind == k.TYPE_UMAP then
+    return math.huge
+
+  elseif texpr.kind == k.TYPE_NAMED then
+    local decl = texpr.resolved
+    if not decl then return -math.huge end
+    if decl.builtin then return math.huge end
+    return state_space_log2_of_decl(decl, symtab)
+
+  elseif texpr.kind == k.TYPE_FN then
+    return math.huge
+  end
+
+  return -math.huge
+end
+
+state_space_log2_of_decl = function(decl, symtab)
+  if not decl then return -math.huge end
+  local k = ast.K
+
+  if decl.kind == k.TYPE_ENUM then
+    return log2(#(decl.values or {}))
+
+  elseif decl.kind == k.TYPE_ALIAS then
+    return state_space_log2(decl.type_expr, symtab)
+
+  elseif decl.kind == k.TYPE_RECORD then
+    local sum_l2 = 0
+    for _, field in ipairs(decl.fields or {}) do
+      if field.kind == k.RECORD_FIELD then
+        local fl = state_space_log2(field.type_expr, symtab)
+        if fl == math.huge then return math.huge end
+        if fl == -math.huge then return -math.huge end   -- empty field zeroes the product
+        sum_l2 = sum_l2 + fl
+      end
+    end
+    return sum_l2
+
+  elseif decl.kind == k.TYPE_VARIANT then
+    local total_l2 = -math.huge
+    for _, branch in ipairs(decl.branches or {}) do
+      if branch.kind == k.VARIANT_BRANCH then
+        local bsize_l2 = 0
+        local zero_branch = false
+        for _, field in ipairs(branch.fields or {}) do
+          if field.kind == k.RECORD_FIELD then
+            local fl = state_space_log2(field.type_expr, symtab)
+            if fl == math.huge then return math.huge end
+            if fl == -math.huge then zero_branch = true; break end
+            bsize_l2 = bsize_l2 + fl
+          end
+        end
+        if not zero_branch then
+          total_l2 = log2_add(total_l2, bsize_l2)
+        end
+      end
+    end
+    return total_l2
+  end
+
+  return -math.huge
 end
 
 -- ============================================================
@@ -555,20 +687,25 @@ local function emit_schema_version(decls)
 end
 
 --- Compute total state-space size across all state declarations.
+--- Returns a float; math.huge if the total is unbounded.
+--- All arithmetic is in float to avoid Lua 5.4 integer multiplication
+--- wrapping mod 2^64 — for state spaces > 2^53 the float result may be
+--- imprecise (caller should consult compute_total_state_space_log2 instead).
 local function compute_total_state_space(decls, symtab)
   local k = ast.K
-  local total = 1
+  local total = 1.0
   for _, node in ipairs(decls) do
     local sz
     if node.kind == k.STATE_SCALAR then
       sz = state_space_size(node.type_expr, symtab)
     elseif node.kind == k.STATE_RECORD then
-      sz = 1
+      sz = 1.0
       for _, f in ipairs(node.fields or {}) do
         if f.kind == k.RECORD_FIELD then
           local fs = state_space_size(f.type_expr, symtab)
           if fs == math.huge then sz = math.huge; break end
           sz = sz * fs
+          if sz == math.huge then break end
         end
       end
     elseif node.kind == k.STATE_FAMILY then
@@ -578,15 +715,57 @@ local function compute_total_state_space(decls, symtab)
         sz = math.huge
       else
         -- Approximate: (member_sz + 1)^max  (each slot: value or absent)
-        sz = (member_sz + 1) ^ mx
+        sz = (member_sz + 1.0) ^ mx
       end
     end
     if sz then
       if sz == math.huge then return math.huge end
       total = total * sz
+      if total == math.huge then return math.huge end
     end
   end
   return total
+end
+
+--- Compute log2 of total state-space size across all state declarations.
+--- Stays accurate for arbitrarily large finite spaces (log addition only).
+--- Returns math.huge for unbounded spaces; -math.huge if any declaration's
+--- contribution is 0 (the product collapses to zero).
+local function compute_total_state_space_log2(decls, symtab)
+  local k = ast.K
+  local total_l2 = 0
+  for _, node in ipairs(decls) do
+    local sz_l2
+    if node.kind == k.STATE_SCALAR then
+      sz_l2 = state_space_log2(node.type_expr, symtab)
+    elseif node.kind == k.STATE_RECORD then
+      sz_l2 = 0
+      for _, f in ipairs(node.fields or {}) do
+        if f.kind == k.RECORD_FIELD then
+          local fl = state_space_log2(f.type_expr, symtab)
+          if fl == math.huge then sz_l2 = math.huge; break end
+          if fl == -math.huge then sz_l2 = -math.huge; break end
+          sz_l2 = sz_l2 + fl
+        end
+      end
+    elseif node.kind == k.STATE_FAMILY then
+      local member_l2 = state_space_log2(node.type_expr, symtab)
+      local mx = node.max or 0
+      if member_l2 == math.huge then
+        sz_l2 = math.huge
+      elseif mx == 0 then
+        sz_l2 = 0
+      else
+        sz_l2 = mx * log2_add(member_l2, 0)   -- log2((member+1)^max)
+      end
+    end
+    if sz_l2 then
+      if sz_l2 == math.huge then return math.huge end
+      if sz_l2 == -math.huge then return -math.huge end
+      total_l2 = total_l2 + sz_l2
+    end
+  end
+  return total_l2
 end
 
 -- ============================================================
@@ -1020,6 +1199,16 @@ function M.emit(typed_ast, opts)
   local time_mdl  = emit_time_model(decls)
   local schema_v  = emit_schema_version(decls)
   local ss_size   = compute_total_state_space(decls, symtab)
+  local ss_log2   = compute_total_state_space_log2(decls, symtab)
+  -- Past 2^53 floats can no longer represent every integer, so we report
+  -- the exact-size field as "unbounded" and rely on the log2 field for
+  -- magnitude. Below the limit we coerce to an integer for clean display.
+  local ss_size_report
+  if ss_size == math.huge or ss_size > EXACT_INT_LIMIT then
+    ss_size_report = "unbounded"
+  else
+    ss_size_report = math.tointeger(ss_size) or ss_size
+  end
 
   -- Count unique type/state/relation entries (user-declared only; SceneId is auto-generated)
   local k = ast.K
@@ -1052,7 +1241,8 @@ function M.emit(typed_ast, opts)
       scene_count      = scene_count,
       scene_names      = scene_names,
       relation_count   = relation_count,
-      state_space_size = ss_size == math.huge and "unbounded" or ss_size,
+      state_space_size = ss_size_report,
+      state_space_log2 = ss_log2,
       types            = types,
       states           = states,
       relations        = relations,
