@@ -19,12 +19,14 @@ user-authored `decl-macro`), I3 (demo28 — counterfactual `from:` rewind +
 `distribution: conditioned-on` bounded), I4 (demo29 — computed `-> (expr)`
 + `goto-scene!`/`enter-scene!`/`exit-scene!` imperative scene navigation),
 I5 (demo30 — `changes` binding in tag-level + fn-level hooks; `path@before`
-post-contract surviving `--production` via `strict-contracts: true`), and
+post-contract surviving `--production` via `strict-contracts: true`),
 I6 (demo31 — embedded-host walkthrough with `engine/emit` listeners +
-save/load round-trip via the public `lib/storybase.lua` API) all
+save/load round-trip via the public `lib/storybase.lua` API), and the
+I7 residue promotion (demo32 — `union`/`intersect`/`difference` as load-bearing
+game logic + `(set)` empty literal + labelled `engine/checkpoint!`) all
 complete. See completed.md.
 
-**~2951 successes / 0 failures / 2 pending (known limitations).**
+**~2958 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -43,10 +45,11 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
 
-**Demo coverage:** All six I-series demos (26–31) complete. The §I7 residue
-(language features intentionally without dedicated demos: bare `Set`
-ops, `(set)` literal, labelled `engine/checkpoint!`, lambda outside `find`)
-is noted in completed.md and considered acceptable.
+**Demo coverage:** All seven I-series demos (26–32) complete. demo32
+promoted three of the four §I7 residue items (set ops, `(set)` literal,
+labelled `engine/checkpoint!`). The remaining residue item — **lambda
+expressions outside a `find` clause** — is still covered only by unit
+tests; promote only if a user-facing limitation surfaces.
 
 ---
 
@@ -290,24 +293,25 @@ strategy beats a uniform-random policy in 1000 sampled rollouts.
 
 ---
 
-## I. Demo Coverage Gaps (demos 26–31) — all complete
+## I. Demo Coverage Gaps (demos 26–32) — all complete
 
 A 2026-05-19 audit of `demos/demo01–25` against `docs/reference/language.md`
 found a handful of supported language features that no demo exercised
-end-to-end. All six follow-on demos (26–31) have now shipped; details in
+end-to-end. All seven follow-on demos (26–32) have now shipped; details in
 completed.md.
 
 ### I7. Coverage tracker (residue)
 
-The language features intentionally left without dedicated demos:
-- `Set` operations (`union` / `intersect` / `difference`)
-- `(set)` empty literal
-- `engine/checkpoint!` with an explicit label argument
-- Lambda expressions outside a `find` clause
+demo32 ("The Inquisitor's Board") promoted three of the four original I7
+residue items: `union`/`intersect`/`difference` as load-bearing game
+logic, the `(set)` empty literal as a state initializer, and
+`engine/checkpoint! `<label>` with an explicit label argument.
 
-These are covered by unit tests and the language reference; a dedicated
-demo for each would add more demo bulk than coverage. Promote to a real
-demo only if a user-facing limitation surfaces.
+The remaining residue:
+- **Lambda expressions outside a `find` clause** — covered only by unit
+  tests. Idiomatic StoryBase puts lambdas inside `find`; an out-of-`find`
+  lambda demo would feel contrived. Promote only if a user-facing
+  limitation surfaces.
 
 ---
 

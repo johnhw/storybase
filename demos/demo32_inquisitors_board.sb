@@ -1,0 +1,268 @@
+# demo32_inquisitors_board.sb
+# "The Inquisitor's Board" — narrow three witnesses' testimony down to a single
+# suspect and lay the charge.
+#
+# Retires the §I7 residue items that no earlier demo exercised end-to-end:
+#
+#   1. `Set` operations as the game's core logic, not decoration:
+#        - `union`      — assemble the full suspect pool from three testimony sets,
+#                         used both pairwise and nested (`union (union a b) c`).
+#        - `intersect`  — corroboration: who did multiple witnesses name?
+#                         used pairwise AND triple-nested
+#                         (`intersect (intersect a b) c`).
+#        - `difference` — both senses:
+#                         (a) "unique attribution" — named by one witness, not the
+#                             others: `difference w (union others ...)`
+#                         (b) "outstanding leads" — every named suspect minus those
+#                             the inquisitor has exonerated. This is the win-driver.
+#
+#   2. `engine/checkpoint! `<label>` with an explicit label argument.
+#      Every destructive move on the board (exonerate, recant, new tip) pushes
+#      a uniquely labelled checkpoint as its FIRST statement, so a subsequent
+#      `undo!` rewinds exactly that move. The label captures the KIND of
+#      decision being guarded; the bare unlabelled form is already covered by
+#      demo08, so this demo focuses on the labelled form.
+#
+#   3. `(set)` empty-set literal — the initial value of board/exonerated.
+#      (Already used in other demos, but completes the I7 residue cleanly.)
+#
+# Run:    lua5.4 cli/main.lua run demos/demo32_inquisitors_board.sb
+# Auto:   lua5.4 cli/main.lua run --auto --steps 20 demos/demo32_inquisitors_board.sb
+# Verify: lua5.4 cli/main.lua verify demos/demo32_inquisitors_board.sb
+
+module inquisition
+  version: 1.0
+
+engine-config:
+  entry-scene: board
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+"The five suspects under consideration."
+type Suspect = aldric | brenna | corwin | duna | esmund
+
+# ─────────────────────────────────────────────────────────
+# State — three witness testimony sets with deliberate overlap
+# ─────────────────────────────────────────────────────────
+#
+# Initial testimony:
+#                aldric  brenna  corwin  duna  esmund
+#   marshall :    X       X       X
+#   maid     :            X       X             X
+#   pilgrim  :                    X       X     X
+#
+# So:
+#   union (all)             = {aldric, brenna, corwin, duna, esmund}
+#   triple-intersect        = {corwin}                       (named by all three)
+#   marshall ∩ maid         = {brenna, corwin}
+#   maid ∩ pilgrim          = {corwin, esmund}
+#   marshall ∩ pilgrim      = {corwin}
+#   unique-to-pilgrim       = {duna}                         (pilgrim only)
+#   unique-to-marshall      = {aldric}                       (marshall only)
+#   unique-to-maid          = (empty — maid never names anyone the others don't)
+
+state testimony:
+  marshall: Set(Suspect, 5) = {`aldric, `brenna, `corwin}
+  maid:     Set(Suspect, 5) = {`brenna, `corwin, `esmund}
+  pilgrim:  Set(Suspect, 5) = {`corwin, `duna,   `esmund}
+
+state board:
+  exonerated: Set(Suspect, 5) = (set)        # (set) empty-set literal
+  charged:    Option(Suspect) = nil
+  turn:       Int(0, 30)      = 0
+
+# ─────────────────────────────────────────────────────────
+# Pure fns built on `union` / `intersect` / `difference`
+# ─────────────────────────────────────────────────────────
+
+"Every suspect named by at least one witness (nested union)."
+fn all-named:
+  union (union testimony/marshall testimony/maid) testimony/pilgrim
+
+"Suspects named by the marshall AND the maid (pairwise intersect)."
+fn marshall-and-maid:
+  intersect testimony/marshall testimony/maid
+
+"Suspects named by the maid AND the pilgrim (pairwise intersect)."
+fn maid-and-pilgrim:
+  intersect testimony/maid testimony/pilgrim
+
+"Suspects named by the marshall AND the pilgrim (pairwise intersect)."
+fn marshall-and-pilgrim:
+  intersect testimony/marshall testimony/pilgrim
+
+"Suspects named by ALL THREE witnesses (nested intersect)."
+fn triple-corroborated:
+  intersect (intersect testimony/marshall testimony/maid) testimony/pilgrim
+
+"Suspects the pilgrim named that no one else did (difference of a union)."
+fn unique-to-pilgrim:
+  difference testimony/pilgrim (union testimony/marshall testimony/maid)
+
+"Suspects the marshall named that no one else did."
+fn unique-to-marshall:
+  difference testimony/marshall (union testimony/maid testimony/pilgrim)
+
+"Active suspect pool — `all-named` minus exonerated. The `difference` op in its load-bearing role: when this narrows to one, the inquisitor can charge."
+fn outstanding-leads:
+  difference all-named board/exonerated
+
+"Count of suspects still under suspicion."
+fn outstanding-count:
+  count outstanding-leads
+
+"True when the board has narrowed to a single suspect."
+fn solved?:
+  outstanding-count = 1
+
+"Was suspect s named by at least one witness?"
+fn named? s:
+  contains? all-named s
+
+"Has suspect s already been exonerated?"
+fn exonerated? s:
+  contains? board/exonerated s
+
+"Is suspect s still an active lead?"
+fn outstanding? s:
+  contains? outstanding-leads s
+
+"Was s in the triple-corroborated set (strongest evidence)?"
+fn strongly-corroborated? s:
+  contains? triple-corroborated s
+
+# ─────────────────────────────────────────────────────────
+# Mutation fns — each opens with a LABELLED checkpoint
+# ─────────────────────────────────────────────────────────
+#
+# The labels (`before-exonerate, `before-recant, `before-new-tip) are pushed
+# onto the transaction log so a later `undo! 1` rewinds exactly the matching
+# move. The bare unlabelled form is covered by demo08; here every checkpoint
+# carries a label that names the KIND of decision being guarded.
+
+"Remove a suspect from the active pool."
+fn exonerate s:
+  pre: named? s
+  pre: not (exonerated? s)
+  engine/checkpoint! `before-exonerate
+  add! board/exonerated s
+  inc! board/turn 1
+
+"The marshall withdraws his accusation of s."
+fn marshall-recants s:
+  pre: contains? testimony/marshall s
+  engine/checkpoint! `before-recant
+  remove! testimony/marshall s
+  inc! board/turn 1
+
+"The maid recants her accusation of s."
+fn maid-recants s:
+  pre: contains? testimony/maid s
+  engine/checkpoint! `before-recant
+  remove! testimony/maid s
+  inc! board/turn 1
+
+"A new tip reaches the maid — she adds s to her testimony."
+fn maid-new-tip s:
+  pre: not (contains? testimony/maid s)
+  engine/checkpoint! `before-new-tip
+  add! testimony/maid s
+  inc! board/turn 1
+
+"Lay the charge — only callable once the board has narrowed to one suspect AND that suspect is the one remaining outstanding lead."
+fn charge s:
+  pre: solved?
+  pre: outstanding? s
+  set! board/charged s
+  inc! board/turn 1
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene board:
+  THE INQUISITOR'S BOARD — turn {board/turn}.
+  Outstanding leads: {outstanding-count}.  Exonerated: {count board/exonerated}.
+  Triple-corroborated count: {count triple-corroborated}.  Unique-to-pilgrim count: {count unique-to-pilgrim}.
+
+  Status of each suspect.
+  aldric — named={named? `aldric} outstanding={outstanding? `aldric} exonerated={exonerated? `aldric} triple={strongly-corroborated? `aldric}
+  brenna — named={named? `brenna} outstanding={outstanding? `brenna} exonerated={exonerated? `brenna} triple={strongly-corroborated? `brenna}
+  corwin — named={named? `corwin} outstanding={outstanding? `corwin} exonerated={exonerated? `corwin} triple={strongly-corroborated? `corwin}
+  duna   — named={named? `duna}   outstanding={outstanding? `duna}   exonerated={exonerated? `duna}   triple={strongly-corroborated? `duna}
+  esmund — named={named? `esmund} outstanding={outstanding? `esmund} exonerated={exonerated? `esmund} triple={strongly-corroborated? `esmund}
+
+  * [solved? and outstanding? `aldric] Charge Aldric — the case is closed
+    charge `aldric
+    -> verdict
+  * [solved? and outstanding? `brenna] Charge Brenna — the case is closed
+    charge `brenna
+    -> verdict
+  * [solved? and outstanding? `corwin] Charge Corwin — the case is closed
+    charge `corwin
+    -> verdict
+  * [solved? and outstanding? `duna] Charge Duna — the case is closed
+    charge `duna
+    -> verdict
+  * [solved? and outstanding? `esmund] Charge Esmund — the case is closed
+    charge `esmund
+    -> verdict
+
+  * [outstanding? `aldric] Exonerate Aldric (drop from the active pool)
+    exonerate `aldric
+    -> board
+  * [outstanding? `brenna] Exonerate Brenna (drop from the active pool)
+    exonerate `brenna
+    -> board
+  * [outstanding? `duna] Exonerate Duna (drop from the active pool)
+    exonerate `duna
+    -> board
+  * [outstanding? `esmund] Exonerate Esmund (drop from the active pool)
+    exonerate `esmund
+    -> board
+
+  * [contains? testimony/marshall `aldric] The marshall recants on Aldric
+    marshall-recants `aldric
+    -> board
+  * [contains? testimony/maid `brenna] The maid recants on Brenna
+    maid-recants `brenna
+    -> board
+  * [not (contains? testimony/maid `duna)] A new tip names Duna — the maid corroborates
+    maid-new-tip `duna
+    -> board
+
+  * [board/turn > 0] Rewind the last move on the board
+    undo! 1
+    -> board
+
+scene verdict:
+  THE CASE IS CLOSED.
+  Charged: {board/charged}.  Strongly corroborated at time of charge: {strongly-corroborated? board/charged}.
+  Turns taken: {board/turn}.  Exonerated suspects: {count board/exonerated}.
+
+  * The hearing adjourns
+    -> verdict
+
+# ─────────────────────────────────────────────────────────
+# Verify — invariants on the set-op expressions
+# ─────────────────────────────────────────────────────────
+
+"The board can always be narrowed to a single suspect and a charge laid."
+verify "the case is solvable from initial testimony":
+  verify-eventually (board/charged != nil)
+
+"`triple-corroborated` is non-empty in the initial state (corwin named by all three)."
+verify "triple-corroborated holds corwin from the start":
+  contains? triple-corroborated `corwin
+
+"Subset invariant phrased without a subset builtin: outstanding-leads minus all-named is empty in every reachable state. Direct exercise of the difference operator inside verify."
+verify "outstanding-leads is always a subset of all-named":
+  from-any-state:
+    (count (difference outstanding-leads all-named)) = 0
+
+"Exonerated suspects are never outstanding — intersect of the two sets is empty in every reachable state."
+verify "exonerated and outstanding sets never overlap":
+  from-any-state:
+    (count (intersect outstanding-leads board/exonerated)) = 0

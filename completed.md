@@ -5,6 +5,53 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## I7 — demo32 "The Inquisitor's Board" — set ops + labelled checkpoint ✅ (2026-05-20)
+
+Retires the §I7 residue items that no earlier demo exercised end-to-end:
+`union`/`intersect`/`difference` driving game logic (not decoration),
+the `(set)` empty-set literal as a state initializer, and
+`engine/checkpoint! `<label>` in its labelled (not bare) form.
+
+**Demo (`demos/demo32_inquisitors_board.sb`):**
+- Three witness testimony sets (`testimony/marshall`, `testimony/maid`,
+  `testimony/pilgrim`), each `Set(Suspect, 5)` with deliberate overlap so
+  every set-op fn yields a non-trivial answer from the initial state.
+- Eleven pure fns built on the set builtins:
+  - `union` — `all-named` nested as `union (union a b) c`.
+  - `intersect` — pairwise (`marshall-and-maid` etc.) AND triple-nested
+    (`triple-corroborated = intersect (intersect a b) c`).
+  - `difference` — both senses: "unique attribution" (`unique-to-pilgrim`,
+    `unique-to-marshall` — `difference w (union others)`) and the
+    load-bearing `outstanding-leads = difference all-named board/exonerated`
+    which drives the win condition.
+- `board/exonerated: Set(Suspect, 5) = (set)` — the empty-set literal as
+  the initial value of a mutable state path.
+- Each of the three destructive moves (`exonerate`, `marshall-recants` /
+  `maid-recants`, `maid-new-tip`) opens with
+  `engine/checkpoint! `<label>` so a subsequent `undo! 1` rewinds exactly
+  that move with semantic context. Labels: `before-exonerate`,
+  `before-recant`, `before-new-tip`. The bare form is already covered by
+  demo08; this demo focuses on the labelled form.
+- Four `verify` blocks, including two `from-any-state` invariants phrased
+  directly on `difference` and `intersect` (a subset check without a
+  subset builtin; non-overlap of exonerated and outstanding). All four
+  pass on 430 BFS states.
+
+**Tests (`tests/cli/cli_integration_spec.lua`):**
+Seven new tests covering compile / `--production` compile / verify /
+auto-play (which charges Corwin, the triple-corroborated suspect) /
+embedded-host invocation of every set-op fn / `(set)` empty-init
+inspection / labelled-checkpoint undo round-trip (asserts both the set
+mutation and the turn counter rewind in one step).
+
+**Files:** new `demos/demo32_inquisitors_board.sb`;
+`tests/cli/cli_integration_spec.lua` (+7 tests).
+
+**Test count:** 2958 successes / 0 failures / 2 pending (HTTP/debug
+port-binding failures are transient and ignored per CLAUDE.md).
+
+---
+
 ## I6 — demo31 "The Lighthouse Relay" + embedded host walkthrough ✅ (2026-05-20)
 
 Closes the §I6 demo-coverage gap: a Lua host driving a StoryBase game end to

@@ -2715,3 +2715,126 @@ describe("CLI demo31_embedded_host: Lua host embedding", function()
       "host script did not reach the completion banner")
   end)
 end)
+
+-- ── demo32: Inquisitor's Board (set ops + labelled checkpoint) ────────────────
+--
+-- §I7 residue: this is the first demo where `union`/`intersect`/`difference`
+-- drive game logic (not decoration), `(set)` is the initial value of a state
+-- path, and `engine/checkpoint! `<label>` is used in its labelled form.
+
+describe("CLI demo32_inquisitors_board: set ops + labelled checkpoint", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo32_inquisitors_board.sb"})
+    assert.equal(0, rc, "demo32 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("--production compile exits 0", function()
+    local rc, out, err = run_cli({"compile", "--production",
+                                  "demos/demo32_inquisitors_board.sb"})
+    assert.equal(0, rc, "demo32 --production compile failed:\n" .. out .. err)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo32_inquisitors_board.sb",
+                                  "--no-cache"})
+    assert.equal(0, rc, "demo32 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays to the verdict scene", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "20",
+                                   "demos/demo32_inquisitors_board.sb"})
+    assert.equal(0, rc, "demo32 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("THE CASE IS CLOSED"),
+      "expected demo32 to reach the verdict scene; got: " .. out)
+    assert.is_truthy(out:find("Charged: corwin"),
+      "expected --auto playthrough to charge corwin (triple-corroborated suspect)")
+    assert.is_truthy(out:find("Strongly corroborated at time of charge: true"),
+      "charged suspect should be in the triple-corroborated set")
+  end)
+
+  -- Direct exercise of the three set-op fns from the embedded host.
+  it("set-op fns return the expected sets from initial state", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo32_inquisitors_board.sb")
+    game:init()
+
+    local function as_set(t)
+      local s = {}
+      for _, v in ipairs(t or {}) do s[tostring(v)] = true end
+      return s
+    end
+
+    local all       = as_set(game:call("all-named"))
+    local triple    = as_set(game:call("triple-corroborated"))
+    local mm        = as_set(game:call("marshall-and-maid"))
+    local mp        = as_set(game:call("marshall-and-pilgrim"))
+    local up        = as_set(game:call("unique-to-pilgrim"))
+    local um        = as_set(game:call("unique-to-marshall"))
+    local out       = as_set(game:call("outstanding-leads"))
+
+    -- union (nested): everyone named by any witness
+    assert.is_true(all.aldric and all.brenna and all.corwin and all.duna and all.esmund,
+      "all-named should contain every suspect")
+
+    -- intersect (nested): only corwin is named by all three
+    assert.is_true(triple.corwin, "corwin should be in triple-corroborated")
+    assert.is_nil(triple.aldric, "aldric should not be triple-corroborated")
+    assert.is_nil(triple.brenna, "brenna should not be triple-corroborated")
+    assert.is_nil(triple.duna,   "duna should not be triple-corroborated")
+    assert.is_nil(triple.esmund, "esmund should not be triple-corroborated")
+
+    -- intersect (pairwise)
+    assert.is_true(mm.brenna and mm.corwin, "marshall ∩ maid = {brenna, corwin}")
+    assert.is_true(mp.corwin and not mp.brenna,
+      "marshall ∩ pilgrim should be exactly {corwin}")
+
+    -- difference (unique attribution)
+    assert.is_true(up.duna and not up.corwin,
+      "unique-to-pilgrim should be exactly {duna}")
+    assert.is_true(um.aldric and not um.corwin,
+      "unique-to-marshall should be exactly {aldric}")
+
+    -- difference (load-bearing): no exonerations yet → outstanding == all-named
+    assert.is_true(out.aldric and out.brenna and out.corwin and out.duna and out.esmund,
+      "outstanding-leads with empty exonerated set should equal all-named")
+  end)
+
+  -- (set) empty-set literal: board/exonerated must read as an empty set on init.
+  it("`(set)` empty literal initializes board/exonerated to an empty set", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo32_inquisitors_board.sb")
+    game:init()
+    local exonerated = game:get("board/exonerated")
+    assert.is_table(exonerated)
+    assert.equal(0, #exonerated,
+      "board/exonerated should be empty on init; got " .. #exonerated .. " element(s)")
+  end)
+
+  -- Labelled checkpoint: `engine/checkpoint! `before-exonerate` should let
+  -- a subsequent undo rewind exactly the exonerate move.
+  it("labelled checkpoint allows undo to rewind exactly one move", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo32_inquisitors_board.sb")
+    game:init()
+
+    local initial = #game:get("board/exonerated")
+    assert.equal(0, initial)
+
+    -- Push `before-exonerate checkpoint and add aldric to exonerated.
+    game:call("exonerate", "aldric")
+    assert.equal(1, #game:get("board/exonerated"))
+    assert.equal(1, game:get("board/turn"))
+
+    -- Undo one checkpoint. The labelled checkpoint should rewind exactly
+    -- the exonerate move (both the set mutation AND the turn counter).
+    local ok = game._eng._state:undo(1)
+    assert.is_true(ok, "undo(1) should succeed against the labelled checkpoint")
+    assert.equal(0, #game:get("board/exonerated"),
+      "exonerated set should be empty again after undo")
+    assert.equal(0, game:get("board/turn"),
+      "turn counter should rewind alongside the set mutation")
+  end)
+end)
