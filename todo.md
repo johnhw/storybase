@@ -4,7 +4,7 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-19)
+## Current Status (2026-05-20)
 
 All eight implementation phases complete. Language review passes 1 and 2 complete.
 Demos 01–25 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
@@ -14,9 +14,10 @@ resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (�
 complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2, and the full §E series (E0 decl-macro
 substrate, E1 quests, E2 dialog-topic, E3 inventory+stat, E4 review fixes) all
 complete. §G2 (stateless HTTP API) and §H2 (diff-mode hot reload) also complete.
-See completed.md.
+I1 (demo26 — record `with` mixins + path-pattern queries) and I2 (demo27 — file-local
+user-authored `decl-macro`) complete. See completed.md.
 
-**~2891 successes / 0 failures / 2 pending (known limitations).**
+**~2896 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -35,13 +36,13 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
 
-**Demo coverage gaps (smaller, parallelisable):** §I2–I6 add demos 27–31 for
+**Demo coverage gaps (smaller, parallelisable):** §I3–I6 add demos 28–31 for
 language features that ship today but have no end-to-end example:
-user-authored `decl-macro`, `counterfactual from:` /
-`distribution: conditioned-on`, computed `-> (expr)` + imperative scene nav,
-the `changes` hook binding, and a Lua embedded-host walkthrough. See §I for
-specs. (I1 / demo26 — record `with` mixins + path patterns — complete; see
-completed.md.)
+`counterfactual from:` / `distribution: conditioned-on`, computed
+`-> (expr)` + imperative scene nav, the `changes` hook binding, and a Lua
+embedded-host walkthrough. See §I for specs. (I1 / demo26 — record `with`
+mixins + path patterns — and I2 / demo27 — user-authored `decl-macro` —
+both complete; see completed.md.)
 
 ---
 
@@ -285,35 +286,14 @@ strategy beats a uniform-random policy in 1000 sampled rollouts.
 
 ---
 
-## I. Demo Coverage Gaps (new demos 27–31)
+## I. Demo Coverage Gaps (new demos 28–31)
 
 A 2026-05-19 audit of `demos/demo01–25` against `docs/reference/language.md`
 found a handful of supported language features that no current demo exercises
-end-to-end. Five new demos below fill those gaps. Each item names the specific
+end-to-end. Four new demos below fill those gaps. Each item names the specific
 features to showcase, the suggested theme, and an acceptance criterion. Implement
-in order; each is independent. (I1 / demo26 complete; see completed.md.)
-
-### I2. demo27 — "The Apprentice's Grimoire" (`demo27_grimoire.sb`)
-
-**Primary gap:** User-authored `decl-macro`. All §E0-using demos so far
-(`demo24`, `demo25`) import macros from `@stdlib/`; none defines its own.
-
-**Features demonstrated:**
-- A file-local `decl-macro spell $name cost: $c power: $p` (positional args
-  per the §E0 convention) that emits, per spell:
-  - `state player/spells/$name/learned: Bool = false`
-  - `state player/spells/$name/uses: Int(0, $max) = 0`
-  - `fn cast-$name`: precondition guards (`player/mana >= $c`), mutations,
-    `say` line, optional `engine/emit`
-  - one `verify-eventually (cast-$name-once?)` reachability check per spell
-- Three `spell` calls (`fireball`, `mend`, `ward`) at the top level
-- A bonus: a `$param` used in a type slot (`Int(0, $max)`) and in an integer
-  bound, exercising the §E3 Stage-A substrate extension on the author side
-- A scene that wires each emitted `cast-<name>` fn into a choice
-
-**Acceptance:** Three full spell systems materialise from three single-line
-macro calls; `storybase verify` proves each spell is castable from the
-initial state; adding a fourth spell is genuinely one line in the source.
+in order; each is independent. (I1 / demo26 and I2 / demo27 complete; see
+completed.md.)
 
 ### I3. demo28 — "The Seer's Chamber" (`demo28_seers_chamber.sb`)
 

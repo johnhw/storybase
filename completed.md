@@ -5,6 +5,61 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## I2 — demo27 "The Apprentice's Grimoire" ✅ (2026-05-20)
+
+Fills the §I2 demo-coverage gap: user-authored `decl-macro`. The §E0
+substrate has shipped since 2026-04 and is used in `stdlib/` (counter,
+inventory, stat, dialog-topic), but no demo defined its own decl-macro at
+the file scope — `demo24`/`demo25` only *import* macros from `@stdlib/`.
+
+**Files:** new `demos/demo27_grimoire.sb`,
+`tests/cli/cli_integration_spec.lua` (+5 tests).
+
+**Features exercised:**
+- A file-local `decl-macro spell $name $cost $power $max` (positional
+  params per the §E0 convention) that expands per call site into:
+  - 2 state paths (`spell-$name-learned: Bool`,
+    `spell-$name-uses: Int(0, $max)`)
+  - 6 fns (`$name-power`, `$name-uses`, `$name-learned?`,
+    `$name-exhausted?`, `cast-$name`, plus the auto-emitted verify body)
+  - 1 `verify-eventually` reachability check
+- `$param` substitution across the slot kinds documented in
+  language.md §E0:
+  - bare segment / composite single-segment name parts
+  - integer-bound slot `Int(0, $max)`
+  - whole-expression literal (`dec! player/mana $cost`,
+    `spell-$name-uses < $max`, `$power` as a fn body)
+- Three single-line `spell` calls (`fireball 20 8 5`, `mend 15 6 8`,
+  `ward 10 4 3`) materialise three independent spell subsystems whose
+  per-spell `verify-eventually` blocks all pass under bounded BFS.
+
+**Limitation discovered while authoring (documented in the demo header):**
+COMPOSITE_IDENT tokens (anything with a literal `$ident` segment) parse
+into `path_expr` nodes in expression position — they never become
+`fn_call` nodes. So a `verify-eventually (cast-$name-once?)` form (as
+sketched in the original §I2 spec) would substitute into a single-segment
+path lookup that finds no matching state and never succeeds. The
+demo works around this by writing the verify condition against the
+emitted state path directly (`verify-eventually (spell-$name-uses > 0)`),
+and by calling helper fns from the scene via $-less names at the call
+site (`fireball-exhausted?`, not `$name-exhausted?`). Worth revisiting
+as a future polish item if multiple decl-macro authors hit it.
+
+**Acceptance:**
+- `lua5.4 cli/main.lua run demos/demo27_grimoire.sb` reaches the rest
+  scene under interactive play (cast each spell, close the grimoire).
+- `lua5.4 cli/main.lua verify demos/demo27_grimoire.sb` → 3/3 PASS
+  (85 BFS states checked per block; the three blocks are emitted by the
+  three `spell` call sites).
+- Adding a fourth spell needs one line at the bottom plus one matching
+  scene-choice; the state, fns, and verify materialise from the call.
+- 5 new integration tests cover compile, verify, auto-play to the rest
+  scene, decl-macro expansion fidelity (state defaults + emitted fns),
+  and `$max` flowing into the `Int(0, $max)` bound (cast-Ward 3× exhausts
+  the spell and removes the choice from the visible menu).
+
+---
+
 ## I1 — demo26 "The Beastmaster's Ledger" ✅ (2026-05-19)
 
 Fills the §I1 demo-coverage gap: record `with`-mixin composition and

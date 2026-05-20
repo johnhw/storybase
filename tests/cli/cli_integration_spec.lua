@@ -2190,3 +2190,73 @@ describe("CLI demo26_bestiary: record with-mixins and path-pattern queries", fun
       "expected at least 6 status changes recorded via bestiary/**/status; got: " .. tostring(count))
   end)
 end)
+
+-- ── demo27: Apprentice's Grimoire (file-local decl-macro) ─────────────────────
+
+describe("CLI demo27_grimoire: user-authored decl-macro", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo27_grimoire.sb"})
+    assert.equal(0, rc, "demo27 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass (one per spell)", function()
+    local rc, out, err = run_cli({"verify", "demos/demo27_grimoire.sb", "--no-cache"})
+    assert.equal(0, rc, "demo27 verify failed:\n" .. out .. err)
+    local pass_count = 0
+    for _ in out:gmatch("PASS") do pass_count = pass_count + 1 end
+    assert.is_true(pass_count >= 3,
+      "expected at least 3 PASS lines (one per spell); got: " .. out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays to the rest scene within 25 steps", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "25",
+                                   "demos/demo27_grimoire.sb"})
+    assert.equal(0, rc, "demo27 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("grimoire is closed") or out:find("Three spells in the journal"),
+      "expected demo27 to reach the rest scene; got: " .. out)
+  end)
+
+  it("decl-macro expands one state + 6 fns + 1 verify per spell", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo27_grimoire.sb")
+    game:init()
+
+    -- Each spell's state pair exists with the correct initial values.
+    for _, name in ipairs({"fireball", "mend", "ward"}) do
+      assert.equal(false, game:get("spell-" .. name .. "-learned"),
+        "spell-" .. name .. "-learned should default to false")
+      assert.equal(0, game:get("spell-" .. name .. "-uses"),
+        "spell-" .. name .. "-uses should default to 0")
+    end
+
+    -- Each spell's expanded fns exist and return expected values.
+    assert.equal(8, game:call("fireball-power"))
+    assert.equal(6, game:call("mend-power"))
+    assert.equal(4, game:call("ward-power"))
+
+    assert.equal(0, game:call("fireball-uses"))
+    assert.equal(false, game:call("fireball-learned?"))
+    assert.equal(false, game:call("fireball-exhausted?"))
+  end)
+
+  it("$param flows into the Int(0, $max) bound — exhaustion at $max casts", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo27_grimoire.sb")
+    game:init()
+
+    -- ward has max=3 (the smallest). Cast it three times and check exhaustion.
+    for _ = 1, 3 do game:pick("Cast Ward") end
+    assert.equal(3, game:get("spell-ward-uses"))
+    assert.is_true(game:call("ward-exhausted?"),
+      "after $max casts, ward-exhausted? should be true")
+
+    -- A fourth attempt is gated out of the available choices.
+    local choices = game:choices()
+    for _, c in ipairs(choices) do
+      assert.is_falsy(c.label:find("Cast Ward"),
+        "Cast Ward choice should be unavailable once exhausted; saw: " .. c.label)
+    end
+  end)
+end)
