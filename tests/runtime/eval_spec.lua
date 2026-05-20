@@ -2487,6 +2487,16 @@ describe("str builtin", function()
       { kind="string_lit", value="c" })
     assert.equal("abc", eval.eval_expr(node, c))
   end)
+
+  it("renders bool values as 'true'/'false' (not blank)", function()
+    local c = ctx({})
+    local node = fn_call("str",
+      { kind="string_lit",  value="before=" },
+      { kind="bool_lit",    value=false },
+      { kind="string_lit",  value=" after=" },
+      { kind="bool_lit",    value=true })
+    assert.equal("before=false after=true", eval.eval_expr(node, c))
+  end)
 end)
 
 describe("stdlib: numeric builtins", function()

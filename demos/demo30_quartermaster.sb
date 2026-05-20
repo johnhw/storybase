@@ -1,0 +1,247 @@
+# demo30_quartermaster.sb — "The Quartermaster's Audit"
+#
+# Features demonstrated:
+#   tags: [transaction]              — every gameplay fn carries the tag
+#   hook transaction: post:          — tag-level hook fires once after each
+#                                      tagged fn, sees the `changes` binding
+#   for entry in changes:            — walk the per-mutation diff list
+#                                      reading entry/path, entry/old, entry/new
+#   hook after: spend:               — function-level hook (runs alongside
+#                                      the tag-level one) for cross-checking
+#   post: ... = player/gold@before   — postcondition referring to a path's
+#                                      value before the fn body ran
+#   engine-config strict-contracts:  — keep pre:/post: live in production
+#
+# The story: a campaign quartermaster runs a daily audit. Each gameplay
+# action (spend, brew, ration, restock, drill) is tagged [transaction];
+# a single tag-level `post:` hook reads `changes` and pushes a one-line
+# ledger entry per mutation into `audit/ledger`. The camp scene shows the
+# ledger every turn, with a counter pair (one bumped by the tag hook,
+# the other by the fn-level hook on spend) proving both hooks fire
+# independently for the same call.
+#
+# `strict-contracts: true` is set so the `post: player/gold = player/gold@before
+# - amount` on `spend` survives even a --production build — turning the
+# numeric postcondition into a runtime safety invariant rather than a
+# dev-only check.
+#
+# Run:    storybase run        demos/demo30_quartermaster.sb
+# Auto:   storybase run --auto --steps 25 demos/demo30_quartermaster.sb
+# Check:  storybase check      demos/demo30_quartermaster.sb
+# Verify: storybase verify     demos/demo30_quartermaster.sb
+
+module quartermaster-audit
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene:      camp
+  # IMPLICATION: pre:/post: contract blocks remain compiled into a
+  # --production build. The spend post: assertion below becomes a hard
+  # runtime safety check at the customer's site, not just a dev guard.
+  strict-contracts: true
+
+# ─────────────────────────────────────────────────────────
+# Tag
+# ─────────────────────────────────────────────────────────
+
+"Marks every player-facing gameplay fn that should appear in the audit ledger."
+tag transaction
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+"The quartermaster's daily stocks."
+state player:
+  gold:   Int(0, 999)  = 30
+  herbs:  Int(0, 99)   = 4
+  water:  Int(0, 50)   = 14
+  morale: Int(0, 10)   = 7
+  turn:   Int(0, 99)   = 0
+  done:   Bool         = false
+
+"Audit counters and the per-turn ledger written by the tag-level post hook."
+state audit:
+  # Tag-level hook increments this; reaches the count of all tagged calls.
+  transactions-run:  Int(0, 999)    = 0
+  # Function-level (`hook after: spend:`) hook increments this; reaches the
+  # count of `spend` calls. Both counters together prove the tag-level
+  # and fn-level hooks fire independently for the same call.
+  spend-hook-fires:  Int(0, 999)    = 0
+  # Cleared and refilled by the tag-level hook each tagged call. Holds one
+  # pre-formatted line per mutation in the prior fn body.
+  ledger:            UList(String)  = []
+
+# ─────────────────────────────────────────────────────────
+# Pure helpers
+# ─────────────────────────────────────────────────────────
+
+"True when stocks and morale are healthy enough to march."
+fn ready-to-march?:
+  pure
+  player/gold >= 5  and  player/water >= 4  and  player/morale >= 4
+
+"True when enough transactions have been audited to call it a day."
+fn finished?:
+  pure
+  player/done = true  or  audit/transactions-run >= 8
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions — every one carries [transaction]
+# ─────────────────────────────────────────────────────────
+
+"Spend gold from the chest. Demonstrates post: ... @before with strict-contracts."
+fn spend amount:
+  tags: [transaction]
+  pre:  player/gold >= amount
+  post: player/gold = player/gold@before - amount
+  dec! player/gold amount
+
+"Brew a healing tonic — burns water and herbs, lifts morale."
+fn brew:
+  tags: [transaction]
+  pre:  player/herbs >= 1  and  player/water >= 2
+  dec! player/herbs 1
+  dec! player/water 2
+  inc! player/morale 1
+
+"Issue rations — eats water, lifts morale slightly."
+fn ration:
+  tags: [transaction]
+  pre:  player/water >= 1
+  dec! player/water 1
+  inc! player/morale 1
+
+"Drill the troops — costs morale, no consumable use."
+fn drill:
+  tags: [transaction]
+  pre:  player/morale >= 1
+  dec! player/morale 1
+
+"Restock at the wagon line — costs gold, refills supplies."
+fn restock:
+  tags: [transaction]
+  pre:  player/gold >= 6
+  # `spend` is itself a transaction fn; we call the primitive dec!/inc! here
+  # so the audit shows only the line items, not a nested spend call.
+  dec! player/gold 6
+  inc! player/herbs 2
+  inc! player/water 6
+
+"Advance the day counter — also tagged, so a turn-tick shows up in the ledger."
+fn end-day:
+  tags: [transaction]
+  inc! player/turn 1
+
+"Strike camp and end the audit."
+fn strike-camp:
+  tags: [transaction]
+  set! player/done true
+
+# ─────────────────────────────────────────────────────────
+# Hooks — the heart of the demo
+# ─────────────────────────────────────────────────────────
+
+"Tag-level audit: fires after every [transaction] fn and walks the `changes` binding to fill `audit/ledger`."
+hook transaction:
+  post:
+    # Stamp the call into the rolling counter, then rebuild the per-turn
+    # ledger from the `changes` binding. clear!/push! mutations done from
+    # inside the hook body do NOT appear in `changes` — the binding was
+    # snapshotted before either hook ran.
+    inc! audit/transactions-run 1
+    clear! audit/ledger
+    for entry in changes:
+      push! audit/ledger (str entry/path " : " (entry/old ?? 0) " → " (entry/new ?? 0))
+    else:
+      # Hook ran but the body produced no mutations (rare; still worth a row).
+      push! audit/ledger "(no mutations)"
+
+"Fn-level cross-check on spend: a second post-hook that bumps its own counter independently of the tag-level one."
+hook after: spend:
+  inc! audit/spend-hook-fires 1
+
+# ─────────────────────────────────────────────────────────
+# Verify
+# ─────────────────────────────────────────────────────────
+
+verify "spend honours its post:contract": # always holds because dec! removes exactly amount.
+  requires player/gold >= 5
+  after (spend 5):
+    player/gold = player/gold@before - 5
+
+verify "every spend bumps both counters":
+  requires player/gold >= 3
+  after (spend 3):
+    audit/spend-hook-fires > audit/spend-hook-fires@before  and  audit/transactions-run > audit/transactions-run@before
+
+verify "ledger is non-empty after any tagged call":
+  requires player/water >= 1
+  after (ration):
+    ulist-size audit/ledger >= 1
+
+verify "tag hook fires for non-spend transactions too":
+  requires player/morale >= 1
+  after (drill):
+    audit/transactions-run > audit/transactions-run@before  and  audit/spend-hook-fires = audit/spend-hook-fires@before
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene camp:
+  THE QUARTERMASTER'S TENT — turn {player/turn}
+
+  Gold {player/gold}  •  Herbs {player/herbs}  •  Water {player/water}  •  Morale {player/morale}
+  Tag-hook fires: {audit/transactions-run}   Spend-hook fires: {audit/spend-hook-fires}
+
+  --- Last action's ledger ---
+  for line in audit/ledger:
+    {line}
+  else:
+    (no entries yet — the audit begins after your first action)
+
+  * [finished?] Strike camp and march out
+    strike-camp
+    -> departure
+
+  * [not (finished?)  and  player/gold >= 4] Pay the porter 4g (spend)
+    spend 4
+    -> camp
+
+  * [not (finished?)  and  player/herbs >= 1  and  player/water >= 2] Brew a tonic
+    brew
+    -> camp
+
+  * [not (finished?)  and  player/water >= 1] Issue rations
+    ration
+    -> camp
+
+  * [not (finished?)  and  player/morale >= 1] Drill the troops
+    drill
+    -> camp
+
+  * [not (finished?)  and  player/gold >= 6] Restock at the wagon line (gold → herbs+water)
+    restock
+    -> camp
+
+  * [not (finished?)] Close the day's ledger (end-day, also tagged)
+    end-day
+    -> camp
+
+scene departure:
+  THE MARCH OUT
+
+  The quartermaster shuts the chest, lays the audit on the table, and signals
+  the column forward.
+
+  Final tallies — turns {player/turn}, gold {player/gold}, morale {player/morale}.
+  Tag-level hook fired {audit/transactions-run} time(s). The spend-only hook fired {audit/spend-hook-fires} time(s).
+
+  --- Ledger from the last action ---
+  for line in audit/ledger:
+    {line}
+  else:
+    (ledger is empty)

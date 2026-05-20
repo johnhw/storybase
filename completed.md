@@ -5,6 +5,58 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## I5 — demo30 "The Quartermaster's Audit" ✅ (2026-05-20)
+
+Fills the §I5 demo-coverage gap: the per-mutation `changes` binding inside a
+tag-level `post:` hook, an fn-level `after:` hook firing alongside it, a
+`post:` contract referencing `path@before`, and `strict-contracts: true`
+keeping that contract live in `--production` builds. Two cross-cutting
+language fixes shipped with the demo (both surfaced by writing it):
+
+**Language fixes:**
+- `cli/verify_cmd.lua` was building a 1-block sub-game-table that **dropped
+  `hooks`** (plus `tags`, `relations`, `grids`, `speakers`, `generates`,
+  `quests`, `endings`). Any verify block exercising hook-driven state — like
+  `after (spend X): audit/spend-hook-fires > …@before` — silently failed at
+  BFS state 1 because the hook never fired during verify's call. The fix
+  threads those fields into the sub-table so verify sees the same hook
+  registry the runtime does. Caught by demo30's four verify blocks, which
+  flipped from 1 PASS / 3 FAIL to 4 PASS without changing the demo itself.
+- `runtime/eval.lua` `str` builtin rendered `false` as `""` (Lua's
+  `v ~= nil and v or ""` idiom collapses both nil and false). With this fix
+  `false` renders as `"false"` and `true` as `"true"`; nil still renders as
+  `""`. Surfaced by the ledger line for `set! player/done true` —
+  `player/done : false → true` was previously `player/done :  → true`.
+  Regression test added in `tests/runtime/eval_spec.lua`.
+
+**Demo (`demos/demo30_quartermaster.sb`):**
+- `tag transaction` decl; every gameplay fn carries `tags: [transaction]`.
+- A single `hook transaction: post:` walks `changes` with
+  `for entry in changes: push! audit/ledger (str entry/path " : " ...)`,
+  refilling `audit/ledger: UList(String)` once per tagged call.
+- A second `hook after: spend:` increments `audit/spend-hook-fires`. The
+  pair of counters (`audit/transactions-run` from the tag hook,
+  `audit/spend-hook-fires` from the fn hook) proves both hooks fire
+  independently for the same call.
+- `fn spend amount: post: player/gold = player/gold@before - amount` is the
+  flagship `path@before` contract; `engine-config: strict-contracts: true`
+  keeps it live under `--production`. The integration test fixture
+  `spend-broken` (an inline tmpfile) demonstrates the contract failing
+  loudly when violated.
+- Four `verify` blocks: spend honours its post-contract, every spend bumps
+  both counters, ledger non-empty after any tagged call, tag hook fires for
+  non-spend transactions too (with `spend-hook-fires` unchanged).
+
+**Files:** new `demos/demo30_quartermaster.sb`;
+`cli/verify_cmd.lua` (sub-game-table now carries hooks/tags/relations/etc.);
+`runtime/eval.lua` (str builtin nil/bool rendering);
+`tests/runtime/eval_spec.lua` (+1 str regression test);
+`tests/cli/cli_integration_spec.lua` (+9 demo30 tests).
+
+**Test count:** 2943 successes / 0 failures / 2 pending.
+
+---
+
 ## I4 — demo29 "Caravan Dispatch" ✅ (2026-05-20)
 
 Fills the §I4 demo-coverage gap: computed `-> (expr)` and the three imperative

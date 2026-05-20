@@ -1001,11 +1001,13 @@ local BUILTINS = {
   end,
   -- ── String / numeric stdlib ──────────────────────────────────────────────────
   ["str"] = function(args, ctx)
-    -- Concatenate any number of arguments into a String (superficial)
+    -- Concatenate any number of arguments into a String (superficial).
+    -- nil renders as "" (suppressed); false/true render as "false"/"true"
+    -- so Bool state values survive into narration unchanged.
     local parts = {}
     for _, arg in ipairs(args) do
       local v = eval_expr(arg, ctx)
-      parts[#parts + 1] = tostring(v ~= nil and v or "")
+      parts[#parts + 1] = (v == nil) and "" or tostring(v)
     end
     return table.concat(parts)
   end,

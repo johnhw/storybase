@@ -141,6 +141,14 @@ function M.run(args)
         bounded    = game_table.bounded,
         tests      = {},
         migrations = game_table.migrations,
+        hooks      = game_table.hooks,
+        tags       = game_table.tags,
+        relations  = game_table.relations,
+        grids      = game_table.grids,
+        speakers   = game_table.speakers,
+        generates  = game_table.generates,
+        quests     = game_table.quests,
+        endings    = game_table.endings,
       })
       result = rs[1] or { label = ventry.label, pass = true }
       cache_mod.put(cache, hash, result)

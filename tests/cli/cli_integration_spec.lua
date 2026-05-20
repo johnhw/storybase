@@ -2424,3 +2424,147 @@ describe("CLI demo29_caravan_dispatch: computed goto + imperative scene-nav", fu
       "spec asks for exactly one `-> (expr)` form; saw " .. count)
   end)
 end)
+
+-- ── demo30: Quartermaster's Audit (`changes` binding + strict-contracts) ──────
+--
+-- I5 — exercises the per-mutation `changes` binding inside a tag-level post
+-- hook, an fn-level `after:` hook that fires alongside it, a `post:` contract
+-- referencing `path@before`, and `strict-contracts: true` keeping that
+-- contract live in --production builds.
+
+describe("CLI demo30_quartermaster: changes binding + strict-contracts", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo30_quartermaster.sb"})
+    assert.equal(0, rc, "demo30 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("compiles cleanly under --production", function()
+    local rc, out, err = run_cli({"compile", "--production",
+                                  "demos/demo30_quartermaster.sb"})
+    assert.equal(0, rc, "demo30 --production compile failed:\n" .. out .. err)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo30_quartermaster.sb",
+                                  "--no-cache"})
+    assert.equal(0, rc, "demo30 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays from camp to departure without error", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "15",
+                                   "demos/demo30_quartermaster.sb"})
+    assert.equal(0, rc, "demo30 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("THE MARCH OUT"),
+      "expected demo30 to reach the departure scene; got: " .. out)
+  end)
+
+  it("tag-level post hook writes a ledger entry per mutation", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo30_quartermaster.sb")
+    game:init()
+    -- spend mutates exactly one path: player/gold
+    assert.equal(0, #(game:get("audit/ledger") or {}))
+    game:call("spend", 5)
+    local ledger = game:get("audit/ledger")
+    assert.equal(1, #ledger,
+      "expected one ledger entry for spend's single mutation")
+    assert.is_truthy(ledger[1]:find("player/gold"), ledger[1])
+    assert.is_truthy(ledger[1]:find("30") and ledger[1]:find("25"),
+      "expected ledger line to show 30 → 25, got: " .. ledger[1])
+    -- brew mutates three paths
+    game:call("brew")
+    ledger = game:get("audit/ledger")
+    assert.equal(3, #ledger,
+      "expected three ledger entries after brew (herbs/water/morale)")
+  end)
+
+  it("tag-level and fn-level hooks fire independently for the same call", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo30_quartermaster.sb")
+    game:init()
+    assert.equal(0, game:get("audit/transactions-run"))
+    assert.equal(0, game:get("audit/spend-hook-fires"))
+    game:call("spend", 3)
+    -- Both hooks must fire once for the spend call.
+    assert.equal(1, game:get("audit/transactions-run"))
+    assert.equal(1, game:get("audit/spend-hook-fires"))
+    -- A non-spend transaction bumps only the tag-level counter.
+    game:call("drill")
+    assert.equal(2, game:get("audit/transactions-run"))
+    assert.equal(1, game:get("audit/spend-hook-fires"),
+      "fn-level after: spend: must NOT fire for drill")
+  end)
+
+  it("post: contract on spend holds under normal use", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo30_quartermaster.sb")
+    game:init()
+    local before = game:get("player/gold")
+    game:call("spend", 7)
+    assert.equal(before - 7, game:get("player/gold"))
+  end)
+
+  it("post: contract on spend triggers a runtime error when violated", function()
+    -- Sibling .sb fixture: a copy of spend that bumps gold the WRONG way,
+    -- with the same post: contract attached. Confirms the contract is wired
+    -- in (and would fail loudly under strict-contracts in production too).
+    local src = [[
+module demo30-broken-contract
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene:      hub
+  strict-contracts: true
+
+state player:
+  gold: Int(0, 999) = 30
+
+"Broken spend — increments instead of decrementing. post: contract MUST fail."
+fn spend-broken amount:
+  pre:  player/gold >= amount
+  post: player/gold = player/gold@before - amount
+  inc!  player/gold amount
+
+scene hub:
+  HUB
+
+  * Stub
+    -> hub
+]]
+    local p = tmpfile(".sb", src)
+    -- Use the embedded API to trigger the contract failure deterministically.
+    local sb = require("lib.storybase")
+    local game = sb.load(p)
+    game:init()
+    local ok, err = pcall(function() game:call("spend-broken", 1) end)
+    os.remove(p)
+    assert.is_false(ok, "expected post:contract to raise an error")
+    assert.is_truthy(tostring(err):find("Postcondition failed"),
+      "expected 'Postcondition failed' error, got: " .. tostring(err))
+  end)
+
+  it("`changes` rendering preserves bool old/new (regression: str(false))", function()
+    -- The final transaction sets player/done=true; the ledger should show the
+    -- Bool transition rather than dropping the false value to empty string.
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo30_quartermaster.sb")
+    game:init()
+    game:call("strike-camp")
+    local ledger = game:get("audit/ledger")
+    assert.equal(1, #ledger)
+    assert.is_truthy(ledger[1]:find("false") and ledger[1]:find("true"),
+      "expected 'false → true' in ledger, got: " .. ledger[1])
+  end)
+
+  it("source declares strict-contracts: true (survives --production)", function()
+    local f = io.open("demos/demo30_quartermaster.sb")
+    local src = f:read("*a"); f:close()
+    assert.is_truthy(src:find("strict%-contracts:%s*true"),
+      "demo30 must declare strict-contracts: true in engine-config")
+  end)
+end)

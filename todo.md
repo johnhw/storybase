@@ -16,11 +16,13 @@ substrate, E1 quests, E2 dialog-topic, E3 inventory+stat, E4 review fixes) all
 complete. §G2 (stateless HTTP API) and §H2 (diff-mode hot reload) also complete.
 I1 (demo26 — record `with` mixins + path-pattern queries), I2 (demo27 — file-local
 user-authored `decl-macro`), I3 (demo28 — counterfactual `from:` rewind +
-`distribution: conditioned-on` bounded), and I4 (demo29 — computed `-> (expr)`
-+ `goto-scene!`/`enter-scene!`/`exit-scene!` imperative scene navigation) all
+`distribution: conditioned-on` bounded), I4 (demo29 — computed `-> (expr)`
++ `goto-scene!`/`enter-scene!`/`exit-scene!` imperative scene navigation), and
+I5 (demo30 — `changes` binding in tag-level + fn-level hooks; `path@before`
+post-contract surviving `--production` via `strict-contracts: true`) all
 complete. See completed.md.
 
-**~2932 successes / 0 failures / 2 pending (known limitations).**
+**~2943 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -39,13 +41,13 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
 
-**Demo coverage gaps (smaller, parallelisable):** §I5–I6 add demos 30–31 for
-language features that ship today but have no end-to-end example: the
-`changes` hook binding, and a Lua embedded-host walkthrough. See §I for
-specs. (I1 / demo26 — record `with` mixins + path patterns, I2 / demo27 —
-user-authored `decl-macro`, I3 / demo28 — counterfactual `from:` +
-conditioned-on bounded, and I4 / demo29 — computed `-> (expr)` + imperative
-scene navigation — all complete; see completed.md.)
+**Demo coverage gaps (smaller, parallelisable):** §I6 adds demo 31 for the
+remaining language feature without an end-to-end example: a Lua embedded-host
+walkthrough. See §I for the spec. (I1 / demo26 — record `with` mixins + path
+patterns, I2 / demo27 — user-authored `decl-macro`, I3 / demo28 —
+counterfactual `from:` + conditioned-on bounded, I4 / demo29 — computed
+`-> (expr)` + imperative scene navigation, and I5 / demo30 — `changes`
+binding + strict-contracts `path@before` — all complete; see completed.md.)
 
 ---
 
@@ -293,33 +295,10 @@ strategy beats a uniform-random policy in 1000 sampled rollouts.
 
 A 2026-05-19 audit of `demos/demo01–25` against `docs/reference/language.md`
 found a handful of supported language features that no current demo exercises
-end-to-end. Four new demos below fill those gaps. Each item names the specific
+end-to-end. The new demos below fill those gaps. Each item names the specific
 features to showcase, the suggested theme, and an acceptance criterion. Implement
-in order; each is independent. (I1 / demo26, I2 / demo27, I3 / demo28, and
-I4 / demo29 all complete; see completed.md.)
-
-### I5. demo30 — "The Quartermaster's Audit" (`demo30_quartermaster.sb`)
-
-**Primary gap:** The `changes` binding inside `after:` / `post:` hooks (the
-per-mutation diff list). Also a chance to highlight `strict-contracts: true`
-and a real `post:` contract with `path@before`.
-
-**Features demonstrated:**
-- `tags: [transaction]` on every gameplay fn, and a single
-  `hook transaction: post:` body that walks `changes` to render a per-turn
-  ledger (`"3 gold spent, 1 herb consumed, morale -2"`)
-- Inside the hook body, iterate `changes` with `for entry in changes:`,
-  reading `entry/path`, `entry/old`, `entry/new`
-- A `post:` contract on a `spend` fn using `player/gold@before` for a numerical
-  postcondition
-- `engine-config: strict-contracts: true` so the contract survives a production
-  build, with a comment noting the implication
-- A second `hook after: spend:` (function-level) that double-checks against
-  the tag-level hook running
-
-**Acceptance:** Running the demo yields a visible ledger at the end of each
-turn driven entirely by `changes`; the `post:` contract triggers a clear
-error when intentionally violated (a test fixture demonstrates the failure).
+in order; each is independent. (I1 / demo26, I2 / demo27, I3 / demo28,
+I4 / demo29, and I5 / demo30 all complete; see completed.md.)
 
 ### I6. demo31 — Embedded host example (`demo31_embedded_host.sb` + `examples/demo31_host.lua`)
 
