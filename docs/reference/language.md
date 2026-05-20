@@ -1552,7 +1552,14 @@ At runtime the expression is evaluated and its symbol value is used as the speak
 
 ### Narration output format
 
-`say` statements produce *dialogue objects* in the narration list rather than plain strings. Each dialogue object is a Lua table with the following fields:
+Every entry in the narration list returned by `game:render()` is a Lua table tagged with a `kind` field. Two kinds are emitted today:
+
+| `kind`        | Other fields                                | Source                       |
+|---------------|---------------------------------------------|------------------------------|
+| `"narration"` | `text`                                      | A plain scene-body text line |
+| `"say"`       | `speaker`, `display`, `color`, `text`       | A `say` statement            |
+
+The `say` fields are:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -1561,18 +1568,17 @@ At runtime the expression is evaluated and its symbol value is used as the speak
 | `color` | string or nil | CSS hex color from the `speaker` declaration, or nil if undeclared |
 | `text` | string | Rendered dialogue text (with `{expr}` interpolation applied) |
 
-Plain narration lines remain plain strings. Hosts must check `type(line) == "table"` to distinguish dialogue objects from narration strings.
+Hosts dispatch on `item.kind`:
 
 ```lua
 local narration, choices = game:render()
-for _, line in ipairs(narration) do
-  if type(line) == "table" then
-    -- Attributed dialogue
-    local label = line.display or line.speaker or "?"
-    print(label .. ": " .. line.text)
+for _, item in ipairs(narration) do
+  if item.kind == "say" then
+    local label = item.display or item.speaker or "?"
+    print(label .. ": " .. item.text)
   else
-    -- Plain narration
-    print(line)
+    -- item.kind == "narration"
+    print(item.text)
   end
 end
 ```

@@ -16,8 +16,14 @@ game:init()
 
 -- Render the first scene
 local narration, choices = game:render()
-for _, line   in ipairs(narration) do print(line) end
-for _, choice in ipairs(choices)   do print(choice.index .. ") " .. choice.label) end
+for _, item in ipairs(narration) do
+  if item.kind == "say" then
+    print((item.display or item.speaker or "?") .. ": " .. item.text)
+  else
+    print(item.text)
+  end
+end
+for _, choice in ipairs(choices) do print(choice.index .. ") " .. choice.label) end
 
 -- Dispatch a choice
 game:choose(1)
@@ -35,9 +41,13 @@ game:init()
 while true do
   local narration, choices = game:render()
 
-  -- Display narration
-  for _, line in ipairs(narration) do
-    print(line)
+  -- Display narration (each item is a table: {kind="narration"|"say", text=..., ...})
+  for _, item in ipairs(narration) do
+    if item.kind == "say" then
+      print((item.display or item.speaker or "?") .. ": " .. item.text)
+    else
+      print(item.text)
+    end
   end
 
   -- Check for end of game (no choices available)

@@ -17,12 +17,14 @@ complete. §G2 (stateless HTTP API) and §H2 (diff-mode hot reload) also complet
 I1 (demo26 — record `with` mixins + path-pattern queries), I2 (demo27 — file-local
 user-authored `decl-macro`), I3 (demo28 — counterfactual `from:` rewind +
 `distribution: conditioned-on` bounded), I4 (demo29 — computed `-> (expr)`
-+ `goto-scene!`/`enter-scene!`/`exit-scene!` imperative scene navigation), and
++ `goto-scene!`/`enter-scene!`/`exit-scene!` imperative scene navigation),
 I5 (demo30 — `changes` binding in tag-level + fn-level hooks; `path@before`
-post-contract surviving `--production` via `strict-contracts: true`) all
+post-contract surviving `--production` via `strict-contracts: true`), and
+I6 (demo31 — embedded-host walkthrough with `engine/emit` listeners +
+save/load round-trip via the public `lib/storybase.lua` API) all
 complete. See completed.md.
 
-**~2943 successes / 0 failures / 2 pending (known limitations).**
+**~2951 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -41,13 +43,10 @@ The core language and runtime are feature-complete against the V1.0 specificatio
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
 
-**Demo coverage gaps (smaller, parallelisable):** §I6 adds demo 31 for the
-remaining language feature without an end-to-end example: a Lua embedded-host
-walkthrough. See §I for the spec. (I1 / demo26 — record `with` mixins + path
-patterns, I2 / demo27 — user-authored `decl-macro`, I3 / demo28 —
-counterfactual `from:` + conditioned-on bounded, I4 / demo29 — computed
-`-> (expr)` + imperative scene navigation, and I5 / demo30 — `changes`
-binding + strict-contracts `path@before` — all complete; see completed.md.)
+**Demo coverage:** All six I-series demos (26–31) complete. The §I7 residue
+(language features intentionally without dedicated demos: bare `Set`
+ops, `(set)` literal, labelled `engine/checkpoint!`, lambda outside `find`)
+is noted in completed.md and considered acceptable.
 
 ---
 
@@ -291,47 +290,24 @@ strategy beats a uniform-random policy in 1000 sampled rollouts.
 
 ---
 
-## I. Demo Coverage Gaps (new demos 28–31)
+## I. Demo Coverage Gaps (demos 26–31) — all complete
 
 A 2026-05-19 audit of `demos/demo01–25` against `docs/reference/language.md`
-found a handful of supported language features that no current demo exercises
-end-to-end. The new demos below fill those gaps. Each item names the specific
-features to showcase, the suggested theme, and an acceptance criterion. Implement
-in order; each is independent. (I1 / demo26, I2 / demo27, I3 / demo28,
-I4 / demo29, and I5 / demo30 all complete; see completed.md.)
+found a handful of supported language features that no demo exercised
+end-to-end. All six follow-on demos (26–31) have now shipped; details in
+completed.md.
 
-### I6. demo31 — Embedded host example (`demo31_embedded_host.sb` + `examples/demo31_host.lua`)
+### I7. Coverage tracker (residue)
 
-**Primary gap:** The Lua embedding host story. `engine/emit` fires in
-`demo08` / `demo09` / `demo10`, but no end-to-end example shows a Lua host
-consuming those events via `game:on("event-name", handler)`. This is the
-operational counterpart to the language-feature demos above.
+The language features intentionally left without dedicated demos:
+- `Set` operations (`union` / `intersect` / `difference`)
+- `(set)` empty literal
+- `engine/checkpoint!` with an explicit label argument
+- Lambda expressions outside a `find` clause
 
-**Features demonstrated (StoryBase side, in `demo31_embedded_host.sb`):**
-- Several `engine/emit` sites tagged with structured payloads
-  (e.g. `engine/emit 'door-opened {room: ..., key: ...}`)
-- A tiny `state` / `scene` shell sufficient to drive a few interesting events
-
-**Features demonstrated (host side, in `examples/demo31_host.lua`):**
-- `local game = require("storybase").load("demo31_embedded_host.sb")`
-- `game:on("door-opened", function(payload) … end)` for every event the demo emits
-- A driver loop that calls `game:render()` / `game:choose(n)` and prints
-  attributed dialogue objects vs. plain narration lines (the type-table check
-  from `docs/reference/language.md` §Dialogue)
-- A demonstration of save/load round-tripping through the host API
-
-**Acceptance:** `lua5.4 examples/demo31_host.lua` runs the game to completion
-without using the `storybase` CLI; every `engine/emit` call lands in a
-registered handler; the printed transcript shows speaker attribution working
-through the host. Add a brief `docs/howto/lua_embedding.md` cross-reference.
-
-### I7. Coverage tracker
-
-Once all six land, the language features without demo coverage drop to a
-small residue worth documenting (not necessarily demoing): `Set` operations
-(`union` / `intersect` / `difference`), `(set)` empty literal, `engine/checkpoint!`
-with an explicit label argument, and lambda expressions outside a `find`
-clause. Add a note in `completed.md` if/when that residue is acceptable.
+These are covered by unit tests and the language reference; a dedicated
+demo for each would add more demo bulk than coverage. Promote to a real
+demo only if a user-facing limitation surfaces.
 
 ---
 

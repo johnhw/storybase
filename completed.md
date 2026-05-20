@@ -5,6 +5,65 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## I6 — demo31 "The Lighthouse Relay" + embedded host walkthrough ✅ (2026-05-20)
+
+Closes the §I6 demo-coverage gap: a Lua host driving a StoryBase game end to
+end via `lib/storybase.lua`, with no `storybase` CLI involvement. The .sb file
+is purpose-shaped to exercise every interesting public hook on the embedding
+surface, and the companion host script proves the contract holds in practice.
+
+**Documentation fix (caught by writing the host):**
+- `docs/reference/language.md` §"Narration output format" and
+  `docs/howto/lua_embedding.md` previously told hosts to dispatch on
+  `type(line) == "table"` and described plain narration as Lua strings. The
+  engine has long since emitted both narration and dialogue as `{kind, text,
+  …}` tables (see `runtime/engine.lua:260` and the `cli/drivers/*` consumers).
+  Updated both docs to specify the actual contract — `item.kind == "say"`
+  vs. `item.kind == "narration"` — and folded the example into both docs.
+  Discovered by writing the §I6 host, which initially printed `?:` in front
+  of every plain narration line because the type-check dispatch had no false
+  branch.
+
+**Demo (`demos/demo31_embedded_host.sb`):**
+- Six `engine/emit` sites with structured record payloads: `door-opened`,
+  `signal-sent`, `ship-spotted`, `ship-saved`, `storm-began`, `night-ended`.
+- Emits fire from three positions: fn body (`send-signal`, `open-door`,
+  `mark-saved`, `spot-ship`, `rest`), choice body (composition of the
+  above), and schedule body (`storm-watch` with `at: [day: +1]`).
+- Two declared `speaker`s (keeper, captain) with `display:` + `color:` so
+  the host can demonstrate attribution. `say` statements appear in fn
+  bodies (function-form quoted) and scene bodies (block / NAMED_ARG form).
+- Minimal `time-model` (`axes: [day]`, `wrap: [none]`) so `time-inc! day: 1`
+  in `rest` actually advances the scheduler clock and lets `game:tick()`
+  fire the storm. Two `verify` blocks (fuel non-negative; signal counter
+  increments by exactly 1).
+
+**Host (`examples/demo31_host.lua`):**
+- `sb.load` → `game:init` → 6 × `game:on(<event>, …)` + `mutation` + `choice`
+  listeners.
+- A `render_narration()` helper that dispatches on `item.kind` exactly the
+  way the docs now specify (uses `display` + `color` from the speaker
+  declaration when present).
+- A driver loop using `game:pick(substr)` so the script is independent of
+  choice order / guard visibility.
+- `game:call` to brighten the lamp + `rest`; `game:tick` to fan out the
+  scheduler and fire `storm-began`.
+- `game:save` + fresh `sb.load` + `game:load` + assert every snapshot
+  field matches across the trip.
+- An acceptance assertion that every emit kind landed in a handler at
+  least once before the script exits.
+
+**Files:** new `demos/demo31_embedded_host.sb`; new `examples/demo31_host.lua`;
+`docs/reference/language.md` (narration format clarified);
+`docs/howto/lua_embedding.md` (two examples updated to dispatch on
+`item.kind`); `tests/cli/cli_integration_spec.lua` (+8 demo31 tests
+covering compile / verify / auto-run / six-event coverage / payload
+fields / kind dispatch / save-load round-trip / host-script smoke).
+
+**Test count:** 2951 successes / 0 failures / 2 pending.
+
+---
+
 ## I5 — demo30 "The Quartermaster's Audit" ✅ (2026-05-20)
 
 Fills the §I5 demo-coverage gap: the per-mutation `changes` binding inside a

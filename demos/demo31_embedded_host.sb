@@ -1,0 +1,228 @@
+# demo31_embedded_host.sb — The Lighthouse Relay
+#
+# Companion piece: examples/demo31_host.lua
+#
+# This demo is the language-side half of the §I6 "embedded host" example.
+# It is a tiny lighthouse-keeper game intentionally shaped so a Lua host
+# can drive every interesting hook in lib/storybase.lua:
+#
+#   • Several `engine/emit` sites in fn bodies, choice bodies, and schedule
+#     bodies — every event has a *structured* payload (a record literal).
+#   • Two declared speakers + `say` lines in both fn bodies and scene
+#     bodies (so the host can demonstrate the `type(line) == "table"`
+#     dispatch from docs/reference/language.md §Dialogue).
+#   • A schedule that fires once on day-2 — exercised by `game:tick()`
+#     from the host loop.
+#   • Pure & transaction fns the host can call directly via `game:call`.
+#   • State paths the host can save/restore via `game:save` / `game:load`.
+#
+# Run from the CLI:        lua5.4 cli/main.lua run demos/demo31_embedded_host.sb
+# Auto run:                lua5.4 cli/main.lua run --auto --steps 12 demos/demo31_embedded_host.sb
+# Embedded host walkthrough: lua5.4 examples/demo31_host.lua
+
+module lighthouse-relay
+  version: 1.0
+
+schema-version: 1
+
+time-model:
+  axes: [day]
+  wrap: [none]
+
+engine-config:
+  entry-scene: dawn
+
+# ─────────────────────────────────────────────────────────
+# Speakers (so the host can show display: / color: dispatch)
+# ─────────────────────────────────────────────────────────
+
+speaker keeper:
+  display: "Keeper Vael"
+  color:   "#e0c878"
+
+speaker captain:
+  display: "Captain Roen"
+  color:   "#6098c0"
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+type SignalStrength = weak | steady | bright
+type Weather        = calm | breezy | storm
+type Ship           = none | nightingale | albatross
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state world:
+  day:        Int(1, 5)      = 1
+  hour:       Int(0, 23)     = 6
+  weather:    Weather        = `calm
+  door-open:  Bool           = false
+
+state relay:
+  signals-sent: Int(0, 99)   = 0
+  ships-saved:  Int(0, 99)   = 0
+  fuel:         Int(0, 100)  = 80
+  strength:     SignalStrength = `steady
+  sighted:      Ship         = `none
+
+# ─────────────────────────────────────────────────────────
+# Watches
+# ─────────────────────────────────────────────────────────
+
+watch world/day           "Day"
+watch world/hour          "Hour"
+watch relay/fuel          "Fuel"
+watch relay/signals-sent  "Signals sent"
+watch relay/ships-saved   "Ships saved"
+watch-when world/weather = `storm  "A storm has fallen on the cape!"
+
+# ─────────────────────────────────────────────────────────
+# Pure functions (host-callable via game:call)
+# ─────────────────────────────────────────────────────────
+
+"True iff the relay still has fuel and the door is open."
+fn can-signal?:
+  world/door-open  and  relay/fuel >= 5
+
+"True when night work is done and the keeper may rest."
+fn can-rest?:
+  relay/signals-sent >= 3
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions (most fire engine/emit events)
+# ─────────────────────────────────────────────────────────
+
+"Open the lighthouse door. Emits door-opened with the current hour."
+fn open-door:
+  pre: not world/door-open
+  set! world/door-open true
+  engine/emit `door-opened {hour: world/hour, day: world/day}
+  say keeper: The door swings open. Sea air rushes in.
+
+"Send one beam of light to a named ship. Emits signal-sent {ship, strength, fuel-after}."
+fn send-signal ship:
+  pre: can-signal?
+  dec! relay/fuel 5
+  inc! relay/signals-sent 1
+  engine/emit `signal-sent {ship: ship, strength: relay/strength, fuel-after: relay/fuel}
+  say keeper: Signal away — bearing toward the open water.
+
+"A ship is spotted in the fog. Emits ship-spotted {name, distance-nm}."
+fn spot-ship name distance:
+  set! relay/sighted name
+  engine/emit `ship-spotted {name: name, distance-nm: distance, weather: world/weather}
+  say captain: Light off the port bow!
+
+"Mark a ship as saved. Emits ship-saved {name, ships-saved-after}."
+fn mark-saved name:
+  inc! relay/ships-saved 1
+  engine/emit `ship-saved {name: name, ships-saved-after: relay/ships-saved}
+
+"Rest until morning. Advances hour and day; emits night-ended."
+fn rest:
+  pre: can-rest?
+  time-inc! day: 1
+  inc! world/day  1
+  set! world/hour 6
+  set! relay/signals-sent 0
+  set! world/door-open false
+  set! relay/fuel 80
+  engine/emit `night-ended {next-day: world/day}
+  say keeper: Another night kept. The lamp may sleep a while.
+
+"Tune the lamp to a stronger beam. Pure state change, no emit."
+fn brighten:
+  pre: relay/fuel >= 10
+  set! relay/strength `bright
+
+# ─────────────────────────────────────────────────────────
+# Schedule — fires once at day +1 to bring on the storm.
+# Demonstrates engine/emit from a schedule body, picked up by
+# the host via game:tick().
+# ─────────────────────────────────────────────────────────
+
+"A storm rolls in on the second evening; emits storm-began."
+schedule storm-watch:
+  at: [day: +1]
+  fn:
+    set! world/weather `storm
+    engine/emit `storm-began {day: world/day, severity: `gale}
+
+# ─────────────────────────────────────────────────────────
+# Verify (cheap sanity check; runs under the CLI verify command)
+# ─────────────────────────────────────────────────────────
+
+verify "fuel never goes negative":
+  verify-always relay/fuel >= 0
+
+verify "send-signal records exactly one signal":
+  requires can-signal?
+  after (send-signal `nightingale):
+    relay/signals-sent = relay/signals-sent@before + 1
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene dawn:
+  THE LIGHTHOUSE — Day {world/day}, hour {world/hour}.
+  The lamp room smells of paraffin and salt.
+  Fuel: {relay/fuel}. Signals sent tonight: {relay/signals-sent}.
+
+  say keeper: Another watch begins. Time to open up.
+
+  * [not world/door-open] Open the lighthouse door
+    open-door
+    -> dawn
+
+  * [world/door-open and can-signal?] Signal the Nightingale
+    send-signal `nightingale
+    spot-ship `nightingale 4
+    -> sighting
+
+  * [world/door-open and can-signal?] Signal the Albatross
+    send-signal `albatross
+    spot-ship `albatross 6
+    -> sighting
+
+  * [can-rest?] Rest until morning
+    rest
+    -> dawn
+
+  * Adjust the lamp to a brighter beam
+    brighten
+    -> dawn
+
+  * [relay/ships-saved >= 2] End the watch — the cape is safe
+    -> finale
+
+scene sighting:
+  A SHIP IN THE FOG
+
+  say captain: We see you, keeper. Steering for the channel.
+
+  * Guide the ship in — call it saved
+    mark-saved relay/sighted
+    -> dawn
+
+  * Let the fog take it — the ship drifts on
+    -> dawn
+
+scene finale:
+  THE LAMP IS COLD.
+
+  say keeper: We held the line. Two ships home, a third still out there.
+
+  Day {world/day}. Fuel left: {relay/fuel}. Ships saved: {relay/ships-saved}.
+
+  if relay/ships-saved >= 3:
+    A keeper's finest watch. The cape will sing of you.
+  else:
+    A steady night's work. The sea remembers what it can.
+
+  * The lamp room falls quiet
+    -> finale

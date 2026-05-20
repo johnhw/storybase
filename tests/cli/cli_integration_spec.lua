@@ -2568,3 +2568,150 @@ scene hub:
       "demo30 must declare strict-contracts: true in engine-config")
   end)
 end)
+
+-- ── demo31: Lighthouse Relay (embedded host walkthrough) ─────────────────────
+--
+-- I6 — exercises the Lua host story end to end: every engine/emit site
+-- routes through game:on(), narration items dispatch on kind="say" vs.
+-- kind="narration", and a save/load round-trip preserves state.
+
+describe("CLI demo31_embedded_host: Lua host embedding", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo31_embedded_host.sb"})
+    assert.equal(0, rc, "demo31 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo31_embedded_host.sb",
+                                  "--no-cache"})
+    assert.equal(0, rc, "demo31 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays without error", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "12",
+                                   "demos/demo31_embedded_host.sb"})
+    assert.equal(0, rc, "demo31 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("THE LIGHTHOUSE"),
+      "expected demo31 to render the lighthouse scene; got: " .. out)
+  end)
+
+  it("every engine/emit event lands in a registered handler", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo31_embedded_host.sb")
+    game:init()
+
+    local seen = {}
+    local function tally(name)
+      return function(_) seen[name] = (seen[name] or 0) + 1 end
+    end
+    game:on("door-opened",  tally("door-opened"))
+    game:on("signal-sent",  tally("signal-sent"))
+    game:on("ship-spotted", tally("ship-spotted"))
+    game:on("ship-saved",   tally("ship-saved"))
+    game:on("night-ended",  tally("night-ended"))
+    game:on("storm-began",  tally("storm-began"))
+
+    -- Drive the canonical event sequence via direct fn calls.
+    game:call("open-door")
+    game:call("send-signal", "'nightingale")
+    game:call("spot-ship",   "'nightingale", 4)
+    game:call("mark-saved",  "'nightingale")
+    game:call("send-signal", "'albatross")
+    game:call("spot-ship",   "'albatross", 6)
+    game:call("mark-saved",  "'albatross")
+    game:call("send-signal", "'nightingale")
+    game:call("spot-ship",   "'nightingale", 4)
+    game:call("mark-saved",  "'nightingale")
+    game:call("rest")
+    -- rest advances the time-axis 'day' by 1; tick fires storm-watch (at day +1)
+    game:tick()
+
+    assert.equal(1, seen["door-opened"])
+    assert.equal(3, seen["signal-sent"])
+    assert.equal(3, seen["ship-spotted"])
+    assert.equal(3, seen["ship-saved"])
+    assert.equal(1, seen["night-ended"])
+    assert.equal(1, seen["storm-began"])
+  end)
+
+  it("emit payloads carry structured fields", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo31_embedded_host.sb")
+    game:init()
+
+    local last_signal
+    game:on("signal-sent", function(e) last_signal = e end)
+    game:call("open-door")
+    game:call("send-signal", "'nightingale")
+
+    assert.equal("nightingale", last_signal.payload.ship)
+    assert.equal("steady",      last_signal.payload.strength)
+    assert.equal(75,            last_signal.payload["fuel-after"])
+  end)
+
+  it("render() returns kind-tagged narration AND say items", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo31_embedded_host.sb")
+    game:init()
+    local narr = game:render()
+
+    local has_narration, has_say = false, false
+    for _, item in ipairs(narr) do
+      if item.kind == "narration" then
+        has_narration = true
+        assert.is_string(item.text)
+      end
+      if item.kind == "say" then
+        has_say = true
+        assert.is_string(item.text)
+        -- Declared speakers carry display + color
+        if item.speaker == "keeper" then
+          assert.equal("Keeper Vael", item.display)
+          assert.equal("#e0c878",     item.color)
+        end
+      end
+    end
+    assert.is_true(has_narration, "expected a narration item in dawn scene")
+    assert.is_true(has_say,       "expected a say item in dawn scene")
+  end)
+
+  it("save/load round-trips game state through the host API", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo31_embedded_host.sb")
+    game:init()
+    game:call("open-door")
+    game:call("send-signal", "'nightingale")
+    game:call("mark-saved",  "'nightingale")
+
+    local path = os.tmpname() .. ".sbd"
+    local ok, save_err = game:save(path)
+    assert.is_true(ok, "save failed: " .. tostring(save_err))
+
+    local game2 = assert(sb.load("demos/demo31_embedded_host.sb"))
+    game2:init()
+    local ok2, load_err = game2:load(path)
+    os.remove(path)
+    assert.is_true(ok2, "load failed: " .. tostring(load_err))
+
+    assert.equal(game:get("relay/fuel"),         game2:get("relay/fuel"))
+    assert.equal(game:get("relay/ships-saved"),  game2:get("relay/ships-saved"))
+    assert.equal(game:get("relay/signals-sent"), game2:get("relay/signals-sent"))
+    assert.equal(game:get("world/door-open"),    game2:get("world/door-open"))
+  end)
+
+  it("examples/demo31_host.lua runs to completion", function()
+    -- The acceptance criterion: lua5.4 examples/demo31_host.lua exits 0
+    -- without producing the "Missing emit handlers" assertion error.
+    local handle = io.popen(
+      "lua5.4 examples/demo31_host.lua 2>&1; echo \"__rc:$?\"", "r")
+    local out = handle:read("*a"); handle:close()
+    local rc = out:match("__rc:(%d+)")
+    assert.equal("0", rc,
+      "examples/demo31_host.lua exited non-zero. Output:\n" .. out)
+    assert.is_truthy(out:find("demo31 embedded%-host walkthrough complete"),
+      "host script did not reach the completion banner")
+  end)
+end)
