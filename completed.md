@@ -5,6 +5,70 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## I3 — demo28 "The Seer's Chamber" ✅ (2026-05-20)
+
+Fills the §I3 demo-coverage gap: `counterfactual from: <past-tick>` (log-replay
+rewind), `counterfactual from: … simulate: true` (rewind + one actor/scheduler
+tick), and `bounded … distribution: conditioned-on <path>`. None of these were
+exercised end-to-end by any prior demo. A vision-bowl scene lets the player
+preview two rewound futures (plus a no-rewind control) before committing.
+
+**Files:** new `demos/demo28_seers_chamber.sb`,
+`tests/cli/cli_integration_spec.lua` (+5 tests). Also two runtime fixes (see
+below) and `compiler/parser.lua` `distribution:` clause now handles
+`conditioned-on` as a single hyphenated IDENT followed by a `PATH`.
+
+**Features exercised:**
+- `time-model: axes: [tick]` and `time-inc! tick: 1` so the transaction log
+  carries real per-turn ticks. Without this, `from:` is a no-op because every
+  log entry has `tick = 0`.
+- `counterfactual from: (world/turn - 3) do: meditate / meditate` — rewinds to
+  tick `turn - 3`, then applies two `meditate` calls on top.
+- `counterfactual from: (world/turn - 3) simulate: true do: meditate` — same
+  rewind, but also runs one round of actor behaviors + scheduler in the branch.
+- A control `counterfactual do: meditate / meditate` (no `from:`) demonstrates
+  the visible state divergence: after four real meditates (wisdom = 20), the
+  no-rewind preview returns 30, the rewound preview returns 15, the simulated
+  rewound preview returns 10.
+- `bounded omen-of-season:` with `distribution: conditioned-on world/season`
+  and `reads: [world/season, world/turn]`. The bounded record in the compiled
+  game table now carries the full distribution string (parser fix below).
+- `(omen-of-season ?? \`still)` exercises the bounded-then-nil-coalesce path
+  inside both the live `meditate` body and the counterfactual branches.
+- Three `verify` blocks pass (`verify-always` × 2, `verify-eventually` × 1).
+
+**Parser fix bundled with this demo:** the `distribution:` clause in a
+`bounded` declaration was assuming `conditioned-on` would arrive as two
+IDENT tokens (`conditioned`, `on`); the lexer actually emits it as one
+hyphenated IDENT, so the path that followed was silently dropped. The
+compiled bounded record stored `"conditioned-on"` with no path. The parser
+now accepts both `IDENT PATH` (preferred) and `IDENT IDENT [PATH]` (legacy)
+shapes and joins the path with a space, so the compiled `distribution`
+field round-trips as `"conditioned-on world/season"`.
+
+**Runtime fix bundled with this demo:** `eval.lua`'s `COUNTERFACTUAL_EXPR`
+branch built a fresh sub-context via `M.new_ctx(cf_state, ctx.fns,
+"counterfactual")` and never forwarded `ctx.game`. Inside the branch every
+bounded call missed `ctx.game.bounded[name]` and fell into the
+"unknown call returned as string" SF-1 path, polluting verify output and
+silently corrupting any `(bounded-fn ?? default)` expression by writing
+the bounded function's *name* into state instead of the fallback. The
+counterfactual sub-context now propagates `game`, `rng`, `grids`,
+`engine_ref`, and `_in_bfs` from the parent.
+
+**Acceptance:**
+- `storybase check demos/demo28_seers_chamber.sb` → passes.
+- `storybase verify demos/demo28_seers_chamber.sb` → 3/3 PASS (86 BFS states).
+- `storybase run --auto --steps 12 demos/demo28_seers_chamber.sb` → auto-plays
+  without runtime error; the chamber heading renders each turn.
+- A 4-turn drive into the bowl-vision scene shows the three previews diverging
+  by 5/15/20 wisdom — visibly different per the spec's acceptance criterion.
+- 5 new integration tests cover compile, verify, auto-play, distribution
+  capture in the compiled bounded record, and the past-tick / control /
+  simulate counterfactual values.
+
+---
+
 ## I2 — demo27 "The Apprentice's Grimoire" ✅ (2026-05-20)
 
 Fills the §I2 demo-coverage gap: user-authored `decl-macro`. The §E0

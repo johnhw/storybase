@@ -2260,3 +2260,67 @@ describe("CLI demo27_grimoire: user-authored decl-macro", function()
     end
   end)
 end)
+
+-- ── demo28: Seer's Chamber (counterfactual from: + conditioned-on bounded) ────
+
+describe("CLI demo28_seers_chamber: counterfactual from: + conditioned-on", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo28_seers_chamber.sb"})
+    assert.equal(0, rc, "demo28 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo28_seers_chamber.sb",
+                                  "--no-cache"})
+    assert.equal(0, rc, "demo28 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays without runtime error for 10 steps", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "10",
+                                   "demos/demo28_seers_chamber.sb"})
+    assert.equal(0, rc, "demo28 auto run failed:\n" .. out .. err)
+    -- Auto picks choice 1 (Meditate). After 10 turns the chamber heading
+    -- has been printed many times.
+    assert.is_truthy(out:find("THE SEER'S CHAMBER"),
+      "expected chamber heading; got: " .. out)
+  end)
+
+  it("bounded omen-of-season records distribution: conditioned-on world/season", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo28_seers_chamber.sb")
+    local b = game._gt and game._gt.bounded and game._gt.bounded["omen-of-season"]
+    assert.is_table(b, "bounded omen-of-season should be present in game.bounded")
+    assert.equal("conditioned-on world/season", b.distribution,
+      "expected distribution string to capture the conditioned-on path")
+  end)
+
+  it("counterfactual from: (turn - 3) replays to a past state, do: applies on top", function()
+    local sb   = require("lib.storybase")
+    local game = sb.load("demos/demo28_seers_chamber.sb")
+    game:init()
+
+    -- Walk four turns so the log carries ticks 1..4 and wisdom climbs to 20.
+    for _ = 1, 4 do game:pick("Meditate") end
+    assert.equal(4,  game:get("world/turn"))
+    assert.equal(20, game:get("world/wisdom"))
+
+    -- The control vision (no rewind, meditate twice) should reach 30.
+    assert.equal(30, game:call("preview-present-vision"))
+
+    -- The rewound vision (from: turn - 3 == tick 1; wisdom=5) plus two
+    -- meditates should reach 15 — visibly different from the control.
+    assert.equal(15, game:call("preview-quiet-vision"))
+
+    -- The simulated rewound branch advances state one more time after the
+    -- single meditate (no actors/schedules in this demo, so no extra
+    -- mutations) — its wisdom is 5 + 5 = 10.
+    assert.equal(10, game:call("preview-storm-vision"))
+
+    -- The live state must be untouched by any of the previews.
+    assert.equal(4,  game:get("world/turn"))
+    assert.equal(20, game:get("world/wisdom"))
+  end)
+end)

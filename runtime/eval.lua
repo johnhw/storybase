@@ -444,10 +444,14 @@ eval_expr = function(node, ctx)
       end
     end
     -- Apply transition function calls to the copy
-    local cf_ctx = M.new_ctx(cf_state, ctx.fns, "counterfactual")
+    local cf_ctx = M.new_ctx(cf_state, ctx.fns, "counterfactual", ctx.game)
     cf_ctx.actors              = ctx.actors
     cf_ctx.scheduler           = ctx.scheduler
     cf_ctx.counterfactual_depth = cf_depth  -- propagate nesting depth
+    cf_ctx.rng                 = ctx.rng    -- share seeded RNG so draws are logged
+    cf_ctx.grids               = ctx.grids  -- tile grid data
+    cf_ctx.engine_ref          = ctx.engine_ref
+    cf_ctx._in_bfs             = ctx._in_bfs
     pcall(eval_stmts, node.transitions or {}, cf_ctx)
     -- simulate: true — run one round of actor behaviors + scheduler on the copy
     if node.simulate and ctx.actors then

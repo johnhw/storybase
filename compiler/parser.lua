@@ -3131,10 +3131,12 @@ local function parse_bounded_decl(p, doc)
           returns_type = parse_type_expr(p)
         elseif na.value == "distribution" then
           -- distribution: uniform  or  distribution: conditioned-on path
+          -- The lexer may emit "conditioned-on" as a single IDENT (preferred)
+          -- or as two IDENTs ("conditioned" then "on") in older inputs.
           if p:at("IDENT") then
             local d = p:adv().value
-            if p:at("IDENT") then
-              -- e.g. conditioned-on
+            if p:at("IDENT") and not p:at("PATH") then
+              -- Two-token form: "conditioned" "on" [path]
               local part2 = p:adv().value
               if p:at("PATH") or p:at("IDENT") then
                 local path_val = p:adv().value
@@ -3142,6 +3144,10 @@ local function parse_bounded_decl(p, doc)
               else
                 distribution = d .. "-" .. part2
               end
+            elseif p:at("PATH") then
+              -- Single-token form: "conditioned-on" followed by a path
+              local path_val = p:adv().value
+              distribution = d .. " " .. path_val
             else
               distribution = d
             end

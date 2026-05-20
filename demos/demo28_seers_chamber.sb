@@ -1,0 +1,255 @@
+# demo28_seers_chamber.sb — The Seer's Chamber
+#
+# Features demonstrated:
+#   counterfactual from: (world/turn - 3) do: …      — log-replay rewind, then mutate
+#   counterfactual from: … simulate: true do: …      — rewind + run one actor/scheduler tick
+#   bounded ... distribution: conditioned-on <path>  — distribution conditioned on state
+#   preview two rewound futures before committing    — two divergent visions in one scene
+#
+# A young seer keeps a vision-bowl on the chamber floor. After enough days of
+# meditation the bowl can rewind several turns and show what *would* have
+# happened — once with the seer alone (no actors), once with the scheduler
+# firing in the replayed branch.
+#
+# The omen the bowl draws is governed by `omen-of-season`, a bounded handler
+# whose distribution is conditioned on the current season.
+#
+# Run:  storybase run        demos/demo28_seers_chamber.sb
+# Auto: storybase run --auto --steps 12 demos/demo28_seers_chamber.sb
+# Check: storybase check     demos/demo28_seers_chamber.sb
+# Verify: storybase verify   demos/demo28_seers_chamber.sb
+
+module seers-chamber
+  version: 1.0
+
+schema-version: 1
+
+engine-config:
+  entry-scene:              chamber
+  max-counterfactual-depth: 3
+
+# A single tick axis on the engine clock — every turn-advancing fn calls
+# `time-inc! tick: 1`, so the transaction log carries real per-turn ticks
+# and `counterfactual from:` can replay to a specific past tick.
+time-model:
+  axes: [tick]
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+"The four seasons; cycles every three turns."
+type Season = spring | summer | autumn | winter
+
+"Omens the vision-bowl may draw; falls back to `still when no handler is wired."
+type OmenKind = still | crow | rain | flame | bell
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+"The chamber and the seer who tends it."
+state world:
+  turn:         Int(0, 30)  = 0
+  season:       Season      = `spring
+  wisdom:       Int(0, 100) = 0
+  offerings:    Int(0, 30)  = 9
+  last-omen:    OmenKind    = `still
+  visions-cast: Int(0, 10)  = 0
+
+# ─────────────────────────────────────────────────────────
+# Bounded — distribution conditioned on the current season
+# ─────────────────────────────────────────────────────────
+
+"Draw an omen from the bowl; distribution is conditioned on the current season."
+bounded omen-of-season:
+  returns:      OmenKind
+  distribution: conditioned-on world/season
+  reads:        [world/season, world/turn]
+  lua:          "seer.omen"
+
+# ─────────────────────────────────────────────────────────
+# Pure helpers
+# ─────────────────────────────────────────────────────────
+
+"True once the seer has lived long enough to gaze backwards."
+fn can-gaze?:
+  world/turn >= 3
+
+"True once meditation has produced lasting wisdom."
+fn enlightened?:
+  world/wisdom >= 30
+
+# ─────────────────────────────────────────────────────────
+# Transaction functions
+# ─────────────────────────────────────────────────────────
+
+"Cycle the season every three turns."
+fn advance-season:
+  match world/season:
+    `spring:
+      set! world/season `summer
+    `summer:
+      set! world/season `autumn
+    `autumn:
+      set! world/season `winter
+    `winter:
+      set! world/season `spring
+
+"Sit in silence, draw an omen, and let the season turn (tick advanced first)."
+fn meditate:
+  time-inc!  tick: 1
+  inc!       world/turn 1
+  inc!       world/wisdom 5
+  set!       world/last-omen (omen-of-season ?? `still)
+  advance-season
+
+"Pour offerings into the bowl. The bowl rewards focus, not drift."
+fn offer:
+  pre:       world/offerings >= 3
+  time-inc!  tick: 1
+  dec!       world/offerings 3
+  inc!       world/wisdom    3
+  inc!       world/turn      1
+
+"Rest. A day passes, nothing else."
+fn rest:
+  time-inc!  tick: 1
+  inc!       world/turn 1
+
+# ─────────────────────────────────────────────────────────
+# Pure counterfactual previews used by the vision-bowl scene
+# ─────────────────────────────────────────────────────────
+
+"No rewind — meditate twice from the present (control case for comparison)."
+fn preview-present-vision:
+  pure
+  let alt = counterfactual do:
+    meditate
+    meditate
+  (in-state alt) world/wisdom
+
+"Rewind three turns, then meditate twice in the replayed branch."
+fn preview-quiet-vision:
+  pure
+  let alt = counterfactual from: (world/turn - 3) do:
+    meditate
+    meditate
+  (in-state alt) world/wisdom
+
+"Rewind three turns, meditate once, with one actor/scheduler tick (simulate: true)."
+fn preview-storm-vision:
+  pure
+  let alt = counterfactual from: (world/turn - 3) simulate: true do:
+    meditate
+  (in-state alt) world/wisdom
+
+"The omen the bowl would have drawn three turns ago after a single meditation."
+fn preview-vision-omen:
+  pure
+  let alt = counterfactual from: (world/turn - 3) do:
+    meditate
+  (in-state alt) world/last-omen
+
+"How many turns ago the bowl is reaching back; clamped at zero for a fresh chamber."
+fn rewind-target:
+  pure
+  if world/turn >= 3:
+    world/turn - 3
+  else:
+    0
+
+# ─────────────────────────────────────────────────────────
+# Watches (dev-mode only)
+# ─────────────────────────────────────────────────────────
+
+watch world/turn      "Turn"
+watch world/season    "Season"
+watch world/wisdom    "Wisdom"
+watch world/last-omen "Last omen"
+watch-when enlightened? "The seer is enlightened."
+
+# ─────────────────────────────────────────────────────────
+# Verify blocks
+# ─────────────────────────────────────────────────────────
+
+verify "wisdom never goes negative":
+  verify-always world/wisdom >= 0
+
+verify "the chamber's life is bounded":
+  verify-always world/turn <= 30
+
+verify "the bowl can be opened at all":
+  verify-eventually can-gaze?
+
+# ─────────────────────────────────────────────────────────
+# Scenes
+# ─────────────────────────────────────────────────────────
+
+scene chamber:
+  THE SEER'S CHAMBER
+  A shallow bronze bowl rests in the centre of the floor.
+
+  Turn {world/turn}. Season: {world/season}. Wisdom: {world/wisdom}.
+  Offerings remaining: {world/offerings}. Last omen: {world/last-omen}.
+
+  [enlightened?] The bowl's surface is unusually still — the seer has grown.
+  [not can-gaze?] The bowl is dark — too few days have passed to look behind.
+
+  * Meditate (+5 wisdom, +1 turn, season may shift, omen drawn)
+    meditate
+    -> chamber
+
+  * [world/offerings >= 3] Pour an offering (+3 wisdom, -3 offerings, +1 turn)
+    offer
+    -> chamber
+
+  * Rest (+1 turn)
+    rest
+    -> chamber
+
+  * [can-gaze?] Gaze into the vision-bowl (preview two pasts before acting)
+    => bowl-vision
+
+  * [enlightened?] Leave the chamber
+    -> finale
+
+scene bowl-vision:
+  THE BOWL CLOUDS AND CLEARS
+
+  The water shows two ripples reaching back {rewind-target} turn(s).
+
+  Now: wisdom {world/wisdom}, omen {world/last-omen}.
+
+  Present vision — meditate twice without rewinding (control).
+  Wisdom would be {preview-present-vision}.
+
+  Quiet vision — rewound, meditate twice, no other forces.
+  Wisdom would be {preview-quiet-vision}.
+
+  Storm vision — rewound, meditate once, other forces stirring.
+  Wisdom would be {preview-storm-vision}.
+
+  Either way, the omen the bowl draws first would be {preview-vision-omen}.
+
+  The visions fade. The choice in the present remains yours.
+
+  * Return to the chamber
+    inc! world/visions-cast 1
+    <-
+
+scene finale:
+  THE SEER LEAVES THE CHAMBER
+
+  Days in the chamber:   {world/turn}
+  Final wisdom:          {world/wisdom}
+  Final season:          {world/season}
+  Visions cast in total: {world/visions-cast}
+
+  if world/wisdom >= 60:
+    The chamber's silence follows the seer out into the world.
+  else:
+    The chamber stays behind. The bowl is dark again.
+
+  * Reflect further
+    -> finale
