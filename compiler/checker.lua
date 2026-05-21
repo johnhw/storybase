@@ -3052,6 +3052,204 @@ local function pass_check_undefined_read_paths(acc, symtab, program)
 end
 
 -- ============================================================
+-- Pass — J-B4: size/count/empty? receiver type check
+-- ============================================================
+-- Warn when `size`, `count`, or `empty?` is applied to a value that is
+-- statically known not to be a collection.  Two shapes flagged:
+--   1. The argument is a state path whose declared type is a scalar
+--      (Int, Bool, Symbol, Enum, Float, named record/variant).
+--   2. The argument is a bare zero-arg fn_call whose name matches a
+--      declared family — author probably wanted `(path-list family)`.
+
+local SIZE_LIKE_FNS = { ["size"] = true, ["count"] = true, ["empty?"] = true }
+
+local function is_collection_type_expr(texpr)
+  if not texpr then return true end   -- unknown → don't warn
+  local k = ast.K
+  if texpr.kind == k.TYPE_SET    then return true end
+  if texpr.kind == k.TYPE_LIST   then return true end
+  if texpr.kind == k.TYPE_ULIST  then return true end
+  if texpr.kind == k.TYPE_UMAP   then return true end
+  if texpr.kind == k.TYPE_STRING then return true end   -- treat as char-collection
+  if texpr.kind == k.TYPE_OPTION then
+    return is_collection_type_expr(texpr.inner)         -- Option Set is OK
+  end
+  if texpr.kind == k.TYPE_NAMED and texpr.resolved then
+    -- Resolved alias may unwrap to a Set/List/etc.
+    if texpr.resolved.kind == k.TYPE_RECORD then return false end
+    return is_collection_type_expr(texpr.resolved)
+  end
+  return false
+end
+
+local function describe_type(texpr)
+  if not texpr then return "unknown" end
+  local k = ast.K
+  if texpr.kind == k.TYPE_INT       then return "Int" end
+  if texpr.kind == k.TYPE_BOOL      then return "Bool" end
+  if texpr.kind == k.TYPE_SYMBOL    then return "Symbol" end
+  if texpr.kind == k.TYPE_SYMBOL_OF then return "SymbolOf " .. (texpr.family or "?") end
+  if texpr.kind == k.TYPE_FLOAT     then return "Float" end
+  if texpr.kind == k.TYPE_NAMED     then return texpr.name or "named" end
+  if texpr.kind == k.TYPE_OPTION    then return "Option " .. describe_type(texpr.inner) end
+  return texpr.kind or "?"
+end
+
+local function pass_check_size_count_receiver(acc, symtab, program)
+  local k = ast.K
+  local path_map = build_path_type_map(program, symtab)
+
+  local function check_call(node, _scope)
+    if not SIZE_LIKE_FNS[node.name] then return end
+    local args = node.args or {}
+    if #args ~= 1 then return end
+    local arg = args[1]
+    if not arg or type(arg) ~= "table" then return end
+
+    -- Shape 1: bare zero-arg fn_call to a family name.
+    if arg.kind == k.FN_CALL and #(arg.args or {}) == 0
+       and symtab.families[arg.name] then
+      table.insert(acc.diags, ast.warning(
+        ast.W.NOT_A_COLLECTION,
+        "'" .. node.name .. " " .. arg.name .. "' applies " .. node.name ..
+        " to a family declaration, not its members",
+        node.pos,
+        "use '(path-list " .. arg.name .. ")' to iterate family keys"))
+      return
+    end
+
+    -- Shape 2: state path with a known non-collection type.
+    if arg.kind == k.PATH_EXPR then
+      local texpr = lookup_path_type(arg, path_map)
+      if texpr and not is_collection_type_expr(texpr) then
+        local pstr = table.concat(arg.segments or {}, "/")
+        table.insert(acc.diags, ast.warning(
+          ast.W.NOT_A_COLLECTION,
+          "'" .. node.name .. "' applied to '" .. pstr ..
+          "' (type " .. describe_type(texpr) .. ") will always return " ..
+          (node.name == "empty?" and "true" or "0"),
+          node.pos,
+          "size/count/empty? expect a Set, List, UList, UMap, or String"))
+      end
+    end
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      local scope = {}
+      for _, p in ipairs(decl.params or {}) do
+        if type(p) == "table" and p.name then scope[p.name] = true
+        elseif type(p) == "string" then scope[p] = true end
+      end
+      walk_body_seq(decl.body or {}, scope, check_call)
+      for _, e in ipairs(decl.pre  or {}) do walk_fn_calls(e, scope, check_call) end
+      for _, e in ipairs(decl.post or {}) do walk_fn_calls(e, scope, check_call) end
+    elseif decl.kind == k.SCENE_DECL then
+      walk_body_seq(decl.body or {}, {}, check_call)
+      for _, choice in ipairs(decl.choices or {}) do
+        if choice.guard then walk_fn_calls(choice.guard, {}, check_call) end
+        walk_body_seq(choice.body or {}, {}, check_call)
+      end
+    elseif decl.kind == k.SCHEDULE_DECL or decl.kind == k.HOOK_DECL
+        or decl.kind == k.GENERATE_DECL then
+      walk_body_seq(decl.body or {}, {}, check_call)
+    elseif decl.kind == k.ENDING_DECL then
+      if decl.when_expr then walk_fn_calls(decl.when_expr, {}, check_call) end
+      walk_body_seq(decl.body or {}, {}, check_call)
+    end
+  end
+end
+
+-- ============================================================
+-- Pass — J-B5: `when ... : <expr>` looks like early-return but isn't
+-- ============================================================
+-- If a `when` body's last statement is a bare value-producing expression
+-- (the author's apparent attempt at early-return) and the surrounding
+-- sequence has another value-producing statement after it, the `when`
+-- result will be silently overwritten.  Warn so the author can rewrite
+-- using `if/else`, `match`, or `cond`.
+
+local function stmt_returns_value(stmt)
+  if not stmt or type(stmt) ~= "table" then return false end
+  local k = ast.K
+  if ast.is_mut(stmt) then return false end
+  local kind = stmt.kind
+  if kind == k.SAY_STMT     then return false end
+  if kind == k.LET_STMT     then return false end
+  if kind == k.FOR_STMT     then return false end
+  if kind == k.WHILE_STMT   then return false end
+  if kind == k.WHEN_STMT    then return false end
+  if kind == k.SCENE_GOTO   then return false end
+  if kind == k.SCENE_ENTER  then return false end
+  if kind == k.GOTO_SCENE_MUT  then return false end
+  if kind == k.ENTER_SCENE_MUT then return false end
+  if kind == k.RETURN_STMT  then return false end
+  if kind == k.BREAK_STMT   then return false end
+  if kind == k.CONTINUE_STMT then return false end
+  -- Everything else is a value-producing expression in statement position.
+  return true
+end
+
+local function when_body_last_returns_value(when_node)
+  local body = when_node.body or {}
+  if #body == 0 then return false end
+  return stmt_returns_value(body[#body])
+end
+
+local function pass_check_when_value_overwritten(acc, program)
+  local k = ast.K
+
+  -- Recursive walker over every body-sequence in the program.
+  local visit
+  visit = function(stmts)
+    if type(stmts) ~= "table" then return end
+    for i, s in ipairs(stmts) do
+      if s and type(s) == "table" and s.kind == k.WHEN_STMT
+         and when_body_last_returns_value(s)
+         and i < #stmts then
+        -- Find the next stmt that actually produces a value
+        local follow = stmts[i + 1]
+        if stmt_returns_value(follow) then
+          table.insert(acc.diags, ast.warning(
+            ast.W.WHEN_VALUE_OVERWRITTEN,
+            "value produced by `when` body is silently overwritten by " ..
+            "the following statement",
+            s.pos,
+            "`when` is not an early-return — rewrite with `if/else`, `cond`, or `match`"))
+        end
+      end
+      -- Recurse into nested bodies regardless
+      if s and type(s) == "table" then
+        if s.body and type(s.body) == "table" and not s.body.kind then
+          visit(s.body)
+        end
+        if s.then_body then visit(s.then_body) end
+        if s.else_body and type(s.else_body) == "table" and not s.else_body.kind then
+          visit(s.else_body)
+        end
+        if s.arms then
+          for _, arm in ipairs(s.arms) do
+            if type(arm.body) == "table" and not arm.body.kind then
+              visit(arm.body)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- Only walk `fn` bodies — scene/choice/hook/schedule bodies use narration
+  -- and display statements in expression position, where the "retval is
+  -- overwritten" framing is meaningless (the engine doesn't use retval to
+  -- decide what to render).
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      visit(decl.body)
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -3100,6 +3298,8 @@ function M.check(ast_root, filename)
   pass_check_scene_targets(acc, symtab, ast_root)        -- AV-2
   pass_check_undefined_read_paths(acc, symtab, ast_root) -- AV-4
   pass_check_undefined_families(acc, symtab, ast_root)   -- A4
+  pass_check_size_count_receiver(acc, symtab, ast_root)  -- J-B4
+  pass_check_when_value_overwritten(acc, ast_root)       -- J-B5
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab

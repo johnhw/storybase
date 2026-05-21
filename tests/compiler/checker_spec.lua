@@ -562,6 +562,212 @@ describe("checker pass 2 — warn-untyped-symbol", function()
 end)
 
 -- ============================================================
+-- J-B3: unknown find clause warning
+-- ============================================================
+
+describe("parser — J-B3: unknown find clause", function()
+  -- J-B3 is emitted at parse time; checker's `compile` helper discards
+  -- parser diags, so go through the parser directly.
+  local function parse_diags(src)
+    local tokens = lexer.tokenize(src, "test")
+    local _, diags = parser.parse(tokens, "test")
+    return diags
+  end
+
+  it("warns on a typo'd inline named-arg in find", function()
+    local diags = parse_diags([[
+type Thing:
+  hp: Int(0, 100) = 0
+state things/{t}: Thing
+fn find-broken:
+  find things wherre: things/{things}/hp > 0
+]])
+    local found
+    for _, d in ipairs(diags) do
+      if d.code == ast.W.UNKNOWN_FIND_CLAUSE then found = d; break end
+    end
+    assert.is_not_nil(found, "expected WARN_UNKNOWN_FIND_CLAUSE")
+    assert.is_true(found.message:find("wherre", 1, true) ~= nil,
+      "message should mention the offending clause name")
+  end)
+
+  it("does not warn on recognised clauses", function()
+    local diags = parse_diags([[
+type Thing:
+  hp: Int(0, 100) = 0
+state things/{t}: Thing
+fn find-good:
+  find things where: things/{things}/hp > 0 order-by: things/{things}/hp desc limit: 3
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.UNKNOWN_FIND_CLAUSE, d.code)
+    end
+  end)
+end)
+
+-- ============================================================
+-- J-B4: size/count/empty? on non-collection
+-- ============================================================
+
+describe("checker — J-B4: size/count/empty? receiver type", function()
+  it("warns on `size <family-name>` (should be path-list)", function()
+    local d = check_warn([[
+type Thing:
+  hp: Int(0, 100) = 0
+state things/{t}: Thing
+fn count-things:
+  size things
+]], ast.W.NOT_A_COLLECTION)
+    assert.is_true(d.note and d.note:find("path-list", 1, true) ~= nil,
+      "note should suggest path-list")
+  end)
+
+  it("warns on `count <family-name>`", function()
+    check_warn([[
+type Thing:
+  hp: Int(0, 100) = 0
+state things/{t}: Thing
+fn n:
+  count things
+]], ast.W.NOT_A_COLLECTION)
+  end)
+
+  it("warns on `size` of an Int state path", function()
+    check_warn([[
+state world:
+  hp: Int(0, 100) = 100
+fn bad:
+  size world/hp
+]], ast.W.NOT_A_COLLECTION)
+  end)
+
+  it("warns on `empty?` of an Int state path", function()
+    check_warn([[
+state world:
+  hp: Int(0, 100) = 100
+fn bad:
+  empty? world/hp
+]], ast.W.NOT_A_COLLECTION)
+  end)
+
+  it("does not warn on `size` of a List", function()
+    local _, diags = compile([[
+state inventory:
+  items: List(Symbol, 10) = (list)
+fn good:
+  size inventory/items
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.NOT_A_COLLECTION, d.code)
+    end
+  end)
+
+  it("does not warn on `size (path-list family)`", function()
+    local _, diags = compile([[
+type Thing:
+  hp: Int(0, 100) = 0
+state things/{t}: Thing
+fn good:
+  size (path-list things)
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.NOT_A_COLLECTION, d.code)
+    end
+  end)
+
+  it("does not warn on `size` of a Set", function()
+    local _, diags = compile([[
+state tags: Set Symbol = (set)
+fn good:
+  size tags
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.NOT_A_COLLECTION, d.code)
+    end
+  end)
+end)
+
+-- ============================================================
+-- J-B5: when-body value silently overwritten
+-- ============================================================
+
+describe("checker — J-B5: when-body value overwritten", function()
+  it("warns when a `when` value-expr is followed by another expr stmt", function()
+    -- Canonical bug shape: when path = nil: 0 / count-where path ...
+    check_warn([[
+type Loc:
+  visited: Bool = false
+state world/loc/{l}: Loc
+
+fn supply-path-steps:
+  let path = find-path (world/loc/lake/visited = true) depth: 5
+  when path = nil:
+    0
+  count-where path fn(step): true
+]], ast.W.WHEN_VALUE_OVERWRITTEN)
+  end)
+
+  it("does not warn when the `when` is the last statement", function()
+    local _, diags = compile([[
+state world:
+  hp: Int(0, 100) = 100
+fn last:
+  when world/hp = 0:
+    0
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.WHEN_VALUE_OVERWRITTEN, d.code)
+    end
+  end)
+
+  it("does not warn when the `when` body ends in a mutation", function()
+    local _, diags = compile([[
+state world:
+  hp: Int(0, 100) = 100
+fn mut-body:
+  when world/hp = 0:
+    set! world/hp 50
+  inc! world/hp 1
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.WHEN_VALUE_OVERWRITTEN, d.code)
+    end
+  end)
+
+  it("does not warn inside a scene body (narration patterns)", function()
+    local _, diags = compile([[
+state world:
+  found: Bool = false
+scene s:
+  Look around.
+  when world/found:
+    You see a herb.
+  when not world/found:
+    Nothing here.
+  * Continue
+    -> s
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.WHEN_VALUE_OVERWRITTEN, d.code)
+    end
+  end)
+
+  it("does not warn when followed by a mutation (no value overwrite)", function()
+    local _, diags = compile([[
+state world:
+  hp: Int(0, 100) = 100
+fn ok:
+  when world/hp = 0:
+    0
+  set! world/hp 1
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.WHEN_VALUE_OVERWRITTEN, d.code)
+    end
+  end)
+end)
+
+-- ============================================================
 -- Integration
 -- ============================================================
 

@@ -5,6 +5,38 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## J-B3 + J-B4 + J-B5 diagnostic warnings from Review Pass 3 ✅ (2026-05-21)
+
+Three new compiler warnings address the diagnostic bugs from §J:
+
+- **J-B3** (`WARN_UNKNOWN_FIND_CLAUSE`): parser emits when an unknown
+  `NAMED_ARG` appears in a `find ...` clause list. Recovery skips its
+  value expression. Catches typos like `wherre:` that previously vanished
+  without trace.
+- **J-B4** (`WARN_NOT_A_COLLECTION`): new checker pass
+  `pass_check_size_count_receiver` warns when `size`/`count`/`empty?` is
+  applied to a family name (suggests `path-list`) or to a state path of
+  non-collection scalar type.
+- **J-B5** (`WARN_WHEN_VALUE_OVERWRITTEN`): new checker pass
+  `pass_check_when_value_overwritten`. Restricted to `fn` bodies; flags
+  when a `when` body ends in a value-producing expression and a follow-up
+  statement also produces a value (the `when` result is silently
+  overwritten). The hint suggests `if`/`else`, `cond`, or `match` for
+  proper exclusive branches.
+
+All three are warnings (per the user request: "favour explicit compiler
+warnings"). No code or runtime behavior changed.
+
+Tests: 16 new cases in `tests/compiler/checker_spec.lua` covering the
+positive bug shapes and several silent-on-valid-code cases each.
+
+Full suite: 2988 / 0 failures (+ 2 pre-existing pending). CLI integration:
+256 / 256. demo08's `supply-path-steps`/`supply-optimal-steps` continue
+to compile and run; the J-B5 warning highlights a known accidental-success
+pattern (`count-where nil → 0`) that the author may choose to refactor.
+
+---
+
 ## J-B1 + J-B2 correctness fixes from Review Pass 3 ✅ (2026-05-21)
 
 Fixed the two correctness bugs surfaced by Review Pass 3:

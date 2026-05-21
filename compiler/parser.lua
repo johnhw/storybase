@@ -76,6 +76,10 @@ function parser:emit_err(code, msg, pos, note)
   table.insert(self.diags, ast.error(code, msg, pos or self:cur().pos, note))
 end
 
+function parser:emit_warn(code, msg, pos, note)
+  table.insert(self.diags, ast.warning(code, msg, pos or self:cur().pos, note))
+end
+
 --- Advance to end of current logical line (error recovery).
 function parser:skip_to_eol()
   while not self:at("NEWLINE") and not self:at("DEDENT") and not self:at("EOF") do
@@ -1188,8 +1192,15 @@ local function parse_atom(p)
         elseif na.value == "in-state" then
           local state_expr = parse_expr(p)
           clauses[#clauses+1] = { kind = "in_state", state_expr = state_expr }
+        else
+          -- J-B3: unknown NAMED_ARG inside find — warn so typos don't get
+          -- silently dropped.  Skip its value expression for recovery.
+          p:emit_warn(ast.W.UNKNOWN_FIND_CLAUSE,
+            "unknown find clause '" .. tostring(na.value) ..
+            ":' — recognised clauses are where:, or-where:, order-by:, limit:, in-state:",
+            na.pos)
+          pcall(parse_expr, p)
         end
-        -- unknown NAMED_ARG: skip
         if newline_skip then p:skip_newlines() end
       end
       if newline_skip then p:skip_newlines() end
@@ -1231,6 +1242,12 @@ local function parse_atom(p)
             elseif na.value == "in-state" then
               local state_expr = parse_expr(p)
               clauses[#clauses+1] = { kind = "in_state", state_expr = state_expr }
+            else
+              -- J-B3: unknown NAMED_ARG inside find — warn (see inline branch above).
+              p:emit_warn(ast.W.UNKNOWN_FIND_CLAUSE,
+                "unknown find clause '" .. tostring(na.value) ..
+                ":' — recognised clauses are where:, or-where:, order-by:, limit:, in-state:",
+                na.pos)
             end
             p:skip_to_eol()
           elseif p:at("IDENT", "count") then

@@ -11,7 +11,7 @@ All eight implementation phases, language review passes 1 and 2, the full audit
 backlog, the full §E series, §F1/F2, §G2, §H2, and the I-series demos (26–32) are
 complete — details in [completed.md](completed.md).
 
-**~2958 successes / 0 failures / 2 pending (known limitations).**
+**~2988 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless
 touching http/debug code.)
 
@@ -19,20 +19,12 @@ A **language review pass 3** (2026-05-20) surveyed demos 01–32 against the dem
 themselves and surfaced 10 authoring inelegances plus 5 verified runtime/parser
 bugs (two correctness, three diagnostic). See **§J** below.
 
-J-B1 and J-B2 (the two correctness bugs) were **fixed on 2026-05-21** — family
-`max:` is now enforced at `spawn!`, and `find ... limit:` evaluates arbitrary
-integer expressions at runtime. Regression tests live in
-`tests/runtime/state_spec.lua`, `tests/runtime/query_spec.lua`, and
-`tests/runtime/j_bugs_spec.lua`.
+All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. The 10 authoring
+inelegances (J-I1..I10) remain open as design-first backlog.
 
 ---
 
 ## What to work on next
-
-**Diagnostic gaps from review pass 3 (small, polish):**
-- §J-B3 — unknown `find` named-args silently skipped
-- §J-B4 — `size`/`count` on non-collection silently returns 0
-- §J-B5 — `when … : <expr>` looks like early-return but isn't
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I1 (per-symbol fn duplication) and §J-I2 (loops in choice lists) account for
@@ -353,45 +345,59 @@ Regression tests: `tests/runtime/query_spec.lua` (unit: path-limit, arith,
 non-int error, zero) and `tests/runtime/j_bugs_spec.lua` (e2e via
 `fn limited: find things ... limit: world/cap`).
 
-### J-B3. Unknown `find` named-args silently skipped [bug — diagnostic]
+### J-B3. Unknown `find` named-args silently skipped ✅ FIXED (2026-05-21)
 
-Same parser block: an unrecognised `NAMED_ARG` inside a `find ...` clause
-list is dropped with a "skip" comment. Typos like `wherre:` produce no
-error. Other parsers emit `BAD_EXPRESSION` for unknown tokens.
+`compiler/parser.lua` find-clause parser now emits
+`WARN_UNKNOWN_FIND_CLAUSE` when a NAMED_ARG inside `find ...` is not one
+of {`where`, `or-where`, `order-by`, `limit`, `in-state`}. The warning
+lists the recognised clause names. Recovery skips the unknown clause's
+value expression so the rest of the find continues to parse cleanly.
+Implemented as a warning (not an error) so existing surfaces keep
+compiling — typos still surface in `--check` output.
 
-**Fix sketch:** add a final `else: p:emit_err(ast.E.BAD_EXPRESSION, "unknown find clause '" .. na.value .. "'", na.pos)` branch.
+Regression test: `tests/compiler/checker_spec.lua "parser — J-B3:
+unknown find clause"`.
 
-### J-B4. `size`/`count` on a non-collection silently returns 0 [bug — diagnostic]
+### J-B4. `size`/`count`/`empty?` on a non-collection ✅ FIXED (2026-05-21)
 
-`runtime/eval.lua:1055` (`size`) and `:1065` (`count`) both early-return 0
-on a non-table input. Catches author mistakes like `size things` (treating
-a family-base path as a list — `things` resolves to nil, `size nil → 0`).
+New checker pass `pass_check_size_count_receiver` walks every fn_call
+to `size`/`count`/`empty?` and warns when the single argument is one of
+the two clear authoring mistakes:
+1. A bare zero-arg call to a declared family name — author meant
+   `(path-list family)`. The hint suggests the rewrite.
+2. A state path whose declared type is a non-collection scalar
+   (Int/Bool/Symbol/Float/named record). The warning notes that the
+   result will always be 0 (or `true` for `empty?`).
 
-**Fix sketch:** at compile time, when the receiver's type is known and is
-not Set/List/UList/Map/relation-adjacency, emit a `NOT_A_COLLECTION`
-warning. Keep the runtime tolerant behavior (avoids breaking valid uses
-on optional values).
+Runtime semantics unchanged — `size nil → 0` still tolerates Option
+values and unknown fn returns. Collection types accepted: Set, List,
+UList, UMap, String, and Option-wrapped versions of those.
 
-### J-B5. `when … : <expr>` looks like early-return but isn't [bug — diagnostic]
+Regression tests: `tests/compiler/checker_spec.lua "checker — J-B4:
+size/count/empty? receiver type"` (7 cases — family, scalar Int,
+empty? Int, List ok, path-list ok, Set ok).
 
-`runtime/eval.lua:2325`: a `when` body that evaluates to a value sets
-`ctx.retval`, but the surrounding sequence continues and any subsequent
-expr-stmt overwrites it. Authors copying patterns like demo08's
-`supply-path-steps`:
-```
-when path = nil:
-  0
-count-where path fn(step): true
-```
-will get a silent wrong answer when the follow-up call isn't itself
-nil-tolerant. (demo08 happens to work because `count-where nil` also
-returns 0.)
+### J-B5. `when … : <expr>` looks like early-return but isn't ✅ FIXED (2026-05-21)
 
-**Fix sketch:** in `compiler/checker.lua` (or a new lint pass), warn when
-a `when`-body's last statement is a bare expression and a sibling
-statement follows that also produces a value. Alternatively, document
-clearly that StoryBase fns have no early return — only the last evaluated
-expression wins.
+New checker pass `pass_check_when_value_overwritten`. Restricted to `fn`
+bodies (scene/choice/hook bodies use narration in expression position
+and the warning doesn't apply there). Fires when:
+1. A `when` body's last statement is a value-producing expression
+   (literal, fn_call, if_expr, match_expr, etc.)
+2. AND a following statement in the same body also produces a value
+   that will overwrite the `when` result.
+
+The hint suggests rewriting with `if`/`else`, `cond`, or `match` to get
+proper exclusive branches.
+
+Note: demo08 `supply-path-steps`/`supply-optimal-steps` still emit this
+warning — they accidentally work because `count-where nil` also returns
+0. Author's call whether to rewrite; the warning is informational, not
+breaking.
+
+Regression tests: `tests/compiler/checker_spec.lua "checker — J-B5:
+when-body value overwritten"` (5 cases including the canonical bug shape,
+last-stmt OK, mut-body OK, scene narration silent, follow-by-mut OK).
 
 ### J-I1. Symbol-keyed work needs N near-identical fns [inelegance]
 
