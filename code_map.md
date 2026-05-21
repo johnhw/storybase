@@ -109,6 +109,11 @@ EMIT_MUT         -- engine/emit event [args]
   IDENT after the leading name so `Alias.macro-name` from a
   namespaced import (`import "lib" as Alias`) parses cleanly (mirrors
   the existing `parse_atom` fn-call branch at line 1200).
+- §J-I3 (2026-05-21): `parse_if_expr` accepts `elif cond:` or
+  `else if cond:` after the then-body, desugaring to a nested `if_expr`
+  in `else_body`. `elif` is a new lexer keyword; `else if` is handled
+  via two-token lookahead. AST shape is identical to hand-nested
+  `if/else: if`, so checker/codegen/runtime need no changes.
 
 ---
 

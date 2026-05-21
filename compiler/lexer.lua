@@ -23,7 +23,7 @@ local M = {}
 -- ── Keyword set ────────────────────────────────────────────────────────────
 local KEYWORDS = {}
 for _, kw in ipairs({
-  "fn", "state", "type", "scene", "when", "if", "else", "match",
+  "fn", "state", "type", "scene", "when", "if", "elif", "else", "match",
   "cond", "for", "while", "break", "continue", "return", "let", "in", "with", "import", "module",
   "relation", "actor", "schedule", "bounded", "macro", "decl-macro", "verify",
   "watch", "watch-when", "pre", "post", "tags", "pass",

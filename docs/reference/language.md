@@ -946,6 +946,24 @@ count-where (path-list npcs) fn(m): npcs/{m}/alive = true
 if player/health > 50: "healthy" else: "hurt"
 ```
 
+Multi-way branches can be expressed with `elif` (or the equivalent
+two-token form `else if`), which desugars to a nested `if` in the
+parent `else`-body. Indentation collapses to a single level:
+
+```
+if score >= 90:
+  set! grade `A
+elif score >= 80:
+  set! grade `B
+elif score >= 70:
+  set! grade `C
+else:
+  set! grade `F
+```
+
+`elif` and `else if` are interchangeable. Use whichever reads better
+at the call site; the compiled AST is identical in both cases.
+
 ### `match` expression
 
 ```

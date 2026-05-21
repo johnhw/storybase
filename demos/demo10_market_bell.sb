@@ -159,15 +159,14 @@ scene market-town:
     The Grand Festival fills the square. The market has closed for good.
     Merchants and travellers from across the kingdom pack the cobblestones.
     The smell of roasting chestnuts drifts from every corner.
+  elif market/open:
+    The market is open and busy.
+    Grain: {prices/grain} gold per bundle.  Cloth: {prices/cloth} gold per bolt.
+    You carry {player/gold} gold and {player/goods} bundles of grain.
   else:
-    if market/open:
-      The market is open and busy.
-      Grain: {prices/grain} gold per bundle.  Cloth: {prices/cloth} gold per bolt.
-      You carry {player/gold} gold and {player/goods} bundles of grain.
-    else:
-      The market has closed for the evening. The stalls are shuttered.
-      A cold breeze sweeps through the empty square.
-      You carry {player/gold} gold and {player/goods} bundles of grain.
+    The market has closed for the evening. The stalls are shuttered.
+    A cold breeze sweeps through the empty square.
+    You carry {player/gold} gold and {player/goods} bundles of grain.
 
   * [can-buy?] Buy grain  (-{prices/grain} gold, +1 bundle)
     buy-grain
@@ -195,8 +194,7 @@ scene festival-end:
 
   if player/gold >= 150:
     A profitable venture. The market has been kind.
+  elif player/gold >= 100:
+    You broke even. Not bad for a few days of work.
   else:
-    if player/gold >= 100:
-      You broke even. Not bad for a few days of work.
-    else:
-      A lean stretch. Perhaps next season will bring better prices.
+    A lean stretch. Perhaps next season will bring better prices.

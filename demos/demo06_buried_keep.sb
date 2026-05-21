@@ -523,11 +523,10 @@ scene victory:
 
   if living-count >= 3:
     A perfect delve — all three adventurers survived.
+  elif living-count >= 2:
+    A costly victory — two survivors made it out.
   else:
-    if living-count >= 2:
-      A costly victory — two survivors made it out.
-    else:
-      A desperate escape — only one survivor remains.
+    A desperate escape — only one survivor remains.
 
   The Sunstone is safe. The keep falls silent.
 

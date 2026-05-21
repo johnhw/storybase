@@ -315,10 +315,9 @@ scene guild-epilogue:
     of admiration.  New recruits queue at the door.  The Expedition
     Guild has earned a legendary reputation this season.
     """
+  elif guild/prestige >= 30:
+    The guild made solid progress.  A respectable season.
+    Word of your deeds has spread through the region.
   else:
-    if guild/prestige >= 30:
-      The guild made solid progress.  A respectable season.
-      Word of your deeds has spread through the region.
-    else:
-      A quiet season.  The guild survives, but its name is not yet known
-      beyond the city walls.  Perhaps next season will bring more glory.
+    A quiet season.  The guild survives, but its name is not yet known
+    beyond the city walls.  Perhaps next season will bring more glory.

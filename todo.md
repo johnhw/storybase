@@ -4,14 +4,14 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-20)
+## Current Status (2026-05-21)
 
 The core language and runtime are feature-complete against the V1.0 specification.
 All eight implementation phases, language review passes 1 and 2, the full audit
 backlog, the full §E series, §F1/F2, §G2, §H2, and the I-series demos (26–32) are
 complete — details in [completed.md](completed.md).
 
-**~2988 successes / 0 failures / 2 pending (known limitations).**
+**~2999 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless
 touching http/debug code.)
 
@@ -19,8 +19,10 @@ A **language review pass 3** (2026-05-20) surveyed demos 01–32 against the dem
 themselves and surfaced 10 authoring inelegances plus 5 verified runtime/parser
 bugs (two correctness, three diagnostic). See **§J** below.
 
-All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. The 10 authoring
-inelegances (J-I1..I10) remain open as design-first backlog.
+All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. Authoring inelegances
+J-I3 (elif / else if) and J-I5 (bidirectional relations) were also fixed
+on 2026-05-21. The remaining 8 inelegances (J-I1, I2, I4, I6, I7, I8, I9, I10)
+stay open as design-first backlog.
 
 ---
 
@@ -30,7 +32,8 @@ inelegances (J-I1..I10) remain open as design-first backlog.
 - §J-I1 (per-symbol fn duplication) and §J-I2 (loops in choice lists) account for
   the bulk of duplication across the 32 demos — investigate these first.
 - §J-I4 (time-axis / state-path double bookkeeping) shows up in demos 10, 16, 20, 22.
-- Others (§J-I3, I6–I10) are smaller polish. §J-I5 fixed 2026-05-21.
+- Others (§J-I6–I10) are smaller polish. §J-I3 (elif) and §J-I5 (bidirectional
+  relations) both fixed 2026-05-21.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -432,14 +435,22 @@ bodies that generates one choice per iteration with `{x}`-interpolated
 guards and text. Engine already loops over choices at runtime; the gap
 is parser/codegen.
 
-### J-I3. No `elif` / `else if` [inelegance — small]
+### J-I3. No `elif` / `else if` [inelegance] — DONE 2026-05-21
 
-Every multi-branch ending uses nested `if/else: if/else:` (demos 03, 05,
-09, 10, 11, 14, 16, 21, …). Adds one indent level per branch.
+Every multi-branch ending used nested `if/else: if/else:` (demos 03, 05,
+09, 10, 11, 14, 16, 21, …). Added one indent level per branch.
 
-**Possible direction:** parser-only change — accept `else if` after an
-`if`-body and desugar to nested `if_expr`. Or add `cond` to scene-body
-context (it's already an expression form).
+**Fixed (2026-05-21)** as a parser-only change. `parse_if_expr` now accepts
+either `else if cond:` or `elif cond:` after the then-body and desugars to
+a nested `if_expr` placed in the parent's `else_body`. The runtime, checker,
+and codegen are unchanged — the AST shape is identical to hand-nested
+`if/else: if`.
+
+`elif` is a new lexer keyword. `else if` works via lookahead (KEYWORD
+"else" followed by KEYWORD "if"). Both forms are interchangeable. Demos
+4, 6, 7, 8, 9, 10, 11, 12, 20, 21 migrated to the flattened form; demo20
+alone collapsed 10 three-deep `world/phase` chains into single elif
+ladders. See `docs/reference/language.md#if-expression`.
 
 ### J-I4. Time-axis ↔ state path double-bookkeeping [inelegance]
 

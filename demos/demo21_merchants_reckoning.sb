@@ -234,11 +234,10 @@ scene reckoning-fortune:
     The Chronicle records {gold-on-day 1} gold at day 1.
     if player/gold > (gold-on-day 1):
       You carry more gold now than the Chronicle shows for day 1.
+    elif player/gold < (gold-on-day 1):
+      You carry less gold now than the Chronicle shows for day 1.
     else:
-      if player/gold < (gold-on-day 1):
-        You carry less gold now than the Chronicle shows for day 1.
-      else:
-        Your gold today matches the Chronicle record for day 1.
+      Your gold today matches the Chronicle record for day 1.
   else:
     (No gold record survives from day 1. Earn or spend gold first,
      then advance a day, before consulting the opening fortune.)

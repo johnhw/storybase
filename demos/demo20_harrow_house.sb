@@ -493,13 +493,12 @@ scene foyer:
   if world/phase = `prosaic:
     The hallway smells of cedar and old paper. Afternoon light filters through
     the transom above the door. Portraits of Harrow ancestors line the panelled walls.
+  elif world/phase = `uneasy:
+    The portraits seem to watch you differently today. You cannot say exactly how.
+    The light through the transom is the same light -- and yet.
   else:
-    if world/phase = `uneasy:
-      The portraits seem to watch you differently today. You cannot say exactly how.
-      The light through the transom is the same light -- and yet.
-    else:
-      Something below the house is patient. You understand now why she does not sleep.
-      The foyer feels like the mouth of something that has not yet decided to close.
+    Something below the house is patient. You understand now why she does not sleep.
+    The foyer feels like the mouth of something that has not yet decided to close.
 
   Period: {world/period}. Day {world/day}. Rapport: {player/rapport}. Wariness: {player/wariness}.
 
@@ -534,13 +533,12 @@ scene parlour:
   if world/phase = `prosaic:
     A faded room. Heavy drapes, a cold fireplace, furniture arranged as if for guests
     who stopped arriving decades ago. Everything is clean and nothing is comfortable.
+  elif world/phase = `uneasy:
+    The chairs face inward at angles that seem slightly wrong since your last visit.
+    The fireplace has been lit but the smoke does not rise the way smoke should.
   else:
-    if world/phase = `uneasy:
-      The chairs face inward at angles that seem slightly wrong since your last visit.
-      The fireplace has been lit but the smoke does not rise the way smoke should.
-    else:
-      You avoid the corner where the wallpaper pattern refuses to resolve into anything
-      your eye can hold. You stopped trying to look at it directly two days ago.
+    You avoid the corner where the wallpaper pattern refuses to resolve into anything
+    your eye can hold. You stopped trying to look at it directly two days ago.
 
   [meredith-here?] Meredith is seated at the escritoire, not writing.
 
@@ -566,13 +564,12 @@ scene dining:
     A long table, eight chairs, one place set. A sideboard holds crystal decanters
     not refilled in years. Everything is kept in readiness for an occasion that has
     stopped coming.
+  elif world/phase = `uneasy:
+    The table has been cleared since morning. A faint smell of something not quite
+    food drifts from the direction of the kitchen. Meredith does not comment.
   else:
-    if world/phase = `uneasy:
-      The table has been cleared since morning. A faint smell of something not quite
-      food drifts from the direction of the kitchen. Meredith does not comment.
-    else:
-      Seven of the eight chairs have been turned to face the wall. You did not do that.
-      You are certain you did not do that.
+    Seven of the eight chairs have been turned to face the wall. You did not do that.
+    You are certain you did not do that.
 
   [meredith-here?] Meredith is eating, or appearing to eat. She invites you to sit.
 
@@ -601,13 +598,12 @@ scene kitchen:
   if world/phase = `prosaic:
     A kettle on the range. Everything ordered and exactly where it should be. The kitchen
     is the most lived-in room in the house -- the only one that feels inhabited.
+  elif world/phase = `uneasy:
+    The kettle has been moved to a burner that is not connected to the gas. Meredith
+    does not appear to notice when you mention it.
   else:
-    if world/phase = `uneasy:
-      The kettle has been moved to a burner that is not connected to the gas. Meredith
-      does not appear to notice when you mention it.
-    else:
-      There is a door in the kitchen wall that you did not see on the first day.
-      It leads down. Of course it does.
+    There is a door in the kitchen wall that you did not see on the first day.
+    It leads down. Of course it does.
 
   [meredith-here?] Meredith is here -- either preparing something or cleaning up from it.
 
@@ -636,13 +632,12 @@ scene garden:
   if world/phase = `prosaic:
     Overgrown but not wild. Someone tends this space with care if not with artistry.
     A stone bench. Bare rose canes. The smell of turned earth even in late autumn.
+  elif world/phase = `uneasy:
+    The geometry of the garden paths is subtly off -- the angles at the corner hedges
+    do not add up. You pace it out and the measurements do not agree with each other.
   else:
-    if world/phase = `uneasy:
-      The geometry of the garden paths is subtly off -- the angles at the corner hedges
-      do not add up. You pace it out and the measurements do not agree with each other.
-    else:
-      You have stopped walking the perimeter. Whatever is at the north end of the garden
-      is not something you need to confirm with your eyes.
+    You have stopped walking the perimeter. Whatever is at the north end of the garden
+    is not something you need to confirm with your eyes.
 
   [meredith-here?] Meredith kneels at a flower bed, doing something with her hands.
 
@@ -664,13 +659,12 @@ scene library:
     Floor-to-ceiling shelves. Architecture, history, natural philosophy -- the library
     of a Victorian gentleman with catholic tastes. Everything is dusty except a small
     section on the east wall, which has been read recently.
+  elif world/phase = `uneasy:
+    You have been through the recently-read section twice. The titles are ordinary.
+    The marginalia in the professor's hand are not. You try not to read them too carefully.
   else:
-    if world/phase = `uneasy:
-      You have been through the recently-read section twice. The titles are ordinary.
-      The marginalia in the professor's hand are not. You try not to read them too carefully.
-    else:
-      Three of the books on the east shelf have no titles. Their spines are blank.
-      You have not opened them. You do not intend to open them.
+    Three of the books on the east shelf have no titles. Their spines are blank.
+    You have not opened them. You do not intend to open them.
 
   [meredith-here?] Meredith is here, standing before the recently-read section.
 
@@ -691,13 +685,12 @@ scene landing:
   if world/phase = `prosaic:
     A wide landing with three doors. One stands open -- a linen closet, nothing more.
     The door at the end is Meredith's room. A third door, beside the stairs, is locked.
+  elif world/phase = `uneasy:
+    You can see, in the gap under Meredith's door, that her light burns at hours
+    that are not sleeping hours. You do not knock. She does not invite you to.
   else:
-    if world/phase = `uneasy:
-      You can see, in the gap under Meredith's door, that her light burns at hours
-      that are not sleeping hours. You do not knock. She does not invite you to.
-    else:
-      The locked study door is open now. Meredith watches which way you walk when
-      you reach the top of the stairs.
+    The locked study door is open now. Meredith watches which way you walk when
+    you reach the top of the stairs.
 
   [meredith-here?] Meredith is at the writing desk at the far end of the landing.
 
@@ -876,11 +869,10 @@ scene talk-meredith:
   if world/phase = `prosaic:
     She meets your questions with the precise, unhurried manner of someone who has
     rehearsed being pleasant for a long time.
+  elif world/phase = `uneasy:
+    Something has shifted in how she looks at you. As if she is deciding something.
   else:
-    if world/phase = `uneasy:
-      Something has shifted in how she looks at you. As if she is deciding something.
-    else:
-      She is tired. Not frightened -- she has not been frightened for years. But tired.
+    She is tired. Not frightened -- she has not been frightened for years. But tired.
 
   Rapport: {player/rapport}. Wariness: {player/wariness}.
 
@@ -906,11 +898,10 @@ scene talk-meredith:
     ask-about-locked-study
     if world/phase = `prosaic:
       say Meredith: That was his study. It has been locked since the nineteen-twenties. I find it is easier not to open it without good reason. There is a great deal in there that requires careful handling.
+    elif player/rapport >= 6:
+      say Meredith: Yes. You should see it -- you are asking the right questions. I left the key on the library desk for you.
     else:
-      if player/rapport >= 6:
-        say Meredith: Yes. You should see it -- you are asking the right questions. I left the key on the library desk for you.
-      else:
-        say Meredith: Not yet. There are things in that room that are easier to understand if you already know what to look for. Give it a little more time.
+      say Meredith: Not yet. There are things in that room that are easier to understand if you already know what to look for. Give it a little more time.
     <-
 
   * [meredith-receptive? and asked/locked-study and world/phase != `prosaic and not (`study-key in player/inventory) and player/rapport >= 6] Ask again -- you need to see the study.
@@ -938,11 +929,10 @@ scene talk-meredith:
     ask-about-her-work
     if world/phase = `revelation:
       say Meredith: I keep watch. I have been keeping watch for eleven years. Before me it was my mother. Before her, her father. The work does not stop because we would prefer it to.
+    elif player/rapport >= 5:
+      say Meredith: I maintain the house and manage my grandfather's correspondence -- he left a great deal of it that still requires attention. And I continue certain of his observations. The records must be kept current.
     else:
-      if player/rapport >= 5:
-        say Meredith: I maintain the house and manage my grandfather's correspondence -- he left a great deal of it that still requires attention. And I continue certain of his observations. The records must be kept current.
-      else:
-        say Meredith: I look after the house. There is more to it than it appears. A house like this requires a great deal of sustained attention.
+      say Meredith: I look after the house. There is more to it than it appears. A house like this requires a great deal of sustained attention.
     <-
 
   * [can-ask-vigil?] Ask about the vigil -- you have read both notebooks and you need to understand.

@@ -408,11 +408,10 @@ scene finale:
   if world/reputation >= 70:
     Your name is legend in the besieged city.
     The mechanical oracle proved its worth beyond all doubt.
+  elif world/reputation >= 40:
+    A respectable trade. The city's desperate paid well for certainty.
   else:
-    if world/reputation >= 40:
-      A respectable trade. The city's desperate paid well for certainty.
-    else:
-      Few trusted the machine. The gears spin on, unappreciated.
+    Few trusted the machine. The gears spin on, unappreciated.
 
   if world/gold >= 200:
     You leave with a heavy purse.

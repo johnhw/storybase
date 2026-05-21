@@ -961,6 +961,87 @@ else:
     assert.are.equal(ast.K.IF_EXPR, s.kind)
     assert.is_not_nil(s.else_body)
   end)
+
+  it("parses `else if` as a nested if_expr in the else_body", function()
+    local fd, diags = parse_fn("test", [[
+if player/health > 50:
+  pass
+else if player/health > 20:
+  pass
+else:
+  pass]])
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local s = fd.body[1]
+    assert.are.equal(ast.K.IF_EXPR, s.kind)
+    assert.is_not_nil(s.else_body)
+    assert.are.equal(1, #s.else_body)
+    local nested = s.else_body[1]
+    assert.are.equal(ast.K.IF_EXPR, nested.kind)
+    assert.is_not_nil(nested.else_body)
+    -- Innermost else terminates the chain with pass.
+    assert.are.equal(ast.K.PASS_STMT, nested.else_body[1].kind)
+  end)
+
+  it("parses `elif` as a nested if_expr in the else_body", function()
+    local fd, diags = parse_fn("test", [[
+if player/health > 50:
+  pass
+elif player/health > 20:
+  pass
+else:
+  pass]])
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local s = fd.body[1]
+    assert.are.equal(ast.K.IF_EXPR, s.kind)
+    local nested = s.else_body[1]
+    assert.are.equal(ast.K.IF_EXPR, nested.kind)
+    assert.is_not_nil(nested.condition)
+  end)
+
+  it("parses a long elif chain", function()
+    local fd, diags = parse_fn("test", [[
+if x = 1:
+  pass
+elif x = 2:
+  pass
+elif x = 3:
+  pass
+elif x = 4:
+  pass
+else:
+  pass]])
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    -- Walk the chain: 4 nested if_exprs, terminating else has pass.
+    local s = fd.body[1]
+    local depth = 0
+    while s and s.kind == ast.K.IF_EXPR do
+      depth = depth + 1
+      s = s.else_body and s.else_body[1]
+    end
+    assert.are.equal(4, depth)
+  end)
+
+  it("parses an elif with no terminal else", function()
+    local fd, diags = parse_fn("test", [[
+if x = 1:
+  pass
+elif x = 2:
+  pass]])
+    local errs = 0
+    for _, d in ipairs(diags) do if d.level == "error" then errs = errs + 1 end end
+    assert.are.equal(0, errs)
+    local s = fd.body[1]
+    assert.are.equal(ast.K.IF_EXPR, s.kind)
+    local nested = s.else_body[1]
+    assert.are.equal(ast.K.IF_EXPR, nested.kind)
+    assert.is_nil(nested.else_body)
+  end)
 end)
 
 -- ── When statement ────────────────────────────────────────────────────────────

@@ -184,11 +184,10 @@ scene finale:
 
   if world/renown >= 70:
     Your name echoes in every shrine-hall. You have become legend.
+  elif world/renown >= 50:
+    A modest legacy. The shrine keepers remember you fondly.
   else:
-    if world/renown >= 50:
-      A modest legacy. The shrine keepers remember you fondly.
-    else:
-      Few recall your passing. The shrines stand unchanged.
+    Few recall your passing. The shrines stand unchanged.
 
   if world/offerings >= 60:
     Your satchel is heavy with offerings — a prosperous journey.

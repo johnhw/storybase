@@ -152,8 +152,7 @@ scene ending:
   Survivors: {living-count} of 3.
   if living-count >= 3:
     All hands returned safely. A flawless expedition.
+  elif living-count >= 2:
+    Two crew members made it out. A difficult victory.
   else:
-    if living-count >= 2:
-      Two crew members made it out. A difficult victory.
-    else:
-      Only one survived. The canyon claimed its toll.
+    Only one survived. The canyon claimed its toll.

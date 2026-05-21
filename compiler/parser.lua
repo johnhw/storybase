@@ -1547,6 +1547,19 @@ local function parse_if_expr(p, is_scene)
     p:adv()
     p:match("NEWLINE")
     else_body = parse_body_items(p, is_scene or false)
+  elseif (p:at("KEYWORD", "else") and p:peek(1).kind == "KEYWORD"
+                                  and p:peek(1).value == "if")
+      or p:at("KEYWORD", "elif") then
+    -- `else if cond: ...` or `elif cond: ...` — desugar to a nested if_expr
+    -- as the else_body. Both forms leave the cursor positioned on a KEYWORD
+    -- "if" that parse_if_expr can consume.
+    if p:at("KEYWORD", "else") then
+      p:adv()  -- consume "else"; "if" is next
+    else
+      p:cur().value = "if"  -- rewrite "elif" → "if" in place
+    end
+    local nested = parse_if_expr(p, is_scene)
+    else_body = { nested }
   end
   return ast.if_expr(cond, then_body, else_body, tpos)
 end

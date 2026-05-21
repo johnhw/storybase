@@ -219,11 +219,10 @@ fn advance-round:
   let dist = route-length
   if dist <= 2:
     set! world/alert `critical
+  elif dist <= 5:
+    set! world/alert `tense
   else:
-    if dist <= 5:
-      set! world/alert `tense
-    else:
-      set! world/alert `quiet
+    set! world/alert `quiet
 
 "Reset — a new intruder approaches from (3,3)."
 fn reset-intruder:
@@ -317,11 +316,10 @@ scene finale:
   if intruder/caught:
     The intruder was caught at ({intruder/x},{intruder/y}).
     The Crystal Vault stands secure.
+  elif vault/breached:
+    The intruder breached the Crystal Vault. The crystal is gone.
   else:
-    if vault/breached:
-      The intruder breached the Crystal Vault. The crystal is gone.
-    else:
-      The watch ended without resolution.
+    The watch ended without resolution.
 
   Guards on post: {count-where (path-list guards) fn(g): guards/{g}/active}
 

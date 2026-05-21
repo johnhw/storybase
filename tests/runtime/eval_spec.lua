@@ -3288,6 +3288,86 @@ scene main:
     local _, st = run(src, "pick-value")
     assert.equal(10, st:get("world/x"))
   end)
+
+  -- ── J-I3 elif / else if (2026-05-21) ──────────────────────────────────────
+  local function grade_src()
+    return [[
+module test-elif
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: main
+state world:
+  score: Int(0,100) = 0
+  grade: Int(0,5) = 0
+fn assign-grade:
+  if world/score >= 90:
+    set! world/grade 5
+  elif world/score >= 80:
+    set! world/grade 4
+  elif world/score >= 70:
+    set! world/grade 3
+  elif world/score >= 60:
+    set! world/grade 2
+  else:
+    set! world/grade 1
+scene main:
+  title: Main
+  * Go
+    -> main
+]]
+  end
+
+  it("elif chain: first arm fires when its condition holds", function()
+    local src = grade_src():gsub("score: Int%(0,100%) = 0", "score: Int(0,100) = 95")
+    local _, st = run(src, "assign-grade")
+    assert.equal(5, st:get("world/grade"))
+  end)
+
+  it("elif chain: middle arms fire correctly", function()
+    for score, want in pairs({ [85] = 4, [75] = 3, [65] = 2 }) do
+      local src = grade_src():gsub("score: Int%(0,100%) = 0",
+                                   "score: Int(0,100) = " .. score)
+      local _, st = run(src, "assign-grade")
+      assert.equal(want, st:get("world/grade"),
+        "score=" .. score .. " expected grade " .. want)
+    end
+  end)
+
+  it("elif chain: terminal else fires when no arm matches", function()
+    local src = grade_src():gsub("score: Int%(0,100%) = 0",
+                                  "score: Int(0,100) = 40")
+    local _, st = run(src, "assign-grade")
+    assert.equal(1, st:get("world/grade"))
+  end)
+
+  it("else if (separate-token form) behaves identically to elif", function()
+    local src = [[
+module test-elseif
+  version: 1.0
+schema-version: 1
+engine-config:
+  entry-scene: main
+state world:
+  score: Int(0,100) = 75
+  grade: Int(0,5) = 0
+fn assign-grade:
+  if world/score >= 90:
+    set! world/grade 5
+  else if world/score >= 80:
+    set! world/grade 4
+  else if world/score >= 70:
+    set! world/grade 3
+  else:
+    set! world/grade 1
+scene main:
+  title: Main
+  * Go
+    -> main
+]]
+    local _, st = run(src, "assign-grade")
+    assert.equal(3, st:get("world/grade"))
+  end)
 end)
 
 -- ============================================================

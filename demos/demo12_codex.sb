@@ -155,13 +155,12 @@ scene epilogue:
     Merchants leave offerings at your door.
     The Codex names you among the great herbalists of the age.
     """
+  elif player/gold >= 100:
+    A profitable season.  The shelves are stocked and the purse is heavy.
+    Your reputation grows, one remedy at a time.
   else:
-    if player/gold >= 100:
-      A profitable season.  The shelves are stocked and the purse is heavy.
-      Your reputation grows, one remedy at a time.
-    else:
-      A modest season.  The plants are patient teachers.
-      There is always more to learn from the garden.
+    A modest season.  The plants are patient teachers.
+    There is always more to learn from the garden.
 
   Final gold: {player/gold}.  Final reputation: {player/rep}.
 

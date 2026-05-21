@@ -75,7 +75,11 @@
       "Bash(grep -n \"^end\\)\\\\s*$\\\\|^end\\)\" /mnt/c/Users/John/Dropbox/devel/storybase/tests/compiler/macro_decl_spec.lua)",
       "Bash(grep -rn \"asked/\\\\$\\\\|state \\\\$.*/\\\\$\\\\|\\\\$.*/\\\\$\" /mnt/c/Users/John/Dropbox/devel/storybase/stdlib/ /mnt/c/Users/John/Dropbox/devel/storybase/tests/)",
       "Bash(grep -n \"ending \\\\|scene ending\\\\|done$\" /mnt/c/Users/John/Dropbox/devel/storybase/demos/demo01_wanderer.sb)",
-      "Bash(grep -n \"runtime/debug\\\\|runtime/state\\\\|^### runtime/\\\\|^- \\\\`runtime/\\\\|runtime/log.lua\\\\|runtime/migrate\" /mnt/c/Users/John/Dropbox/devel/storybase/code_map.md)"
+      "Bash(grep -n \"runtime/debug\\\\|runtime/state\\\\|^### runtime/\\\\|^- \\\\`runtime/\\\\|runtime/log.lua\\\\|runtime/migrate\" /mnt/c/Users/John/Dropbox/devel/storybase/code_map.md)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(grep -n 'Int\\($\\\\|$max\\\\|$min' /mnt/c/Users/John/Dropbox/devel/storybase/tests/compiler/macro_decl_spec.lua)",
+      "Bash(grep -c \"set! .*\\\\`\" demos/demo26_bestiary.sb)"
     ]
   }
 }
