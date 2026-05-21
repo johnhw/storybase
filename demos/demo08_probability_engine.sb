@@ -73,16 +73,18 @@ fn supply-probability:
 "Number of steps in the shortest path to supply delivery."
 fn supply-path-steps:
   let path = find-path (supply/arrived = true) depth: 5
-  when path = nil:
+  if path = nil:
     0
-  count-where path fn(step): true
+  else:
+    size path
 
 "Number of steps in the optimal supply route."
 fn supply-optimal-steps:
   let path = optimal-path (supply/arrived = true) depth: 5
-  when path = nil:
+  if path = nil:
     0
-  count-where path fn(step): true
+  else:
+    size path
 
 "Probability the gambler clears his debt (0.0–1.0)."
 fn gambler-odds:

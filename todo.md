@@ -20,9 +20,10 @@ themselves and surfaced 10 authoring inelegances plus 5 verified runtime/parser
 bugs (two correctness, three diagnostic). See **§J** below.
 
 All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. Authoring inelegances
-J-I3 (elif / else if), J-I5 (bidirectional relations), and J-I6 (range
-builtin) were also fixed on 2026-05-21. The remaining 7 inelegances
-(J-I1, I2, I4, I7, I8, I9, I10) stay open as design-first backlog.
+J-I3 (elif / else if), J-I5 (bidirectional relations), J-I6 (range
+builtin), and J-I7 (length-name rationalisation) were also fixed on
+2026-05-21. The remaining 6 inelegances (J-I1, I2, I4, I8, I9, I10) stay
+open as design-first backlog.
 
 ---
 
@@ -32,8 +33,9 @@ builtin) were also fixed on 2026-05-21. The remaining 7 inelegances
 - §J-I1 (per-symbol fn duplication) and §J-I2 (loops in choice lists) account for
   the bulk of duplication across the 32 demos — investigate these first.
 - §J-I4 (time-axis / state-path double bookkeeping) shows up in demos 10, 16, 20, 22.
-- Others (§J-I7–I10) are smaller polish. §J-I3 (elif), §J-I5 (bidirectional
-  relations), and §J-I6 (range builtin) all fixed 2026-05-21.
+- §J-I8–I10 are smaller polish. §J-I3 (elif), §J-I5 (bidirectional
+  relations), §J-I6 (range builtin), and §J-I7 (length-name
+  rationalisation) all fixed 2026-05-21.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -493,15 +495,31 @@ allow-list so calls don't surface as `unknown call` warnings. Tests in
 `tests/runtime/eval_spec.lua` ("eval: range builtin"). See
 `docs/reference/language.md#collection-builtins`.
 
-### J-I7. Five names for "length" [inelegance — documentation]
+### J-I7. Five names for "length" [inelegance] — DONE 2026-05-21
 
-`size`, `count`, `list-size`, `ulist-size`, `map-size`. demo08 uses
+`size`, `count`, `list-size`, `ulist-size`, `map-size`. demo08 used
 `count-where path fn(step): true` to count a list — a clear "didn't find
 the right builtin" workaround.
 
-**Possible direction:** either consolidate to `size` as the canonical
-polymorphic name (keep `*-size` as aliases) or add a "which length
-function to use" note to `docs/reference/language.md`.
+**Fixed (2026-05-21)** by consolidating to a single shared `size_impl`
+in `runtime/eval.lua`'s BUILTINS table. `size` is the canonical
+polymorphic name; `count`, `list-size`, `ulist-size`, and `map-size`
+are aliases that all reference the same implementation, so they always
+agree on every input (sequence tables, hash-style tables, non-tables).
+The J-B4 checker's `SIZE_LIKE_FNS` set was extended to include the
+`*-size` aliases so applying any of them to a scalar emits the same
+`NOT_A_COLLECTION` warning.
+
+demo08's `supply-path-steps` / `supply-optimal-steps` were rewritten
+from the `count-where path fn(step): true` workaround to the obvious
+`size path`, and from `when path = nil: 0` / value-expr-follows to a
+proper `if path = nil: 0 else: size path` (also clearing the J-B5
+warning those functions previously emitted).
+
+Tests in `tests/runtime/eval_spec.lua` ("size, count, list-size,
+ulist-size, map-size are aliases" — sequence, map-style, non-table) and
+`tests/compiler/checker_spec.lua` (J-B4 cases for the three new
+aliases). See `docs/reference/language.md#collection-builtins`.
 
 ### J-I8. `set!` on a `let`-binding silently writes a fake state path [inelegance]
 

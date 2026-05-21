@@ -2871,6 +2871,37 @@ describe("stdlib: collection builtins", function()
     local node = fn_call("list-size", list_lit("a","b","c","d"))
     assert.equal(4, eval.eval_expr(node, c))
   end)
+
+  -- J-I7: rationalise all length names to a single `size` with aliases.
+  -- All five names must agree on every input.
+  it("size, count, list-size, ulist-size, map-size are aliases (sequence)", function()
+    local c = ctx({})
+    local seq = list_lit("a","b","c","d","e")
+    assert.equal(5, eval.eval_expr(fn_call("size",       seq), c))
+    assert.equal(5, eval.eval_expr(fn_call("count",      seq), c))
+    assert.equal(5, eval.eval_expr(fn_call("list-size",  seq), c))
+    assert.equal(5, eval.eval_expr(fn_call("ulist-size", seq), c))
+    assert.equal(5, eval.eval_expr(fn_call("map-size",   seq), c))
+  end)
+
+  it("size, count, list-size, ulist-size, map-size are aliases (map-style)", function()
+    local c = ctx({})
+    c.vars["m"] = { alpha=1, beta=2, gamma=3 }
+    local arg = { kind="fn_call", name="m", args={} }
+    assert.equal(3, eval.eval_expr(fn_call("size",       arg), c))
+    assert.equal(3, eval.eval_expr(fn_call("count",      arg), c))
+    assert.equal(3, eval.eval_expr(fn_call("list-size",  arg), c))
+    assert.equal(3, eval.eval_expr(fn_call("ulist-size", arg), c))
+    assert.equal(3, eval.eval_expr(fn_call("map-size",   arg), c))
+  end)
+
+  it("size aliases return 0 for non-table input", function()
+    local c = ctx({})
+    for _, name in ipairs({"size","count","list-size","ulist-size","map-size"}) do
+      assert.equal(0, eval.eval_expr(fn_call(name, int_lit(7)), c),
+        name .. " on non-table should be 0")
+    end
+  end)
 end)
 
 describe("engine pseudo-paths", function()

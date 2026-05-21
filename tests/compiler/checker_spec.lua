@@ -685,6 +685,35 @@ fn good:
       assert.are_not.equal(ast.W.NOT_A_COLLECTION, d.code)
     end
   end)
+
+  -- J-I7: size aliases (list-size, ulist-size, map-size) trigger the
+  -- same warning as size/count when applied to non-collection scalars.
+  it("warns on `list-size` of an Int state path", function()
+    check_warn([[
+state world:
+  hp: Int(0, 100) = 100
+fn bad:
+  list-size world/hp
+]], ast.W.NOT_A_COLLECTION)
+  end)
+
+  it("warns on `ulist-size` of an Int state path", function()
+    check_warn([[
+state world:
+  hp: Int(0, 100) = 100
+fn bad:
+  ulist-size world/hp
+]], ast.W.NOT_A_COLLECTION)
+  end)
+
+  it("warns on `map-size` of an Int state path", function()
+    check_warn([[
+state world:
+  hp: Int(0, 100) = 100
+fn bad:
+  map-size world/hp
+]], ast.W.NOT_A_COLLECTION)
+  end)
 end)
 
 -- ============================================================

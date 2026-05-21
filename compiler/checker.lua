@@ -3061,7 +3061,12 @@ end
 --   2. The argument is a bare zero-arg fn_call whose name matches a
 --      declared family — author probably wanted `(path-list family)`.
 
-local SIZE_LIKE_FNS = { ["size"] = true, ["count"] = true, ["empty?"] = true }
+-- size is canonical; count, list-size, ulist-size, map-size are aliases.
+-- All warn the same way when applied to a non-collection scalar.
+local SIZE_LIKE_FNS = {
+  ["size"] = true, ["count"] = true, ["empty?"] = true,
+  ["list-size"] = true, ["ulist-size"] = true, ["map-size"] = true,
+}
 
 local function is_collection_type_expr(texpr)
   if not texpr then return true end   -- unknown → don't warn

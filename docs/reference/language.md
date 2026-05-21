@@ -852,14 +852,14 @@ diagnostic at compile time.
 
 Superficial values may never appear in conditional expressions or drive game logic.
 
-`UList` supports `push!`, `pop!`, `size`, `count`, and `for` iteration. The `UMap` type must be declared as a named type alias before use in state declarations. `UMap` supports:
+`UList` supports `push!`, `pop!`, `size` (and its `ulist-size` / `count` aliases), and `for` iteration. The `UMap` type must be declared as a named type alias before use in state declarations. `UMap` supports:
 
 | Operation | Description |
 |-----------|-------------|
 | `map-set! path key value` | Set a key in a UMap |
 | `map-delete! path key` | Remove a key from a UMap |
 | `(map-get path key)` | Read a value (nil if absent) |
-| `(map-size path)` | Number of entries |
+| `(size path)` | Number of entries (`map-size` is an alias) |
 | `(map-keys path)` | List of all keys |
 
 ### Function types
@@ -1074,8 +1074,11 @@ player/waypoints[1:4]   # elements 1–3 (0-based, end exclusive)
 | `contains? coll item` | collection, any | Bool | True if item is in the collection |
 | `not-in? item coll` | any, collection | Bool | True if item is **not** in the collection |
 | `empty? coll` | collection | Bool | True if the collection has no elements |
-| `count coll` | collection | Int | Number of elements |
-| `size coll` | collection | Int | Alias for `count` |
+| `size coll` | collection | Int | Number of elements (canonical name; works on Set, List, UList, UMap, String) |
+| `count coll` | collection | Int | Alias for `size` |
+| `list-size coll` | List | Int | Alias for `size` (type-specific name) |
+| `ulist-size coll` | UList | Int | Alias for `size` (type-specific name) |
+| `map-size coll` | UMap | Int | Alias for `size` (type-specific name) |
 | `union a b` | Set, Set | Set | Elements in either set (no duplicates) |
 | `intersect a b` | Set, Set | Set | Elements in both sets |
 | `difference a b` | Set, Set | Set | Elements in `a` but not `b` |

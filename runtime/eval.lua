@@ -859,6 +859,20 @@ local function make_search_cache(ctx)
   return search_mod.clone_cache(ctx.state, ctx.scheduler, ctx.game)
 end
 
+-- Polymorphic length: handles List/UList/Set sequences via #v, and
+-- UMap/relation adjacency hash-style tables via a pairs() fallback.
+-- Shared by `size` (canonical) and its aliases (`count`, `list-size`,
+-- `ulist-size`, `map-size`) so the five names always agree.
+local function size_impl(args, ctx)
+  local v = eval_expr(args[1], ctx)
+  if type(v) ~= "table" then return 0 end
+  local n = #v
+  if n > 0 then return n end
+  local count = 0
+  for _ in pairs(v) do count = count + 1 end
+  return count
+end
+
 --- Built-in functions.
 local BUILTINS = {
   ["path-list"] = function(args, ctx)
@@ -1118,25 +1132,10 @@ local BUILTINS = {
     return a % b  -- Lua % is floor-division remainder (same sign convention as Python)
   end,
   -- ── Collection stdlib ────────────────────────────────────────────────────────
-  ["size"] = function(args, ctx)
-    local v = eval_expr(args[1], ctx)
-    if type(v) ~= "table" then return 0 end
-    local n = #v
-    if n > 0 then return n end
-    -- Also count map-style entries (e.g. relation adjacency {key=true,...})
-    local count = 0
-    for _ in pairs(v) do count = count + 1 end
-    return count
-  end,
-  ["count"] = function(args, ctx)  -- alias for size
-    local v = eval_expr(args[1], ctx)
-    if type(v) ~= "table" then return 0 end
-    local n = #v
-    if n > 0 then return n end
-    local count = 0
-    for _ in pairs(v) do count = count + 1 end
-    return count
-  end,
+  -- size is the canonical polymorphic length. count, list-size,
+  -- ulist-size, and map-size are aliases (see size_impl above).
+  ["size"]       = size_impl,
+  ["count"]      = size_impl,
   ["empty?"] = function(args, ctx)
     local v = eval_expr(args[1], ctx)
     if type(v) ~= "table" then return true end
@@ -1214,24 +1213,14 @@ local BUILTINS = {
     if idx < 0 then idx = #list + idx + 1 end
     return list[idx]  -- nil if out of bounds → Option(T)
   end,
-  ["list-size"] = function(args, ctx)
-    local list = eval_expr(args[1], ctx)
-    if type(list) ~= "table" then return 0 end
-    return #list
-  end,
+  ["list-size"]  = size_impl,  -- alias for size
   ["map-get"] = function(args, ctx)
     local map = eval_expr(args[1], ctx)
     local key = eval_expr(args[2], ctx)
     if type(map) ~= "table" then return nil end
     return map[key]
   end,
-  ["map-size"] = function(args, ctx)
-    local map = eval_expr(args[1], ctx)
-    if type(map) ~= "table" then return 0 end
-    local n = 0
-    for _ in pairs(map) do n = n + 1 end
-    return n
-  end,
+  ["map-size"]   = size_impl,  -- alias for size
   ["map-keys"] = function(args, ctx)
     local map = eval_expr(args[1], ctx)
     if type(map) ~= "table" then return {} end
@@ -1287,11 +1276,7 @@ local BUILTINS = {
   -- UList(T) is an unbounded superficial list. Stored as a Lua sequence table.
   -- Mutations use push!/pop!/clear!/set![idx].  These builtins are pure
   -- (return new tables; do not touch the state store).
-  ["ulist-size"] = function(args, ctx)
-    local list = eval_expr(args[1], ctx)
-    if type(list) ~= "table" then return 0 end
-    return #list
-  end,
+  ["ulist-size"] = size_impl,  -- alias for size
   ["ulist-get"] = function(args, ctx)
     local list = eval_expr(args[1], ctx)
     local idx  = eval_expr(args[2], ctx) or 1
