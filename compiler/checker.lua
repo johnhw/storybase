@@ -712,7 +712,7 @@ local MUTATION_NAMES = {
 
 -- Built-in function names known to the checker (must match BUILTINS in runtime/eval.lua).
 local CHECKER_BUILTIN_FNS = {
-  ["path-list"]=true, ["min"]=true, ["max"]=true,
+  ["path-list"]=true, ["range"]=true, ["min"]=true, ["max"]=true,
   ["count-where"]=true, ["any?"]=true, ["all?"]=true,
   ["random-int"]=true, ["random-bool"]=true, ["random-enum"]=true,
   ["random-choice"]=true, ["random-weighted"]=true,

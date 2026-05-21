@@ -1079,8 +1079,21 @@ player/waypoints[1:4]   # elements 1–3 (0-based, end exclusive)
 | `union a b` | Set, Set | Set | Elements in either set (no duplicates) |
 | `intersect a b` | Set, Set | Set | Elements in both sets |
 | `difference a b` | Set, Set | Set | Elements in `a` but not `b` |
+| `range n` | Int | List(Int) | `[0, 1, ..., n-1]` (empty when `n ≤ 0`) |
+| `range lo hi` | Int, Int | List(Int) | `[lo, lo+1, ..., hi-1]` (empty when `lo ≥ hi`) |
+| `range lo hi step` | Int, Int, Int | List(Int) | Step must be non-zero. Counts up when `step > 0` (while `i < hi`), down when `step < 0` (while `i > hi`). |
 
 `not-in? item coll` is sugar for `not (contains? coll item)` and reduces double-negative noise in guards.
+
+`range` produces a list suitable for iteration with `for`:
+
+```
+for i in (range count):
+  spawn! rooms `room-{i} Room(...)
+```
+
+The result is capped at 10000 elements to match the engine's loop safety
+limit; larger requests raise a runtime error.
 
 ---
 

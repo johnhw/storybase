@@ -377,6 +377,7 @@ ctx = {
 **Built-in functions (BUILTINS table, line ~524):**
 ```
 path-list        → list of live family keys
+range            n | lo hi | lo hi step → List(Int) (Python-style, exclusive hi; capped at 10000)
 query-at         path [time: value] → value at given time bound (or current if omitted)
 query-history    path → [{time, old, new}, ...] (all recorded changes)
 query-changes    path [last-n: N] → [{time, old, new}, ...] (most recent N changes)

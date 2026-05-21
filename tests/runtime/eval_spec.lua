@@ -1958,6 +1958,107 @@ scene s:
 end)
 
 -- ============================================================
+-- Built-in: range
+-- ============================================================
+
+describe("eval: range builtin", function()
+  local function range_call(...)
+    local args = {}
+    for _, v in ipairs({...}) do args[#args+1] = int_lit(v) end
+    return { kind="fn_call", name="range", args=args }
+  end
+
+  it("range n returns [0..n-1]", function()
+    assert.same({0, 1, 2, 3, 4}, eval.eval_expr(range_call(5), ctx()))
+  end)
+
+  it("range 0 yields empty list", function()
+    assert.same({}, eval.eval_expr(range_call(0), ctx()))
+  end)
+
+  it("range with negative n yields empty list", function()
+    assert.same({}, eval.eval_expr(range_call(-3), ctx()))
+  end)
+
+  it("range lo hi yields [lo..hi-1]", function()
+    assert.same({2, 3, 4, 5, 6}, eval.eval_expr(range_call(2, 7), ctx()))
+  end)
+
+  it("range lo hi where lo >= hi yields empty list", function()
+    assert.same({}, eval.eval_expr(range_call(5, 5), ctx()))
+    assert.same({}, eval.eval_expr(range_call(10, 3), ctx()))
+  end)
+
+  it("range with positive step", function()
+    assert.same({0, 2, 4, 6, 8}, eval.eval_expr(range_call(0, 10, 2), ctx()))
+  end)
+
+  it("range with positive step that doesn't divide evenly", function()
+    assert.same({0, 3, 6, 9}, eval.eval_expr(range_call(0, 10, 3), ctx()))
+  end)
+
+  it("range with negative step counts down", function()
+    assert.same({10, 8, 6, 4, 2}, eval.eval_expr(range_call(10, 0, -2), ctx()))
+  end)
+
+  it("range with negative bounds", function()
+    assert.same({-3, -2, -1, 0, 1}, eval.eval_expr(range_call(-3, 2), ctx()))
+  end)
+
+  it("range errors on zero step", function()
+    assert.has_error(function()
+      eval.eval_expr(range_call(0, 5, 0), ctx())
+    end)
+  end)
+
+  it("range errors when result exceeds safety cap", function()
+    assert.has_error(function()
+      eval.eval_expr(range_call(20000), ctx())
+    end)
+  end)
+
+  it("range errors on non-integer arg", function()
+    local n = { kind="string_lit", value="five" }
+    assert.has_error(function()
+      eval.eval_expr({ kind="fn_call", name="range", args={n} }, ctx())
+    end)
+  end)
+
+  it("range errors on no args", function()
+    assert.has_error(function()
+      eval.eval_expr({ kind="fn_call", name="range", args={} }, ctx())
+    end)
+  end)
+
+  it("range errors on too many args", function()
+    assert.has_error(function()
+      eval.eval_expr(range_call(0, 10, 1, 1), ctx())
+    end)
+  end)
+
+  it("range is iterable by for via compiled source", function()
+    local src = [[
+module t
+  version: 1.0
+engine-config:
+  entry-scene: s
+state world/sum: Int(0, 100) = 0
+fn add-up n:
+  for i in (range n):
+    inc! world/sum i
+scene s:
+  * go -> s
+]]
+    local gt = assert(compiler.compile(src, "t.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    eval.call_fn("add-up", { int_lit(5) }, c)
+    assert.equal(0 + 1 + 2 + 3 + 4, st:get("world/sum"))
+  end)
+end)
+
+-- ============================================================
 -- Built-ins: any? / all? / tostring / division
 -- ============================================================
 

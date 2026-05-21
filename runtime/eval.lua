@@ -868,6 +868,57 @@ local BUILTINS = {
     end
     return {}
   end,
+  -- range n            → [0, 1, ..., n-1]
+  -- range lo hi        → [lo, lo+1, ..., hi-1]
+  -- range lo hi step   → step ≠ 0; direction follows the sign of step
+  -- Cap at 10000 elements to match the engine's while-loop safety limit.
+  ["range"] = function(args, ctx)
+    local n = #args
+    if n < 1 or n > 3 then
+      error("range: expected 1..3 arguments, got " .. n)
+    end
+    local lo, hi, step
+    if n == 1 then
+      lo, hi, step = 0, eval_expr(args[1], ctx), 1
+    elseif n == 2 then
+      lo, hi, step = eval_expr(args[1], ctx), eval_expr(args[2], ctx), 1
+    else
+      lo   = eval_expr(args[1], ctx)
+      hi   = eval_expr(args[2], ctx)
+      step = eval_expr(args[3], ctx)
+    end
+    if type(lo) ~= "number" or lo ~= math.floor(lo) then
+      error("range: lo must be an integer, got " .. tostring(lo))
+    end
+    if type(hi) ~= "number" or hi ~= math.floor(hi) then
+      error("range: hi must be an integer, got " .. tostring(hi))
+    end
+    if type(step) ~= "number" or step ~= math.floor(step) then
+      error("range: step must be an integer, got " .. tostring(step))
+    end
+    if step == 0 then error("range: step must not be zero") end
+    local out = {}
+    local limit = 10000
+    local i = lo
+    if step > 0 then
+      while i < hi do
+        out[#out + 1] = i
+        if #out > limit then
+          error("range: result exceeds 10000-element safety limit")
+        end
+        i = i + step
+      end
+    else
+      while i > hi do
+        out[#out + 1] = i
+        if #out > limit then
+          error("range: result exceeds 10000-element safety limit")
+        end
+        i = i + step
+      end
+    end
+    return out
+  end,
   ["min"] = function(args, ctx)
     local a = eval_expr(args[1], ctx)
     local b = eval_expr(args[2], ctx)

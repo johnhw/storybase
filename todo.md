@@ -20,9 +20,9 @@ themselves and surfaced 10 authoring inelegances plus 5 verified runtime/parser
 bugs (two correctness, three diagnostic). See **§J** below.
 
 All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. Authoring inelegances
-J-I3 (elif / else if) and J-I5 (bidirectional relations) were also fixed
-on 2026-05-21. The remaining 8 inelegances (J-I1, I2, I4, I6, I7, I8, I9, I10)
-stay open as design-first backlog.
+J-I3 (elif / else if), J-I5 (bidirectional relations), and J-I6 (range
+builtin) were also fixed on 2026-05-21. The remaining 7 inelegances
+(J-I1, I2, I4, I7, I8, I9, I10) stay open as design-first backlog.
 
 ---
 
@@ -32,8 +32,8 @@ stay open as design-first backlog.
 - §J-I1 (per-symbol fn duplication) and §J-I2 (loops in choice lists) account for
   the bulk of duplication across the 32 demos — investigate these first.
 - §J-I4 (time-axis / state-path double bookkeeping) shows up in demos 10, 16, 20, 22.
-- Others (§J-I6–I10) are smaller polish. §J-I3 (elif) and §J-I5 (bidirectional
-  relations) both fixed 2026-05-21.
+- Others (§J-I7–I10) are smaller polish. §J-I3 (elif), §J-I5 (bidirectional
+  relations), and §J-I6 (range builtin) all fixed 2026-05-21.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -475,15 +475,23 @@ and 20 to remove the manual mirror lines. Tests in
 `tests/runtime/eval_spec.lua` "eval_stmt: relate_both_mut / unrelate_both_mut".
 See `docs/reference/language.md#relate-both--unrelate-both`.
 
-### J-I6. No integer range [inelegance]
+### J-I6. No integer range [inelegance] — DONE 2026-05-21
 
-Every numeric loop is `for x in [0,1,2,3,4,5,6,7]:` (demo09). demo23 wants
-"spawn N rooms" but can't loop over a runtime count, so it uses cascaded
-`when count >= 4` / `when count >= 5` blocks.
+Every numeric loop previously spelled out the integers (`for x in
+[0,1,2,3,4,5,6,7]:` in demo09); runtime-sized loops weren't expressible
+at all.
 
-**Possible direction:** `for i in 0..count:` or a `range` builtin
-returning a list. The latter is one new entry in `eval.lua`'s builtin
-table.
+**Fixed (2026-05-21)** by adding a `range` builtin in `runtime/eval.lua`'s
+BUILTINS table (Python-style, exclusive upper bound):
+- `range n` → `[0..n-1]`
+- `range lo hi` → `[lo..hi-1]`
+- `range lo hi step` → directional, non-zero step
+
+Result capped at 10000 elements (matches the engine's while-loop safety
+limit). `range` was also added to the checker's `CHECKER_BUILTIN_FNS`
+allow-list so calls don't surface as `unknown call` warnings. Tests in
+`tests/runtime/eval_spec.lua` ("eval: range builtin"). See
+`docs/reference/language.md#collection-builtins`.
 
 ### J-I7. Five names for "length" [inelegance — documentation]
 
