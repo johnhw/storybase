@@ -6,34 +6,39 @@ Completed work has been moved to [completed.md](completed.md).
 
 ## Current Status (2026-05-20)
 
-All eight implementation phases complete. Language review passes 1 and 2 complete.
-Demos 01–25 tested end-to-end. UList(T) and UMap(K,V) fully implemented.
-UI driver layer complete. All compile-time validation gaps (AV-1 through AV-4) and
-silent-failure hazards SF-1 through SF-4 resolved. All AE issues (AE-1 through AE-17)
-resolved. All critical and major bugs (#1–#13) resolved. Full audit backlog (§A3–§A16)
-complete. §B1/B2/B4/B5, §C1/C2/C3/C4, §F1/F2, and the full §E series (E0 decl-macro
-substrate, E1 quests, E2 dialog-topic, E3 inventory+stat, E4 review fixes) all
-complete. §G2 (stateless HTTP API) and §H2 (diff-mode hot reload) also complete.
-I1 (demo26 — record `with` mixins + path-pattern queries), I2 (demo27 — file-local
-user-authored `decl-macro`), I3 (demo28 — counterfactual `from:` rewind +
-`distribution: conditioned-on` bounded), I4 (demo29 — computed `-> (expr)`
-+ `goto-scene!`/`enter-scene!`/`exit-scene!` imperative scene navigation),
-I5 (demo30 — `changes` binding in tag-level + fn-level hooks; `path@before`
-post-contract surviving `--production` via `strict-contracts: true`),
-I6 (demo31 — embedded-host walkthrough with `engine/emit` listeners +
-save/load round-trip via the public `lib/storybase.lua` API), and the
-I7 residue promotion (demo32 — `union`/`intersect`/`difference` as load-bearing
-game logic + `(set)` empty literal + labelled `engine/checkpoint!`) all
-complete. See completed.md.
+The core language and runtime are feature-complete against the V1.0 specification.
+All eight implementation phases, language review passes 1 and 2, the full audit
+backlog, the full §E series, §F1/F2, §G2, §H2, and the I-series demos (26–32) are
+complete — details in [completed.md](completed.md).
 
 **~2958 successes / 0 failures / 2 pending (known limitations).**
-(HTTP/debug spec failures are transient network timing issues — ignore unless touching http/debug code.)
+(HTTP/debug spec failures are transient network timing issues — ignore unless
+touching http/debug code.)
 
-The core language and runtime are feature-complete against the V1.0 specification.
+A **language review pass 3** (2026-05-20) surveyed demos 01–32 against the demos
+themselves and surfaced 10 authoring inelegances plus 5 verified runtime/parser
+bugs (two correctness, three diagnostic). See **§J** below.
+
+J-B1 and J-B2 (the two correctness bugs) were **fixed on 2026-05-21** — family
+`max:` is now enforced at `spawn!`, and `find ... limit:` evaluates arbitrary
+integer expressions at runtime. Regression tests live in
+`tests/runtime/state_spec.lua`, `tests/runtime/query_spec.lua`, and
+`tests/runtime/j_bugs_spec.lua`.
 
 ---
 
 ## What to work on next
+
+**Diagnostic gaps from review pass 3 (small, polish):**
+- §J-B3 — unknown `find` named-args silently skipped
+- §J-B4 — `size`/`count` on non-collection silently returns 0
+- §J-B5 — `when … : <expr>` looks like early-return but isn't
+
+**Authoring inelegances from review pass 3 (larger, design-first):**
+- §J-I1 (per-symbol fn duplication) and §J-I2 (loops in choice lists) account for
+  the bulk of duplication across the 32 demos — investigate these first.
+- §J-I4 (time-axis / state-path double bookkeeping) shows up in demos 10, 16, 20, 22.
+- Others (§J-I3, I5–I10) are smaller polish.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -312,6 +317,184 @@ The remaining residue:
   tests. Idiomatic StoryBase puts lambdas inside `find`; an out-of-`find`
   lambda demo would feel contrived. Promote only if a user-facing
   limitation surfaces.
+
+---
+
+## J. Language Review Pass 3 (2026-05-20)
+
+A read-through of demos 01–32 to spot places the demos visibly work around
+language limits, plus targeted runtime/parser inspection for bugs hinted at
+by those workarounds. Two of the five bugs were verified with minimal
+repro `.sb` files.
+
+### J-B1. Family `max:` capacity not enforced at `spawn!` ✅ FIXED (2026-05-21)
+
+`state things/{t}: Thing max: 2` previously declared a cap that
+`runtime/state.lua:store:spawn` ignored — only the `SPAWN_EXISTS` uniqueness
+sentinel was checked. Fixed by counting existing keys via `path_list(family)`
+before allowing a new spawn; raises `FAMILY_FULL` at the cap. Set/List capacity
+enforcement remains unchanged.
+
+Regression tests: `tests/runtime/state_spec.lua` (unit) and
+`tests/runtime/j_bugs_spec.lua` (e2e: `spawn!` errors at cap, despawn frees a
+slot, no-cap families remain unbounded).
+
+### J-B2. `find ... limit: <non-int-literal>` silently falls back to 10 ✅ FIXED (2026-05-21)
+
+`compiler/parser.lua` (find-clause parser) used to drop any non-`int_lit`
+limit expression and substitute the literal `10`. Fixed by storing the
+parsed expression alongside the literal-int fast-path (`value_expr` on the
+clause); `runtime/query.lua` evaluates `value_expr` at find-time and errors
+on non-integer (`FIND_LIMIT_TYPE`) or negative (`FIND_LIMIT_NEGATIVE`)
+results. Literal-int `limit: 4` continues to work via the unchanged
+`clause.value` path (preserves all existing parser tests).
+
+Regression tests: `tests/runtime/query_spec.lua` (unit: path-limit, arith,
+non-int error, zero) and `tests/runtime/j_bugs_spec.lua` (e2e via
+`fn limited: find things ... limit: world/cap`).
+
+### J-B3. Unknown `find` named-args silently skipped [bug — diagnostic]
+
+Same parser block: an unrecognised `NAMED_ARG` inside a `find ...` clause
+list is dropped with a "skip" comment. Typos like `wherre:` produce no
+error. Other parsers emit `BAD_EXPRESSION` for unknown tokens.
+
+**Fix sketch:** add a final `else: p:emit_err(ast.E.BAD_EXPRESSION, "unknown find clause '" .. na.value .. "'", na.pos)` branch.
+
+### J-B4. `size`/`count` on a non-collection silently returns 0 [bug — diagnostic]
+
+`runtime/eval.lua:1055` (`size`) and `:1065` (`count`) both early-return 0
+on a non-table input. Catches author mistakes like `size things` (treating
+a family-base path as a list — `things` resolves to nil, `size nil → 0`).
+
+**Fix sketch:** at compile time, when the receiver's type is known and is
+not Set/List/UList/Map/relation-adjacency, emit a `NOT_A_COLLECTION`
+warning. Keep the runtime tolerant behavior (avoids breaking valid uses
+on optional values).
+
+### J-B5. `when … : <expr>` looks like early-return but isn't [bug — diagnostic]
+
+`runtime/eval.lua:2325`: a `when` body that evaluates to a value sets
+`ctx.retval`, but the surrounding sequence continues and any subsequent
+expr-stmt overwrites it. Authors copying patterns like demo08's
+`supply-path-steps`:
+```
+when path = nil:
+  0
+count-where path fn(step): true
+```
+will get a silent wrong answer when the follow-up call isn't itself
+nil-tolerant. (demo08 happens to work because `count-where nil` also
+returns 0.)
+
+**Fix sketch:** in `compiler/checker.lua` (or a new lint pass), warn when
+a `when`-body's last statement is a bare expression and a sibling
+statement follows that also produces a value. Alternatively, document
+clearly that StoryBase fns have no early return — only the last evaluated
+expression wins.
+
+### J-I1. Symbol-keyed work needs N near-identical fns [inelegance]
+
+Every demo with parallel actions per symbol writes one fn per case:
+- demo02: `buy-herbs`/`buy-iron`/`buy-silk` + `sell-*` (6 fns differing
+  only by symbol + price path)
+- demo05: `order-battle-stations`/`order-guarded`/`order-stand-down` (only
+  diff is the message constructor)
+- demo11: `* Hire X` choice repeated for each of 4 members
+- demo15: `cast-fireball`/`cast-ice-shard`/`cast-heal-beam` despite the
+  spell record already carrying `mana-cost` and `ingredient`
+
+**Root cause:** no way to bind a Symbol parameter to a path-builder so
+`cast-spell s` can read `spells/{s}/mana-cost`. Macros + interpolated
+paths half-solve it inside fn bodies, but choice lists can't be generated
+this way.
+
+**Possible direction:** decl-macros already let authors generate per-symbol
+fns; document the pattern (`cast-spell-decl `fireball`) explicitly, OR
+extend interpolated-path semantics so a fn parameter can drive both
+sides of a `spells/{s}/...` lookup (it already works in many cases —
+verify which cases fail).
+
+### J-I2. Choice lists are static — no `for npc in ...: * Talk to {npc}` [inelegance]
+
+A scene with N family members duplicates the choice block N times:
+demo04 crew narration, demo07 four shrines, demo11 four hires, demo20
+per-room "X here:" lines.
+
+**Possible direction:** allow a `for x in <list>: *` form inside scene
+bodies that generates one choice per iteration with `{x}`-interpolated
+guards and text. Engine already loops over choices at runtime; the gap
+is parser/codegen.
+
+### J-I3. No `elif` / `else if` [inelegance — small]
+
+Every multi-branch ending uses nested `if/else: if/else:` (demos 03, 05,
+09, 10, 11, 14, 16, 21, …). Adds one indent level per branch.
+
+**Possible direction:** parser-only change — accept `else if` after an
+`if`-body and desugar to nested `if_expr`. Or add `cond` to scene-body
+context (it's already an expression form).
+
+### J-I4. Time-axis ↔ state path double-bookkeeping [inelegance]
+
+Demos 10, 16, 20, 22 all pair every `time-inc! turn: N` with `inc! world/turn N`
+(and `time-set! hour: 8` with `set! world/hour 8`). The engine's time axis
+is invisible from narration paths, so authors mirror it into a state path.
+demo20 even mirrors three things meaning one: `world/period` (enum),
+`world/period-index` (Int), and the actual time axis.
+
+**Possible direction:** expose time-axis values as readable paths (e.g.
+`time/turn`, `time/hour`) so narration can interpolate them directly and
+state-path mirrors go away.
+
+### J-I5. Bidirectional relations need manual mirroring [inelegance]
+
+demo16: `relate! roads `a `b; relate! roads `b `a`. No symmetric flag.
+
+**Possible direction:** a `bidirectional: true` field on `relation` declarations,
+or a `relate-bi!` mutation.
+
+### J-I6. No integer range [inelegance]
+
+Every numeric loop is `for x in [0,1,2,3,4,5,6,7]:` (demo09). demo23 wants
+"spawn N rooms" but can't loop over a runtime count, so it uses cascaded
+`when count >= 4` / `when count >= 5` blocks.
+
+**Possible direction:** `for i in 0..count:` or a `range` builtin
+returning a list. The latter is one new entry in `eval.lua`'s builtin
+table.
+
+### J-I7. Five names for "length" [inelegance — documentation]
+
+`size`, `count`, `list-size`, `ulist-size`, `map-size`. demo08 uses
+`count-where path fn(step): true` to count a list — a clear "didn't find
+the right builtin" workaround.
+
+**Possible direction:** either consolidate to `size` as the canonical
+polymorphic name (keep `*-size` as aliases) or add a "which length
+function to use" note to `docs/reference/language.md`.
+
+### J-I8. `set!` on a `let`-binding silently writes a fake state path [inelegance]
+
+Already tracked as §A1 (SF-5). Kept here only as a cross-reference: still
+visible to authors despite the AV-4 mitigation.
+
+### J-I9. Author writes redundant clamp [inelegance — discoverability]
+
+demo05: `dec! castle/supplies 10; when castle/supplies < 0: set! castle/supplies 0`.
+Inline `Int(0, 300)` already clamps — the guard is dead code. The
+clamping behavior isn't visible enough.
+
+**Possible direction:** mention clamping in error messages when the demo
+manually clamps, or add a checker lint for "dead guard after inc!/dec!".
+
+### J-I10. Hooks collapse into multi-way switches [inelegance]
+
+demo20's `hook after: move-to:` is 5 `when player/location = X: add! flag`
+blocks. A per-room declarative `on-enter` (or per-flag declarative `gained-when:`)
+would express the same data with less indirection.
+
+**Possible direction:** allow `state world/location: Room; hook after move-to to `study: add! ...`. Pattern-match on the new value in the hook header.
 
 ---
 

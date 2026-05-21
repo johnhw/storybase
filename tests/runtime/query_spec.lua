@@ -278,6 +278,67 @@ describe("find query: limit", function()
     assert.equal("a", result[1])
     assert.equal("b", result[2])
   end)
+
+  -- J-B2: limit: must accept any integer expression and evaluate at runtime,
+  -- not silently fall back to 10 for non-literal expressions.
+  it("evaluates a literal limit AST node via value_expr", function()
+    local c = make_ctx({
+      ["npcs/a/hp"] = 1, ["npcs/b/hp"] = 2, ["npcs/c/hp"] = 3,
+    })
+    local result = query.find(c, "npcs", {
+      { kind = "limit", value_expr = int_lit(2) },
+    })
+    assert.equal(2, #result)
+  end)
+
+  it("evaluates limit: from a state path", function()
+    local c = make_ctx({
+      ["world/want-limit"] = 2,
+      ["npcs/a/hp"] = 1, ["npcs/b/hp"] = 2,
+      ["npcs/c/hp"] = 3, ["npcs/d/hp"] = 4,
+      ["npcs/e/hp"] = 5,
+    })
+    local result = query.find(c, "npcs", {
+      { kind = "limit", value_expr = path("world", "want-limit") },
+    })
+    assert.equal(2, #result)
+  end)
+
+  it("errors on non-integer limit", function()
+    local c = make_ctx({
+      ["world/want-limit"] = "not an int",
+      ["npcs/a/hp"] = 1,
+    })
+    local ok, err = pcall(query.find, c, "npcs", {
+      { kind = "limit", value_expr = path("world", "want-limit") },
+    })
+    assert.is_false(ok)
+    assert.is_true(tostring(err):find("FIND_LIMIT_TYPE", 1, true) ~= nil,
+      "expected FIND_LIMIT_TYPE error, got: " .. tostring(err))
+  end)
+
+  it("errors on negative limit", function()
+    local c = make_ctx({
+      ["world/want-limit"] = -3,
+      ["npcs/a/hp"] = 1,
+    })
+    local ok, err = pcall(query.find, c, "npcs", {
+      { kind = "limit", value_expr = path("world", "want-limit") },
+    })
+    assert.is_false(ok)
+    assert.is_true(tostring(err):find("FIND_LIMIT_NEGATIVE", 1, true) ~= nil,
+      "expected FIND_LIMIT_NEGATIVE error, got: " .. tostring(err))
+  end)
+
+  it("limit 0 returns empty result", function()
+    local c = make_ctx({
+      ["npcs/a/hp"] = 1, ["npcs/b/hp"] = 2,
+    })
+    local result = query.find(c, "npcs", {
+      { kind = "limit", value_expr = int_lit(0) },
+    })
+    assert.equal(0, #result)
+  end)
 end)
 
 -- ============================================================

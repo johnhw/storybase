@@ -1183,8 +1183,8 @@ local function parse_atom(p)
           clauses[#clauses+1] = { kind = "order_by", path = path_node, dir = dir }
         elseif na.value == "limit" then
           local lim_tok = parse_expr(p)
-          local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or 10
-          clauses[#clauses+1] = { kind = "limit", value = lim_val }
+          local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or nil
+          clauses[#clauses+1] = { kind = "limit", value = lim_val, value_expr = lim_tok }
         elseif na.value == "in-state" then
           local state_expr = parse_expr(p)
           clauses[#clauses+1] = { kind = "in_state", state_expr = state_expr }
@@ -1226,8 +1226,8 @@ local function parse_atom(p)
               clauses[#clauses+1] = { kind = "order_by", path = path_node, dir = dir }
             elseif na.value == "limit" then
               local lim_tok = parse_expr(p)
-              local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or 10
-              clauses[#clauses+1] = { kind = "limit", value = lim_val }
+              local lim_val = (lim_tok and lim_tok.kind == "int_lit") and lim_tok.value or nil
+              clauses[#clauses+1] = { kind = "limit", value = lim_val, value_expr = lim_tok }
             elseif na.value == "in-state" then
               local state_expr = parse_expr(p)
               clauses[#clauses+1] = { kind = "in_state", state_expr = state_expr }

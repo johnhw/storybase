@@ -570,6 +570,15 @@ function M.new(schema, log)
     if self._cache[prefix] ~= nil then
       error("SPAWN_EXISTS: Family member " .. prefix .. " already exists")
     end
+    -- Enforce family capacity (`max:`) if declared on the schema.
+    local fam_info = self._type_index["__family__" .. family]
+    if fam_info and fam_info.max then
+      local current = #self:path_list(family)
+      if current >= fam_info.max then
+        error("FAMILY_FULL: Family " .. family ..
+              " is at capacity (" .. fam_info.max .. ")")
+      end
+    end
     -- Write each field from the record (or just mark the key as existing)
     local rec = type(record) == "table" and record or {}
     if type(record) == "table" then
@@ -582,7 +591,6 @@ function M.new(schema, log)
       end
     end
     -- Apply type defaults for any fields not explicitly set in the record
-    local fam_info = self._type_index["__family__" .. family]
     for _, f in ipairs(fam_info and fam_info.fields or {}) do
       if f.name and rec[f.name] == nil and f.default ~= nil then
         local path = family .. "/" .. key_str .. "/" .. f.name

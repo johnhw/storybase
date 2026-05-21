@@ -108,7 +108,21 @@ function M.find(ctx, family, clauses)
       order_path = clause.path
       order_dir  = clause.dir or "asc"
     elseif clause.kind == "limit" then
-      limit = clause.value
+      if clause.value_expr then
+        local ok, v = pcall(eval_mod.eval_expr, clause.value_expr, ctx)
+        if not ok then
+          error("FIND_LIMIT_EVAL: failed to evaluate limit: expression: " .. tostring(v))
+        end
+        if type(v) ~= "number" or v ~= math.floor(v) then
+          error("FIND_LIMIT_TYPE: find limit: must be an integer, got " .. tostring(v))
+        end
+        if v < 0 then
+          error("FIND_LIMIT_NEGATIVE: find limit: must be non-negative, got " .. tostring(v))
+        end
+        limit = v
+      else
+        limit = clause.value
+      end
     elseif clause.kind == "count" then
       count_only = true
     elseif clause.kind == "within" or clause.kind == "connected_to" then

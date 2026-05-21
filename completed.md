@@ -5,6 +5,50 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## J-B1 + J-B2 correctness fixes from Review Pass 3 ✅ (2026-05-21)
+
+Fixed the two correctness bugs surfaced by Review Pass 3:
+
+- **J-B1**: `store:spawn` in `runtime/state.lua` now consults
+  `fam_info.max` and errors `FAMILY_FULL` once the family is at capacity.
+  Previously the cap was parsed and stored but never read.
+- **J-B2**: `find ... limit:` now accepts any integer expression (paths,
+  arithmetic, lambdas, etc.). The parser captures `value_expr` on the limit
+  clause; `runtime/query.lua` evaluates it at find-time and errors on
+  non-integer or negative results. Literal-int `limit: 4` still uses the
+  fast path so all existing parser tests pass unchanged.
+
+Tests:
+- `tests/runtime/state_spec.lua` — 4 new cases (cap, despawn frees a slot,
+  spawn-up-to-max, no-cap families unbounded).
+- `tests/runtime/query_spec.lua` — 5 new cases (value_expr literal, path
+  limit, non-int error, negative error, zero limit).
+- `tests/runtime/j_bugs_spec.lua` (new file) — 7 end-to-end cases parsing
+  full `.sb` source through the API.
+
+Full suite: 2981 successes / 0 failures (+ 2 pre-existing pending).
+CLI integration: 256/256 passing.
+
+---
+
+## Language Review Pass 3 — demos 01–32 audit ✅ (2026-05-20)
+
+A read-through of every shipped demo against the demos themselves to spot places
+where authors visibly work around language limits, followed by targeted
+runtime/parser inspection for bugs hinted at by those workarounds.
+
+Surfaced **10 authoring inelegances** (§J-I1 through §J-I10) and **5 bugs**
+(§J-B1 through §J-B5) — two correctness, three diagnostic. Two correctness bugs
+verified with minimal repro `.sb` files:
+- §J-B1: family `max:` declared cap accepts unlimited `spawn!` calls.
+- §J-B2: `find ... limit: <non-int-literal>` silently substitutes the literal 10.
+
+Full write-up of each item, with file:line anchors and fix sketches, lives in
+**§J of [todo.md](todo.md)**. No code changed — this pass is purely
+investigation, with the backlog landing in todo.md for later implementation.
+
+---
+
 ## I7 — demo32 "The Inquisitor's Board" — set ops + labelled checkpoint ✅ (2026-05-20)
 
 Retires the §I7 residue items that no earlier demo exercised end-to-end:

@@ -299,6 +299,53 @@ describe("state store: spawn / despawn", function()
     local s = new_store()
     assert.same({}, s:path_list("party"))
   end)
+
+  -- J-B1: family `max:` capacity must be enforced at spawn (the schema's
+  -- party family is declared with max = 4).
+  it("spawn errors when family is at declared max capacity", function()
+    local s = new_store()
+    s:spawn("party", "a", {})
+    s:spawn("party", "b", {})
+    s:spawn("party", "c", {})
+    s:spawn("party", "d", {})
+    local ok, err = pcall(function() s:spawn("party", "e", {}) end)
+    assert.is_false(ok)
+    assert.is_true(tostring(err):find("FAMILY_FULL", 1, true) ~= nil,
+      "expected FAMILY_FULL error, got: " .. tostring(err))
+  end)
+
+  it("despawn frees a slot and allows another spawn at capacity", function()
+    local s = new_store()
+    s:spawn("party", "a", {})
+    s:spawn("party", "b", {})
+    s:spawn("party", "c", {})
+    s:spawn("party", "d", {})
+    s:despawn("party", "b")
+    -- After despawn there's room again
+    assert.has_no.errors(function() s:spawn("party", "e", {}) end)
+  end)
+
+  it("spawn allows up to max without errors", function()
+    local s = new_store()
+    for _, k in ipairs({"w","x","y","z"}) do
+      s:spawn("party", k, {})
+    end
+    assert.equal(4, #s:path_list("party"))
+  end)
+
+  it("families without a max: have no cap", function()
+    -- Build a schema with no max on a separate family
+    local schema = {
+      states = {
+        { kind = "family", family = "bigfam", var = "m",
+          type_desc = { tag = "int" } },  -- no max
+      },
+    }
+    local l = log_mod.new()
+    local s = state_mod.new(schema, l)
+    for i = 1, 20 do s:spawn("bigfam", "k" .. i, {}) end
+    assert.equal(20, #s:path_list("bigfam"))
+  end)
 end)
 
 -- ============================================================
