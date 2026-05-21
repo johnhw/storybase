@@ -1120,7 +1120,21 @@ relate!   exits 'forest 'dungeon
 unrelate! exits 'forest 'dungeon
 ```
 
-Add or remove an edge from a `relation`.
+Add or remove a directed edge from a `relation`.
+
+### `relate-both!` / `unrelate-both!`
+
+```
+relate-both!   roads 'fortress 'village
+unrelate-both! roads 'port-city 'market-town
+```
+
+Add or remove a symmetric pair of edges in one call. Equivalent to two
+`relate!`/`unrelate!` calls that mirror the same edge — useful for
+undirected relations (roads, neighbours, two-way doors) where authoring
+both directions by hand is repetitive and easy to forget. Each call
+writes two log entries (one per direction), so replay, undo, and
+counterfactuals all see both edges.
 
 ### `spawn!` / `despawn!`
 

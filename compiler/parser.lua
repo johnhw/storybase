@@ -2119,6 +2119,16 @@ MUTATION_TABLE = {
     local a = parse_atom(p); local b = parse_atom(p)
     p:skip_to_eol(); return ast.unrelate_mut(rel, a, b, pos)
   end,
+  ["relate-both!"] = function(p, pos)
+    local rel = p:at("IDENT") and p:adv().value or "?"
+    local a = parse_atom(p); local b = parse_atom(p)
+    p:skip_to_eol(); return ast.relate_both_mut(rel, a, b, pos)
+  end,
+  ["unrelate-both!"] = function(p, pos)
+    local rel = p:at("IDENT") and p:adv().value or "?"
+    local a = parse_atom(p); local b = parse_atom(p)
+    p:skip_to_eol(); return ast.unrelate_both_mut(rel, a, b, pos)
+  end,
   ["send!"]    = function(p, pos)
     -- actor is always a bare name; use parse_atom so '(' is not collected as an arg
     local actor = parse_atom(p)

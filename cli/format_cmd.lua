@@ -433,6 +433,12 @@ local function fmt_stmt(buf, node, is_fn)
   elseif k == K.UNRELATE_MUT then
     buf.line("unrelate! " .. tostring(node.rel or "?")
              .. " " .. fmt_expr(node.a) .. " " .. fmt_expr(node.b))
+  elseif k == K.RELATE_BOTH_MUT then
+    buf.line("relate-both! " .. tostring(node.rel or "?")
+             .. " " .. fmt_expr(node.a) .. " " .. fmt_expr(node.b))
+  elseif k == K.UNRELATE_BOTH_MUT then
+    buf.line("unrelate-both! " .. tostring(node.rel or "?")
+             .. " " .. fmt_expr(node.a) .. " " .. fmt_expr(node.b))
 
   -- Time mutations
   elseif k == K.TIME_INC_MUT then

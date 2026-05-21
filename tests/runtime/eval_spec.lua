@@ -2186,6 +2186,75 @@ scene s:
 end)
 
 -- ============================================================
+-- relate-both! / unrelate-both! mutations (J-I5)
+-- ============================================================
+
+describe("eval_stmt: relate_both_mut / unrelate_both_mut", function()
+  local compiler = require("compiler.compiler")
+
+  local function make_bi_eng()
+    local src = [[
+module bi-rel-test
+  version: 1.0
+engine-config:
+  entry-scene: s
+relation edges: Symbol -> Set(Symbol, 10)
+fn do-bi-relate:
+  relate-both! edges `a `b
+fn do-bi-unrelate:
+  unrelate-both! edges `a `b
+scene s:
+  * go -> s
+]]
+    local gt = assert(compiler.compile(src, "bi.sb"))
+    local l  = log_mod.new()
+    local st = state_mod.new(gt.schema, l)
+    local c  = eval.new_ctx(st, gt.fns, "test", gt)
+    return c, gt
+  end
+
+  local function adj_set(c, src_sym)
+    local adj_node = { kind="fn_call", name="adjacent?", args={
+      { kind="fn_call", name="edges", args={} },
+      { kind="symbol_lit", name=src_sym },
+    }}
+    return eval.eval_expr(adj_node, c)
+  end
+
+  it("relate-both! adds edges in both directions", function()
+    local c = make_bi_eng()
+    eval.call_fn("do-bi-relate", {}, c)
+    local a_adj = adj_set(c, "a")
+    local b_adj = adj_set(c, "b")
+    assert.is_truthy(a_adj and a_adj["b"])
+    assert.is_truthy(b_adj and b_adj["a"])
+  end)
+
+  it("unrelate-both! removes edges in both directions", function()
+    local c = make_bi_eng()
+    eval.call_fn("do-bi-relate", {}, c)
+    eval.call_fn("do-bi-unrelate", {}, c)
+    local a_adj = adj_set(c, "a")
+    local b_adj = adj_set(c, "b")
+    assert.is_falsy(a_adj and a_adj["b"])
+    assert.is_falsy(b_adj and b_adj["a"])
+  end)
+
+  it("relate-both! writes two log entries (one per direction) for replay", function()
+    local c = make_bi_eng()
+    eval.call_fn("do-bi-relate", {}, c)
+    local entries = c.state._log and c.state._log:entries() or {}
+    local seen_ab, seen_ba = false, false
+    for _, e in ipairs(entries) do
+      if e.path == "__rel/edges/a" then seen_ab = true end
+      if e.path == "__rel/edges/b" then seen_ba = true end
+    end
+    assert.is_true(seen_ab, "expected __rel/edges/a log entry (a→b direction)")
+    assert.is_true(seen_ba, "expected __rel/edges/b log entry (b→a direction)")
+  end)
+end)
+
+-- ============================================================
 -- random-int builtin
 -- ============================================================
 

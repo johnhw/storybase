@@ -30,7 +30,7 @@ inelegances (J-I1..I10) remain open as design-first backlog.
 - §J-I1 (per-symbol fn duplication) and §J-I2 (loops in choice lists) account for
   the bulk of duplication across the 32 demos — investigate these first.
 - §J-I4 (time-axis / state-path double bookkeeping) shows up in demos 10, 16, 20, 22.
-- Others (§J-I3, I5–I10) are smaller polish.
+- Others (§J-I3, I6–I10) are smaller polish. §J-I5 fixed 2026-05-21.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -453,12 +453,16 @@ demo20 even mirrors three things meaning one: `world/period` (enum),
 `time/turn`, `time/hour`) so narration can interpolate them directly and
 state-path mirrors go away.
 
-### J-I5. Bidirectional relations need manual mirroring [inelegance]
+### J-I5. Bidirectional relations need manual mirroring [inelegance] — DONE 2026-05-21
 
 demo16: `relate! roads `a `b; relate! roads `b `a`. No symmetric flag.
 
-**Possible direction:** a `bidirectional: true` field on `relation` declarations,
-or a `relate-bi!` mutation.
+**Fixed (2026-05-21)** by adding two new intrinsics: `relate-both!` and
+`unrelate-both!`. Each writes two log entries (one per direction) so
+replay, undo, and counterfactuals all see both edges. Migrated demos 16
+and 20 to remove the manual mirror lines. Tests in
+`tests/runtime/eval_spec.lua` "eval_stmt: relate_both_mut / unrelate_both_mut".
+See `docs/reference/language.md#relate-both--unrelate-both`.
 
 ### J-I6. No integer range [inelegance]
 

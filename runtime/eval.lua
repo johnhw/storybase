@@ -73,6 +73,8 @@ local K = {
   DESPAWN_MUT        = "despawn_mut",
   RELATE_MUT         = "relate_mut",
   UNRELATE_MUT       = "unrelate_mut",
+  RELATE_BOTH_MUT    = "relate_both_mut",
+  UNRELATE_BOTH_MUT  = "unrelate_both_mut",
   SEND_MUT           = "send_mut",
   UNDO_MUT           = "undo_mut",
   TIME_INC_MUT       = "time_inc_mut",
@@ -244,6 +246,19 @@ local function effective_rel(rel, rel_name, cache)
     end
   end
   return { data = merged }
+end
+
+--- Write one dynamic relation edge into the state cache.
+--- value=true adds an edge, value=false removes it (overriding static edges).
+--- Routes through state:set so the edit is logged, saved, undoable, BFS-visible.
+local function write_rel_edge(ctx, rel_name, source, target, value)
+  if not ctx.state or not rel_name then return end
+  local cache_key = "__rel/" .. rel_name .. "/" .. source
+  local old_dyn = ctx.state._cache[cache_key] or {}
+  local new_dyn = {}
+  for t, v in pairs(old_dyn) do new_dyn[t] = v end
+  new_dyn[target] = value
+  ctx.state:set(cache_key, new_dyn, ctx.fn_name)
 end
 
 -- ============================================================
@@ -2296,30 +2311,27 @@ eval_stmt = function(node, ctx)
     local rel_name = node.rel  -- string
     local source   = tostring(eval_expr(node.a, ctx))
     local target   = tostring(eval_expr(node.b, ctx))
-    -- Write through state store so the edge is logged, saved, undoable, and BFS-visible.
-    -- Dynamic edges are stored at "__rel/<name>/<src>" → {tgt=true/false} in the cache.
-    if ctx.state and rel_name then
-      local cache_key = "__rel/" .. rel_name .. "/" .. source
-      local old_dyn = ctx.state._cache[cache_key] or {}
-      local new_dyn = {}
-      for t, v in pairs(old_dyn) do new_dyn[t] = v end
-      new_dyn[target] = true
-      ctx.state:set(cache_key, new_dyn, ctx.fn_name)
-    end
+    write_rel_edge(ctx, rel_name, source, target, true)
 
   elseif k == K.UNRELATE_MUT then
     local rel_name = node.rel  -- string
     local source   = tostring(eval_expr(node.a, ctx))
     local target   = tostring(eval_expr(node.b, ctx))
-    -- Write through state store (false = "remove this edge even if it was static").
-    if ctx.state and rel_name then
-      local cache_key = "__rel/" .. rel_name .. "/" .. source
-      local old_dyn = ctx.state._cache[cache_key] or {}
-      local new_dyn = {}
-      for t, v in pairs(old_dyn) do new_dyn[t] = v end
-      new_dyn[target] = false
-      ctx.state:set(cache_key, new_dyn, ctx.fn_name)
-    end
+    write_rel_edge(ctx, rel_name, source, target, false)
+
+  elseif k == K.RELATE_BOTH_MUT then
+    local rel_name = node.rel
+    local a        = tostring(eval_expr(node.a, ctx))
+    local b        = tostring(eval_expr(node.b, ctx))
+    write_rel_edge(ctx, rel_name, a, b, true)
+    write_rel_edge(ctx, rel_name, b, a, true)
+
+  elseif k == K.UNRELATE_BOTH_MUT then
+    local rel_name = node.rel
+    local a        = tostring(eval_expr(node.a, ctx))
+    local b        = tostring(eval_expr(node.b, ctx))
+    write_rel_edge(ctx, rel_name, a, b, false)
+    write_rel_edge(ctx, rel_name, b, a, false)
 
   -- Control flow
   elseif k == K.WHEN_STMT then

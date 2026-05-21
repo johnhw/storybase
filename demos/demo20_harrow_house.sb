@@ -331,11 +331,9 @@ fn pick-up item:
   add! player/inventory item
   unrelate! room-items player/location item
   when item = `attic-key:
-    relate! house-exits `landing `attic
-    relate! house-exits `attic `landing
+    relate-both! house-exits `landing `attic
   when item = `basement-key:
-    relate! house-exits `kitchen `basement
-    relate! house-exits `basement `kitchen
+    relate-both! house-exits `kitchen `basement
 
 "Read a Harrow notebook to gain knowledge."
 fn read-notebook notebook:
@@ -366,8 +364,7 @@ fn activate-mechanism:
   pre: has-item? `oil-lamp
   pre: not world/ambient-light
   add! player/knowledge `knows-the-mechanism
-  relate! house-exits `basement `chamber
-  relate! house-exits `chamber `basement
+  relate-both! house-exits `basement `chamber
 
 "Transition to phase 2: uneasy."
 fn enter-uneasy:
@@ -424,8 +421,7 @@ fn ask-about-locked-study:
     inc! player/wariness 1
   when world/phase != `prosaic and player/rapport >= 6:
     add! player/inventory `study-key
-    relate! house-exits `landing `study
-    relate! house-exits `study `landing
+    relate-both! house-exits `landing `study
   when world/phase != `prosaic and player/rapport < 6:
     inc! player/wariness 1
 

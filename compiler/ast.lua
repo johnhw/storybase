@@ -320,6 +320,8 @@ M.K.MAP_SET_MUT         = "map_set_mut"      -- map-set! path key value
 M.K.MAP_DELETE_MUT      = "map_delete_mut"   -- map-delete! path key
 M.K.RELATE_MUT          = "relate_mut"       -- relate! rel a b
 M.K.UNRELATE_MUT        = "unrelate_mut"     -- unrelate! rel a b
+M.K.RELATE_BOTH_MUT     = "relate_both_mut"  -- relate-both! rel a b   (symmetric pair)
+M.K.UNRELATE_BOTH_MUT   = "unrelate_both_mut" -- unrelate-both! rel a b (symmetric pair)
 M.K.SPAWN_MUT           = "spawn_mut"        -- spawn! family key record
 M.K.DESPAWN_MUT         = "despawn_mut"      -- despawn! family key
 M.K.SEND_MUT            = "send_mut"         -- send! actor msg
@@ -400,6 +402,7 @@ local MUT_KINDS = {
   [M.K.PUSH_MUT]            = true, [M.K.POP_MUT]      = true,
   [M.K.MAP_SET_MUT]         = true, [M.K.MAP_DELETE_MUT] = true,
   [M.K.RELATE_MUT]          = true, [M.K.UNRELATE_MUT] = true,
+  [M.K.RELATE_BOTH_MUT]     = true, [M.K.UNRELATE_BOTH_MUT] = true,
   [M.K.SPAWN_MUT]           = true, [M.K.DESPAWN_MUT]  = true,
   [M.K.SEND_MUT]            = true, [M.K.TIME_INC_MUT] = true,
   [M.K.TIME_SET_MUT]        = true,
@@ -943,6 +946,12 @@ function M.relate_mut(rel, a, b, pos)
 end
 function M.unrelate_mut(rel, a, b, pos)
   return M.node(M.K.UNRELATE_MUT, { rel = rel, a = a, b = b }, pos)
+end
+function M.relate_both_mut(rel, a, b, pos)
+  return M.node(M.K.RELATE_BOTH_MUT, { rel = rel, a = a, b = b }, pos)
+end
+function M.unrelate_both_mut(rel, a, b, pos)
+  return M.node(M.K.UNRELATE_BOTH_MUT, { rel = rel, a = a, b = b }, pos)
 end
 function M.spawn_mut(family, key, record, pos)
   return M.node(M.K.SPAWN_MUT, { family = family, key = key, record = record }, pos)

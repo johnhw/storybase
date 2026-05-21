@@ -11,7 +11,7 @@ module demo16-cartographers-web
 #   • can-reach? with strategy: `depth-first
 #   • find-path with strategy: `breadth-first and budget: N
 #   • counterfactual simulate: true (route-bonus fires in counterfactual branch)
-#   • relate!/unrelate! for dynamic road modifications
+#   • relate-both!/unrelate-both! for symmetric road modifications (§J-I5)
 #   • Entity family cities/{city} with typed fields
 
 engine-config:
@@ -143,8 +143,7 @@ fn init-map:
 fn open-village-road:
   pre:  world/route-status != `open
   post: world/route-status = `open
-  relate!  roads `fortress `village
-  relate!  roads `village  `fortress
+  relate-both! roads `fortress `village
   set!  world/route-status `open
   inc!  world/turn 1
   time-inc! turn: 1
@@ -153,8 +152,7 @@ fn open-village-road:
 fn trigger-crisis:
   pre:  not world/crisis-active
   post: world/crisis-active = true
-  unrelate! roads `port-city  `market-town
-  unrelate! roads `market-town `port-city
+  unrelate-both! roads `port-city `market-town
   set!  world/crisis-active true
   inc!  world/turn 1
   time-inc! turn: 1
