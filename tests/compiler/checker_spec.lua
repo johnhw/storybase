@@ -797,6 +797,115 @@ fn ok:
 end)
 
 -- ============================================================
+-- J-I9: manual clamp after inc!/dec! on an inline Int(min,max) path
+-- ============================================================
+
+describe("checker — J-I9: redundant clamp", function()
+  it("warns on the canonical dec! + manual lower clamp pattern", function()
+    check_warn([[
+state castle:
+  supplies: Int(0, 300) = 150
+fn tick:
+  dec! castle/supplies 10
+  when castle/supplies < 0:
+    set! castle/supplies 0
+]], ast.W.REDUNDANT_CLAMP)
+  end)
+
+  it("warns on the canonical inc! + manual upper clamp pattern", function()
+    check_warn([[
+state castle:
+  supplies: Int(0, 300) = 150
+fn resupply:
+  inc! castle/supplies 40
+  when castle/supplies > 300:
+    set! castle/supplies 300
+]], ast.W.REDUNDANT_CLAMP)
+  end)
+
+  it("warns inside a schedule body (demo05's resupply-caravan pattern)", function()
+    check_warn([[
+state castle:
+  supplies: Int(0, 300) = 150
+time-model:
+  axes: [turn]
+  wrap: [none]
+schedule resupply:
+  every: [turn: +4]
+  fn:
+    inc! castle/supplies 40
+    when castle/supplies > 300:
+      set! castle/supplies 300
+]], ast.W.REDUNDANT_CLAMP)
+  end)
+
+  it("does not warn when the path uses a named Int alias (clamping is off)", function()
+    -- Named aliases (Gold = Int(0,N)) do not trigger clamping at runtime, so
+    -- the manual guard is NOT dead code.  See "Notes for future agents" in
+    -- todo.md.
+    local _, diags = compile([[
+type Supply = Int(0, 300)
+state castle:
+  supplies: Supply = 150
+fn tick:
+  dec! castle/supplies 10
+  when castle/supplies < 0:
+    set! castle/supplies 0
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.REDUNDANT_CLAMP, d.code)
+    end
+  end)
+
+  it("does not warn when the `when` body has additional statements", function()
+    local _, diags = compile([[
+state castle:
+  supplies: Int(0, 300) = 150
+  alarm:    Bool = false
+fn tick:
+  dec! castle/supplies 10
+  when castle/supplies < 0:
+    set! castle/supplies 0
+    set! castle/alarm true
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.REDUNDANT_CLAMP, d.code)
+    end
+  end)
+
+  it("does not warn when the threshold is inside the clamped range", function()
+    -- dec! on Int(0,300) clamps to 0; a guard at < 50 is a real
+    -- domain-specific check (e.g. "warn when supplies low"), not a clamp.
+    local _, diags = compile([[
+state castle:
+  supplies: Int(0, 300) = 150
+fn tick:
+  dec! castle/supplies 10
+  when castle/supplies < 50:
+    set! castle/supplies 50
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.REDUNDANT_CLAMP, d.code)
+    end
+  end)
+
+  it("does not warn when the mutated path is interpolated", function()
+    local _, diags = compile([[
+state castle:
+  supplies: Int(0, 300) = 150
+state world/buckets/{b}: Int(0, 100) = 50
+fn drain b:
+  dec! world/buckets/{b} 10
+  when world/buckets/{b} < 0:
+    set! world/buckets/{b} 0
+]])
+    for _, d in ipairs(diags) do
+      assert.are_not.equal(ast.W.REDUNDANT_CLAMP, d.code)
+    end
+  end)
+end)
+
+-- ============================================================
 -- Integration
 -- ============================================================
 

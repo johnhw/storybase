@@ -76,14 +76,12 @@ schedule attacker-wave:
       `calm:
         dec! castle/hp 50
 
-"Resupply caravan arrives every 4 turns."
+"Resupply caravan arrives every 4 turns. The Int(0, 300) on castle/supplies clamps the inc! automatically -- no manual upper bound needed."
 schedule resupply-caravan:
   every:  [turn: +4]
   offset: [turn: 0]
   fn:
     inc! castle/supplies 40
-    when castle/supplies > 300:
-      set! castle/supplies 300
 
 # ─────────────────────────────────────────────────────────
 # Verify
@@ -139,9 +137,7 @@ fn end-turn:
   pre: castle/turn < 10
   time-inc! turn: 1
   inc! castle/turn 1
-  dec! castle/supplies 10
-  when castle/supplies < 0:
-    set! castle/supplies 0
+  dec! castle/supplies 10  # Int(0, 300) clamps at zero; no manual guard needed
 
 fn reinforce-walls:
   pre: can-reinforce?

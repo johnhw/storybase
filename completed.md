@@ -5,6 +5,54 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## J-I9 — `WARN_REDUNDANT_CLAMP` checker lint ✅ (2026-05-22)
+
+demo05 (and demo20 after the J-I4 migration) wrote a defensive
+`when path < 0: set! path 0` block after every `dec!` on a path declared
+with inline `Int(0, N)` — the guard was dead because the runtime already
+clamps inc!/dec! on inline-Int-typed paths (see
+`runtime/state.lua#store:inc` / `store:dec`). The pattern was invisible
+to authors coming from imperative languages.
+
+Fixed by adding a new checker pass `pass_check_redundant_clamp` in
+`compiler/checker.lua`. It walks `fn` and `schedule` bodies looking for
+the canonical shape:
+
+```
+inc! P amt              dec! P amt
+when P > MAX:           when P < MIN:
+  set! P MAX              set! P MIN
+```
+
+…where `P` is statically resolvable and declared with an inline
+`Int(MIN, MAX)`. The warning is strict: the `when` body must be exactly
+one `set!`, and the threshold/set value must equal the declared
+min/max. Named-alias paths (`Gold = Int(0, N)` → `TYPE_NAMED`) are
+deliberately skipped because the runtime's `lookup_type` returns
+`{tag="named"}` for them and the clamp does not fire — the manual
+guard is real, not dead. The warning is emitted with a "note: delete
+the `when …` block" hint pointing the author at the exact text to remove.
+
+demos updated:
+- **demo05** — dropped the `inc! castle/supplies 40; when > 300: set! 300`
+  block in `schedule resupply-caravan` and the `dec! castle/supplies 10;
+  when < 0: set! 0` block in `fn end-turn`.
+- **demo20** — dropped the `inc! player/wariness 2; when > 5: set! 5`
+  block in `fn ask-about-basement`. The follow-up `when player/wariness
+  >= 5: send! …force-depart` block is real game logic and stays.
+
+Regression tests: `tests/compiler/checker_spec.lua "checker — J-I9:
+redundant clamp"` (7 cases — canonical dec!, canonical inc!, inside a
+`schedule` body, named-alias skipped, multi-stmt when-body skipped,
+non-clamping threshold skipped, interpolated path skipped). All 3054
+tests pass.
+
+The "Notes for future agents" item about named-alias clamping (E1/E3
+limitation) is now load-bearing — kept in todo.md as a pointer for the
+fix path if a user-written decl-macro ever hits this.
+
+---
+
 ## J-I4 — Time-axis / state-path mirroring removed from demos ✅ (2026-05-22)
 
 The underlying feature already shipped on 2026-05-07 as **AE-3**:

@@ -16,9 +16,9 @@ complete — details in [completed.md](completed.md).
 touching http/debug code.)
 
 Language Review Pass 3 (2026-05-20) is now closed on the runtime/parser side: all
-5 bugs (J-B1..B5) and 6 of the 10 authoring inelegances (J-I2, I3, I4, I5, I6,
-I7) shipped between 2026-05-21 and 2026-05-22. The remaining 4 inelegances
-(§J-I1, I8, I9, I10) stay open below as design-first backlog. K1 (demo33,
+5 bugs (J-B1..B5) and 7 of the 10 authoring inelegances (J-I2, I3, I4, I5, I6,
+I7, I9) shipped between 2026-05-21 and 2026-05-22. The remaining 3 inelegances
+(§J-I1, I8, I10) stay open below as design-first backlog. K1 (demo33,
 J-I2 showcase) also shipped 2026-05-22.
 
 ---
@@ -30,7 +30,6 @@ J-I2 showcase) also shipped 2026-05-22.
   shipped; many cited cases fold into "single parameterised fn + looped
   choice list."
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
-- §J-I9 — redundant clamp pattern (lint opportunity).
 - §J-I10 — multi-way `hook` switches collapsing into per-case declarations.
 
 **Lower-priority polish (open, not blocking):**
@@ -317,8 +316,8 @@ The remaining residue:
 
 A read-through of demos 01–32 to spot places the demos visibly work around
 language limits, plus targeted runtime/parser inspection for bugs hinted at
-by those workarounds. All 5 bugs (J-B1..B5) and 6 inelegances (J-I2, I3, I4,
-I5, I6, I7) are shipped — see completed.md. The 4 remaining inelegances
+by those workarounds. All 5 bugs (J-B1..B5) and 7 inelegances (J-I2, I3, I4,
+I5, I6, I7, I9) are shipped — see completed.md. The 3 remaining inelegances
 are below.
 
 ### J-I1. Symbol-keyed work needs N near-identical fns [inelegance]
@@ -348,15 +347,6 @@ lists may cover many of the cited cases.
 
 Already tracked as §A1 (SF-5). Kept here only as a cross-reference: still
 visible to authors despite the AV-4 mitigation.
-
-### J-I9. Author writes redundant clamp [inelegance — discoverability]
-
-demo05: `dec! castle/supplies 10; when castle/supplies < 0: set! castle/supplies 0`.
-Inline `Int(0, 300)` already clamps — the guard is dead code. The
-clamping behavior isn't visible enough.
-
-**Possible direction:** mention clamping in error messages when the demo
-manually clamps, or add a checker lint for "dead guard after inc!/dec!".
 
 ### J-I10. Hooks collapse into multi-way switches [inelegance]
 

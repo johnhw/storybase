@@ -438,9 +438,7 @@ fn ask-about-basement:
   pre: can-ask-basement?
   set! asked/basement true
   add! player/knowledge `knows-basement-exists
-  inc! player/wariness 2
-  when player/wariness > 5:
-    set! player/wariness 5
+  inc! player/wariness 2  # Int(0, 5) clamps at ceiling
   when player/wariness >= 5:
     send! meredith-actor (MeredithMsg/force-depart)
 

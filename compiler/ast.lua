@@ -194,6 +194,7 @@ M.W = {
   UNKNOWN_FIND_CLAUSE      = "WARN_UNKNOWN_FIND_CLAUSE",  -- J-B3
   NOT_A_COLLECTION         = "WARN_NOT_A_COLLECTION",     -- J-B4
   WHEN_VALUE_OVERWRITTEN   = "WARN_WHEN_VALUE_OVERWRITTEN",  -- J-B5
+  REDUNDANT_CLAMP          = "WARN_REDUNDANT_CLAMP",      -- J-I9
 }
 
 -- ============================================================

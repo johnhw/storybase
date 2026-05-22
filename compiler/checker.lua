@@ -3255,6 +3255,141 @@ local function pass_check_when_value_overwritten(acc, program)
 end
 
 -- ============================================================
+-- J-I9 — Manual clamp after inc!/dec! on an inline Int(min,max) path
+-- ============================================================
+--
+-- The runtime clamps `inc!`/`dec!` mutations on paths declared with an inline
+-- `Int(min, max)` type (see runtime/state.lua:store:inc / store:dec). Authors
+-- coming from imperative languages often write a defensive
+--   when path < 0: set! path 0
+-- block after a `dec!`, not realising it is dead code. This pass warns on
+-- the canonical shape so the author can delete the redundant guard.
+--
+-- Pattern (strict):
+--   inc! P amt           dec! P amt
+--   when P > MAX:        when P < MIN:
+--     set! P MAX           set! P MIN
+-- where P is statically resolvable and declared with `Int(MIN, MAX)` inline.
+-- Named aliases (`Gold = Int(0, N)`) deliberately don't clamp and are skipped.
+local function pass_check_redundant_clamp(acc, symtab, program)
+  local k = ast.K
+  local path_map = build_path_type_map(program, symtab)
+
+  local function path_string(path_node)
+    if not path_node or path_node.kind ~= k.PATH_EXPR then return nil end
+    local segs = path_node.segments or {}
+    for _, s in ipairs(segs) do
+      if type(s) ~= "string" then return nil end
+    end
+    return table.concat(segs, "/")
+  end
+
+  local function inline_int_bounds(path_node)
+    local texpr = lookup_path_type(path_node, path_map)
+    if texpr and texpr.kind == k.TYPE_INT then
+      return texpr.min, texpr.max
+    end
+    return nil, nil
+  end
+
+  local function int_lit_value(expr)
+    if expr and expr.kind == k.INT_LIT then return expr.value end
+    return nil
+  end
+
+  -- Returns op, threshold, set_value if the `when` matches the clamp shape on
+  -- `target`; else nil.
+  local function match_clamp_when(when_stmt, target)
+    if not when_stmt or when_stmt.kind ~= k.WHEN_STMT then return nil end
+    local cond = when_stmt.condition
+    if not cond or cond.kind ~= k.BINARY_OP then return nil end
+    if cond.op ~= "<" and cond.op ~= ">" then return nil end
+    local left_path = path_string(cond.left)
+    local rhs_lit   = int_lit_value(cond.right)
+    if left_path ~= target or rhs_lit == nil then return nil end
+
+    local body = when_stmt.body
+    if type(body) ~= "table" or #body ~= 1 then return nil end
+    local s = body[1]
+    if not s or s.kind ~= k.SET_MUT then return nil end
+    if path_string(s.path) ~= target then return nil end
+    local set_val = int_lit_value(s.value)
+    if set_val == nil then return nil end
+
+    return cond.op, rhs_lit, set_val
+  end
+
+  local function check_pair(mut, follow)
+    local target = path_string(mut.path)
+    if not target then return end
+    local min, max = inline_int_bounds(mut.path)
+    if min == nil and max == nil then return end
+
+    local op, threshold, set_val = match_clamp_when(follow, target)
+    if not op then return end
+
+    local kind = mut.kind
+    if kind == k.DEC_MUT and op == "<" and min ~= nil
+       and threshold <= min and set_val == min then
+      table.insert(acc.diags, ast.warning(
+        ast.W.REDUNDANT_CLAMP,
+        "manual clamp after `dec!` is redundant — `" .. target ..
+          "` is declared `Int(" .. tostring(min) .. ", " .. tostring(max) ..
+          ")`, which the runtime clamps automatically",
+        follow.pos,
+        "delete the `when " .. target .. " < " .. tostring(threshold) ..
+          ": set! " .. target .. " " .. tostring(set_val) .. "` block"))
+    elseif kind == k.INC_MUT and op == ">" and max ~= nil
+       and threshold >= max and set_val == max then
+      table.insert(acc.diags, ast.warning(
+        ast.W.REDUNDANT_CLAMP,
+        "manual clamp after `inc!` is redundant — `" .. target ..
+          "` is declared `Int(" .. tostring(min) .. ", " .. tostring(max) ..
+          ")`, which the runtime clamps automatically",
+        follow.pos,
+        "delete the `when " .. target .. " > " .. tostring(threshold) ..
+          ": set! " .. target .. " " .. tostring(set_val) .. "` block"))
+    end
+  end
+
+  local visit
+  visit = function(stmts)
+    if type(stmts) ~= "table" then return end
+    for i, s in ipairs(stmts) do
+      if s and type(s) == "table"
+         and (s.kind == k.INC_MUT or s.kind == k.DEC_MUT)
+         and i < #stmts then
+        check_pair(s, stmts[i + 1])
+      end
+      if s and type(s) == "table" then
+        if s.body and type(s.body) == "table" and not s.body.kind then
+          visit(s.body)
+        end
+        if s.then_body then visit(s.then_body) end
+        if s.else_body and type(s.else_body) == "table" and not s.else_body.kind then
+          visit(s.else_body)
+        end
+        if s.arms then
+          for _, arm in ipairs(s.arms) do
+            if type(arm.body) == "table" and not arm.body.kind then
+              visit(arm.body)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  for _, decl in ipairs(program.decls) do
+    if decl.kind == k.FN_DECL then
+      visit(decl.body)
+    elseif decl.kind == k.SCHEDULE_DECL then
+      visit(decl.body)
+    end
+  end
+end
+
+-- ============================================================
 -- Public API
 -- ============================================================
 
@@ -3305,6 +3440,7 @@ function M.check(ast_root, filename)
   pass_check_undefined_families(acc, symtab, ast_root)   -- A4
   pass_check_size_count_receiver(acc, symtab, ast_root)  -- J-B4
   pass_check_when_value_overwritten(acc, ast_root)       -- J-B5
+  pass_check_redundant_clamp(acc, symtab, ast_root)      -- J-I9
 
   -- Attach the symbol table to the AST root for use by codegen
   ast_root.symtab = symtab
