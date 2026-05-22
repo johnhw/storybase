@@ -15,18 +15,11 @@ complete — details in [completed.md](completed.md).
 (HTTP/debug spec failures are transient network timing issues — ignore unless
 touching http/debug code.)
 
-A **language review pass 3** (2026-05-20) surveyed demos 01–32 against the demos
-themselves and surfaced 10 authoring inelegances plus 5 verified runtime/parser
-bugs (two correctness, three diagnostic). See **§J** below.
-
-All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. Authoring inelegances
-J-I3 (elif / else if), J-I5 (bidirectional relations), J-I6 (range
-builtin), and J-I7 (length-name rationalisation) were also fixed on
-2026-05-21. J-I2 (looped / gated choices) was fixed on 2026-05-22.
-J-I4 (time-axis / state-path mirroring) was closed on 2026-05-22 by
-migrating demos 10, 16, 20 to read `time/<axis>` directly. The
-remaining 4 inelegances (J-I1, I8, I9, I10) stay open as design-first
-backlog.
+Language Review Pass 3 (2026-05-20) is now closed on the runtime/parser side: all
+5 bugs (J-B1..B5) and 6 of the 10 authoring inelegances (J-I2, I3, I4, I5, I6,
+I7) shipped between 2026-05-21 and 2026-05-22. The remaining 4 inelegances
+(§J-I1, I8, I9, I10) stay open below as design-first backlog. K1 (demo33,
+J-I2 showcase) also shipped 2026-05-22.
 
 ---
 
@@ -36,10 +29,9 @@ backlog.
 - §J-I1 (per-symbol fn duplication) — re-evaluate now that J-I2 has
   shipped; many cited cases fold into "single parameterised fn + looped
   choice list."
-- §J-I8–I10 are smaller polish. §J-I2 (choice-list looping), §J-I3
-  (elif), §J-I4 (time-axis mirrors), §J-I5 (bidirectional relations),
-  §J-I6 (range builtin), and §J-I7 (length-name rationalisation) all
-  fixed.
+- §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
+- §J-I9 — redundant clamp pattern (lint opportunity).
+- §J-I10 — multi-way `hook` switches collapsing into per-case declarations.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -51,11 +43,11 @@ backlog.
 2. §B3 — Trace scrubber (browser debug UI)
 3. §G1 — Web/JS compilation target
 
-**Demo coverage:** All seven I-series demos (26–32) complete. demo32
-promoted three of the four §I7 residue items (set ops, `(set)` literal,
-labelled `engine/checkpoint!`). The remaining residue item — **lambda
-expressions outside a `find` clause** — is still covered only by unit
-tests; promote only if a user-facing limitation surfaces.
+**Demo coverage:** All seven I-series demos (26–32) complete, plus demo33
+(J-I2 showcase). demo32 promoted three of the four §I7 residue items (set
+ops, `(set)` literal, labelled `engine/checkpoint!`). The remaining residue
+item — **lambda expressions outside a `find` clause** — is still covered only
+by unit tests; promote only if a user-facing limitation surfaces.
 
 ---
 
@@ -321,92 +313,13 @@ The remaining residue:
 
 ---
 
-## J. Language Review Pass 3 (2026-05-20)
+## J. Language Review Pass 3 (2026-05-20) — open inelegances
 
 A read-through of demos 01–32 to spot places the demos visibly work around
 language limits, plus targeted runtime/parser inspection for bugs hinted at
-by those workarounds. Two of the five bugs were verified with minimal
-repro `.sb` files.
-
-### J-B1. Family `max:` capacity not enforced at `spawn!` ✅ FIXED (2026-05-21)
-
-`state things/{t}: Thing max: 2` previously declared a cap that
-`runtime/state.lua:store:spawn` ignored — only the `SPAWN_EXISTS` uniqueness
-sentinel was checked. Fixed by counting existing keys via `path_list(family)`
-before allowing a new spawn; raises `FAMILY_FULL` at the cap. Set/List capacity
-enforcement remains unchanged.
-
-Regression tests: `tests/runtime/state_spec.lua` (unit) and
-`tests/runtime/j_bugs_spec.lua` (e2e: `spawn!` errors at cap, despawn frees a
-slot, no-cap families remain unbounded).
-
-### J-B2. `find ... limit: <non-int-literal>` silently falls back to 10 ✅ FIXED (2026-05-21)
-
-`compiler/parser.lua` (find-clause parser) used to drop any non-`int_lit`
-limit expression and substitute the literal `10`. Fixed by storing the
-parsed expression alongside the literal-int fast-path (`value_expr` on the
-clause); `runtime/query.lua` evaluates `value_expr` at find-time and errors
-on non-integer (`FIND_LIMIT_TYPE`) or negative (`FIND_LIMIT_NEGATIVE`)
-results. Literal-int `limit: 4` continues to work via the unchanged
-`clause.value` path (preserves all existing parser tests).
-
-Regression tests: `tests/runtime/query_spec.lua` (unit: path-limit, arith,
-non-int error, zero) and `tests/runtime/j_bugs_spec.lua` (e2e via
-`fn limited: find things ... limit: world/cap`).
-
-### J-B3. Unknown `find` named-args silently skipped ✅ FIXED (2026-05-21)
-
-`compiler/parser.lua` find-clause parser now emits
-`WARN_UNKNOWN_FIND_CLAUSE` when a NAMED_ARG inside `find ...` is not one
-of {`where`, `or-where`, `order-by`, `limit`, `in-state`}. The warning
-lists the recognised clause names. Recovery skips the unknown clause's
-value expression so the rest of the find continues to parse cleanly.
-Implemented as a warning (not an error) so existing surfaces keep
-compiling — typos still surface in `--check` output.
-
-Regression test: `tests/compiler/checker_spec.lua "parser — J-B3:
-unknown find clause"`.
-
-### J-B4. `size`/`count`/`empty?` on a non-collection ✅ FIXED (2026-05-21)
-
-New checker pass `pass_check_size_count_receiver` walks every fn_call
-to `size`/`count`/`empty?` and warns when the single argument is one of
-the two clear authoring mistakes:
-1. A bare zero-arg call to a declared family name — author meant
-   `(path-list family)`. The hint suggests the rewrite.
-2. A state path whose declared type is a non-collection scalar
-   (Int/Bool/Symbol/Float/named record). The warning notes that the
-   result will always be 0 (or `true` for `empty?`).
-
-Runtime semantics unchanged — `size nil → 0` still tolerates Option
-values and unknown fn returns. Collection types accepted: Set, List,
-UList, UMap, String, and Option-wrapped versions of those.
-
-Regression tests: `tests/compiler/checker_spec.lua "checker — J-B4:
-size/count/empty? receiver type"` (7 cases — family, scalar Int,
-empty? Int, List ok, path-list ok, Set ok).
-
-### J-B5. `when … : <expr>` looks like early-return but isn't ✅ FIXED (2026-05-21)
-
-New checker pass `pass_check_when_value_overwritten`. Restricted to `fn`
-bodies (scene/choice/hook bodies use narration in expression position
-and the warning doesn't apply there). Fires when:
-1. A `when` body's last statement is a value-producing expression
-   (literal, fn_call, if_expr, match_expr, etc.)
-2. AND a following statement in the same body also produces a value
-   that will overwrite the `when` result.
-
-The hint suggests rewriting with `if`/`else`, `cond`, or `match` to get
-proper exclusive branches.
-
-Note: demo08 `supply-path-steps`/`supply-optimal-steps` still emit this
-warning — they accidentally work because `count-where nil` also returns
-0. Author's call whether to rewrite; the warning is informational, not
-breaking.
-
-Regression tests: `tests/compiler/checker_spec.lua "checker — J-B5:
-when-body value overwritten"` (5 cases including the canonical bug shape,
-last-stmt OK, mut-body OK, scene narration silent, follow-by-mut OK).
+by those workarounds. All 5 bugs (J-B1..B5) and 6 inelegances (J-I2, I3, I4,
+I5, I6, I7) are shipped — see completed.md. The 4 remaining inelegances
+are below.
 
 ### J-I1. Symbol-keyed work needs N near-identical fns [inelegance]
 
@@ -428,149 +341,8 @@ this way.
 fns; document the pattern (`cast-spell-decl `fireball`) explicitly, OR
 extend interpolated-path semantics so a fn parameter can drive both
 sides of a `spells/{s}/...` lookup (it already works in many cases —
-verify which cases fail).
-
-### J-I2. Choice lists are static — no `for npc in ...: * Talk to {npc}` [inelegance] — DONE 2026-05-22
-
-A scene with N family members previously duplicated the choice block N
-times (demo04 crew narration, demo07 four shrines, demo11 four hires,
-demo20 per-room "X here:" lines).
-
-**Fixed (2026-05-22)** by extending `runtime/engine.lua` to descend into
-`for` / `when` / `if` blocks when rendering choices and locating the
-player's selection. New helper `eng:_walk_scene_choices(items, ctx,
-visit)` performs a single left-to-right depth-first traversal shared by
-`render_scene` and `do_choice`, guaranteeing the visible-index → (choice
-node, iteration bindings) mapping is identical across render and execute.
-`do_choice` propagates for-loop variable bindings into the choice body's
-execution context so interpolated paths (`set! items/{i}/taken true`)
-resolve to the correct family member.
-
-**Shape C — enum-case iteration.** `for s in EnumKind:` iterates the
-enum's variant symbols. Implemented in `eval.eval_for_iter`, so the
-shortcut also works in `fn` / `generate` bodies. Falls through to
-`eval_expr` for any iter that is not a bare enum type name.
-
-Latent bug closed: the parser previously accepted `*` choices inside
-scene-mode `when`/`if`/`for` but the runtime silently dropped them
-(`engine.lua:368` literally said "narration-only, no choice"). Now they
-participate in the visible list.
-
-Regression tests: `tests/runtime/j_i2_spec.lua` (15 cases — for over list
-literal / family / enum, per-iteration guard filtering, empty-iteration
-else, when-grouped choices, if/else branches, nesting and visible-index
-ordering, do_choice iter-binding propagation, replay determinism, BFS
-can_reach behind a looped choice). See
-`docs/reference/language.md#choices-inside-for--when--if`.
-
-### J-I3. No `elif` / `else if` [inelegance] — DONE 2026-05-21
-
-Every multi-branch ending used nested `if/else: if/else:` (demos 03, 05,
-09, 10, 11, 14, 16, 21, …). Added one indent level per branch.
-
-**Fixed (2026-05-21)** as a parser-only change. `parse_if_expr` now accepts
-either `else if cond:` or `elif cond:` after the then-body and desugars to
-a nested `if_expr` placed in the parent's `else_body`. The runtime, checker,
-and codegen are unchanged — the AST shape is identical to hand-nested
-`if/else: if`.
-
-`elif` is a new lexer keyword. `else if` works via lookahead (KEYWORD
-"else" followed by KEYWORD "if"). Both forms are interchangeable. Demos
-4, 6, 7, 8, 9, 10, 11, 12, 20, 21 migrated to the flattened form; demo20
-alone collapsed 10 three-deep `world/phase` chains into single elif
-ladders. See `docs/reference/language.md#if-expression`.
-
-### J-I4. Time-axis ↔ state path double-bookkeeping [inelegance] — DONE 2026-05-22
-
-Demos 10, 16, 20 all paired every `time-inc! turn: N` with `inc! world/turn N`
-(and `time-set! hour: 8` with `set! world/hour 8`). The engine's time axis
-appeared invisible from narration paths, so authors mirrored it into a state path.
-demo20 even mirrored three things meaning one: `world/period` (enum),
-`world/period-index` (Int), and the actual time axis.
-
-**Resolution:** The underlying feature already shipped on **2026-05-07** as
-**AE-3** — `time/<axis-name>` is a read-only pseudo-path backed directly by
-the engine's time state (e.g. `time/day`, `time/hour`, `time/period`). The
-remaining work was a demo migration:
-
-- **demo10** — dropped `state world/day` and `state world/hour`; narration now
-  reads `{time/day + 1}` and `{time/hour}`. Day/hour math realigned: hour 0
-  is dawn, the market closes at hour 10 (instead of 18) so the original
-  5-browses-per-day rhythm is preserved. `engine/emit` payloads keep
-  1-indexed `day` for narrative consistency.
-- **demo16** — dropped `state world/turn`; narration and writes use
-  `{time/turn}` and `time-inc! turn: 1` directly.
-- **demo20** — dropped `state world/period`, `state world/period-index`, and
-  `state world/day`. Added a `day` axis to `time-model` so the period-wrap
-  bumps day natively. Schedule and pure functions read `time/period`; a
-  helper `current-period` fn maps `time/period` → Period enum for
-  narration (`{current-period}`).
-- **demo28** is intentionally left untouched — it uses `world/turn` as a
-  genuine state path for counterfactual `from: (world/turn - 3)` rewinds,
-  which depend on per-turn ticks living in the transaction log.
-
-Supporting change: `lib/storybase.lua#get(path)` now recognises
-`time/<axis>` and delegates to the engine's `state:get_time()`, so tests
-and embedded hosts can read the engine clock through the same API as
-declared state paths.
-
-CLI integration tests for demo10 (3 cases) and demo16 (1 case) updated to
-match the new schemas and the realigned hour math. All 3047 tests pass.
-
-### J-I5. Bidirectional relations need manual mirroring [inelegance] — DONE 2026-05-21
-
-demo16: `relate! roads `a `b; relate! roads `b `a`. No symmetric flag.
-
-**Fixed (2026-05-21)** by adding two new intrinsics: `relate-both!` and
-`unrelate-both!`. Each writes two log entries (one per direction) so
-replay, undo, and counterfactuals all see both edges. Migrated demos 16
-and 20 to remove the manual mirror lines. Tests in
-`tests/runtime/eval_spec.lua` "eval_stmt: relate_both_mut / unrelate_both_mut".
-See `docs/reference/language.md#relate-both--unrelate-both`.
-
-### J-I6. No integer range [inelegance] — DONE 2026-05-21
-
-Every numeric loop previously spelled out the integers (`for x in
-[0,1,2,3,4,5,6,7]:` in demo09); runtime-sized loops weren't expressible
-at all.
-
-**Fixed (2026-05-21)** by adding a `range` builtin in `runtime/eval.lua`'s
-BUILTINS table (Python-style, exclusive upper bound):
-- `range n` → `[0..n-1]`
-- `range lo hi` → `[lo..hi-1]`
-- `range lo hi step` → directional, non-zero step
-
-Result capped at 10000 elements (matches the engine's while-loop safety
-limit). `range` was also added to the checker's `CHECKER_BUILTIN_FNS`
-allow-list so calls don't surface as `unknown call` warnings. Tests in
-`tests/runtime/eval_spec.lua` ("eval: range builtin"). See
-`docs/reference/language.md#collection-builtins`.
-
-### J-I7. Five names for "length" [inelegance] — DONE 2026-05-21
-
-`size`, `count`, `list-size`, `ulist-size`, `map-size`. demo08 used
-`count-where path fn(step): true` to count a list — a clear "didn't find
-the right builtin" workaround.
-
-**Fixed (2026-05-21)** by consolidating to a single shared `size_impl`
-in `runtime/eval.lua`'s BUILTINS table. `size` is the canonical
-polymorphic name; `count`, `list-size`, `ulist-size`, and `map-size`
-are aliases that all reference the same implementation, so they always
-agree on every input (sequence tables, hash-style tables, non-tables).
-The J-B4 checker's `SIZE_LIKE_FNS` set was extended to include the
-`*-size` aliases so applying any of them to a scalar emits the same
-`NOT_A_COLLECTION` warning.
-
-demo08's `supply-path-steps` / `supply-optimal-steps` were rewritten
-from the `count-where path fn(step): true` workaround to the obvious
-`size path`, and from `when path = nil: 0` / value-expr-follows to a
-proper `if path = nil: 0 else: size path` (also clearing the J-B5
-warning those functions previously emitted).
-
-Tests in `tests/runtime/eval_spec.lua` ("size, count, list-size,
-ulist-size, map-size are aliases" — sequence, map-style, non-table) and
-`tests/compiler/checker_spec.lua` (J-B4 cases for the three new
-aliases). See `docs/reference/language.md#collection-builtins`.
+verify which cases fail). Re-evaluate now that J-I2's looped choice
+lists may cover many of the cited cases.
 
 ### J-I8. `set!` on a `let`-binding silently writes a fake state path [inelegance]
 
@@ -593,152 +365,6 @@ blocks. A per-room declarative `on-enter` (or per-flag declarative `gained-when:
 would express the same data with less indirection.
 
 **Possible direction:** allow `state world/location: Room; hook after move-to to `study: add! ...`. Pattern-match on the new value in the hook header.
-
----
-
-## K. Demo backlog
-
-### K1. demo33 — "The Apothecary's Counter" (showcase for J-I2) — **DONE 2026-05-22**
-
-Shipped: `demos/demo33_apothecary.sb` (~120 lines), regression suite
-`tests/runtime/demo33_spec.lua` (7 tests, all green), and 5 CLI
-integration cases in `tests/cli/cli_integration_spec.lua` (compile,
---production compile, verify, --auto playthrough, 25-choice count).
-
-All four acceptance criteria from the spec below are tested directly:
-initial 25-choice render, looped-choice iter-binding propagation (treating
-bethe with the "tonic" iter binding), if/else flip on moonpetal depletion,
-and the outer `when shop/served >= 4` end-of-day gate.
-
-One small spec deviation: the spec sketch used `++` for string concatenation
-(non-existent operator) inside `set! shop/last-note`; the demo uses the
-existing variadic `(str ...)` builtin instead — same observable behaviour,
-no language change needed.  No other surprises: J-I2 carried the whole
-scene structure end-to-end (BFS verify of `shop/served >= 4` passes in 489
-states).
-
-Original spec below for reference:
-
-### K1 (original spec). demo33 — "The Apothecary's Counter" (showcase for J-I2)
-
-**Goal:** a single-scene demo whose interactive structure depends entirely
-on the three J-I2 affordances (looped, gated, branched choices) and on
-Shape C (enum iteration). Pre-J-I2 the same content would have required
-~28 hand-written choice rows for four patients; the proposed scene
-expresses it in one for-loop with three sub-blocks.
-
-**Mechanic.** You run a counter. Four patients are waiting, each with a
-`Symptom` (ache / fever / cough / malaise). On each turn you pick a
-remedy from the `Remedy` enum (poultice / tincture / salve / tonic).
-Feverish patients also accept a cool compress (extra `when`-gated choice).
-While your moonpetal stock is non-zero, two premium remedies are also
-craftable (`if`/`else` branching). The day ends when all four are tended.
-
-**Files:** `demos/demo33_apothecary.sb` (+ optional tests file). Add to
-`tests/cli/cli_integration_spec.lua` per existing pattern.
-
-**Source sketch:**
-
-```
-module demo33-apothecary
-  version: 1.0
-
-# Demo 33 — The Apothecary's Counter
-# Demonstrates J-I2: looped + gated + branched choices in a single scene.
-
-engine-config:
-  entry-scene: counter
-
-type Symptom = ache | fever | cough | malaise
-type Remedy  = poultice | tincture | salve | tonic
-type Premium = elixir-of-moon | dragonbalm
-
-type PatientRec:
-  symptom: Symptom = `ache
-  treated: Bool    = false
-
-state patients/{p}:   PatientRec  max: 12
-state shop/moonpetal: Int(0, 10) = 1
-state shop/served:    Int(0, 99) = 0
-state shop/last-note: String     = ""
-
-generate stock-counter:
-  spawn! patients `arlin  PatientRec(symptom: `ache,    treated: false)
-  spawn! patients `bethe  PatientRec(symptom: `fever,   treated: false)
-  spawn! patients `corwin PatientRec(symptom: `cough,   treated: false)
-  spawn! patients `dell   PatientRec(symptom: `malaise, treated: false)
-
-fn treat p r:
-  set! patients/{p}/treated true
-  inc! shop/served 1
-  set! shop/last-note "Prepared a " ++ (str r) ++ " for " ++ (str p) ++ "."
-
-fn premium-treat p r:
-  dec! shop/moonpetal 1
-  set! patients/{p}/treated true
-  inc! shop/served 1
-  set! shop/last-note "Crafted a rare " ++ (str r) ++ " for " ++ (str p) ++ "."
-
-scene counter:
-  Served {shop/served}.  Moonpetal x{shop/moonpetal}.
-  {shop/last-note}
-
-  for p in (path-list patients):
-    [not patients/{p}/treated] {p} waits ({patients/{p}/symptom}).
-    for r in Remedy:                          # Shape C: enum iteration
-      * [not patients/{p}/treated] Give {r} to {p}
-        treat p r
-        -> counter
-    when patients/{p}/symptom = `fever:       # when-gated extra
-      * [not patients/{p}/treated] Apply cool compress to {p}
-        treat p `poultice
-        -> counter
-    if shop/moonpetal > 0:                    # if/else branching
-      for r in Premium:                       # Shape C inside if
-        * [not patients/{p}/treated] Brew {r} for {p}
-          premium-treat p r
-          -> counter
-    else:
-      [not patients/{p}/treated] (Premium remedies need moonpetal.)
-
-  when shop/served >= 4:
-    All patients tended.  The day is done.
-    * Close up shop
-      -> end-day
-
-scene end-day:
-  You served {shop/served} patients today.  Rest well.
-```
-
-**Features the demo lights up (each from §J-I2):**
-| Feature | Lines |
-|---|---|
-| `for p in (path-list family):` | outer loop over patients |
-| `for r in EnumKind:` (Shape C) | inner loops over Remedy, Premium |
-| `when cond: *` extra choice | cool-compress for fever patients |
-| `if cond: * ... else:` branching | premium remedies gated by moonpetal |
-| iter-binding flows into choice body | `treat p r`, `premium-treat p r` |
-| conditional narration inside for | "{p} waits ({patients/{p}/symptom})" |
-
-**Acceptance:**
-1. Initial render of `counter` shows ≥ (4 patients × 4 Remedy) + 1 fever
-   + (4 × 2 Premium) = 25 visible choices (modulo treated filtering).
-2. Picking choice 9 ("Give tonic to bethe") marks `patients/bethe/treated`
-   and bumps `shop/served` to 1; the next render of `counter` shows
-   patients other than bethe still waiting.
-3. After moonpetal hits 0 (use two premium brews), the if/else flips and
-   the "(Premium remedies need moonpetal.)" narration line replaces the
-   premium choice rows.
-4. After all four treated, the `when shop/served >= 4` block surfaces
-   "Close up shop" as the single remaining choice; selecting it ends.
-
-**Why pre-J-I2 this was awkward.** Without looped/gated/branched
-choices, the scene would have required either 28 hand-written choice
-rows (4 patients × 7 possible actions each, mostly disjoint) or a forest
-of per-patient sub-scenes reached via `=>`. The mechanic is itself the
-showcase: a player faces an action menu derived from declarative game
-state plus type definitions, with zero per-patient/per-remedy author
-duplication.
 
 ---
 

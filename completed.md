@@ -5,6 +5,192 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## J-I4 — Time-axis / state-path mirroring removed from demos ✅ (2026-05-22)
+
+The underlying feature already shipped on 2026-05-07 as **AE-3**:
+`time/<axis-name>` is a read-only pseudo-path backed directly by the
+engine's time state (e.g. `time/day`, `time/hour`, `time/period`). What
+remained was a demo migration to drop the redundant `world/turn`,
+`world/hour`, `world/day`, `world/period`, `world/period-index` mirrors
+that authors had written alongside `time-inc!` calls.
+
+- **demo10** — dropped `state world/day` and `state world/hour`;
+  narration now reads `{time/day + 1}` and `{time/hour}`. Day/hour math
+  realigned: hour 0 is dawn, the market closes at hour 10 (instead of
+  18) so the original 5-browses-per-day rhythm is preserved.
+  `engine/emit` payloads keep 1-indexed `day` for narrative consistency.
+- **demo16** — dropped `state world/turn`; narration and writes use
+  `{time/turn}` and `time-inc! turn: 1` directly.
+- **demo20** — dropped `state world/period`, `state world/period-index`,
+  and `state world/day`. Added a `day` axis to `time-model` so the
+  period-wrap bumps day natively. Schedule and pure functions read
+  `time/period`; a helper `current-period` fn maps `time/period` →
+  Period enum for narration (`{current-period}`).
+- **demo28** intentionally untouched — it uses `world/turn` as a genuine
+  state path for counterfactual `from: (world/turn - 3)` rewinds, which
+  depend on per-turn ticks living in the transaction log.
+
+Supporting change: `lib/storybase.lua#get(path)` now recognises
+`time/<axis>` and delegates to the engine's `state:get_time()`, so tests
+and embedded hosts can read the engine clock through the same API as
+declared state paths.
+
+CLI integration tests for demo10 (3 cases) and demo16 (1 case) updated
+to match the new schemas and the realigned hour math. All 3047 tests
+pass.
+
+---
+
+## K1 — demo33 "The Apothecary's Counter" (J-I2 showcase) ✅ (2026-05-22)
+
+Shipped: `demos/demo33_apothecary.sb` (~120 lines), regression suite
+`tests/runtime/demo33_spec.lua` (7 tests, all green), and 5 CLI
+integration cases in `tests/cli/cli_integration_spec.lua` (compile,
+`--production` compile, verify, `--auto` playthrough, 25-choice count).
+
+A single-scene apothecary counter whose interactive structure depends
+entirely on the three J-I2 affordances (looped, gated, branched
+choices) and on Shape C (enum iteration). Pre-J-I2 the same content
+would have required ~28 hand-written choice rows for four patients;
+the demo expresses it in one `for` loop with three sub-blocks.
+
+Acceptance criteria all met:
+1. Initial render shows 25 visible choices (4 patients × 4 Remedy + 1
+   fever-only compress + 4 × 2 Premium).
+2. Looped-choice iter-binding propagation (treating bethe with the
+   `tonic` iter binding) works correctly.
+3. If/else branching flips when `shop/moonpetal` hits 0 — premium
+   choice rows are replaced with the narration line.
+4. Outer `when shop/served >= 4` gates the end-of-day "Close up shop"
+   choice.
+
+One small spec deviation: the original sketch used `++` for string
+concatenation (non-existent operator) inside `set! shop/last-note`; the
+demo uses the existing variadic `(str ...)` builtin instead — same
+observable behaviour, no language change needed.
+
+J-I2 carried the whole scene structure end-to-end (BFS verify of
+`shop/served >= 4` passes in 489 states).
+
+---
+
+## J-I2 — Scene-body choices descend into for / when / if blocks ✅ (2026-05-22)
+
+Pre-fix, a scene with N family members had to duplicate the choice
+block N times (demo04 crew narration, demo07 four shrines, demo11 four
+hires, demo20 per-room "X here:" lines). The parser previously accepted
+`*` choices inside scene-mode `when` / `if` / `for` but the runtime
+silently dropped them (`engine.lua:368` literally said "narration-only,
+no choice").
+
+Fixed by extending `runtime/engine.lua` to descend into `for` / `when` /
+`if` blocks when rendering choices and locating the player's selection.
+New helper `eng:_walk_scene_choices(items, ctx, visit)` performs a
+single left-to-right depth-first traversal shared by `render_scene` and
+`do_choice`, guaranteeing the visible-index → (choice node, iteration
+bindings) mapping is identical across render and execute. `do_choice`
+propagates for-loop variable bindings into the choice body's execution
+context so interpolated paths (`set! items/{i}/taken true`) resolve to
+the correct family member.
+
+**Shape C — enum-case iteration.** `for s in EnumKind:` iterates the
+enum's variant symbols. Implemented in `eval.eval_for_iter`, so the
+shortcut also works in `fn` / `generate` bodies. Falls through to
+`eval_expr` for any iter that is not a bare enum type name.
+
+Regression tests: `tests/runtime/j_i2_spec.lua` (15 cases — for over
+list literal / family / enum, per-iteration guard filtering,
+empty-iteration else, when-grouped choices, if/else branches, nesting
+and visible-index ordering, do_choice iter-binding propagation, replay
+determinism, BFS can_reach behind a looped choice). See
+`docs/reference/language.md#choices-inside-for--when--if`.
+
+---
+
+## J-I3 — `elif` / `else if` syntax ✅ (2026-05-21)
+
+Every multi-branch ending previously used nested `if/else: if/else:`
+(demos 03, 05, 09, 10, 11, 14, 16, 21, …), adding one indent level per
+branch.
+
+Fixed as a parser-only change. `parse_if_expr` now accepts either
+`else if cond:` or `elif cond:` after the then-body and desugars to a
+nested `if_expr` placed in the parent's `else_body`. The runtime,
+checker, and codegen are unchanged — the AST shape is identical to
+hand-nested `if/else: if`.
+
+`elif` is a new lexer keyword. `else if` works via lookahead (KEYWORD
+"else" followed by KEYWORD "if"). Both forms are interchangeable. Demos
+4, 6, 7, 8, 9, 10, 11, 12, 20, 21 migrated to the flattened form;
+demo20 alone collapsed 10 three-deep `world/phase` chains into single
+elif ladders. See `docs/reference/language.md#if-expression`.
+
+---
+
+## J-I5 — `relate-both!` / `unrelate-both!` intrinsics ✅ (2026-05-21)
+
+demo16 previously wrote `relate! roads `a `b; relate! roads `b `a` — no
+symmetric flag.
+
+Fixed by adding two new intrinsics: `relate-both!` and `unrelate-both!`.
+Each writes two log entries (one per direction) so replay, undo, and
+counterfactuals all see both edges. Migrated demos 16 and 20 to remove
+the manual mirror lines. Tests in `tests/runtime/eval_spec.lua`
+"eval_stmt: relate_both_mut / unrelate_both_mut". See
+`docs/reference/language.md#relate-both--unrelate-both`.
+
+---
+
+## J-I6 — `range` builtin ✅ (2026-05-21)
+
+Every numeric loop previously spelled out the integers (`for x in
+[0,1,2,3,4,5,6,7]:` in demo09); runtime-sized loops weren't
+expressible at all.
+
+Fixed by adding a `range` builtin in `runtime/eval.lua`'s BUILTINS
+table (Python-style, exclusive upper bound):
+
+- `range n` → `[0..n-1]`
+- `range lo hi` → `[lo..hi-1]`
+- `range lo hi step` → directional, non-zero step
+
+Result capped at 10000 elements (matches the engine's while-loop safety
+limit). `range` was also added to the checker's `CHECKER_BUILTIN_FNS`
+allow-list so calls don't surface as `unknown call` warnings. Tests in
+`tests/runtime/eval_spec.lua` ("eval: range builtin"). See
+`docs/reference/language.md#collection-builtins`.
+
+---
+
+## J-I7 — Length-name rationalisation (canonical `size` + aliases) ✅ (2026-05-21)
+
+Five names previously coexisted for "length": `size`, `count`,
+`list-size`, `ulist-size`, `map-size`. demo08 used `count-where path
+fn(step): true` to count a list — a clear "didn't find the right
+builtin" workaround.
+
+Fixed by consolidating to a single shared `size_impl` in
+`runtime/eval.lua`'s BUILTINS table. `size` is the canonical
+polymorphic name; `count`, `list-size`, `ulist-size`, and `map-size`
+are aliases that all reference the same implementation, so they always
+agree on every input (sequence tables, hash-style tables, non-tables).
+The J-B4 checker's `SIZE_LIKE_FNS` set was extended to include the
+`*-size` aliases so applying any of them to a scalar emits the same
+`NOT_A_COLLECTION` warning.
+
+demo08's `supply-path-steps` / `supply-optimal-steps` were rewritten
+from the `count-where path fn(step): true` workaround to the obvious
+`size path`, and from `when path = nil: 0` / value-expr-follows to a
+proper `if path = nil: 0 else: size path` (also clearing the J-B5
+warning those functions previously emitted).
+
+Tests in `tests/runtime/eval_spec.lua` ("size, count, list-size,
+ulist-size, map-size are aliases" — sequence, map-style, non-table)
+and `tests/compiler/checker_spec.lua` (J-B4 cases for the three new
+aliases). See `docs/reference/language.md#collection-builtins`.
+
+---
+
 ## J-B3 + J-B4 + J-B5 diagnostic warnings from Review Pass 3 ✅ (2026-05-21)
 
 Three new compiler warnings address the diagnostic bugs from §J:
