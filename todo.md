@@ -16,9 +16,9 @@ complete — details in [completed.md](completed.md).
 touching http/debug code.)
 
 Language Review Pass 3 (2026-05-20) is now closed on the runtime/parser side: all
-5 bugs (J-B1..B5) and 7 of the 10 authoring inelegances (J-I2, I3, I4, I5, I6,
-I7, I9) shipped between 2026-05-21 and 2026-05-22. The remaining 3 inelegances
-(§J-I1, I8, I10) stay open below as design-first backlog. K1 (demo33,
+5 bugs (J-B1..B5) and 8 of the 10 authoring inelegances (J-I1, I2, I3, I4, I5,
+I6, I7, I9) shipped between 2026-05-21 and 2026-05-22. The remaining 2
+inelegances (§J-I8, I10) stay open below as design-first backlog. K1 (demo33,
 J-I2 showcase) also shipped 2026-05-22.
 
 ---
@@ -26,9 +26,6 @@ J-I2 showcase) also shipped 2026-05-22.
 ## What to work on next
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
-- §J-I1 (per-symbol fn duplication) — re-evaluate now that J-I2 has
-  shipped; many cited cases fold into "single parameterised fn + looped
-  choice list."
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
 - §J-I10 — multi-way `hook` switches collapsing into per-case declarations.
 
@@ -316,32 +313,9 @@ The remaining residue:
 
 A read-through of demos 01–32 to spot places the demos visibly work around
 language limits, plus targeted runtime/parser inspection for bugs hinted at
-by those workarounds. All 5 bugs (J-B1..B5) and 7 inelegances (J-I2, I3, I4,
-I5, I6, I7, I9) are shipped — see completed.md. The 3 remaining inelegances
-are below.
-
-### J-I1. Symbol-keyed work needs N near-identical fns [inelegance]
-
-Every demo with parallel actions per symbol writes one fn per case:
-- demo02: `buy-herbs`/`buy-iron`/`buy-silk` + `sell-*` (6 fns differing
-  only by symbol + price path)
-- demo05: `order-battle-stations`/`order-guarded`/`order-stand-down` (only
-  diff is the message constructor)
-- demo11: `* Hire X` choice repeated for each of 4 members
-- demo15: `cast-fireball`/`cast-ice-shard`/`cast-heal-beam` despite the
-  spell record already carrying `mana-cost` and `ingredient`
-
-**Root cause:** no way to bind a Symbol parameter to a path-builder so
-`cast-spell s` can read `spells/{s}/mana-cost`. Macros + interpolated
-paths half-solve it inside fn bodies, but choice lists can't be generated
-this way.
-
-**Possible direction:** decl-macros already let authors generate per-symbol
-fns; document the pattern (`cast-spell-decl `fireball`) explicitly, OR
-extend interpolated-path semantics so a fn parameter can drive both
-sides of a `spells/{s}/...` lookup (it already works in many cases —
-verify which cases fail). Re-evaluate now that J-I2's looped choice
-lists may cover many of the cited cases.
+by those workarounds. All 5 bugs (J-B1..B5) and 8 inelegances (J-I1, I2, I3,
+I4, I5, I6, I7, I9) are shipped — see completed.md. The 2 remaining
+inelegances are below.
 
 ### J-I8. `set!` on a `let`-binding silently writes a fake state path [inelegance]
 

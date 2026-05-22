@@ -91,7 +91,7 @@ npcs/{npc}/health
 zones/{zone}/discovered
 ```
 
-The variable must be typed as a family key (`SymbolOf(Family)`).
+The variable must be typed as a family key (`SymbolOf(Family)`). A `for ... in (path-list family):` loop binding is auto-typed; a fn parameter can be annotated as `name: SymbolOf(Family)` to make interpolated writes statically resolvable (see [`fn`](#fn)).
 
 ### Named arguments
 
@@ -305,6 +305,39 @@ fn heal amount:
 - `pre:` — preconditions checked before the body runs.
 - `post:` — postconditions checked after. `path@before` refers to the value of `path` before the call.
 - `tags: [checkpoint, reversible]` — attach function tags.
+
+#### Parameter type annotations
+
+A parameter may be annotated with a type after a colon, mirroring `state` declaration syntax. Annotations are **optional**: bare parameters remain untyped and behave exactly as before.
+
+```
+fn cast-spell s: SymbolOf(spells):
+  dec! player/mana spells/{s}/mana-cost
+  set! spells/{s}/learned true
+```
+
+The trailing `:` after the type opens the function body. Multiple typed parameters and mixed (bare + typed) forms are both supported, and a named type alias works the same as the underlying type:
+
+```
+type ItemId = SymbolOf(items)
+
+fn give slot id: ItemId:                 # mixed bare + typed
+  set! items/{id}/holder slot
+
+fn deduct s: SymbolOf(market) n: Int(0, 99):   # multiple typed
+  dec! merchant/gold market/{s}-price * n
+```
+
+The primary use is annotating a parameter that drives a path interpolation. A param typed `SymbolOf(F)` (directly or via an alias) lets the compiler infer that `{name}` writes are entity-keyed under family `F`, suppressing the `WRITE_UNTYPED_VAR` warning and enabling static write-set inference for the fn. Other type annotations are accepted but currently only used as documentation — runtime type-checking of arguments at call sites is not yet enforced.
+
+Combined with [scene-body for-choices](#choices-inside-for--when--if), a single typed fn typically replaces a family of near-identical per-symbol fns:
+
+```
+for s in SpellKind:
+  * Cast {s} ({spells/{s}/mana-cost} mana)
+    cast-spell s
+    -> shop
+```
 
 Functions are automatically classified as **transaction** (calls mutations) or **pure** (no mutations). The compiler infers this and enforces it.
 

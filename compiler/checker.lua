@@ -1869,16 +1869,54 @@ local function pass_recursive_scenes(acc, program)
   end
 end
 
+--- Resolve a type expression through alias chains to find its SymbolOf
+--- family name, if any. Returns nil for non-SymbolOf types.
+local function resolve_symbol_of_family(texpr, symtab)
+  local seen = {}
+  while texpr do
+    if texpr.kind == ast.K.TYPE_SYMBOL_OF then return texpr.family end
+    if texpr.kind == ast.K.TYPE_NAMED and symtab then
+      if seen[texpr.name] then return nil end
+      seen[texpr.name] = true
+      local decl = symtab.types and symtab.types[texpr.name]
+      if decl and decl.kind == ast.K.TYPE_ALIAS and decl.type_expr then
+        texpr = decl.type_expr
+      else
+        return nil
+      end
+    else
+      return nil
+    end
+  end
+  return nil
+end
+
+--- Build the initial write-path env for a fn body from its typed parameters.
+--- A param annotated `SymbolOf(F)` (or a named alias for it) enters the env
+--- as `name → "family:F"`, so interpolated writes like `set! F/{name}/field`
+--- see the binding and don't trip WRITE_UNTYPED_VAR.
+local function fn_param_env(params, symtab)
+  local env = {}
+  for _, p in ipairs(params or {}) do
+    if type(p) == "table" and p.name and p.type_expr then
+      local fam = resolve_symbol_of_family(p.type_expr, symtab)
+      if fam then env[p.name] = "family:" .. fam end
+    end
+  end
+  return env
+end
+
 --- Pass 6: annotate every FN_DECL and SCENE_DECL with a `write_set` table.
 --- Also emits WRITE_UNTYPED_VAR / WRITE_DYNAMIC_PATH diagnostics.
-local function pass6_write_sets(acc, program)
+local function pass6_write_sets(acc, symtab, program)
   local k = ast.K
 
   for _, node in ipairs(program.decls) do
     if node.kind == k.FN_DECL then
       local ws = {}
+      local env = fn_param_env(node.params, symtab)
       for _, stmt in ipairs(node.body or {}) do
-        collect_writes(stmt, ws, {}, acc)
+        collect_writes(stmt, ws, env, acc)
       end
       node.write_set = ws
 
@@ -3427,7 +3465,7 @@ function M.check(ast_root, filename)
   pass3c_check_reversible(acc, ast_root)
   pass4_check_perceives(acc, ast_root)
   pass5_check_boundary(acc, symtab, ast_root)
-  pass6_write_sets(acc, ast_root)
+  pass6_write_sets(acc, symtab, ast_root)
   pass7_check_contracts(acc, symtab, ast_root)
   pass_recursive_scenes(acc, ast_root)
   pass_check_speakers(acc, symtab, ast_root)

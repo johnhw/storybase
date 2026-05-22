@@ -1154,6 +1154,62 @@ describe("parser — fn declarations", function()
     assert.are.equal("y", d.params[2])
   end)
 
+  -- ── J-I1: typed fn parameters ────────────────────────────────────────────────
+
+  it("parses a typed-param function with SymbolOf annotation", function()
+    local d = decl("fn cast-spell s: SymbolOf(spells):\n  pass")
+    assert.are.equal("cast-spell", d.name)
+    assert.are.equal(1, #d.params)
+    assert.is_table(d.params[1])
+    assert.are.equal("s", d.params[1].name)
+    assert.are.equal(ast.K.TYPE_SYMBOL_OF, d.params[1].type_expr.kind)
+    assert.are.equal("spells", d.params[1].type_expr.family)
+  end)
+
+  it("parses multiple typed params with explicit body opener", function()
+    local d = decl("fn pay s: SymbolOf(market) n: Int(0, 99):\n  pass")
+    assert.are.equal(2, #d.params)
+    assert.are.equal("s", d.params[1].name)
+    assert.are.equal(ast.K.TYPE_SYMBOL_OF, d.params[1].type_expr.kind)
+    assert.are.equal("n", d.params[2].name)
+    assert.are.equal(ast.K.TYPE_INT, d.params[2].type_expr.kind)
+  end)
+
+  it("parses mixed bare + typed params (typed last)", function()
+    local d = decl("fn use-item slot s: SymbolOf(items):\n  pass")
+    assert.are.equal(2, #d.params)
+    assert.are.equal("slot", d.params[1])
+    assert.is_table(d.params[2])
+    assert.are.equal("s", d.params[2].name)
+    assert.are.equal("items", d.params[2].type_expr.family)
+  end)
+
+  it("parses mixed typed + untyped trailing NAMED_ARG (no type at end)", function()
+    local d = decl("fn mixed s: SymbolOf(items) flag:\n  pass")
+    assert.are.equal(2, #d.params)
+    assert.is_table(d.params[1])
+    assert.are.equal("s", d.params[1].name)
+    assert.are.equal("flag", d.params[2])
+  end)
+
+  it("preserves untyped single param as a bare string", function()
+    local d = decl("fn double x:\n  x")
+    assert.are.equal("string", type(d.params[1]))
+    assert.are.equal("x", d.params[1])
+  end)
+
+  it("accepts a named-type alias on a fn param", function()
+    local tree = parse("type SpellSym = SymbolOf(spells)\nfn cast s: SpellSym:\n  pass")
+    local d
+    for _, n in ipairs(tree.decls) do
+      if n.kind == ast.K.FN_DECL then d = n end
+    end
+    assert.is_not_nil(d)
+    assert.are.equal(1, #d.params)
+    assert.are.equal("s", d.params[1].name)
+    assert.are.equal(ast.K.TYPE_NAMED, d.params[1].type_expr.kind)
+  end)
+
   it("parses pre: with a single inline expression", function()
     local d = decl("fn foo:\n  pre: x > 0\n  pass")
     assert.are.equal(ast.K.FN_DECL, d.kind)

@@ -1947,6 +1947,43 @@ fn clear-all:
     set! npcs/{npc} false
 ]])
   end)
+
+  -- ── J-I1: typed fn params silence WRITE_UNTYPED_VAR ────────────────────────
+
+  it("SymbolOf-typed fn param does NOT emit WRITE_UNTYPED_VAR", function()
+    check_ok(BASE .. [[
+state npcs/{npc}: Bool  max: 5
+fn clear-one n: SymbolOf(npcs):
+  set! npcs/{n} false
+]])
+  end)
+
+  it("named alias for SymbolOf-typed fn param does NOT emit WRITE_UNTYPED_VAR", function()
+    check_ok(BASE .. [[
+type NpcId = SymbolOf(npcs)
+state npcs/{npc}: Bool  max: 5
+fn clear-one n: NpcId:
+  set! npcs/{n} false
+]])
+  end)
+
+  it("non-SymbolOf typed fn param still emits WRITE_UNTYPED_VAR", function()
+    check_warn(BASE .. [[
+state world/{key}: Int(0, 99)  max: 5
+fn writer k: Symbol:
+  set! world/{k} 5
+]], ast.E.WRITE_UNTYPED_VAR)
+  end)
+
+  it("untyped (string) param still emits WRITE_UNTYPED_VAR even with typed sibling", function()
+    -- A typed first param doesn't silence a later untyped one.
+    check_warn(BASE .. [[
+state npcs/{npc}: Bool  max: 5
+state world/{key}: Int(0, 99)  max: 5
+fn mixed n: SymbolOf(npcs) k:
+  set! world/{k} 1
+]], ast.E.WRITE_UNTYPED_VAR)
+  end)
 end)
 
 -- ── speaker / say ─────────────────────────────────────────────────────────────

@@ -911,6 +911,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/runtime/migrate_spec.lua` | Migration runner unit tests (all op kinds, chain ordering) |
 | `tests/runtime/migrate_demo14_spec.lua` | Integration test for demo14's full 1→4 migration chain |
 | `tests/runtime/demo33_spec.lua` | Integration tests for demo33 (J-I2 showcase): compiles cleanly; initial counter scene exposes 25 choices (4×4 standard + 8 premium + 1 fever-compress); selecting 'Give tonic to bethe' propagates both iter bindings into `treat p r` and marks bethe treated; moonpetal depletion flips the if/else branch; treating all four patients surfaces 'Close up shop' via the outer `when` gate (7 tests) |
+| `tests/runtime/fn_param_types_spec.lua` | J-I1 typed fn parameters: `SymbolOf(F)` annotation silences WRITE_UNTYPED_VAR; alias-resolved types also work; plain `Symbol` and untyped params still warn; mixed bare + typed isolates the warning to the untyped var; end-to-end runtime case where one `cast-spell s: SymbolOf(spells)` fn drives a J-I2 for-loop of choices (6 tests) |
 | `tests/runtime/tilegrid_spec.lua` | Tile grid algorithms: storage, within_range, visible_from, find_path, occupied_by (83 tests) |
 | `tests/cli/extract_symbols_spec.lua` | extract-symbols CLI command |
 | `tests/cli/compact_spec.lua` | compact CLI command |

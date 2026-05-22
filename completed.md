@@ -5,6 +5,76 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## J-I1 — `fn` parameter type annotations ✅ (2026-05-22)
+
+The Review Pass 3 entry for J-I1 ("symbol-keyed work needs N near-identical
+fns") asserted that there was "no way to bind a Symbol parameter to a
+path-builder so `cast-spell s` can read `spells/{s}/mana-cost`." A
+re-investigation showed this was already wrong — interpolated paths with
+fn parameters had worked since demo11 shipped (`hire-member m` uses
+`members/{m}/status` and friends). Combined with J-I2's looped scene
+choices, the per-symbol fn duplication can be collapsed end-to-end.
+
+The one real residue was the compiler's `WRITE_UNTYPED_VAR` warning,
+emitted on every interpolated write that targets a fn-parameter, because
+fn parameters could not be type-annotated. (The checker comment said as
+much: "fn params have no declared types in the current parser, so we warn
+whenever ...")
+
+**Shipped:**
+- Parser (`compiler/parser.lua`): new helper `parse_fn_param_type_tail`
+  parses an optional type expression after the trailing NAMED_ARG param,
+  with support for multiple typed params (`fn pay s: T1 n: T2:`) and
+  mixed bare + typed forms (`fn use slot s: SymbolOf(items):`). Handles
+  the lexer's NAMED_ARG-fusion case where a single-identifier named-type
+  name has its colon attached (`fn cast s: SpellSym:`). Per-param
+  annotations promote the param entry from a bare string to a
+  `{name, type_expr}` table; bare strings remain for untyped params.
+- Checker (`compiler/checker.lua`): new `resolve_symbol_of_family` follows
+  TYPE_ALIAS chains to find the underlying `SymbolOf(F)` family name;
+  new `fn_param_env` seeds `pass6_write_sets` with `param → "family:F"`
+  bindings from typed params, so interpolated writes like
+  `set! F/{name}/field` no longer fire `WRITE_UNTYPED_VAR`. Plain
+  `Symbol`-typed params still warn (as they should — only `SymbolOf(F)`
+  is statically resolvable).
+- Runtime: no change needed. `eval.lua`'s fn-call site already supported
+  both bare-string and `{name=...}` table params (the comment said as
+  much).
+
+**Tests:**
+- `tests/compiler/parser_spec.lua` — 6 new cases covering single typed,
+  multi typed, mixed bare + typed, named-type alias, and untyped
+  back-compat.
+- `tests/compiler/checker_spec.lua` — 5 new cases covering
+  `WRITE_UNTYPED_VAR` silencing for `SymbolOf(F)` (direct and via alias),
+  still-warning for plain `Symbol`, still-warning for untyped, and the
+  mixed-param case (typed silences only its own var).
+- `tests/runtime/fn_param_types_spec.lua` — 6 new cases (new spec file)
+  covering all of the above plus an end-to-end runtime test that a
+  single `cast-spell s: SymbolOf(spells)` fn drives a J-I2 for-loop of
+  choices and correctly mutates per-symbol state.
+
+**Docs:** new "Parameter type annotations" subsection in
+`docs/reference/language.md#fn`. The path-interpolation reference at
+§"Path interpolation" was extended to mention fn-param annotations as
+the second way (alongside `path-list` loop binding) to type a `{var}`.
+
+**Scope boundary:** annotations are accepted for any type but currently
+only used by the write-set analysis (i.e., for `SymbolOf(F)`). Runtime
+argument-type checking at call sites is intentionally out-of-scope —
+introducing it would surface as a separate fault and is not required
+to close J-I1.
+
+Demo refactors (demo02/05/11/15 to use parameterised + looped form) are
+**not** part of this ship; they were called out in the J-I1 analysis but
+are pure cleanup and can land separately. The new syntax has been
+verified to work for those demos by hand-testing the spell case.
+
+Full suite: 3056 successes / 0 failures / 2 pending (the HTTP/debug
+transient failures excluded per CLAUDE.md).
+
+---
+
 ## J-I9 — `WARN_REDUNDANT_CLAMP` checker lint ✅ (2026-05-22)
 
 demo05 (and demo20 after the J-I4 migration) wrote a defensive

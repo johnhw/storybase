@@ -2669,6 +2669,67 @@ end
 
 -- ── Function declaration ─────────────────────────────────────────────────────
 
+--- After the last NAMED_ARG param has been pushed onto `params`, optionally
+--- parse a type-expression for that param (and any further `name: T` pairs),
+--- terminating on the body-opening `:`. Per-param type annotations convert
+--- the param entry from a bare string to a `{name, type_expr}` table; untyped
+--- params remain bare strings. See §J-I1.
+---
+--- Tokenisation note: when a type name has no trailing whitespace before the
+--- body-opening `:` (e.g. `fn cast s: SpellSym:`), the lexer fuses the colon
+--- onto the type name and emits a NAMED_ARG rather than IDENT + OP. We treat
+--- that NAMED_ARG as a single-identifier named type whose fused colon does
+--- double duty (either body opener or separator before the next param).
+local function parse_fn_param_type_tail(p, params)
+  -- Promote params[idx] from a bare string to {name, type_expr}.
+  local function annotate(idx, texpr)
+    local last = params[idx]
+    local pname = type(last) == "table" and last.name or last
+    params[idx] = { name = pname, type_expr = texpr }
+  end
+
+  while true do
+    if p:at("IDENT") or p:at("MACRO_PARAM") or p:at("OP", "(") then
+      -- Full type expression (Int(...), SymbolOf(...), Option(...),
+      -- function type "(T -> R)", etc.)
+      annotate(#params, parse_type_expr(p))
+
+      -- After the type, either another `name: T` param follows (NAMED_ARG)
+      -- or the body opener `:` closes the param list.
+      if p:at("NAMED_ARG") then
+        table.insert(params, p:adv().value)
+        -- Loop: examine the next token for the next param's type.
+      elseif p:match("OP", ":") then
+        return
+      else
+        p:emit_err(ast.E.EXPECTED_TOKEN,
+          "expected ':' or another typed parameter after fn parameter type",
+          p:cur().pos)
+        return
+      end
+
+    elseif p:at("NAMED_ARG") then
+      -- Fused single-identifier named-type: its `:` is either the body
+      -- opener (if NEWLINE/INDENT/DEDENT/EOF follows) or a separator
+      -- before the next param's NAMED_ARG.
+      local t = p:adv()
+      annotate(#params, ast.type_named(t.value, t.pos))
+      if p:at("NAMED_ARG") then
+        table.insert(params, p:adv().value)
+        -- Loop for next typed param.
+      else
+        -- Fused colon was the body opener.
+        return
+      end
+
+    else
+      -- The NAMED_ARG just pushed was an untyped param whose `:` is the
+      -- body opener. Nothing more to parse here.
+      return
+    end
+  end
+end
+
 local function parse_fn_decl(p, doc)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD "fn"
@@ -2690,6 +2751,7 @@ local function parse_fn_decl(p, doc)
     while p:at("IDENT") do table.insert(params, p:adv().value) end
     if p:at("NAMED_ARG") then
       table.insert(params, p:adv().value)
+      parse_fn_param_type_tail(p, params)
     else
       p:match("OP", ":")
     end
@@ -2700,6 +2762,7 @@ local function parse_fn_decl(p, doc)
     while p:at("IDENT") do table.insert(params, p:adv().value) end
     if p:at("NAMED_ARG") then
       table.insert(params, p:adv().value)
+      parse_fn_param_type_tail(p, params)
     else
       p:match("OP", ":")
     end
@@ -2711,6 +2774,7 @@ local function parse_fn_decl(p, doc)
     end
     if p:at("NAMED_ARG") then
       table.insert(params, p:adv().value)
+      parse_fn_param_type_tail(p, params)
     else
       p:emit_err(ast.E.EXPECTED_TOKEN, "expected ':' after function parameters", p:cur().pos)
     end
