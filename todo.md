@@ -4,14 +4,14 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-21)
+## Current Status (2026-05-22)
 
 The core language and runtime are feature-complete against the V1.0 specification.
 All eight implementation phases, language review passes 1 and 2, the full audit
 backlog, the full §E series, §F1/F2, §G2, §H2, and the I-series demos (26–32) are
 complete — details in [completed.md](completed.md).
 
-**~2999 successes / 0 failures / 2 pending (known limitations).**
+**~3029 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless
 touching http/debug code.)
 
@@ -22,20 +22,22 @@ bugs (two correctness, three diagnostic). See **§J** below.
 All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. Authoring inelegances
 J-I3 (elif / else if), J-I5 (bidirectional relations), J-I6 (range
 builtin), and J-I7 (length-name rationalisation) were also fixed on
-2026-05-21. The remaining 6 inelegances (J-I1, I2, I4, I8, I9, I10) stay
-open as design-first backlog.
+2026-05-21. J-I2 (looped / gated choices) was fixed on 2026-05-22. The
+remaining 5 inelegances (J-I1, I4, I8, I9, I10) stay open as design-first
+backlog.
 
 ---
 
 ## What to work on next
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
-- §J-I1 (per-symbol fn duplication) and §J-I2 (loops in choice lists) account for
-  the bulk of duplication across the 32 demos — investigate these first.
+- §J-I1 (per-symbol fn duplication) — re-evaluate now that J-I2 has
+  shipped; many cited cases fold into "single parameterised fn + looped
+  choice list."
 - §J-I4 (time-axis / state-path double bookkeeping) shows up in demos 10, 16, 20, 22.
-- §J-I8–I10 are smaller polish. §J-I3 (elif), §J-I5 (bidirectional
-  relations), §J-I6 (range builtin), and §J-I7 (length-name
-  rationalisation) all fixed 2026-05-21.
+- §J-I8–I10 are smaller polish. §J-I2 (choice-list looping), §J-I3
+  (elif), §J-I5 (bidirectional relations), §J-I6 (range builtin), and
+  §J-I7 (length-name rationalisation) all fixed.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -426,16 +428,38 @@ extend interpolated-path semantics so a fn parameter can drive both
 sides of a `spells/{s}/...` lookup (it already works in many cases —
 verify which cases fail).
 
-### J-I2. Choice lists are static — no `for npc in ...: * Talk to {npc}` [inelegance]
+### J-I2. Choice lists are static — no `for npc in ...: * Talk to {npc}` [inelegance] — DONE 2026-05-22
 
-A scene with N family members duplicates the choice block N times:
-demo04 crew narration, demo07 four shrines, demo11 four hires, demo20
-per-room "X here:" lines.
+A scene with N family members previously duplicated the choice block N
+times (demo04 crew narration, demo07 four shrines, demo11 four hires,
+demo20 per-room "X here:" lines).
 
-**Possible direction:** allow a `for x in <list>: *` form inside scene
-bodies that generates one choice per iteration with `{x}`-interpolated
-guards and text. Engine already loops over choices at runtime; the gap
-is parser/codegen.
+**Fixed (2026-05-22)** by extending `runtime/engine.lua` to descend into
+`for` / `when` / `if` blocks when rendering choices and locating the
+player's selection. New helper `eng:_walk_scene_choices(items, ctx,
+visit)` performs a single left-to-right depth-first traversal shared by
+`render_scene` and `do_choice`, guaranteeing the visible-index → (choice
+node, iteration bindings) mapping is identical across render and execute.
+`do_choice` propagates for-loop variable bindings into the choice body's
+execution context so interpolated paths (`set! items/{i}/taken true`)
+resolve to the correct family member.
+
+**Shape C — enum-case iteration.** `for s in EnumKind:` iterates the
+enum's variant symbols. Implemented in `eval.eval_for_iter`, so the
+shortcut also works in `fn` / `generate` bodies. Falls through to
+`eval_expr` for any iter that is not a bare enum type name.
+
+Latent bug closed: the parser previously accepted `*` choices inside
+scene-mode `when`/`if`/`for` but the runtime silently dropped them
+(`engine.lua:368` literally said "narration-only, no choice"). Now they
+participate in the visible list.
+
+Regression tests: `tests/runtime/j_i2_spec.lua` (15 cases — for over list
+literal / family / enum, per-iteration guard filtering, empty-iteration
+else, when-grouped choices, if/else branches, nesting and visible-index
+ordering, do_choice iter-binding propagation, replay determinism, BFS
+can_reach behind a looped choice). See
+`docs/reference/language.md#choices-inside-for--when--if`.
 
 ### J-I3. No `elif` / `else if` [inelegance] — DONE 2026-05-21
 
@@ -542,6 +566,152 @@ blocks. A per-room declarative `on-enter` (or per-flag declarative `gained-when:
 would express the same data with less indirection.
 
 **Possible direction:** allow `state world/location: Room; hook after move-to to `study: add! ...`. Pattern-match on the new value in the hook header.
+
+---
+
+## K. Demo backlog
+
+### K1. demo33 — "The Apothecary's Counter" (showcase for J-I2) — **DONE 2026-05-22**
+
+Shipped: `demos/demo33_apothecary.sb` (~120 lines), regression suite
+`tests/runtime/demo33_spec.lua` (7 tests, all green), and 5 CLI
+integration cases in `tests/cli/cli_integration_spec.lua` (compile,
+--production compile, verify, --auto playthrough, 25-choice count).
+
+All four acceptance criteria from the spec below are tested directly:
+initial 25-choice render, looped-choice iter-binding propagation (treating
+bethe with the "tonic" iter binding), if/else flip on moonpetal depletion,
+and the outer `when shop/served >= 4` end-of-day gate.
+
+One small spec deviation: the spec sketch used `++` for string concatenation
+(non-existent operator) inside `set! shop/last-note`; the demo uses the
+existing variadic `(str ...)` builtin instead — same observable behaviour,
+no language change needed.  No other surprises: J-I2 carried the whole
+scene structure end-to-end (BFS verify of `shop/served >= 4` passes in 489
+states).
+
+Original spec below for reference:
+
+### K1 (original spec). demo33 — "The Apothecary's Counter" (showcase for J-I2)
+
+**Goal:** a single-scene demo whose interactive structure depends entirely
+on the three J-I2 affordances (looped, gated, branched choices) and on
+Shape C (enum iteration). Pre-J-I2 the same content would have required
+~28 hand-written choice rows for four patients; the proposed scene
+expresses it in one for-loop with three sub-blocks.
+
+**Mechanic.** You run a counter. Four patients are waiting, each with a
+`Symptom` (ache / fever / cough / malaise). On each turn you pick a
+remedy from the `Remedy` enum (poultice / tincture / salve / tonic).
+Feverish patients also accept a cool compress (extra `when`-gated choice).
+While your moonpetal stock is non-zero, two premium remedies are also
+craftable (`if`/`else` branching). The day ends when all four are tended.
+
+**Files:** `demos/demo33_apothecary.sb` (+ optional tests file). Add to
+`tests/cli/cli_integration_spec.lua` per existing pattern.
+
+**Source sketch:**
+
+```
+module demo33-apothecary
+  version: 1.0
+
+# Demo 33 — The Apothecary's Counter
+# Demonstrates J-I2: looped + gated + branched choices in a single scene.
+
+engine-config:
+  entry-scene: counter
+
+type Symptom = ache | fever | cough | malaise
+type Remedy  = poultice | tincture | salve | tonic
+type Premium = elixir-of-moon | dragonbalm
+
+type PatientRec:
+  symptom: Symptom = `ache
+  treated: Bool    = false
+
+state patients/{p}:   PatientRec  max: 12
+state shop/moonpetal: Int(0, 10) = 1
+state shop/served:    Int(0, 99) = 0
+state shop/last-note: String     = ""
+
+generate stock-counter:
+  spawn! patients `arlin  PatientRec(symptom: `ache,    treated: false)
+  spawn! patients `bethe  PatientRec(symptom: `fever,   treated: false)
+  spawn! patients `corwin PatientRec(symptom: `cough,   treated: false)
+  spawn! patients `dell   PatientRec(symptom: `malaise, treated: false)
+
+fn treat p r:
+  set! patients/{p}/treated true
+  inc! shop/served 1
+  set! shop/last-note "Prepared a " ++ (str r) ++ " for " ++ (str p) ++ "."
+
+fn premium-treat p r:
+  dec! shop/moonpetal 1
+  set! patients/{p}/treated true
+  inc! shop/served 1
+  set! shop/last-note "Crafted a rare " ++ (str r) ++ " for " ++ (str p) ++ "."
+
+scene counter:
+  Served {shop/served}.  Moonpetal x{shop/moonpetal}.
+  {shop/last-note}
+
+  for p in (path-list patients):
+    [not patients/{p}/treated] {p} waits ({patients/{p}/symptom}).
+    for r in Remedy:                          # Shape C: enum iteration
+      * [not patients/{p}/treated] Give {r} to {p}
+        treat p r
+        -> counter
+    when patients/{p}/symptom = `fever:       # when-gated extra
+      * [not patients/{p}/treated] Apply cool compress to {p}
+        treat p `poultice
+        -> counter
+    if shop/moonpetal > 0:                    # if/else branching
+      for r in Premium:                       # Shape C inside if
+        * [not patients/{p}/treated] Brew {r} for {p}
+          premium-treat p r
+          -> counter
+    else:
+      [not patients/{p}/treated] (Premium remedies need moonpetal.)
+
+  when shop/served >= 4:
+    All patients tended.  The day is done.
+    * Close up shop
+      -> end-day
+
+scene end-day:
+  You served {shop/served} patients today.  Rest well.
+```
+
+**Features the demo lights up (each from §J-I2):**
+| Feature | Lines |
+|---|---|
+| `for p in (path-list family):` | outer loop over patients |
+| `for r in EnumKind:` (Shape C) | inner loops over Remedy, Premium |
+| `when cond: *` extra choice | cool-compress for fever patients |
+| `if cond: * ... else:` branching | premium remedies gated by moonpetal |
+| iter-binding flows into choice body | `treat p r`, `premium-treat p r` |
+| conditional narration inside for | "{p} waits ({patients/{p}/symptom})" |
+
+**Acceptance:**
+1. Initial render of `counter` shows ≥ (4 patients × 4 Remedy) + 1 fever
+   + (4 × 2 Premium) = 25 visible choices (modulo treated filtering).
+2. Picking choice 9 ("Give tonic to bethe") marks `patients/bethe/treated`
+   and bumps `shop/served` to 1; the next render of `counter` shows
+   patients other than bethe still waiting.
+3. After moonpetal hits 0 (use two premium brews), the if/else flips and
+   the "(Premium remedies need moonpetal.)" narration line replaces the
+   premium choice rows.
+4. After all four treated, the `when shop/served >= 4` block surfaces
+   "Close up shop" as the single remaining choice; selecting it ends.
+
+**Why pre-J-I2 this was awkward.** Without looped/gated/branched
+choices, the scene would have required either 28 hand-written choice
+rows (4 patients × 7 possible actions each, mostly disjoint) or a forest
+of per-patient sub-scenes reached via `=>`. The mechanic is itself the
+showcase: a player faces an action menu derived from declarative game
+state plus type definitions, with zero per-patient/per-remedy author
+duplication.
 
 ---
 

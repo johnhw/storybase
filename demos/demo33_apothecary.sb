@@ -1,0 +1,135 @@
+# demo33_apothecary.sb
+# "The Apothecary's Counter" — single-scene showcase for §J-I2.
+#
+# Demonstrates: looped + gated + branched choices in a single scene, plus
+# Shape C enum-case iteration. Pre-J-I2 the same surface would have required
+# ~28 hand-written choice rows for four patients; this scene expresses it in
+# one outer for-loop with three sub-blocks (one inner for, one when, one
+# if/else containing another for).
+#
+# Run:    lua5.4 cli/main.lua run demos/demo33_apothecary.sb
+# Auto:   lua5.4 cli/main.lua run --auto --steps 20 demos/demo33_apothecary.sb
+# Verify: lua5.4 cli/main.lua verify demos/demo33_apothecary.sb
+
+module demo33-apothecary
+  version: 1.0
+
+engine-config:
+  entry-scene: counter
+
+# ─────────────────────────────────────────────────────────
+# Types
+# ─────────────────────────────────────────────────────────
+
+"What ails a patient at the counter."
+type Symptom = ache | fever | cough | malaise
+
+"Standard remedies craftable on demand."
+type Remedy = poultice | tincture | salve | tonic
+
+"Premium remedies — each consumes one moonpetal."
+type Premium = elixir-of-moon | dragonbalm
+
+type PatientRec:
+  symptom: Symptom = `ache
+  treated: Bool    = false
+
+# ─────────────────────────────────────────────────────────
+# State
+# ─────────────────────────────────────────────────────────
+
+state patients/{p}:    PatientRec  max: 12
+state shop/moonpetal:  Int(0, 10)  = 2
+state shop/served:     Int(0, 99)  = 0
+state shop/last-note:  String      = "The shop opens.  Four patients wait."
+
+# ─────────────────────────────────────────────────────────
+# Setup
+# ─────────────────────────────────────────────────────────
+
+generate stock-counter:
+  spawn! patients `arlin  PatientRec(symptom: `ache,    treated: false)
+  spawn! patients `bethe  PatientRec(symptom: `fever,   treated: false)
+  spawn! patients `corwin PatientRec(symptom: `cough,   treated: false)
+  spawn! patients `dell   PatientRec(symptom: `malaise, treated: false)
+
+# ─────────────────────────────────────────────────────────
+# Action fns — iter bindings p (patient symbol) and r (remedy symbol)
+# flow in from the looped choice body.
+# ─────────────────────────────────────────────────────────
+
+"Mark patient p treated with standard remedy r."
+fn treat p r:
+  pre: not patients/{p}/treated
+  set! patients/{p}/treated true
+  inc! shop/served 1
+  set! shop/last-note (str "Prepared a " r " for " p ".")
+
+"Mark patient p treated with premium remedy r; consumes one moonpetal."
+fn premium-treat p r:
+  pre: not patients/{p}/treated
+  pre: shop/moonpetal > 0
+  dec! shop/moonpetal 1
+  set! patients/{p}/treated true
+  inc! shop/served 1
+  set! shop/last-note (str "Crafted a rare " r " for " p ".")
+
+# ─────────────────────────────────────────────────────────
+# The counter scene — every patient × every remedy + extras
+# ─────────────────────────────────────────────────────────
+
+scene counter:
+  THE APOTHECARY'S COUNTER.
+  Served {shop/served} of 4.  Moonpetal x{shop/moonpetal}.
+  {shop/last-note}
+
+  for p in (path-list patients):
+    [not patients/{p}/treated] {p} waits ({patients/{p}/symptom}).
+
+    # Inner for over the standard Remedy enum (Shape C).
+    for r in Remedy:
+      * [not patients/{p}/treated] Give {r} to {p}
+        treat p r
+        -> counter
+
+    # When-gated extra: only fever patients accept a cool compress.
+    when patients/{p}/symptom = `fever:
+      * [not patients/{p}/treated] Apply cool compress to {p}
+        treat p `poultice
+        -> counter
+
+    # If / else branching: premium remedies require moonpetal in stock.
+    if shop/moonpetal > 0:
+      for r in Premium:
+        * [not patients/{p}/treated] Brew {r} for {p}
+          premium-treat p r
+          -> counter
+    else:
+      [not patients/{p}/treated] (Premium remedies need moonpetal — none in stock.)
+
+  # Outer when-gate: all four tended → close-up choice.
+  when shop/served >= 4:
+    All patients tended.  The day is done.
+    * Close up shop
+      -> end-day
+
+scene end-day:
+  THE DAY IS DONE.
+  You served {shop/served} patients today.  Moonpetal remaining: {shop/moonpetal}.
+  {shop/last-note}
+
+  * Rest well
+    -> end-day
+
+# ─────────────────────────────────────────────────────────
+# Verify — invariants on the scene's derived structure
+# ─────────────────────────────────────────────────────────
+
+"Every patient can be treated; the day always ends."
+verify "the day can be completed":
+  verify-eventually (shop/served >= 4)
+
+"Served counter is bounded by the four spawned patients."
+verify "served never exceeds patient count":
+  from-any-state:
+    shop/served <= 4

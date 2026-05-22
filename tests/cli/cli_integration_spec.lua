@@ -2838,3 +2838,55 @@ describe("CLI demo32_inquisitors_board: set ops + labelled checkpoint", function
       "turn counter should rewind alongside the set mutation")
   end)
 end)
+
+-- ── demo33: The Apothecary's Counter (J-I2 looped/gated/branched choices) ─────
+--
+-- §J-I2 showcase: the counter scene's 25 visible choices are produced by a
+-- single outer `for p in (path-list patients)` loop with three sub-blocks
+-- (inner `for r in Remedy`, `when patients/{p}/symptom = `fever`, and an
+-- `if shop/moonpetal > 0` else-branch containing `for r in Premium`).  Shape C
+-- enum iteration is exercised twice (Remedy and Premium).
+
+describe("CLI demo33_apothecary: J-I2 looped/gated/branched choices", function()
+  it("compiles successfully", function()
+    local rc, out, err = run_cli({"compile", "demos/demo33_apothecary.sb"})
+    assert.equal(0, rc, "demo33 compile failed:\n" .. out .. err)
+    assert.is_truthy(out:find("Compilation succeeded"), out)
+  end)
+
+  it("--production compile exits 0", function()
+    local rc, out, err = run_cli({"compile", "--production",
+                                  "demos/demo33_apothecary.sb"})
+    assert.equal(0, rc, "demo33 --production compile failed:\n" .. out .. err)
+  end)
+
+  it("verify blocks all pass", function()
+    local rc, out, err = run_cli({"verify", "demos/demo33_apothecary.sb",
+                                  "--no-cache"})
+    assert.equal(0, rc, "demo33 verify failed:\n" .. out .. err)
+    assert.is_truthy(out:find("PASS"), out)
+    assert.is_falsy(out:find("FAIL"), out)
+  end)
+
+  it("auto-plays to the end-day scene", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "10",
+                                   "demos/demo33_apothecary.sb"})
+    assert.equal(0, rc, "demo33 auto run failed:\n" .. out .. err)
+    assert.is_truthy(out:find("THE DAY IS DONE"),
+      "expected demo33 to reach the end-day scene; got: " .. out)
+    assert.is_truthy(out:find("You served 4 patients today"),
+      "expected demo33 to report 4 served on end-day")
+  end)
+
+  -- Spec acceptance #1: initial counter scene shows 25 choices.
+  it("initial counter render shows exactly 25 choices", function()
+    local rc, out, err = run_cli({"run", "--auto", "--steps", "1",
+                                   "demos/demo33_apothecary.sb"})
+    assert.equal(0, rc, "demo33 first render failed:\n" .. out .. err)
+    -- Choice 25 must exist; choice 26 must not.
+    assert.is_truthy(out:find("25%. Brew dragonbalm for dell"),
+      "expected '25. Brew dragonbalm for dell' in initial render")
+    assert.is_falsy(out:find("26%."),
+      "initial render should not contain a 26th choice")
+  end)
+end)
