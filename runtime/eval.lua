@@ -2401,7 +2401,7 @@ eval_stmt = function(node, ctx)
     ctx.retval = eval_cond(node, ctx)
 
   elseif k == K.FOR_STMT then
-    local list = eval_expr(node.iter, ctx)
+    local list = M.eval_for_iter(node.iter, ctx)
     local iterated = false
     if type(list) == "table" then
       for _, val in ipairs(list) do
@@ -2766,6 +2766,42 @@ function M.child_ctx_vars(ctx, vars)
   local c = child_ctx(ctx)
   for k, v in pairs(vars or {}) do c.vars[k] = v end
   return c
+end
+
+--- Resolve a `for-loop` iter expression to a Lua array.
+--- Shape C (J-I2): if the iter is a bare identifier matching a declared
+--- enum type, return that enum's variant symbols. The parser emits such
+--- iters as either a single-segment `path_expr` or a zero-arg `fn_call`,
+--- depending on token shape — match both. Otherwise delegate to
+--- `eval_expr`. The schema's `_type_index` is built lazily on first call
+--- (BFS callers don't always invoke `engine:init`).
+function M.eval_for_iter(node, ctx)
+  local name = nil
+  if node and node.kind == K.PATH_EXPR
+              and node.segments and #node.segments == 1 then
+    name = node.segments[1]
+  elseif node and node.kind == K.FN_CALL
+              and (not node.args or #node.args == 0) then
+    name = node.name
+  end
+  if name then
+    local schema = ctx.game and ctx.game.schema
+    if schema and schema.types then
+      local idx = schema._type_index
+      if not idx then
+        idx = {}
+        for _, t in ipairs(schema.types) do
+          if t.name then idx[t.name] = t end
+        end
+        schema._type_index = idx
+      end
+      local t = idx[name]
+      if t and t.kind == "enum" then
+        return t.values
+      end
+    end
+  end
+  return eval_expr(node, ctx)
 end
 
 --- Evaluate a path node to a string.

@@ -1531,6 +1531,51 @@ Optional guard:
   -> next-scene
 ```
 
+#### Choices inside `for` / `when` / `if`
+
+A `*` choice may appear inside a `for`, `when`, or `if`/`else` block in a scene
+body. The block descends into the visible choice list:
+
+- `for x in <list>: *` emits one choice per iteration; the iteration variable
+  is in scope in the choice's guard, label, and body. The iter may be any list
+  expression (`[a, b, c]`, `(path-list family)`, …) **or** the name of a
+  declared `enum` type — in which case the loop iterates the enum's variants
+  (this also works in `fn` and `generate` bodies):
+
+  ```
+  type Direction = north | south | east | west
+
+  scene crossroads:
+    for d in Direction:
+      * Go {d}
+        move-to {d}
+        -> crossroads
+  ```
+
+- `when cond: *` makes the contained choices visible only when `cond` is true.
+
+- `if cond: *` (with optional `else: *`) routes choices into the matching
+  branch only.
+
+Visible choice indices are assigned in source order via a left-to-right
+depth-first walk, so static and looped choices interleave naturally:
+
+```
+scene hall:
+  * Always-first       # idx 1
+    -> hall
+  for r in (path-list rooms):
+    * [can-go? {r}] Go to {r}   # idx 2..N+1 (one per qualifying room)
+      move-to {r}
+      -> hall
+  * Always-last        # idx N+2
+    -> hall
+```
+
+`(path-list family)` returns keys in lexicographic order, so looped choices
+appear in the same order each turn — a property the replay log depends on
+(choices log the *visible* index).
+
 ### Scene navigation
 
 | Sigil | Effect |

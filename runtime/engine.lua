@@ -277,7 +277,7 @@ function M.new(game_table, opts)
       elseif sub.kind == "scene_goto" or sub.kind == "scene_enter" then
         eval.eval_stmt(sub, ctx)  -- sets ctx.signal
       elseif sub.kind == "for_stmt" then
-        local list = eval.eval_expr(sub.iter, ctx)
+        local list = eval.eval_for_iter(sub.iter, ctx)
         local iterated = false
         if type(list) == "table" then
           for _, val in ipairs(list) do
@@ -294,6 +294,57 @@ function M.new(game_table, opts)
       end
       if ctx.signal then return end  -- stop on navigation signal
     end
+  end
+
+  -- ── Scene choice traversal (J-I2) ────────────────────────────
+  --
+  -- Walk scene-body items left-to-right depth-first, calling `visit(choice, ctx)`
+  -- for each `*` choice in source order. Descends into for_stmt / when_stmt /
+  -- if_expr bodies so choices nested inside those blocks are visible. Both
+  -- `render_scene` (to populate the visible choice list) and `do_choice` (to
+  -- locate the player-selected choice) use this, guaranteeing the visible
+  -- index → (choice node, iteration bindings) mapping is identical across
+  -- render and execute.
+  --
+  -- Non-choice items (narration, say, goto) are ignored here; they are
+  -- handled by `_render_narration_items`. If `visit` sets `ctx.signal` (e.g.
+  -- by returning early through a navigation signal), the walk stops.
+  ---@param items table   list of scene-body AST nodes
+  ---@param ctx   table   eval context (carries any for-loop var bindings)
+  ---@param visit function (choice_node, ctx) → optional truthy to stop walk
+  ---@return boolean stopped — true if walk aborted early
+  function eng:_walk_scene_choices(items, ctx, visit)
+    if not items then return false end
+    for _, item in ipairs(items) do
+      if not item then  -- skip nil entries
+      elseif item.kind == "choice" then
+        if visit(item, ctx) then return true end
+
+      elseif item.kind == "when_stmt" then
+        if eval.eval_expr(item.condition, ctx) then
+          if self:_walk_scene_choices(item.body, ctx, visit) then return true end
+        end
+
+      elseif item.kind == "if_expr" then
+        local body = eval.eval_expr(item.condition, ctx) and item.then_body or item.else_body
+        if body and self:_walk_scene_choices(body, ctx, visit) then return true end
+
+      elseif item.kind == "for_stmt" then
+        local list = eval.eval_for_iter(item.iter, ctx)
+        local iterated = false
+        if type(list) == "table" then
+          for _, val in ipairs(list) do
+            iterated = true
+            local sub_ctx = eval.child_ctx_vars(ctx, {[item.var] = val})
+            if self:_walk_scene_choices(item.body, sub_ctx, visit) then return true end
+          end
+        end
+        if not iterated and item.else_body then
+          if self:_walk_scene_choices(item.else_body, ctx, visit) then return true end
+        end
+      end
+    end
+    return false
   end
 
   --- Render a scene body and return {narration, choices}.
@@ -320,6 +371,9 @@ function M.new(game_table, opts)
     local choice_idx = 0
     local nav_signal = nil
 
+    -- Pass 1: narration + navigation. Choice items are deferred to pass 2 so
+    -- that nested choices inside for/when/if blocks (J-I2) participate in the
+    -- visible-index ordering on equal footing with top-level choices.
     for _, item in ipairs(scene.body or {}) do
       if not item then
         -- skip nil items
@@ -337,15 +391,7 @@ function M.new(game_table, opts)
         eval.eval_stmt(item, ctx)  -- emits into ctx.narration_buf = narration
 
       elseif item.kind == "choice" then
-        local visible = true
-        if item.guard then
-          visible = eval.eval_expr(item.guard, ctx)
-        end
-        if visible then
-          choice_idx = choice_idx + 1
-          local label_str = self:render_text(item.label, ctx)
-          choices[#choices + 1] = { index = choice_idx, label = label_str }
-        end
+        -- Choices handled in pass 2 (below).
 
       elseif item.kind == "scene_goto" then
         -- Unconditional redirect in scene body — evaluate and record
@@ -357,7 +403,8 @@ function M.new(game_table, opts)
         if ctx.signal then nav_signal = ctx.signal; break end
 
       elseif item.kind == "when_stmt" then
-        -- Conditional narration block: render body if condition is true
+        -- Conditional narration block: render body if condition is true.
+        -- Choices inside this body are still emitted in pass 2.
         local cond = eval.eval_expr(item.condition, ctx)
         if cond then
           self:_render_narration_items(narration, item.body, ctx)
@@ -365,7 +412,7 @@ function M.new(game_table, opts)
         end
 
       elseif item.kind == "if_expr" then
-        -- if/else block at scene level (narration-only, no choice)
+        -- if/else block at scene level — narration handled here, choices in pass 2.
         local cond = eval.eval_expr(item.condition, ctx)
         local body = cond and item.then_body or item.else_body
         if body then
@@ -373,8 +420,9 @@ function M.new(game_table, opts)
         end
 
       elseif item.kind == "for_stmt" then
-        -- for loop at scene level — iterate and render narration for each element
-        local list = eval.eval_expr(item.iter, ctx)
+        -- for loop at scene level — iterate and render narration for each element.
+        -- Choices inside the body are still emitted in pass 2.
+        local list = eval.eval_for_iter(item.iter, ctx)
         local iterated = false
         if type(list) == "table" then
           for _, val in ipairs(list) do
@@ -390,6 +438,23 @@ function M.new(game_table, opts)
         end
         if nav_signal then break end
       end
+    end
+
+    -- Pass 2: enumerate visible choices in source order, descending into
+    -- for/when/if blocks via the shared walker.
+    if not nav_signal then
+      self:_walk_scene_choices(scene.body or {}, ctx, function(choice, sub_ctx)
+        local visible = true
+        if choice.guard then
+          visible = eval.eval_expr(choice.guard, sub_ctx)
+        end
+        if visible then
+          choice_idx = choice_idx + 1
+          local label_str = self:render_text(choice.label, sub_ctx)
+          choices[#choices + 1] = { index = choice_idx, label = label_str }
+        end
+        return false  -- never abort during render
+      end)
     end
 
     return narration, choices, nav_signal
@@ -428,26 +493,30 @@ function M.new(game_table, opts)
 
     local ctx     = self:make_ctx("scene:" .. scene_name)
     local visible = 0
+    local result_signal = nil
 
-    for _, item in ipairs(scene.body or {}) do
-      if item and item.kind == "choice" then
-        local show = true
-        if item.guard then
-          show = eval.eval_expr(item.guard, ctx)
-        end
-        if show then
-          visible = visible + 1
-          if visible == choice_idx then
-            -- Execute choice body (uses make_ctx so send! has actor registry)
-            local sub = self:make_ctx("choice")
-            eval.eval_stmts(item.body, sub)
-            return sub.signal
-          end
-        end
+    self:_walk_scene_choices(scene.body or {}, ctx, function(choice, sub_ctx)
+      local show = true
+      if choice.guard then
+        show = eval.eval_expr(choice.guard, sub_ctx)
       end
-    end
+      if not show then return false end
+      visible = visible + 1
+      if visible ~= choice_idx then return false end
+      -- Found the player's selection.  Execute its body with a fresh ctx
+      -- (so say! buffers into self._pending_narration for the next scene)
+      -- but inherit any for-loop iteration variables from sub_ctx so
+      -- interpolated paths inside the body resolve correctly.
+      local exec = self:make_ctx("choice")
+      if sub_ctx.vars then
+        for k, v in pairs(sub_ctx.vars) do exec.vars[k] = v end
+      end
+      eval.eval_stmts(choice.body, exec)
+      result_signal = exec.signal
+      return true  -- abort walk
+    end)
 
-    return nil
+    return result_signal
   end
 
   -- ── State initialisation ─────────────────────────────────────
