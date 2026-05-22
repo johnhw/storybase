@@ -114,11 +114,14 @@ function M._make_game(game_table)
 
   -- ── State access ──────────────────────────────────────────
 
-  --- Read a state path value.
-  ---@param path string  e.g. "player/health"
+  --- Read a state path value.  Accepts `time/<axis>` to read engine time axes
+  --- (mirrors the language's read-only `time/<axis>` pseudo-paths).
+  ---@param path string  e.g. "player/health", "time/hour"
   ---@return any
   function self:get(path)
     assert(self._eng, "call game:init() first")
+    local axis = path:match("^time/(.+)$")
+    if axis then return self._eng._state:get_time()[axis] end
     return self._eng._state:get(path)
   end
 

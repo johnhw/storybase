@@ -40,7 +40,6 @@ type CityRecord:
 
 state player/gold:        Int(0, 9999) = 500
 state player/location:    CityId       = `capital-city
-state world/turn:         Int(0, 999)  = 0
 state world/initialized:  Bool         = false
 state world/route-status: RouteStatus  = `closed
 state world/crisis-active: Bool        = false
@@ -145,7 +144,6 @@ fn open-village-road:
   post: world/route-status = `open
   relate-both! roads `fortress `village
   set!  world/route-status `open
-  inc!  world/turn 1
   time-inc! turn: 1
 
 "Sever Port Haven's main road (crisis event)."
@@ -154,11 +152,9 @@ fn trigger-crisis:
   post: world/crisis-active = true
   unrelate-both! roads `port-city `market-town
   set!  world/crisis-active true
-  inc!  world/turn 1
   time-inc! turn: 1
 
 fn advance-turn:
-  inc!  world/turn 1
   time-inc! turn: 1
 
 # ── Scenes ─────────────────────────────────────────────────────────────────────
@@ -173,7 +169,7 @@ scene init:
 
 scene map-room:
   The map room of Crown's Reach.
-  Turn: {world/turn}.  Gold: {player/gold}.  Route: {world/route-status}.
+  Turn: {time/turn}.  Gold: {player/gold}.  Route: {world/route-status}.
   Trade hubs: {hub-count}.  Coastal cities: {coastal-count}.
 
   * Survey the region

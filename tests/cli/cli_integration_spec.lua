@@ -745,17 +745,17 @@ describe("CLI demo10_market_bell: multi-axis time model + schedules + verify", f
     assert.is_truthy(out:find("Day"), out)
   end)
 
-  it("browsing advances hour and closes market at 18", function()
+  it("browsing advances hour and closes market at 10", function()
     local sb = require("lib.storybase")
     local game = sb.load("demos/demo10_market_bell.sb")
     game:init()
-    -- Browse 5 times: hour goes 8→10→12→14→16→18 (market closes on 5th)
+    -- Browse 5 times: hour goes 0→2→4→6→8→10 (market closes on 5th)
     for _ = 1, 4 do game:choose(3) end  -- browse ×4, still open
     assert.equal(true,  game:get("market/open"))
-    assert.equal(16,    game:get("world/hour"))
-    game:choose(3)  -- 5th browse: hour=18, market closes
+    assert.equal(8,     game:get("time/hour"))
+    game:choose(3)  -- 5th browse: hour=10, market closes
     assert.equal(false, game:get("market/open"))
-    assert.equal(18,    game:get("world/hour"))
+    assert.equal(10,    game:get("time/hour"))
   end)
 
   it("rest triggers morning-bell: market reopens with new prices", function()
@@ -765,13 +765,13 @@ describe("CLI demo10_market_bell: multi-axis time model + schedules + verify", f
     -- Close market by browsing 5 times
     for _ = 1, 5 do game:choose(3) end
     assert.equal(false, game:get("market/open"))
-    assert.equal(1,     game:get("world/day"))
+    assert.equal(0,     game:get("time/day"))
     -- Rest: advances day, triggers morning-bell
     local old_grain = game:get("prices/grain")
     game:choose(1)  -- rest (only choice when market closed)
     assert.equal(true,  game:get("market/open"))
-    assert.equal(2,     game:get("world/day"))
-    assert.equal(8,     game:get("world/hour"))
+    assert.equal(1,     game:get("time/day"))
+    assert.equal(0,     game:get("time/hour"))
     -- morning-bell fires random-int prices (may differ from initial)
     local new_grain = game:get("prices/grain")
     assert.is_truthy(new_grain >= 5 and new_grain <= 12,
@@ -791,7 +791,8 @@ describe("CLI demo10_market_bell: multi-axis time model + schedules + verify", f
     end
     assert.equal(true,  game:get("market/festival"))
     assert.equal(false, game:get("market/open"))
-    assert.equal(5,     game:get("world/day"))
+    -- engine day axis is 0-indexed; player-facing "Day 5" = engine day 4
+    assert.equal(4,     game:get("time/day"))
   end)
 
   it("festival-end scene reached after grand festival", function()
@@ -1246,7 +1247,7 @@ describe("CLI demo16_cartographers_web: or-where, connected-to, inverse-adjacent
     assert.equal("closed", game:get("world/route-status"))
     game:call("open-village-road")
     assert.equal("open", game:get("world/route-status"))
-    assert.equal(1, game:get("world/turn"))
+    assert.equal(1, game:get("time/turn"))
   end)
 
   it("counterfactual simulate: true — preview gold increments by route-bonus", function()

@@ -11,7 +11,7 @@ All eight implementation phases, language review passes 1 and 2, the full audit
 backlog, the full §E series, §F1/F2, §G2, §H2, and the I-series demos (26–32) are
 complete — details in [completed.md](completed.md).
 
-**~3029 successes / 0 failures / 2 pending (known limitations).**
+**~3047 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless
 touching http/debug code.)
 
@@ -22,8 +22,10 @@ bugs (two correctness, three diagnostic). See **§J** below.
 All 5 bugs (J-B1..B5) were **fixed on 2026-05-21**. Authoring inelegances
 J-I3 (elif / else if), J-I5 (bidirectional relations), J-I6 (range
 builtin), and J-I7 (length-name rationalisation) were also fixed on
-2026-05-21. J-I2 (looped / gated choices) was fixed on 2026-05-22. The
-remaining 5 inelegances (J-I1, I4, I8, I9, I10) stay open as design-first
+2026-05-21. J-I2 (looped / gated choices) was fixed on 2026-05-22.
+J-I4 (time-axis / state-path mirroring) was closed on 2026-05-22 by
+migrating demos 10, 16, 20 to read `time/<axis>` directly. The
+remaining 4 inelegances (J-I1, I8, I9, I10) stay open as design-first
 backlog.
 
 ---
@@ -34,10 +36,10 @@ backlog.
 - §J-I1 (per-symbol fn duplication) — re-evaluate now that J-I2 has
   shipped; many cited cases fold into "single parameterised fn + looped
   choice list."
-- §J-I4 (time-axis / state-path double bookkeeping) shows up in demos 10, 16, 20, 22.
 - §J-I8–I10 are smaller polish. §J-I2 (choice-list looping), §J-I3
-  (elif), §J-I5 (bidirectional relations), §J-I6 (range builtin), and
-  §J-I7 (length-name rationalisation) all fixed.
+  (elif), §J-I4 (time-axis mirrors), §J-I5 (bidirectional relations),
+  §J-I6 (range builtin), and §J-I7 (length-name rationalisation) all
+  fixed.
 
 **Lower-priority polish (open, not blocking):**
 - §A1 — SF-5 — already partially mitigated by AV-4; consider closing.
@@ -478,17 +480,42 @@ and codegen are unchanged — the AST shape is identical to hand-nested
 alone collapsed 10 three-deep `world/phase` chains into single elif
 ladders. See `docs/reference/language.md#if-expression`.
 
-### J-I4. Time-axis ↔ state path double-bookkeeping [inelegance]
+### J-I4. Time-axis ↔ state path double-bookkeeping [inelegance] — DONE 2026-05-22
 
-Demos 10, 16, 20, 22 all pair every `time-inc! turn: N` with `inc! world/turn N`
+Demos 10, 16, 20 all paired every `time-inc! turn: N` with `inc! world/turn N`
 (and `time-set! hour: 8` with `set! world/hour 8`). The engine's time axis
-is invisible from narration paths, so authors mirror it into a state path.
-demo20 even mirrors three things meaning one: `world/period` (enum),
+appeared invisible from narration paths, so authors mirrored it into a state path.
+demo20 even mirrored three things meaning one: `world/period` (enum),
 `world/period-index` (Int), and the actual time axis.
 
-**Possible direction:** expose time-axis values as readable paths (e.g.
-`time/turn`, `time/hour`) so narration can interpolate them directly and
-state-path mirrors go away.
+**Resolution:** The underlying feature already shipped on **2026-05-07** as
+**AE-3** — `time/<axis-name>` is a read-only pseudo-path backed directly by
+the engine's time state (e.g. `time/day`, `time/hour`, `time/period`). The
+remaining work was a demo migration:
+
+- **demo10** — dropped `state world/day` and `state world/hour`; narration now
+  reads `{time/day + 1}` and `{time/hour}`. Day/hour math realigned: hour 0
+  is dawn, the market closes at hour 10 (instead of 18) so the original
+  5-browses-per-day rhythm is preserved. `engine/emit` payloads keep
+  1-indexed `day` for narrative consistency.
+- **demo16** — dropped `state world/turn`; narration and writes use
+  `{time/turn}` and `time-inc! turn: 1` directly.
+- **demo20** — dropped `state world/period`, `state world/period-index`, and
+  `state world/day`. Added a `day` axis to `time-model` so the period-wrap
+  bumps day natively. Schedule and pure functions read `time/period`; a
+  helper `current-period` fn maps `time/period` → Period enum for
+  narration (`{current-period}`).
+- **demo28** is intentionally left untouched — it uses `world/turn` as a
+  genuine state path for counterfactual `from: (world/turn - 3)` rewinds,
+  which depend on per-turn ticks living in the transaction log.
+
+Supporting change: `lib/storybase.lua#get(path)` now recognises
+`time/<axis>` and delegates to the engine's `state:get_time()`, so tests
+and embedded hosts can read the engine clock through the same API as
+declared state paths.
+
+CLI integration tests for demo10 (3 cases) and demo16 (1 case) updated to
+match the new schemas and the realigned hour math. All 3047 tests pass.
 
 ### J-I5. Bidirectional relations need manual mirroring [inelegance] — DONE 2026-05-21
 

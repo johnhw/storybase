@@ -21,8 +21,8 @@ module harrow-house
   version: 1.0
 
 time-model:
-  axes: [period]
-  wrap: [8]
+  axes: [period, day]
+  wrap: [8, none]
 
 engine-config:
   entry-scene: prologue
@@ -63,12 +63,9 @@ type MeredithMsg:
 # State
 # ─────────────────────────────────────────────────────────
 
-"World state: phase, period, day counter, ambient light."
+"World state: phase and ambient light. Period and day are read via time/period and time/day -- no mirror state needed."
 state world:
   phase:         Phase      = `prosaic
-  period:        Period     = `morning
-  period-index:  Int(0, 7)  = 1
-  day:           Int(0, 30) = 0
   ambient-light: Bool       = true
 
 "Player state: location, inventory, knowledge, rapport, wariness."
@@ -135,7 +132,7 @@ bounded classify-approach:
 
 "Meredith's behavior actor: processes rapport adjustments and forced departures."
 actor meredith-actor:
-  perceives: [world/phase, world/period, world/period-index, player/rapport, player/wariness, player/location, npcs/meredith, meredith-actor/inbox]
+  perceives: [world/phase, player/rapport, player/wariness, player/location, npcs/meredith, meredith-actor/inbox]
   inbox:     List(MeredithMsg, 8)
   behavior:  meredith-behavior
   priority:  5
@@ -149,15 +146,15 @@ schedule period-cycle:
   every:  [period: +1]
   offset: [period: 0]
   fn:
-    when world/period-index = 7:
+    when time/period = 7:
       when path-exists? npcs/meredith:
         despawn! npcs `meredith
-    when world/period-index != 7:
+    when time/period != 7:
       when path-exists? npcs/meredith:
-        set! npcs/meredith/location (meredith-room-for world/period-index)
+        set! npcs/meredith/location (meredith-room-for time/period)
         set! npcs/meredith/disposition `welcoming
       when not (path-exists? npcs/meredith):
-        spawn! npcs `meredith NpcRecord(location: (meredith-room-for world/period-index), disposition: `welcoming)
+        spawn! npcs `meredith NpcRecord(location: (meredith-room-for time/period), disposition: `welcoming)
     send! meredith-actor (MeredithMsg/rapport-gain amount: 0)
 
 # ─────────────────────────────────────────────────────────
@@ -186,8 +183,8 @@ hook after: move-to:
 # ─────────────────────────────────────────────────────────
 
 watch world/phase         "Phase"
-watch world/period        "Period"
-watch world/day           "Day"
+watch time/period         "Period"
+watch time/day            "Day"
 watch player/rapport      "Rapport"
 watch player/wariness     "Wariness"
 watch player/location     "Location"
@@ -212,11 +209,15 @@ verify "uneasy requires knows-harrow-research":
   verify-always (world/phase = `prosaic) or (`knows-harrow-research in player/knowledge)
 
 verify "day count non-negative":
-  verify-always world/day >= 0
+  verify-always time/day >= 0
 
 # ─────────────────────────────────────────────────────────
 # Pure functions
 # ─────────────────────────────────────────────────────────
+
+"Current period as a Period symbol (derived from the engine time axis)."
+fn current-period:
+  period-for-index time/period
 
 "Room where Meredith should be at the given period index."
 fn meredith-room-for idx:
@@ -300,8 +301,9 @@ fn can-ask-basement?:
 # Transaction functions
 # ─────────────────────────────────────────────────────────
 
-"Spawn Meredith in the library for the opening morning."
+"Spawn Meredith in the library for the opening morning. Engine time starts at period 0 (dawn); we bump to period 1 so the player begins in morning."
 fn init-game:
+  time-set! period: 1
   spawn! npcs `meredith NpcRecord(location: `library, disposition: `welcoming)
 
 "Move to an adjacent accessible room."
@@ -309,20 +311,15 @@ fn move-to room:
   pre: can-go? room
   set! player/location room
 
-"Advance to the next time period and handle the daily reset."
+"Advance to the next time period and handle the daily reset. The period axis wraps at 8; when wrapping back to 0 we bump the day axis and ease wariness."
 fn advance-period:
-  pre: world/day < 30
-  let new-index = world/period-index + 1
-  when new-index >= 8:
-    set! world/period-index 0
-    set! world/period `dawn
-    inc! world/day 1
+  pre: time/day < 30
+  let wrapping = (time/period = 7)
+  time-inc! period: 1
+  when wrapping:
+    time-inc! day: 1
     when player/wariness > 0:
       dec! player/wariness 1
-  when new-index < 8:
-    set! world/period-index new-index
-    set! world/period (period-for-index new-index)
-  time-inc! period: 1
 
 "Pick up an item from the current room. Unlocks door edges when keys are collected."
 fn pick-up item:
@@ -500,7 +497,7 @@ scene foyer:
     Something below the house is patient. You understand now why she does not sleep.
     The foyer feels like the mouth of something that has not yet decided to close.
 
-  Period: {world/period}. Day {world/day}. Rapport: {player/rapport}. Wariness: {player/wariness}.
+  Period: {current-period}. Day {time/day}. Rapport: {player/rapport}. Wariness: {player/wariness}.
 
   [meredith-here?] Meredith stands near the door, politely watchful.
 
@@ -864,7 +861,7 @@ scene chamber:
 # ── Meredith Dialog Sub-Scene ─────────────────────────────────────────────────
 
 scene talk-meredith:
-  Meredith Harrow -- {world/period}.
+  Meredith Harrow -- {current-period}.
 
   if world/phase = `prosaic:
     She meets your questions with the precise, unhurried manner of someone who has
@@ -963,7 +960,7 @@ scene ending-vigil-continues:
   She watches you leave from the doorstep. At the gate you look back.
   She is already closing the door.
 
-  The vigil continues. Day {world/day}. Rapport {player/rapport}.
+  The vigil continues. Day {time/day}. Rapport {player/rapport}.
 
   * Reflect.
     -> ending-vigil-continues
@@ -981,7 +978,7 @@ scene ending-mechanism-fails:
 
   What happens to Meredith Harrow is not shown. This is also correct.
 
-  Day {world/day}. The vigil is ended. What follows is not your story.
+  Day {time/day}. The vigil is ended. What follows is not your story.
 
   * Accept the outcome.
     -> ending-mechanism-fails
@@ -1004,7 +1001,7 @@ scene ending-offered-hand:
   The choice is yours. The story does not tell you what you chose.
   That is the only mercy the house has left to offer.
 
-  Day {world/day}. Rapport {player/rapport}. All three notebooks in hand.
+  Day {time/day}. Rapport {player/rapport}. All three notebooks in hand.
 
   * Accept.
     -> ending-offered-hand
