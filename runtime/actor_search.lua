@@ -388,8 +388,14 @@ end
 -- ============================================================
 
 --- Find the next action for a goal-directed actor.
---- Returns a table `{name=action_name, arg_nodes={literal AST nodes}}` ready
---- for `call_fn`, or nil if no progress is possible within the bound.
+--- Returns one of:
+---   {name = action_name, arg_nodes = {...}}  — a step to commit
+---   {satisfied = true}                        — goal already true, no-op
+---   nil                                       — no plan exists (genuinely blocked)
+---
+--- The caller (run_behaviors) treats `satisfied` as a silent no-op and only
+--- fires the no-progress hook on the nil case.  Conflating the two would
+--- spam the hook every tick for any actor that has already reached its goal.
 ---
 --- Plan caching: after a fresh BFS finds plan `[A, B, C]`, we commit A and
 --- stash `[B, C]` under the hash of the **post-A** cache snapshot.  On the
@@ -409,9 +415,10 @@ function M.find_plan(real_state, game, actor)
   local start_cache = clone_cache(real_state._cache or {})
   local hash        = hash_cache(start_cache)
 
-  -- Already at goal — nothing to commit.
+  -- Already at goal — return a distinguishable sentinel so the caller can
+  -- skip dispatch *and* skip the no-progress hook.
   if eval_goal(schema, fns, game, start_cache, actor.goal) then
-    return nil
+    return { satisfied = true }
   end
 
   -- Plan cache hit: a prior tick stashed the remaining plan under THIS hash.

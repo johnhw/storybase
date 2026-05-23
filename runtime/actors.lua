@@ -245,6 +245,10 @@ function M.new(state, log)
           goto continue
         end
 
+        -- Goal already met: silent no-op (don't dispatch, don't fire
+        -- the no-progress hook — the actor is done, not blocked).
+        if plan.satisfied then goto continue end
+
         local fn_def = fns and fns[plan.name]
         if not fn_def then goto continue end
 

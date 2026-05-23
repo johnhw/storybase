@@ -478,3 +478,252 @@ actor nurse:
     assert.is_true(eng._state:get("patients/bethe/treated"))
   end)
 end)
+
+-- ============================================================
+-- Already-at-goal: silent no-op, no no_progress spam
+-- ============================================================
+
+describe("h1 — already-at-goal is a silent no-op", function()
+  it("does not fire the no_progress hook when goal is already true", function()
+    -- Goal `world/done` defaults to TRUE at init.  The actor would
+    -- previously fire no_progress every tick because find_plan returned
+    -- nil for both "blocked" and "satisfied".  After the fix it returns
+    -- a {satisfied=true} sentinel.
+    local src = [[
+module h1-satisfied
+state world/done: Bool = true
+fn try-flip:
+  pre: not world/done
+  set! world/done false
+actor done-actor:
+  goal:    world/done
+  actions: [try-flip]
+]]
+    local eng = fresh_engine(src)
+    for _ = 1, 5 do eng:autonomous_turn() end
+    assert.is_nil(eng._h1_no_progress,
+      "no_progress fired for a satisfied actor: "
+        .. tostring(eng._h1_no_progress and table.concat(eng._h1_no_progress, ",")))
+    assert.is_true(eng._state:get("world/done"))  -- never flipped
+  end)
+
+  it("returns {satisfied=true} from find_plan when already at goal", function()
+    local search = require("runtime.actor_search")
+    local src = [[
+module h1-find-plan-satisfied
+state world/done: Bool = true
+fn try-flip:
+  pre: not world/done
+  set! world/done false
+actor a:
+  goal:    world/done
+  actions: [try-flip]
+]]
+    local eng, gt = fresh_engine(src)
+    local result = search.find_plan(eng._state, gt, gt.actors.a)
+    assert.is_table(result)
+    assert.is_true(result.satisfied)
+    assert.is_nil(result.name)
+  end)
+
+  it("a satisfied actor still fires no-progress once the goal is invalidated", function()
+    -- Player flips the goal off — actor should now plan; if no plan
+    -- exists (action's pre stays false), the no_progress hook fires.
+    local src = [[
+module h1-flip-back
+state world/done: Bool = true
+state world/blocker: Bool = true
+fn try-flip:
+  pre: not world/done
+  pre: not world/blocker
+  set! world/done true
+actor a:
+  goal:    world/done
+  actions: [try-flip]
+]]
+    local eng = fresh_engine(src)
+    eng:autonomous_turn()
+    assert.is_nil(eng._h1_no_progress)  -- satisfied
+    -- Invalidate goal externally; blocker keeps the only action out of reach.
+    eng._state:set("world/done", false, "test-invalidate")
+    eng:autonomous_turn()
+    assert.is_not_nil(eng._h1_no_progress)
+    assert.equal("a", eng._h1_no_progress[1])
+  end)
+end)
+
+-- ============================================================
+-- Mixed H1 + legacy behavior actors in one game
+-- ============================================================
+
+describe("h1 — mixed H1 and legacy behavior actors", function()
+  it("both flavors run side-by-side in the same engine", function()
+    local src = [[
+module h1-mixed
+state world/h1-touched:     Bool = false
+state world/legacy-touched: Bool = false
+
+fn touch-h1:
+  pre: not world/h1-touched
+  set! world/h1-touched true
+
+fn touch-legacy:
+  set! world/legacy-touched true
+
+actor h1-actor:
+  goal:    world/h1-touched
+  actions: [touch-h1]
+
+actor legacy-actor:
+  behavior: touch-legacy
+]]
+    local eng = fresh_engine(src)
+    eng:autonomous_turn()
+    assert.is_true(eng._state:get("world/h1-touched"))
+    assert.is_true(eng._state:get("world/legacy-touched"))
+  end)
+end)
+
+-- ============================================================
+-- Multi-param action with Cartesian enumeration
+-- ============================================================
+
+describe("h1 — multi-param actions enumerate the Cartesian product", function()
+  it("BFS finds a 2-param call that satisfies the goal", function()
+    -- Two-parameter action over Bool × inline-Enum.  The only `set`
+    -- combination that flips the world flag is `(true, b)`.
+    local src = [[
+module h1-multiparam
+type Slot = left | right
+state world/set: Bool = false
+
+fn set-both flag: Bool slot: Slot:
+  pre: not world/set
+  pre: flag
+  pre: slot = `right
+  set! world/set true
+
+actor a:
+  goal:    world/set
+  actions: [set-both]
+]]
+    local eng = fresh_engine(src)
+    eng:autonomous_turn()
+    assert.is_true(eng._state:get("world/set"))
+  end)
+end)
+
+-- ============================================================
+-- TYPE_NAMED alias resolution in argument enumeration
+-- ============================================================
+
+describe("h1 — TYPE_NAMED alias resolution", function()
+  it("resolves an enum alias to its variants for action args", function()
+    -- `Room` is a type alias chain: declared enum → alias → enum used in fn arg.
+    local src = [[
+module h1-alias-enum
+type Room = lobby | back
+type Place = Room        # alias
+state world/at: Room = `lobby
+
+fn move-to dest: Place:    # alias-typed param
+  pre: not (world/at = dest)
+  set! world/at dest
+
+actor mover:
+  goal:    world/at = `back
+  actions: [move-to]
+]]
+    local eng = fresh_engine(src)
+    eng:autonomous_turn()
+    assert.equal("back", eng._state:get("world/at"))
+  end)
+
+  it("resolves a bool alias to {false,true}", function()
+    local src = [[
+module h1-alias-bool
+type Toggle = Bool
+state world/lit: Bool = false
+
+fn flip v: Toggle:
+  pre: world/lit != v
+  pre: v
+  set! world/lit v
+
+actor a:
+  goal:    world/lit
+  actions: [flip]
+]]
+    local eng = fresh_engine(src)
+    eng:autonomous_turn()
+    assert.is_true(eng._state:get("world/lit"))
+  end)
+end)
+
+-- ============================================================
+-- Empty / malformed actor declarations: graceful no-op
+-- ============================================================
+
+describe("h1 — find_plan input validation", function()
+  it("returns nil for an actor with goal but no actions", function()
+    local search = require("runtime.actor_search")
+    local fake_state = { _cache = {} }
+    local actor = { name = "x", goal = { kind = "bool_lit", value = false } }
+    assert.is_nil(search.find_plan(fake_state, {}, actor))
+  end)
+
+  it("returns nil for an actor with actions but no goal", function()
+    local search = require("runtime.actor_search")
+    local fake_state = { _cache = {} }
+    local actor = { name = "x", actions = { "step" } }
+    assert.is_nil(search.find_plan(fake_state, {}, actor))
+  end)
+end)
+
+-- ============================================================
+-- search-budget-ms is read from the actor record
+-- ============================================================
+
+describe("h1 — search-budget-ms wiring", function()
+  it("propagates the search-budget-ms field onto the compiled actor", function()
+    local src = [[
+module h1-budget
+state world/x: Bool = false
+fn step:
+  pre: not world/x
+  set! world/x true
+actor a:
+  goal:             world/x
+  actions:          [step]
+  search-depth:     4
+  search-budget-ms: 7
+]]
+    local gt, errs = compile(src)
+    assert.equal(0, #errs)
+    assert.equal(7, gt.actors.a.search_budget_ms)
+    -- Sanity: the actor still plans through with this budget.
+    local eng = fresh_engine(src)
+    eng:autonomous_turn()
+    assert.is_true(eng._state:get("world/x"))
+  end)
+end)
+
+-- ============================================================
+-- Plan-cache invalidation: external state change re-plans correctly
+-- ============================================================
+
+describe("h1 — plan cache survives foreign state changes", function()
+  it("an external set! between ticks invalidates the cache and re-plans", function()
+    local eng = fresh_engine(MAZE_SRC)
+    eng:autonomous_turn()
+    assert.equal("room2", eng._state:get("thief/at"))
+    -- Teleport the thief forward via a foreign mutation: cache miss
+    -- on next tick, fresh BFS from the new position.
+    eng._state:set("thief/at", "room4", "test-teleport")
+    eng:autonomous_turn()
+    -- BFS from room4 → first step is room5.
+    assert.equal("room5", eng._state:get("thief/at"))
+    eng:autonomous_turn()
+    assert.equal("room6", eng._state:get("thief/at"))
+  end)
+end)
