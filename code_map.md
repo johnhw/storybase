@@ -484,13 +484,18 @@ Game loop coordinator.
     `engine.scene-stack-max` (int, default 16), `engine.entry-scene`
     (string, no default), `engine.npc-speed` (int, default 0),
     `engine.debug-port` (int, default 7373, cli `--debug-port`),
-    `engine.http-port` (int, no default, cli `--http-port`). Calls
-    `config.bind_game(game_table)` and resolves values through
+    `engine.http-port` (int, no default, cli `--http-port`),
+    `network.bind` (string, default "127.0.0.1", cli `--bind`).
+    Calls `config.bind_game(game_table)` and resolves values through
     `config.get`. `opts.max_stack` is a per-instance escape hatch that
     beats the resolved scene-stack-max without mutating global state.
     (debug-port + http-port are declared here because they live in the
     .sb `engine-config:` block, even though only `cli/main.lua` reads
-    them — the engine itself does not.)
+    them — the engine itself does not. `network.bind` lives here
+    despite not being engine.* / not being bound from engine_config
+    because the engine module is universally loaded by both the CLI
+    and serve-api, so it's the natural home for cross-cutting CLI
+    keys.)
 - `M.run(game_table, opts)` — blocking REPL loop
 
 **eng methods:**

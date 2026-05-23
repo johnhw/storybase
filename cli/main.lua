@@ -347,6 +347,9 @@ local function cmd_run(args)
   end
   local driver = drv_mod.new({ io_out = io.stdout, io_in = io_in })
 
+  local config = require("runtime.config")
+  if flags["bind"] then config.set_cli("network.bind", flags["bind"]) end
+
   local opts = {
     seed        = flags["seed"] and tonumber(flags["seed"]),
     production  = flags["production"] == true,
@@ -356,7 +359,7 @@ local function cmd_run(args)
     debug_port  = debug_port,
     http_port   = http_port,
     serve       = is_serve,
-    bind        = flags["bind"],
+    bind        = config.get("network.bind"),
     driver      = driver,
   }
 

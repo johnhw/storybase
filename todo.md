@@ -29,9 +29,9 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1–L5 + L6a done;
-  next up is L6b (network.bind), L6c (cli.ui), L6d (serve-api.port),
-  L6e (fuzz.*), L6f (coverage.*). One commit per logical group.
+- §L — Unified configuration system (see plan below). L1–L5 + L6a + L6b
+  done; next up is L6c (cli.ui), L6d (serve-api.port), L6e (fuzz.*),
+  L6f (coverage.*). One commit per logical group.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -465,9 +465,31 @@ config key so it can be set via game file, `--config`, env, or
   (additive write, nil-clear, coercion, unknown key); `tests/runtime/engine_spec.lua` — 4 specs covering the declarations (default debug-port,
   unset http-port, game-layer override, cli > game precedence).
 
-#### L6b–L6f. Remaining sweep (next up)
+#### L6b. Bind address [done 2026-05-23]
 
-- `--bind` (network.bind, used by `--debug` / `--serve` and serve-api).
+- Declared `network.bind` (string, default "127.0.0.1", cli `--bind`)
+  in `runtime/engine.lua`'s declare helper (alongside engine.* keys, with
+  a clear note: network.* keys are CLI-only, NOT auto-bound from the .sb
+  `engine-config:` block). Lives in engine.lua because that module is
+  universally loaded by both the CLI and serve-api.
+- Migrated all four consumers:
+  - `cli/main.lua` (--debug / --serve flow): --bind → set_cli;
+    opts.bind = config.get("network.bind").
+  - `cli/serve_api_cmd.lua`: --bind → set_cli; opts.bind from
+    config.get; usage_page now includes the bind in the "Listen:" line
+    instead of hard-coding "127.0.0.1".
+  - `runtime/engine.lua:M.run`: opts.bind fallback now goes to
+    config.get("network.bind").
+  - `runtime/debug.lua:M.new`: opts.bind fallback now goes to
+    config.get("network.bind").
+- 3 new tests in tests/runtime/engine_spec.lua covering the declaration
+  (default, set_cli override, NOT auto-bound from .sb engine-config).
+- Smoke: `--config network.bind=0.0.0.0 config get network.bind` →
+  "0.0.0.0"; `config doc network.bind` shows the full spec.
+- Full suite: 3199 successes / 0 failures.
+
+#### L6c–L6f. Remaining sweep (next up)
+
 - `--ui` (cli.ui, enum: plain|ansi).
 - serve-api port (8080).
 - fuzz defaults (runs/steps/failures-dir/max-failures).

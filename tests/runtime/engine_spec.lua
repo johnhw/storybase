@@ -256,6 +256,52 @@ describe("engine: debug-port + http-port declarations", function()
 end)
 
 -- ============================================================
+-- network.bind: cross-cutting CLI-only key (L6b). Declared in
+-- runtime/engine.lua's declare helper even though it's not engine.*
+-- because the engine module is universally loaded by both the CLI
+-- and serve-api code paths.
+-- ============================================================
+
+describe("network.bind declaration", function()
+  before_each(function()
+    if config.spec("network.bind") then config.set("network.bind", nil) end
+    config.bind_cli(nil)
+  end)
+  after_each(function()
+    if config.spec("network.bind") then config.set("network.bind", nil) end
+    config.bind_cli(nil)
+  end)
+
+  it("declares network.bind with default 127.0.0.1", function()
+    assert.is_truthy(config.spec("network.bind"))
+    local v, layer = config.get("network.bind")
+    assert.equal("127.0.0.1", v)
+    assert.equal("default", layer)
+  end)
+
+  it("set_cli overrides default", function()
+    config.set_cli("network.bind", "0.0.0.0")
+    assert.equal("0.0.0.0", config.get("network.bind"))
+  end)
+
+  it("is NOT auto-bound from .sb engine-config block", function()
+    -- Confirm the namespacing decision: engine-config: bind: ... in the
+    -- .sb source would map to engine.bind (not declared), so the registry
+    -- ignores it. network.bind stays CLI-only.
+    local game = {
+      schema = {
+        engine_config = { bind = "0.0.0.0" },
+        states = {}, types = {}, relations = {},
+      },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      actors = {}, schedules = {}, generates = {},
+    }
+    config.bind_game(game)
+    assert.equal("127.0.0.1", config.get("network.bind"))
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 

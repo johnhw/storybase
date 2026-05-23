@@ -393,13 +393,13 @@ end
 -- ── HTTP server (self-contained, blocking accept loop) ───────
 
 -- Format the human-readable usage page returned for GET /.
-local function usage_page(game_path, port)
+local function usage_page(game_path, port, bind)
   return table.concat({
     "StoryBase HTTP API",
     "==================",
     "",
     "Game:   " .. tostring(game_path),
-    "Listen: 127.0.0.1:" .. tostring(port),
+    "Listen: " .. tostring(bind or "127.0.0.1") .. ":" .. tostring(port),
     "",
     "Endpoints:",
     "  GET  /         -- this page",
@@ -512,7 +512,7 @@ local function handle_connection(sock, ctx)
 
   if method == "GET" and path == "/" then
     send_response(sock, "200 OK", "text/plain; charset=utf-8",
-                  usage_page(ctx.game_path, ctx.port))
+                  usage_page(ctx.game_path, ctx.port, ctx.bind))
     return
   end
 
@@ -581,8 +581,9 @@ end
 ---@return string?  err
 function M.start(game_table, opts)
   opts = opts or {}
+  local config = require("runtime.config")
   local port = tonumber(opts.port) or 8080
-  local bind = opts.bind or "127.0.0.1"
+  local bind = opts.bind or config.get("network.bind")
 
   local ok_sock, socket = pcall(require, "socket")
   if not ok_sock or not socket then
@@ -626,6 +627,7 @@ function M.start(game_table, opts)
       game_table   = game_table,
       game_path    = opts.game_path,
       port         = port,
+      bind         = bind,
       default_seed = opts.default_seed,
     },
   }
@@ -706,9 +708,12 @@ function M.run(args)
     return 1
   end
 
+  local config = require("runtime.config")
+  if flags["bind"] then config.set_cli("network.bind", flags["bind"]) end
+
   return M.serve(game_table, {
     port         = flags["port"] and tonumber(flags["port"]),
-    bind         = flags["bind"],
+    bind         = config.get("network.bind"),
     game_path    = filepath,
     default_seed = flags["seed"] and tonumber(flags["seed"]),
   })

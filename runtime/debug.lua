@@ -517,11 +517,13 @@ end
 function M.new(engine, opts)
   opts = opts or {}
 
+  local config = require("runtime.config")
+
   local srv = {
     _engine       = engine,
     _port         = opts.port or DEFAULT_PORT,
     _mode         = opts.mode or "hook",
-    _bind         = opts.bind or "127.0.0.1",   -- bind address; default loopback-only
+    _bind         = opts.bind or config.get("network.bind"),
     _running      = false,
     _clients      = {},          -- TCP clients (when in tcp mode)
     _breakpoints  = {},          -- {id → condition_fn}

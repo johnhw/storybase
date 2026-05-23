@@ -57,6 +57,17 @@ local function declare_engine_config()
       doc  = "HTTP UI port for --debug / --serve (defaults to debug-port + 1).",
     })
   end
+  -- network.* keys are NOT bound from the .sb engine-config: block; they
+  -- are operational/CLI-level concerns (bind address, etc.). Declared here
+  -- so the registry surfaces them whenever the engine module is loaded.
+  if not config.spec("network.bind") then
+    config.declare("network.bind", {
+      type    = "string",
+      default = "127.0.0.1",
+      cli     = "--bind",
+      doc     = "Bind address for --debug / --serve / serve-api sockets.",
+    })
+  end
 end
 
 -- Run declarations at require time so `config.load_env` / `load_file` at
@@ -966,7 +977,7 @@ function M.run(game_table, opts)
   if opts.debug_port then
     local ok_d, debug_mod = pcall(require, "runtime.debug")
     if ok_d then
-      local bind_addr = opts.bind or "127.0.0.1"
+      local bind_addr = opts.bind or config.get("network.bind")
       local srv = debug_mod.new(eng, { port = opts.debug_port, mode = "tcp", bind = bind_addr })
       eng:set_debug_server(srv)
       srv:start()
