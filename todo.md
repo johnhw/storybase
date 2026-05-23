@@ -29,9 +29,9 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1–L5 + L6a..c
-  done; next up is L6d (serve-api.port), L6e (fuzz.*), L6f (coverage.*).
-  One commit per logical group.
+- §L — Unified configuration system (see plan below). L1–L5 + L6a..d
+  done; next up is L6e (fuzz.*), L6f (coverage.*). One commit per
+  logical group.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -509,9 +509,19 @@ config key so it can be set via game file, `--config`, env, or
   emitting the human-readable rejection.
 - Full suite: 3202 successes / 0 failures.
 
-#### L6d–L6f. Remaining sweep (next up)
+#### L6d. serve-api port [done 2026-05-23]
 
-- serve-api port (8080).
+- Declared `serve-api.port` (int, default 8080, cli `--port`) in
+  `runtime/engine.lua`'s declare helper.
+- `cli/serve_api_cmd.lua`:
+  - `M.start`: `port = tonumber(opts.port) or config.get("serve-api.port")`.
+  - `M.run`: `--port` flag → `config.set_cli("serve-api.port", ...)`;
+    opts.port from `config.get`. Mirror of the L6b --bind treatment.
+- 2 new tests in `tests/runtime/engine_spec.lua` (default 8080,
+  string→int coercion).
+
+#### L6e–L6f. Remaining sweep (next up)
+
 - fuzz defaults (runs/steps/failures-dir/max-failures).
 - coverage defaults (depth/budget).
 

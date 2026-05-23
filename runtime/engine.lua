@@ -77,6 +77,14 @@ local function declare_engine_config()
       doc     = "UI driver for interactive `run`: plain text or ANSI colour.",
     })
   end
+  if not config.spec("serve-api.port") then
+    config.declare("serve-api.port", {
+      type    = "int",
+      default = 8080,
+      cli     = "--port",
+      doc     = "Listen port for `storybase serve-api`.",
+    })
+  end
 end
 
 -- Run declarations at require time so `config.load_env` / `load_file` at

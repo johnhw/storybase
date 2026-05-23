@@ -582,7 +582,7 @@ end
 function M.start(game_table, opts)
   opts = opts or {}
   local config = require("runtime.config")
-  local port = tonumber(opts.port) or 8080
+  local port = tonumber(opts.port) or config.get("serve-api.port")
   local bind = opts.bind or config.get("network.bind")
 
   local ok_sock, socket = pcall(require, "socket")
@@ -710,9 +710,10 @@ function M.run(args)
 
   local config = require("runtime.config")
   if flags["bind"] then config.set_cli("network.bind", flags["bind"]) end
+  if flags["port"] then config.set_cli("serve-api.port", flags["port"]) end
 
   return M.serve(game_table, {
-    port         = flags["port"] and tonumber(flags["port"]),
+    port         = config.get("serve-api.port"),
     bind         = config.get("network.bind"),
     game_path    = filepath,
     default_seed = flags["seed"] and tonumber(flags["seed"]),

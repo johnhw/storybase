@@ -486,7 +486,8 @@ Game loop coordinator.
     `engine.debug-port` (int, default 7373, cli `--debug-port`),
     `engine.http-port` (int, no default, cli `--http-port`),
     `network.bind` (string, default "127.0.0.1", cli `--bind`),
-    `cli.ui` (enum plain|ansi, default "plain", cli `--ui`).
+    `cli.ui` (enum plain|ansi, default "plain", cli `--ui`),
+    `serve-api.port` (int, default 8080, cli `--port`).
     Calls `config.bind_game(game_table)` and resolves values through
     `config.get`. `opts.max_stack` is a per-instance escape hatch that
     beats the resolved scene-stack-max without mutating global state.

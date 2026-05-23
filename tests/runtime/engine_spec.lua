@@ -336,6 +336,34 @@ describe("cli.ui declaration", function()
 end)
 
 -- ============================================================
+-- serve-api.port (L6d) — declared in engine.lua but consumed only by
+-- cli/serve_api_cmd.lua.
+-- ============================================================
+
+describe("serve-api.port declaration", function()
+  before_each(function()
+    if config.spec("serve-api.port") then config.set("serve-api.port", nil) end
+    config.bind_cli(nil)
+  end)
+  after_each(function()
+    if config.spec("serve-api.port") then config.set("serve-api.port", nil) end
+    config.bind_cli(nil)
+  end)
+
+  it("declares serve-api.port with default 8080", function()
+    assert.is_truthy(config.spec("serve-api.port"))
+    local v, layer = config.get("serve-api.port")
+    assert.equal(8080, v)
+    assert.equal("default", layer)
+  end)
+
+  it("coerces string values to int", function()
+    config.set_cli("serve-api.port", "9090")
+    assert.equal(9090, config.get("serve-api.port"))
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 
