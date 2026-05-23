@@ -438,6 +438,65 @@ describe("coverage.* declarations", function()
 end)
 
 -- ============================================================
+-- engine.max-counterfactual-depth (L7a) — closes the L3 carve-off.
+-- Declared in engine.lua, consumed by runtime/eval.lua's
+-- COUNTERFACTUAL_EXPR branch via config.get.
+-- ============================================================
+
+describe("engine.max-counterfactual-depth declaration", function()
+  before_each(function()
+    if config.spec("engine.max-counterfactual-depth") then
+      config.set("engine.max-counterfactual-depth", nil)
+    end
+    config.bind_cli(nil)
+    config.bind_game(nil)
+  end)
+  after_each(function()
+    if config.spec("engine.max-counterfactual-depth") then
+      config.set("engine.max-counterfactual-depth", nil)
+    end
+    config.bind_cli(nil)
+    config.bind_game(nil)
+  end)
+
+  it("declares the key with default 10", function()
+    assert.is_truthy(config.spec("engine.max-counterfactual-depth"))
+    local v, layer = config.get("engine.max-counterfactual-depth")
+    assert.equal(10, v)
+    assert.equal("default", layer)
+  end)
+
+  it("game layer (engine-config block) overrides default", function()
+    local game = {
+      schema = {
+        engine_config = { ["max-counterfactual-depth"] = 3 },
+        states = {}, types = {}, relations = {},
+      },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      actors = {}, schedules = {}, generates = {},
+    }
+    config.bind_game(game)
+    local v, layer = config.get("engine.max-counterfactual-depth")
+    assert.equal(3, v)
+    assert.equal("game", layer)
+  end)
+
+  it("set_cli wins over game layer (CLI override path)", function()
+    local game = {
+      schema = {
+        engine_config = { ["max-counterfactual-depth"] = 3 },
+        states = {}, types = {}, relations = {},
+      },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      actors = {}, schedules = {}, generates = {},
+    }
+    config.bind_game(game)
+    config.set_cli("engine.max-counterfactual-depth", 20)
+    assert.equal(20, config.get("engine.max-counterfactual-depth"))
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 

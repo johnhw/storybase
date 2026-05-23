@@ -17,6 +17,22 @@
 
 local M = {}
 
+-- Declare the config keys this module consumes. Done here (idempotent
+-- with `config.spec`) rather than relying solely on engine.lua's helper
+-- because eval.lua is sometimes exercised without engine.lua being
+-- loaded (e.g. counterfactual_spec.lua) — the circular-require chain
+-- prevents a top-of-file `require("runtime.engine")` workaround.
+do
+  local config = require("runtime.config")
+  if not config.spec("engine.max-counterfactual-depth") then
+    config.declare("engine.max-counterfactual-depth", {
+      type    = "int",
+      default = 10,
+      doc     = "Maximum nesting depth allowed for counterfactual (what-if) expressions.",
+    })
+  end
+end
+
 -- ============================================================
 -- Kind constants (mirrors ast.K, kept local to avoid import)
 -- ============================================================
@@ -391,12 +407,16 @@ eval_expr = function(node, ctx)
     return ctx.state:get(path)
 
   elseif k == K.COUNTERFACTUAL_EXPR then
-    -- Enforce max-counterfactual-depth nesting limit
+    -- Enforce max-counterfactual-depth nesting limit. Resolves through
+    -- runtime.config so the limit can be overridden via CLI/env/file as well
+    -- as the in-source `engine-config:` block. We rebind the game layer on
+    -- every call so direct callers (tests/tools that bypass engine.M.new)
+    -- still get the in-source override; bind_game is idempotent for the
+    -- same game_table.
     local cf_depth = (ctx.counterfactual_depth or 0) + 1
-    local max_depth = ctx.game and ctx.game.schema
-      and ctx.game.schema.engine_config
-      and ctx.game.schema.engine_config["max-counterfactual-depth"]
-      or 10
+    local config = require("runtime.config")
+    if ctx.game then config.bind_game(ctx.game) end
+    local max_depth = config.get("engine.max-counterfactual-depth")
     if cf_depth > max_depth then
       error("max-counterfactual-depth exceeded: nesting depth " .. cf_depth
             .. " exceeds limit of " .. max_depth)

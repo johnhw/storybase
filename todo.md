@@ -29,9 +29,8 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system shipped (L1–L5 + L6a–f). All
-  CLI-side magic numbers have been replaced with registry-declared
-  keys (see completed.md for the §L summary).
+- §L — Unified configuration system: L1–L5 + L6a–f done; L7 follow-on
+  (runtime tunables surfaced) in progress — L7a done, L7b next up.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -547,6 +546,34 @@ config key so it can be set via game file, `--config`, env, or
 - 2 new test groups in tests/runtime/engine_spec.lua (defaults +
   set_cli overrides for depth/budget).
 - Full suite: 3208 successes / 0 failures.
+
+### L7. Runtime tunables (follow-on sweep)
+
+A short re-scour of the runtime for magic numbers that are useful to
+expose without encouraging bad patterns. The 5 keys below are all
+load-bearing for users with bigger games / deeper verify analysis.
+
+#### L7a. engine.max-counterfactual-depth [done 2026-05-23]
+
+- Closes the L3 carve-off: `runtime/eval.lua:398` previously read
+  `engine_config["max-counterfactual-depth"]` directly with a hardcoded
+  `or 10` fallback.
+- Declared `engine.max-counterfactual-depth` (int, default 10) directly
+  in `runtime/eval.lua`'s module top (idempotent) — not in
+  `runtime/engine.lua` — because eval.lua is the actual consumer and is
+  sometimes exercised without engine.lua being loaded
+  (counterfactual_spec bypasses engine.M.new). A top-of-file
+  `require("runtime.engine")` would cause a circular require since
+  engine.lua already requires eval at module top.
+- COUNTERFACTUAL_EXPR branch now calls `config.bind_game(ctx.game)`
+  before the `config.get` so direct callers that skip engine.M.new
+  still get their `engine-config:` block honoured (idempotent for the
+  same game_table; the per-call cost is negligible relative to
+  counterfactual evaluation itself).
+- 3 new tests in tests/runtime/engine_spec.lua (default, game override,
+  set_cli > game). Existing counterfactual_spec test that compiles
+  `max-counterfactual-depth: 1` in source continues to pass.
+- Full suite: 3211 successes / 0 failures.
 
 ### §L summary (closed 2026-05-23)
 

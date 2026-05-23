@@ -384,6 +384,12 @@ store:init_defaults()            -- apply schema defaults to cache
 ### `runtime/eval.lua` (2696 lines)
 Expression and statement evaluator. All evaluation goes through here.
 
+- Declares `engine.max-counterfactual-depth` (int, default 10) at module
+  top — owned here because eval.lua is the only consumer and engine.lua
+  already requires it (so a top-of-file `require("runtime.engine")`
+  would be circular). The COUNTERFACTUAL_EXPR branch calls
+  `config.bind_game(ctx.game)` before reading so direct callers that
+  skip engine.M.new still honour the `engine-config:` block.
 - `M.new_ctx(state, fns, fn_name, game)` → ctx
 - `M.eval_expr(node, ctx)` → value
 - `M.eval_stmt(node, ctx)`
@@ -492,6 +498,10 @@ Game loop coordinator.
     `fuzz.failures-dir` ("failures", `--failures-dir`),
     `fuzz.max-failures` (10, `--max-failures`),
     `coverage.depth` (8, `--depth`), `coverage.budget` (30s, `--budget`).
+    `engine.max-counterfactual-depth` is *not* declared here — its
+    consumer (`runtime/eval.lua`) declares it directly to avoid a
+    circular `require` (engine.lua already requires eval at module
+    top).
     Calls `config.bind_game(game_table)` and resolves values through
     `config.get`. `opts.max_stack` is a per-instance escape hatch that
     beats the resolved scene-stack-max without mutating global state.

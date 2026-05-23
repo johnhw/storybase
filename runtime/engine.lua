@@ -42,6 +42,10 @@ local function declare_engine_config()
       doc     = "Extra autonomous turns run per player action (NPC pacing).",
     })
   end
+  -- engine.max-counterfactual-depth is declared by runtime/eval.lua (its
+  -- actual consumer); we don't redeclare here. engine.lua loads eval at
+  -- module top, so the key is in the registry by the time `bind_game`
+  -- runs.
   if not config.spec("engine.debug-port") then
     config.declare("engine.debug-port", {
       type    = "int",
