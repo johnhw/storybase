@@ -777,6 +777,17 @@ function M.main(argv)
     return 1
   end
 
+  -- Load ~/.storybaserc, ./.storybaserc, and STORYBASE_* env vars into the
+  -- config registry. Require the engine module first so its keys are
+  -- declared before file parsing rejects them. Parse errors are logged to
+  -- stderr but never abort startup; CLI flags can still override anything.
+  pcall(require, "runtime.engine")
+  local config = require("runtime.config")
+  local cfg_errors = config.load_startup()
+  for _, e in ipairs(cfg_errors) do
+    io.stderr:write("storybase config: " .. e .. "\n")
+  end
+
   local cmd     = argv[1]
   local handler = COMMANDS[cmd]
 

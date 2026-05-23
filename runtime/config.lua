@@ -247,6 +247,48 @@ function M.bind_cli(args)
   end
 end
 
+--- Bootstrap the env and file layers from the conventional sources:
+---   1. `<home>/.storybaserc`  (if present)
+---   2. `<cwd>/.storybaserc`   (if present, overrides home)
+---   3. STORYBASE_* env vars
+--- Files that don't exist are silently skipped (not an error). Returns
+--- (errors, sources) where `errors` is a list of strings collected from any
+--- file's parse, and `sources` lists the file paths that were actually read.
+---
+--- Opts (all optional, mostly for tests):
+---   home   — home directory (default: $HOME or $USERPROFILE)
+---   cwd    — current directory (default: ".")
+---   getenv — env lookup function (default: os.getenv)
+function M.load_startup(opts)
+  opts = opts or {}
+  local home   = opts.home   or os.getenv("HOME") or os.getenv("USERPROFILE")
+  local cwd    = opts.cwd    or "."
+  local getenv = opts.getenv or os.getenv
+
+  local errors  = {}
+  local sources = {}
+
+  local function maybe_load(path)
+    if not path or path == "" then return end
+    local f = io.open(path, "r")
+    if not f then return end
+    f:close()
+    local ok, errs = M.load_file(path)
+    sources[#sources + 1] = path
+    if not ok then
+      for _, e in ipairs(errs) do errors[#errors + 1] = e end
+    end
+  end
+
+  if home and home ~= "" then
+    maybe_load(home .. "/.storybaserc")
+  end
+  maybe_load(cwd .. "/.storybaserc")
+
+  M.load_env(getenv)
+  return errors, sources
+end
+
 --- Diagnostic dump: { [key] = { value = v, layer = "cli", doc = "..." } }.
 function M.dump()
   local out = {}

@@ -457,4 +457,114 @@ s = ok
 
   end)
 
+  -- ── load_startup orchestration ────────────────────────────────
+
+  describe("load_startup", function()
+
+    -- Build an isolated home + cwd pair under os.tmpname()'s directory.
+    local function mk_home_cwd()
+      local base = os.tmpname()
+      os.remove(base)
+      local home = base .. "_home"
+      local cwd  = base .. "_cwd"
+      assert(os.execute("mkdir -p " .. home))
+      assert(os.execute("mkdir -p " .. cwd))
+      return home, cwd
+    end
+
+    local function write(path, contents)
+      local f = assert(io.open(path, "w"))
+      f:write(contents)
+      f:close()
+    end
+
+    local function rmrf(path)
+      os.execute("rm -rf " .. path)
+    end
+
+    it("loads only home file when cwd file is absent", function()
+      config.declare("a", { type = "int" })
+      local home, cwd = mk_home_cwd()
+      write(home .. "/.storybaserc", "a = 11\n")
+      local errs, sources = config.load_startup({
+        home = home, cwd = cwd, getenv = function() end,
+      })
+      assert.are.same({}, errs)
+      assert.are.same({ home .. "/.storybaserc" }, sources)
+      local v, layer = config.get("a")
+      assert.equal(11, v)
+      assert.equal("file", layer)
+      rmrf(home); rmrf(cwd)
+    end)
+
+    it("cwd file overrides home file for the same key (later wins)", function()
+      config.declare("a", { type = "int" })
+      local home, cwd = mk_home_cwd()
+      write(home .. "/.storybaserc", "a = 11\n")
+      write(cwd  .. "/.storybaserc", "a = 22\n")
+      local errs, sources = config.load_startup({
+        home = home, cwd = cwd, getenv = function() end,
+      })
+      assert.are.same({}, errs)
+      assert.equal(2, #sources)
+      assert.equal(22, (config.get("a")))
+      rmrf(home); rmrf(cwd)
+    end)
+
+    it("env var beats both files", function()
+      config.declare("a", { type = "int" })
+      local home, cwd = mk_home_cwd()
+      write(home .. "/.storybaserc", "a = 11\n")
+      write(cwd  .. "/.storybaserc", "a = 22\n")
+      local errs = config.load_startup({
+        home = home, cwd = cwd,
+        getenv = stub_env({ STORYBASE_A = "99" }),
+      })
+      assert.are.same({}, errs)
+      local v, layer = config.get("a")
+      assert.equal(99, v)
+      assert.equal("env", layer)
+      rmrf(home); rmrf(cwd)
+    end)
+
+    it("missing files are silently skipped", function()
+      config.declare("a", { type = "int", default = 5 })
+      local home, cwd = mk_home_cwd()
+      -- neither directory has a .storybaserc
+      local errs, sources = config.load_startup({
+        home = home, cwd = cwd, getenv = function() end,
+      })
+      assert.are.same({}, errs)
+      assert.are.same({}, sources)
+      assert.equal(5, (config.get("a")))
+      rmrf(home); rmrf(cwd)
+    end)
+
+    it("collects parse errors but keeps loading valid keys", function()
+      config.declare("a", { type = "int" })
+      local home, cwd = mk_home_cwd()
+      write(cwd .. "/.storybaserc", "a = 7\nb = nope\n")
+      local errs = config.load_startup({
+        home = home, cwd = cwd, getenv = function() end,
+      })
+      assert.equal(1, #errs)
+      assert.matches("unknown config key: b", errs[1])
+      assert.equal(7, (config.get("a")))
+      rmrf(home); rmrf(cwd)
+    end)
+
+    it("accepts nil home directory (cwd-only)", function()
+      config.declare("a", { type = "int" })
+      local _, cwd = mk_home_cwd()
+      write(cwd .. "/.storybaserc", "a = 4\n")
+      local errs = config.load_startup({
+        home = nil, cwd = cwd, getenv = function() end,
+      })
+      assert.are.same({}, errs)
+      assert.equal(4, (config.get("a")))
+      rmrf(cwd)
+    end)
+
+  end)
+
 end)

@@ -44,6 +44,10 @@ local function declare_engine_config()
   end
 end
 
+-- Run declarations at require time so `config.load_env` / `load_file` at
+-- CLI startup can see these keys without first constructing an engine.
+declare_engine_config()
+
 -- ============================================================
 -- Save / load helpers
 -- ============================================================

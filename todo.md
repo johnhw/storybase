@@ -29,7 +29,7 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1, L2, L3 done; next up is L4 (env + file loading).
+- §L — Unified configuration system (see plan below). L1–L4 done; next up is L5 (CLI wiring: arg parser → `config.bind_cli`, `storybase config` subcommand).
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -380,12 +380,24 @@ Decisions locked in (2026-05-23):
   `config.get` is mechanically straightforward but spans 5 files and
   should land as its own commit.
 
-### L4. Env + file loading
+### L4. Env + file loading [done 2026-05-23]
 
-- `STORYBASE_*` env var lookup at startup (caller decides when).
-- `~/.storybaserc` then `./.storybaserc` (later wins).
-- Errors surfaced as a return value, not raised; CLI decides whether to
-  warn or abort.
+- `runtime/config.lua` gained `M.load_startup({ home, cwd, getenv })` which
+  loads `<home>/.storybaserc` then `<cwd>/.storybaserc` (later wins), then
+  `STORYBASE_*` env vars. Missing files are silently skipped; parse errors
+  accumulate in the returned list, never raise.
+- `runtime/engine.lua` now calls `declare_engine_config()` at module-require
+  time (in addition to the idempotent inside-`new` call) so the file/env
+  layers can resolve engine keys without an engine being constructed.
+- `cli/main.lua` `M.main` eagerly requires `runtime.engine`, calls
+  `config.load_startup()`, and writes any errors to stderr (one line per
+  error, prefixed `storybase config:`). Startup never aborts on bad config.
+- Smoke-tested: a `~/.storybaserc` with `engine.scene-stack-max = 99` flows
+  through to engine.new; an unknown key surfaces to stderr but the command
+  still runs.
+- Six new tests in `tests/runtime/config_spec.lua` covering home-only,
+  later-wins file merge, env > files, missing files, parse-error collection,
+  and nil-home (cwd-only) paths.
 
 ### L5. CLI wiring
 

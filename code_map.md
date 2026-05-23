@@ -308,7 +308,7 @@ game_table = {
 
 ## runtime/
 
-### `runtime/config.lua` (~270 lines)
+### `runtime/config.lua` (~330 lines)
 Registry-backed configuration with a precedence chain. Every tunable knob
 is `declare`'d once (type + default + doc); reads of undeclared keys error.
 
@@ -327,6 +327,9 @@ is `declare`'d once (type + default + doc); reads of undeclared keys error.
 - `get(key)` → `(value, layer)` — `layer` names the winning source
 - `set(key, value)` — runtime override; pass nil to clear
 - `load_env(getenv?)`, `load_file(path)` → `(ok, errors)`
+- `load_startup({home, cwd, getenv})` → `(errors, sources)` — loads
+  `<home>/.storybaserc`, then `<cwd>/.storybaserc` (later wins), then
+  env vars. Missing files silently skipped. Called once at CLI startup.
 - `bind_game(game_table)`, `bind_cli(args)`
 - `dump()` → `{[key] = {value, layer, doc}}`
 - `keys()`, `spec(key)`, `_reset()` (test-only)
