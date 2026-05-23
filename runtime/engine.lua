@@ -19,14 +19,27 @@ local tilegrid_mod = require("runtime.tilegrid")
 local random_mod   = require("runtime.random")
 local config       = require("runtime.config")
 
--- Configuration knobs declared by the engine. Idempotent so the declaration
--- survives `config._reset()` between specs.
+-- Configuration knobs declared by the engine. Idempotent so the declarations
+-- survive `config._reset()` between specs.
 local function declare_engine_config()
   if not config.spec("engine.scene-stack-max") then
     config.declare("engine.scene-stack-max", {
       type    = "int",
       default = 16,
       doc     = "Maximum scene stack depth before STACK_OVERFLOW is raised.",
+    })
+  end
+  if not config.spec("engine.entry-scene") then
+    config.declare("engine.entry-scene", {
+      type = "string",
+      doc  = "Scene name pushed onto the stack during engine:init() (no default).",
+    })
+  end
+  if not config.spec("engine.npc-speed") then
+    config.declare("engine.npc-speed", {
+      type    = "int",
+      default = 0,
+      doc     = "Extra autonomous turns run per player action (NPC pacing).",
     })
   end
 end
@@ -586,9 +599,7 @@ function M.new(game_table, opts)
     -- spawn!/relate!/set! mutations land in the log for replay.
     self:run_generates()
 
-    local entry = self._game.schema
-      and self._game.schema.engine_config
-      and self._game.schema.engine_config["entry-scene"]
+    local entry = config.get("engine.entry-scene")
     if entry then
       self._scene_stack = { entry }
     end
@@ -757,8 +768,7 @@ function M.new(game_table, opts)
   --- the same actor/scheduler effects per player choice as the runtime.
   function eng:post_action_chain()
     self:post_action()
-    local cfg = self._game.schema and self._game.schema.engine_config
-    local npc_speed = tonumber(cfg and cfg["npc-speed"]) or 0
+    local npc_speed = config.get("engine.npc-speed")
     for _ = 1, npc_speed do
       self:post_action()
     end
@@ -883,8 +893,7 @@ function M.new(game_table, opts)
     end
 
     -- NPC speed: run N extra autonomous turns per player action
-    local cfg = self._game.schema and self._game.schema.engine_config
-    local npc_speed = tonumber(cfg and cfg["npc-speed"]) or 0
+    local npc_speed = config.get("engine.npc-speed")
     for _ = 1, npc_speed do
       self:post_action()
     end

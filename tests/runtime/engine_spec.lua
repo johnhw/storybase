@@ -189,6 +189,108 @@ describe("engine: scene-stack-max via config module", function()
 end)
 
 -- ============================================================
+-- Config-resolved entry-scene and npc-speed (L3 sweep)
+-- ============================================================
+
+describe("engine: entry-scene via config module", function()
+  before_each(function()
+    if config.spec("engine.entry-scene") then
+      config.set("engine.entry-scene", nil)
+    end
+  end)
+  after_each(function()
+    if config.spec("engine.entry-scene") then
+      config.set("engine.entry-scene", nil)
+    end
+  end)
+
+  local function bare_game(ec)
+    return {
+      schema = { engine_config = ec or {}, states = {}, types = {}, relations = {} },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      actors = {}, schedules = {}, generates = {},
+    }
+  end
+
+  it("init pushes engine-config: entry-scene onto the stack", function()
+    local eng = engine_mod.new(bare_game({ ["entry-scene"] = "lobby" }))
+    eng:init()
+    assert.equal("lobby", eng:current_scene())
+    local _, layer = config.get("engine.entry-scene")
+    assert.equal("game", layer)
+  end)
+
+  it("config.set runtime override wins over the game block", function()
+    config.set("engine.entry-scene", "alt-start")
+    local eng = engine_mod.new(bare_game({ ["entry-scene"] = "lobby" }))
+    eng:init()
+    assert.equal("alt-start", eng:current_scene())
+    local _, layer = config.get("engine.entry-scene")
+    assert.equal("runtime", layer)
+  end)
+
+  it("init leaves the stack empty when no entry-scene is configured", function()
+    local eng = engine_mod.new(bare_game())
+    eng:init()
+    assert.is_nil(eng:current_scene())
+  end)
+end)
+
+describe("engine: npc-speed via config module", function()
+  before_each(function()
+    if config.spec("engine.npc-speed") then
+      config.set("engine.npc-speed", nil)
+    end
+  end)
+  after_each(function()
+    if config.spec("engine.npc-speed") then
+      config.set("engine.npc-speed", nil)
+    end
+  end)
+
+  local function bare_game(ec)
+    return {
+      schema = { engine_config = ec or {}, states = {}, types = {}, relations = {} },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      actors = {}, schedules = {}, generates = {},
+    }
+  end
+
+  it("post_action_chain runs npc-speed extra turns (default = 0)", function()
+    local eng = engine_mod.new(bare_game())
+    local count = 0
+    eng.post_action = function() count = count + 1 end
+    eng:post_action_chain()
+    assert.equal(1, count)  -- one base call only
+    local v, layer = config.get("engine.npc-speed")
+    assert.equal(0, v)
+    assert.equal("default", layer)
+  end)
+
+  it("post_action_chain honours engine-config: npc-speed = N", function()
+    local eng = engine_mod.new(bare_game({ ["npc-speed"] = 3 }))
+    local count = 0
+    eng.post_action = function() count = count + 1 end
+    eng:post_action_chain()
+    assert.equal(4, count)  -- 1 base + 3 extras
+    local _, layer = config.get("engine.npc-speed")
+    assert.equal("game", layer)
+  end)
+
+  it("config.set npc-speed beats the game block at runtime", function()
+    config.set("engine.npc-speed", 1)
+    local eng = engine_mod.new(bare_game({ ["npc-speed"] = 5 }))
+    local count = 0
+    eng.post_action = function() count = count + 1 end
+    eng:post_action_chain()
+    assert.equal(2, count)  -- 1 base + 1 extra (runtime layer wins)
+    local v, layer = config.get("engine.npc-speed")
+    assert.equal(1, v)
+    assert.equal("runtime", layer)
+  end)
+end)
+
+-- ============================================================
 -- Integration: compile + run test02_choices.sb
 -- ============================================================
 

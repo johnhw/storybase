@@ -470,11 +470,13 @@ occupied-by      grid-name family-name x y → key | nil
 Game loop coordinator.
 
 - `M.new(game_table, opts)` → eng  (opts: `io_out`, `io_in`, `seed`, `debug_server`, `driver`, `max_stack`)
-  - Declares `engine.scene-stack-max` (int, default 16) with `runtime/config.lua`
-    via an idempotent `declare_engine_config()` helper, then calls
-    `config.bind_game(game_table)` and reads `config.get("engine.scene-stack-max")`.
-    `opts.max_stack` is a per-instance escape hatch that beats the resolved
-    config value without mutating global state.
+  - Declares engine-side config keys via an idempotent
+    `declare_engine_config()` helper with `runtime/config.lua`:
+    `engine.scene-stack-max` (int, default 16), `engine.entry-scene`
+    (string, no default), `engine.npc-speed` (int, default 0). Calls
+    `config.bind_game(game_table)` and resolves values through
+    `config.get`. `opts.max_stack` is a per-instance escape hatch that
+    beats the resolved scene-stack-max without mutating global state.
 - `M.run(game_table, opts)` — blocking REPL loop
 
 **eng methods:**

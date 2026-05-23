@@ -29,7 +29,7 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1 + L2 done; next up is L3 (sweep remaining `engine_config` reads: `entry-scene`, `npc-speed`).
+- §L — Unified configuration system (see plan below). L1, L2, L3 done; next up is L4 (env + file loading).
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -363,11 +363,22 @@ Decisions locked in (2026-05-23):
   via config module"): default layer, game layer, runtime override beating
   game, and `opts.max_stack` escape hatch.
 
-### L3. Sweep remaining `engine_config` reads
+### L3. Sweep remaining `engine_config` reads [done 2026-05-23]
 
-- `engine.entry-scene` (engine.lua:577)
-- `engine.npc-speed` (engine.lua:747, 873)
-- Any new reads found by grepping `engine_config\b` / `engine-config`.
+- `engine.entry-scene` declared (string, no default) and consumed in
+  `eng:init()`.
+- `engine.npc-speed` declared (int, default 0) and consumed in
+  `eng:post_action_chain()` and the `eng:step()` post-action NPC loop.
+- All three engine-side `engine_config` reads now flow through
+  `config.get`; the runtime layer wins over the in-source block.
+- Six new regression tests in `tests/runtime/engine_spec.lua`
+  (entry-scene default/game/runtime, npc-speed default/game/runtime).
+- Out of scope for L3 (kept as future cleanup): `cli/*` and
+  `runtime/eval.lua` still read `game_table.schema.engine_config`
+  directly for `entry-scene` and `max-counterfactual-depth`. These are
+  read-only consumers of the compiled block; converting them to
+  `config.get` is mechanically straightforward but spans 5 files and
+  should land as its own commit.
 
 ### L4. Env + file loading
 
