@@ -29,7 +29,7 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). Step 1: land `runtime/config.lua` + tests in isolation.
+- §L — Unified configuration system (see plan below). L1 + L2 done; next up is L3 (sweep remaining `engine_config` reads: `entry-scene`, `npc-speed`).
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -334,7 +334,7 @@ Decisions locked in (2026-05-23):
 - Roll out as pilot-first: land the module, migrate one key
   (`engine.scene-stack-max`), prove the round-trip, then sweep.
 
-### L1. Module + tests (Step 1) [active]
+### L1. Module + tests (Step 1) [done 2026-05-23]
 
 - `runtime/config.lua` with API: `declare`, `get` (returns `value, layer`),
   `set`, `load_env`, `load_file`, `bind_game`, `bind_cli`, `dump`, `keys`,
@@ -345,16 +345,23 @@ Decisions locked in (2026-05-23):
   derivation, file parsing (comments, quoted values, malformed, unknown keys),
   `bind_game` from a stub game_table, `bind_cli` from a flag table, `dump`.
 
-### L2. Pilot migration: `engine.scene-stack-max`
+### L2. Pilot migration: `engine.scene-stack-max` [done 2026-05-23]
 
-- `declare("engine.scene-stack-max", { type="int", default=64, ... })` next
-  to its read site in `runtime/engine.lua`.
-- Replace `engine_config["scene-stack-max"]` read (engine.lua:105–106) with
-  `config.get("engine.scene-stack-max")`.
-- Wire `config.bind_game(game_table)` into `engine.new()` so the in-source
-  block still flows through.
-- Add a regression test confirming an engine-config override in a .sb file
-  takes effect, and that `config.set` in test code overrides it.
+- Declared with `type="int", default=16` (matching prior `DEFAULT_MAX_STACK`)
+  via an idempotent `declare_engine_config()` helper at the top of
+  `runtime/engine.lua` — idempotency lets the declaration survive
+  `config._reset()` between specs.
+- `engine.new()` now calls `config.bind_game(game_table)` and reads via
+  `config.get("engine.scene-stack-max")`. `opts.max_stack` is retained as a
+  per-instance escape hatch (used by `diff_replay`) and wins without mutating
+  global config state.
+- Behavior change vs. pre-L2: when both the game's `engine-config:` block and
+  a runtime override (CLI/env/file/set) are present, the runtime override now
+  wins (previously the in-source block always won). This matches the locked-in
+  precedence design.
+- Regression tests added in `tests/runtime/engine_spec.lua` ("scene-stack-max
+  via config module"): default layer, game layer, runtime override beating
+  game, and `opts.max_stack` escape hatch.
 
 ### L3. Sweep remaining `engine_config` reads
 

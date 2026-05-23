@@ -5,6 +5,7 @@
 
 local engine_mod  = require("runtime.engine")
 local compiler_mod = require("compiler.compiler")
+local config       = require("runtime.config")
 
 -- ============================================================
 -- Helpers
@@ -114,6 +115,76 @@ describe("engine: scene stack", function()
     eng:push_scene("b")
     eng:push_scene("c")
     assert.has_error(function() eng:push_scene("d") end)
+  end)
+end)
+
+-- ============================================================
+-- Config-resolved scene-stack-max (L2 pilot migration)
+-- ============================================================
+
+describe("engine: scene-stack-max via config module", function()
+  local empty_game = {
+    schema  = { engine_config = {}, states = {}, types = {}, relations = {} },
+    fns     = {}, scenes = {}, verifies = {}, watches = {},
+  }
+
+  -- Construction triggers idempotent declare; clear runtime/game layers
+  -- between specs so they don't leak.
+  before_each(function()
+    if config.spec("engine.scene-stack-max") then
+      config.set("engine.scene-stack-max", nil)
+    end
+  end)
+  after_each(function()
+    if config.spec("engine.scene-stack-max") then
+      config.set("engine.scene-stack-max", nil)
+    end
+  end)
+
+  it("uses the registry default when no override is present", function()
+    local eng = engine_mod.new(empty_game)
+    assert.equal(16, eng._max_stack)
+    local _, layer = config.get("engine.scene-stack-max")
+    assert.equal("default", layer)
+  end)
+
+  it("picks up engine-config: block from the game (game layer)", function()
+    local game = {
+      schema = { engine_config = { ["scene-stack-max"] = 7 },
+                 states = {}, types = {}, relations = {} },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+    }
+    local eng = engine_mod.new(game)
+    assert.equal(7, eng._max_stack)
+    local v, layer = config.get("engine.scene-stack-max")
+    assert.equal(7, v)
+    assert.equal("game", layer)
+  end)
+
+  it("config.set at runtime overrides the engine-config: block", function()
+    local game = {
+      schema = { engine_config = { ["scene-stack-max"] = 7 },
+                 states = {}, types = {}, relations = {} },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+    }
+    config.set("engine.scene-stack-max", 4)
+    local eng = engine_mod.new(game)
+    assert.equal(4, eng._max_stack)
+    local _, layer = config.get("engine.scene-stack-max")
+    assert.equal("runtime", layer)
+  end)
+
+  it("opts.max_stack still wins as a per-instance escape hatch", function()
+    local game = {
+      schema = { engine_config = { ["scene-stack-max"] = 7 },
+                 states = {}, types = {}, relations = {} },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+    }
+    local eng = engine_mod.new(game, { max_stack = 2 })
+    assert.equal(2, eng._max_stack)
+    -- config state itself is unchanged: game layer still reports 7
+    local v = config.get("engine.scene-stack-max")
+    assert.equal(7, v)
   end)
 end)
 

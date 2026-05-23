@@ -17,6 +17,19 @@ local actors_mod   = require("runtime.actors")
 local sched_mod    = require("runtime.scheduler")
 local tilegrid_mod = require("runtime.tilegrid")
 local random_mod   = require("runtime.random")
+local config       = require("runtime.config")
+
+-- Configuration knobs declared by the engine. Idempotent so the declaration
+-- survives `config._reset()` between specs.
+local function declare_engine_config()
+  if not config.spec("engine.scene-stack-max") then
+    config.declare("engine.scene-stack-max", {
+      type    = "int",
+      default = 16,
+      doc     = "Maximum scene stack depth before STACK_OVERFLOW is raised.",
+    })
+  end
+end
 
 -- ============================================================
 -- Save / load helpers
@@ -89,8 +102,6 @@ end
 
 local M = {}
 
-local DEFAULT_MAX_STACK = 16
-
 -- ============================================================
 -- Engine constructor
 -- ============================================================
@@ -101,11 +112,14 @@ local DEFAULT_MAX_STACK = 16
 ---@return table
 function M.new(game_table, opts)
   opts = opts or {}
-  local max_stack = game_table.schema
-    and game_table.schema.engine_config
-    and game_table.schema.engine_config["scene-stack-max"]
-    or opts.max_stack
-    or DEFAULT_MAX_STACK
+  declare_engine_config()
+  -- Push the game's engine-config: block into the config module's `game`
+  -- layer; runtime/cli/env/file layers can still override.
+  config.bind_game(game_table)
+  -- opts.max_stack remains as a per-instance escape hatch (used by
+  -- diff_replay); it wins over the resolved config value but does not
+  -- mutate global state.
+  local max_stack = opts.max_stack or config.get("engine.scene-stack-max")
 
   local log    = log_mod.new()
   local store  = state_mod.new(game_table.schema, log)

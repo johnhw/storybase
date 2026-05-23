@@ -469,7 +469,12 @@ occupied-by      grid-name family-name x y → key | nil
 ### `runtime/engine.lua` (800 lines)
 Game loop coordinator.
 
-- `M.new(game_table, opts)` → eng  (opts: `io_out`, `io_in`, `seed`, `debug_server`, `driver`)
+- `M.new(game_table, opts)` → eng  (opts: `io_out`, `io_in`, `seed`, `debug_server`, `driver`, `max_stack`)
+  - Declares `engine.scene-stack-max` (int, default 16) with `runtime/config.lua`
+    via an idempotent `declare_engine_config()` helper, then calls
+    `config.bind_game(game_table)` and reads `config.get("engine.scene-stack-max")`.
+    `opts.max_stack` is a per-instance escape hatch that beats the resolved
+    config value without mutating global state.
 - `M.run(game_table, opts)` — blocking REPL loop
 
 **eng methods:**
