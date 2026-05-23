@@ -5,6 +5,75 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## §H1 — Goal-directed actors + demo34 showcase ✅ (runtime 2026-05-22, demo 2026-05-23)
+
+The runtime, parser, checker, codegen, and 24-test spec landed on 2026-05-22
+(see the original entry below for the AST/parser/checker plumbing). The
+acceptance demo `demos/demo34_silent_stair.sb` shipped 2026-05-23 along with
+a 6-test integration spec.
+
+**Demo (`demos/demo34_silent_stair.sb`):** a mansion heist with two H1
+actors and ZERO behavior bodies.
+
+- *Thief* — `goal: world/won`, `actions: [move-to, pocket-crown, escape]`,
+  `search-depth: 12`. The runtime `actor_search` BFS plans the full 10-step
+  heist (`parlor → hall → stair → landing → vault → pocket-crown →
+  landing → stair → hall → gate → escape`) and the plan-cache consumes it
+  across ticks. The precondition chain (pocket-crown only in vault, escape
+  requires crown + at gate) naturally stages the actions — the author wrote
+  one `goal:` and the staging is emergent.
+- *Vault-guard* — `goal: guard/at = \`study`, `actions: [guard-step]`,
+  depth 4. Proves multi-actor H1 composition: both actors plan against the
+  same shared cache without scripted coordination.
+- *Player layer* — `unlock-vault` and `toggle-stair-door` mutate state that
+  the BFS reads on the next tick. Closing the stair door cuts the only
+  route to the vault, the thief idles, and the `actor-no-progress` debug
+  event fires.
+- *Verification* — auto-emitted reachability for `ending escape`, plus a
+  hand-written `verify-eventually world/won` and `verify-always (not
+  world/won) or (\`crown in thief/inventory)`. All three PASS on 8 BFS
+  states.
+
+**Underlying H1 gap fixed by demo34:** `runtime/verify.lua` and
+`runtime/search.lua` ran exactly one `post_action()` per BFS choice, so
+the reachability analysis did not see the npc-speed extras the live
+`step()` loop applies. Without this fix any H1 scenario that needed more
+than depth-5 player choices to converge was provably unreachable, even
+when it ran fine at runtime — exactly the symptom the demo surfaced.
+
+- New `runtime/engine.lua: eng:post_action_chain()` runs `post_action`
+  once plus `engine-config["npc-speed"]` extras. `runtime/search.lua`
+  (6 call sites in `expand_graph` + the legacy search variants) and
+  `runtime/verify.lua` (1 site in `bfs_states`) now call the chain
+  helper. The live step loop is unchanged so existing behavior is
+  preserved.
+- The demo's `engine-config: npc-speed: 3` compresses the 10-action heist
+  into ~3 player choices, comfortably inside the default verify depth
+  of 5.
+
+**Spec (`tests/runtime/demo34_spec.lua`, 6 tests):** demo compiles with
+the actor goal/actions wiring populated; `engine-config: npc-speed: 3`
+is honoured; thief reaches gate with crown via three `Wait` choices;
+crown is observed in inventory mid-heist (precondition staging);
+closing the stair door before tick 1 leaves the thief south of the
+stair and the `_h1_no_progress` list contains `"thief"`; the
+hand-written `verify-eventually world/won` passes.
+
+**Files:**
+- `demos/demo34_silent_stair.sb` (new, ~200 lines including docstrings).
+- `tests/runtime/demo34_spec.lua` (new, 6 tests).
+- `runtime/engine.lua` — added `eng:post_action_chain()`.
+- `runtime/search.lua` — 6 call sites switched to `post_action_chain()`.
+- `runtime/verify.lua` — 1 call site switched to `post_action_chain()`.
+- `code_map.md` — engine method + demo34 + spec rows.
+
+**Test status:** demo34 spec 6/6 ✓; full suite (excluding the 9
+known-transient HTTP/debug failures) 3085 successes / 0 failures / 2
+pending; CLI integration suite 261/261 ✓; existing actors_goal_spec.lua
+still 24/24 ✓.
+
+---
+
 ## J-I1 — `fn` parameter type annotations ✅ (2026-05-22)
 
 The Review Pass 3 entry for J-I1 ("symbol-keyed work needs N near-identical

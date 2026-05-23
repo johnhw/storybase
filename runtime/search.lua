@@ -572,7 +572,7 @@ function M.can_reach(game_table, initial_cache, initial_stack, condition_fn,
           game_table._random_inject = saved_r
 
           if ok2 then
-            pcall(function() eng2:post_action() end)
+            pcall(function() eng2:post_action_chain() end)
 
             local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
             local new_stack = {}
@@ -743,7 +743,7 @@ function M.find_path(game_table, initial_cache, initial_stack, condition_fn,
           game_table._random_inject = saved_r2
 
           if ok2 then
-            pcall(function() eng2:post_action() end)
+            pcall(function() eng2:post_action_chain() end)
 
             local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
             local new_stack = {}
@@ -891,7 +891,7 @@ function M.probability(game_table, initial_cache, initial_stack, condition_fn,
 
         local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
         if ok2 then
-          pcall(function() eng2:post_action() end)
+          pcall(function() eng2:post_action_chain() end)
 
           local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
           local new_stack = {}
@@ -981,7 +981,7 @@ function M.optimal_path(game_table, initial_cache, initial_stack, condition_fn,
 
       local ok2, sig = pcall(function() return eng2:do_choice(scene_name, ch.index) end)
       if ok2 then
-        pcall(function() eng2:post_action() end)
+        pcall(function() eng2:post_action_chain() end)
 
         local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
         local new_stack = {}
@@ -1092,7 +1092,7 @@ function M.make_iterator(game_table, initial_cache, initial_stack, condition_fn,
         end)
 
         if ok2 then
-          pcall(function() eng2:post_action() end)
+          pcall(function() eng2:post_action_chain() end)
 
           local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
           local new_stack = {}
@@ -1337,7 +1337,7 @@ function M.expand_graph(game_table, initial_cache, initial_stack, opts)
           game_table._random_inject = saved_r
 
           if ok2 then
-            pcall(function() eng2:post_action() end)
+            pcall(function() eng2:post_action_chain() end)
 
             local new_cache = clone_cache(eng2._state, eng2._scheduler, game_table)
             local new_stack = {}

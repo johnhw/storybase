@@ -828,6 +828,11 @@ local function emit_actors(decls)
         behavior   = node.behavior,
         priority   = node.priority or 0,
         doc        = node.doc,
+        -- §H1 goal-directed actor fields (nil when not declared)
+        goal              = node.goal,
+        actions           = node.actions,
+        search_depth      = node.search_depth,
+        search_budget_ms  = node.search_budget_ms,
       }
     end
   end

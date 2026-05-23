@@ -1,0 +1,190 @@
+# demo34_silent_stair.sb
+# "The Silent Stair" -- H1 showcase: goal-directed actors only.
+#
+# A small mansion heist.  A thief and a vault-guard.  Both are declared
+# with goal: + actions: and ZERO behavior bodies -- every move they make
+# is found by the H1 bounded-BFS planner.  The player can close the
+# stair door between actor ticks; the BFS sees the cache change and
+# replans.
+#
+# What this demo proves:
+#   1. A `goal: world/won` + an action set routes the thief
+#      parlor -> hall -> stair -> landing -> vault -> ... -> gate
+#      with no imperative code.  The 10-step BFS plan is found and
+#      consumed step-by-step (the plan cache reuses across ticks).
+#   2. The thief's effective goal "switches" via the precondition chain:
+#      while empty-handed the search funnels through `pocket-crown` in
+#      the vault; once the crown is held, `escape` at the gate dominates.
+#      The author wrote ONE `goal:` -- the staging is emergent.
+#   3. Two H1 actors compose.  The vault-guard pathfinds independently
+#      toward his patrol post in the study; both actors plan against the
+#      same shared cache without scripted coordination.
+#   4. The player's mid-game choices replan the BFS.  Closing the stair
+#      door mid-route forces the thief to idle (`*thief hesitates.*`);
+#      reopening it restores the plan.
+#   5. The auto-emitted reachability verify passes.  A hand-written
+#      `verify-eventually world/won` confirms the heist is winnable
+#      under the bounded BFS with a second H1 actor moving in parallel.
+#
+# Run:    lua5.4 cli/main.lua run demos/demo34_silent_stair.sb
+# Auto:   lua5.4 cli/main.lua run --auto --steps 20 demos/demo34_silent_stair.sb
+# Verify: lua5.4 cli/main.lua verify demos/demo34_silent_stair.sb
+
+module silent-stair
+  version: 1.0
+
+engine-config:
+  entry-scene: briefing
+  npc-speed:   3       # 4 actor ticks per player turn -- compresses the 10-step BFS plan into ~3 player choices, keeping verify-eventually inside the default depth bound
+
+# ---------- Types ---------------------------------------------------------
+
+"Rooms of the mansion.  gate is the exit; vault holds the crown."
+type Room = gate | hall | stair | parlor | landing | vault | study
+
+"Items the thief can carry."
+type Loot = crown | sketch
+
+# ---------- State ---------------------------------------------------------
+
+state thief/at:        Room         = `parlor
+state thief/inventory: Set(Loot, 2) = (set)
+
+"The vault-guard's H1 patrol target is the study."
+state guard/at: Room = `landing
+
+"The hall-stair door starts OPEN; the player can close it to block the thief."
+state stair-door/open: Bool = true
+
+state world/won: Bool = false
+
+# ---------- Relations -----------------------------------------------------
+
+"Static mansion graph.  hall-stair is also runtime-gated."
+relation mansion-doors: Room -> Set(Room, 4):
+  `gate:    {`hall}
+  `hall:    {`gate, `stair, `parlor}
+  `stair:   {`hall, `landing}
+  `parlor:  {`hall}
+  `landing: {`stair, `vault, `study}
+  `vault:   {`landing}
+  `study:   {`landing}
+
+# ---------- Watches -------------------------------------------------------
+
+watch thief/at         "Thief"
+watch guard/at         "Guard"
+watch stair-door/open  "Stair door open"
+watch world/won        "Won"
+
+# ---------- H1 actions ----------------------------------------------------
+# Pure mutators with pre: clauses.  The BFS prunes branches whose
+# preconditions fail in the sandbox.
+
+"Walk the thief one room toward dest.  The stair door gates the hall <-> stair edge."
+fn move-to dest: Room:
+  pre: dest in (adjacent? mansion-doors thief/at)
+  pre: not (thief/at = `hall  and dest = `stair) or stair-door/open
+  pre: not (thief/at = `stair and dest = `hall)  or stair-door/open
+  set! thief/at dest
+
+"Pick the crown up off the pedestal."
+fn pocket-crown:
+  pre: thief/at = `vault
+  pre: not (`crown in thief/inventory)
+  add! thief/inventory `crown
+
+"Step through the gate with the crown -- wins the game."
+fn escape:
+  pre: thief/at = `gate
+  pre: `crown in thief/inventory
+  set! world/won true
+
+"Walk the guard one room toward dest.  The guard ignores the stair door."
+fn guard-step dest: Room:
+  pre: dest in (adjacent? mansion-doors guard/at)
+  set! guard/at dest
+
+# ---------- Player-driven action fns --------------------------------------
+
+"Toggle the stair door.  Closing it cuts the thief's only route to the vault."
+fn toggle-stair-door:
+  set! stair-door/open (not stair-door/open)
+
+"Wait -- let the NPCs tick."
+fn wait:
+  pass
+
+# ---------- H1 Actors -- ZERO behavior bodies -----------------------------
+
+"Thief: goal world/won.  The precondition chain stages 10 actions in order."
+actor thief:
+  state:        thief/at
+  goal:         world/won
+  actions:      [move-to, pocket-crown, escape]
+  search-depth: 12
+  priority:     20
+
+"Vault-guard: walks to his study patrol post.  Proves multi-actor H1 composition."
+actor guard:
+  state:        guard/at
+  goal:         guard/at = `study
+  actions:      [guard-step]
+  search-depth: 4
+  priority:     10
+
+# ---------- Scenes --------------------------------------------------------
+
+scene briefing:
+  THE SILENT STAIR.
+
+  The crown sits in the vault.  The thief enters at the parlor and a
+  vault-guard walks the upstairs corridor.  Both move under H1 bounded
+  BFS planning -- the author wrote ZERO behavior bodies.
+
+  Pick 1 (Wait) repeatedly to watch the heist play out.  Pick 2 to close
+  the stair door and watch the thief's BFS idle.
+
+  * Begin the heist
+    -> corridor
+
+scene corridor:
+  THE MANSION HALL.
+
+  Thief: {thief/at}.  Guard: {guard/at}.
+  Stair door open: {stair-door/open}.
+
+  [`crown in thief/inventory] The thief carries the crown.
+
+  when world/won:
+    -> escaped
+
+  * Wait -- let the NPCs tick
+    wait
+    -> corridor
+
+  * Toggle the stair door
+    toggle-stair-door
+    -> corridor
+
+scene escaped:
+  THE HEIST SUCCEEDS.
+  The thief vanishes into the fog with the crown.
+
+  * Reflect
+    -> escaped
+
+# ---------- Endings -------------------------------------------------------
+
+ending escape when: world/won:
+  "Crown in hand, the thief is gone."
+
+# ---------- Hand-written verify -------------------------------------------
+
+"Reachability proof: the thief can reach the gate with the crown under BFS."
+verify "the heist is winnable":
+  verify-eventually world/won
+
+"Sanity: winning state implies the crown is in inventory."
+verify "winning requires the crown":
+  verify-always (not world/won) or (`crown in thief/inventory)

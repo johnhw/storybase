@@ -523,8 +523,24 @@ function M.new(game_table, opts)
 
   --- Register actors and schedules without touching state (used by BFS).
   function eng:register_actors_schedules()
+    -- §H1: pass the compiled game table to the registry so goal-directed
+    -- actors can resolve fns and schema types during BFS planning.
+    if self._actors.set_game then self._actors:set_game(self._game) end
     for _, actor_def in pairs(self._game.actors or {}) do
       self._actors:register(actor_def)
+    end
+    -- §H1: wire the no-progress hook into the engine event channel so the
+    -- driver can surface "*{actor} hesitates*" without authoring code.
+    if self._actors.on_no_progress then
+      self._actors:on_no_progress(function(actor_name)
+        if self._debug_server and self._debug_server.emit then
+          pcall(function()
+            self._debug_server:emit("actor-no-progress", { actor = actor_name })
+          end)
+        end
+        self._h1_no_progress = self._h1_no_progress or {}
+        self._h1_no_progress[#self._h1_no_progress + 1] = actor_name
+      end)
     end
     for _, sched_def in pairs(self._game.schedules or {}) do
       self._scheduler:register(sched_def.name, sched_def.trigger, sched_def.body)
@@ -720,6 +736,18 @@ function M.new(game_table, opts)
   --- Used for NPC-driven turns, schedule-only advances, etc.
   function eng:autonomous_turn()
     self:post_action()
+  end
+
+  --- Run one post-action turn plus npc-speed extras.  Mirrors the live
+  --- step() loop so reachability analyses (search.lua, verify.lua) see
+  --- the same actor/scheduler effects per player choice as the runtime.
+  function eng:post_action_chain()
+    self:post_action()
+    local cfg = self._game.schema and self._game.schema.engine_config
+    local npc_speed = tonumber(cfg and cfg["npc-speed"]) or 0
+    for _ = 1, npc_speed do
+      self:post_action()
+    end
   end
 
   -- ── Turn loop ────────────────────────────────────────────────

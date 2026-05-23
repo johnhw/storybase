@@ -1403,6 +1403,71 @@ local function pass4_check_perceives(acc, program)
 end
 
 -- ============================================================
+-- Pass 4b — Goal-directed (§H1) actor validation
+-- ============================================================
+-- For every actor with `goal:` / `actions:`:
+--   * Reject combinations with `behavior:` (ACTOR_GOAL_BEHAVIOR_BOTH).
+--   * Each entry in `actions:` must resolve to a declared, pure-mutation fn
+--     (ACTOR_ACTION_UNDEFINED, ACTOR_ACTION_PURE).
+--   * Warn if any action fn has no `pre:` clauses — the BFS uses preconditions
+--     to prune transitions, so a pre-less action explodes the frontier
+--     (ACTOR_ACTION_NO_PRE).
+
+local function pass4b_check_goal_actors(acc, program)
+  local k = ast.K
+  local fns = {}
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.FN_DECL then fns[node.name] = node end
+  end
+  for _, node in ipairs(program.decls) do
+    if node.kind == k.ACTOR_DECL and node.goal then
+      -- Both goal and behavior is contradictory
+      if node.behavior then
+        err(acc, ast.E.ACTOR_GOAL_BEHAVIOR_BOTH,
+          "actor '" .. (node.name or "?") .. "' has both 'goal:' and 'behavior:' — "
+          .. "goal-directed and behavior actors are mutually exclusive",
+          node.pos)
+      end
+      -- actions: must be present and non-empty
+      if not node.actions or #node.actions == 0 then
+        err(acc, ast.E.ACTOR_ACTION_UNDEFINED,
+          "goal-directed actor '" .. (node.name or "?")
+          .. "' has 'goal:' but no 'actions:' list",
+          node.pos)
+      else
+        for _, action_name in ipairs(node.actions) do
+          local fn = fns[action_name]
+          if not fn then
+            err(acc, ast.E.ACTOR_ACTION_UNDEFINED,
+              "actor '" .. (node.name or "?") .. "' action '"
+              .. action_name .. "' is not a declared fn",
+              node.pos)
+          else
+            -- Action fns must be mutator (pass3 sets fn.is_transaction = true
+            -- when the body contains a mutation primitive).
+            if not fn.is_transaction then
+              err(acc, ast.E.ACTOR_ACTION_PURE,
+                "actor '" .. (node.name or "?") .. "' action '" .. action_name
+                .. "' is pure — actions must mutate state to drive the search",
+                node.pos)
+            end
+            -- Warn on missing preconditions
+            if not fn.pre or #fn.pre == 0 then
+              table.insert(acc.diags, ast.warning(
+                ast.W.ACTOR_ACTION_NO_PRE,
+                "actor '" .. (node.name or "?") .. "' action '" .. action_name
+                .. "' has no 'pre:' clauses — the BFS can't prune unreachable "
+                .. "transitions and may degrade",
+                node.pos))
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- ============================================================
 -- Pass 5 — Discrete/Superficial boundary enforcement
 -- ============================================================
 -- Emits warnings when:
@@ -3464,6 +3529,7 @@ function M.check(ast_root, filename)
   pass3b_check_call_purity(acc, ast_root)
   pass3c_check_reversible(acc, ast_root)
   pass4_check_perceives(acc, ast_root)
+  pass4b_check_goal_actors(acc, ast_root)
   pass5_check_boundary(acc, symtab, ast_root)
   pass6_write_sets(acc, symtab, ast_root)
   pass7_check_contracts(acc, symtab, ast_root)

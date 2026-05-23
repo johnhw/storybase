@@ -149,6 +149,10 @@ M.E = {
   UNDECLARED_SPEAKER       = "UNDECLARED_SPEAKER",
   -- Perceives enforcement
   PERCEIVES_VIOLATION      = "PERCEIVES_VIOLATION",
+  -- §H1 goal-directed actor
+  ACTOR_GOAL_BEHAVIOR_BOTH = "ACTOR_GOAL_BEHAVIOR_BOTH",
+  ACTOR_ACTION_UNDEFINED   = "ACTOR_ACTION_UNDEFINED",
+  ACTOR_ACTION_PURE        = "ACTOR_ACTION_PURE",
   -- Tag checks
   IRREVERSIBLE_IN_REVERSIBLE = "IRREVERSIBLE_IN_REVERSIBLE",
   -- Pre/post conditions
@@ -195,6 +199,9 @@ M.W = {
   NOT_A_COLLECTION         = "WARN_NOT_A_COLLECTION",     -- J-B4
   WHEN_VALUE_OVERWRITTEN   = "WARN_WHEN_VALUE_OVERWRITTEN",  -- J-B5
   REDUNDANT_CLAMP          = "WARN_REDUNDANT_CLAMP",      -- J-I9
+  -- §H1 goal-directed actor
+  ACTOR_ACTION_NO_PRE      = "WARN_ACTOR_ACTION_NO_PRE",
+  ACTOR_NO_PROGRESS        = "WARN_ACTOR_NO_PROGRESS",
 }
 
 -- ============================================================
@@ -562,7 +569,8 @@ function M.fn_decl(name, params, pre, post, tags, body, doc, pos)
   }, pos)
 end
 
-function M.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, pos)
+function M.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, pos,
+                     goal, actions, search_depth, search_budget_ms)
   return M.node(M.K.ACTOR_DECL, {
     name = name, state_path = state_path,
     perceives = perceives,  -- nil means not declared; {} means declared-but-empty
@@ -570,6 +578,11 @@ function M.actor_decl(name, state_path, perceives, inbox_type, behavior, priorit
     behavior = behavior,
     priority = priority or 0,
     doc = doc,
+    -- §H1 goal-directed actor fields (all optional)
+    goal              = goal,               -- expression AST; if set, actor is goal-driven
+    actions           = actions,            -- list of fn-name strings, mutator transitions
+    search_depth      = search_depth,       -- BFS depth bound (default 3 at runtime)
+    search_budget_ms  = search_budget_ms,   -- per-tick wall-clock budget in ms (default 50)
   }, pos)
 end
 

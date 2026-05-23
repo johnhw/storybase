@@ -218,39 +218,79 @@ function M.new(state, log)
   --- Run every registered actor's behavior function using a capture proxy.
   --- Actors are called in descending priority order.
   --- All mutations are deferred — call apply_deferred() afterwards.
+  ---
+  --- §H1: actors declared with `goal:` + `actions:` (no `behavior:`) get a
+  --- BFS-driven plan from `runtime/actor_search.lua` and the first action of
+  --- that plan is dispatched through the capture proxy in the same way a
+  --- regular behavior fn would have been.  When no plan exists, the
+  --- registry's `_no_progress_hook` (if set) fires with the actor name; the
+  --- engine subscribes this to surface a "*{actor} hesitates*" line.
   ---@param fns table  game_table.fns
   function registry:run_behaviors(fns)
-    local eval = require("runtime.eval")
+    local eval         = require("runtime.eval")
+    local actor_search = require("runtime.actor_search")
     local all_captures = {}
 
     for _, actor in ipairs(self._actors) do
-      local behavior = actor.behavior
-      local fn_def   = behavior and fns and fns[behavior]
-      if not fn_def then goto continue end
-
-      local proxy, captures = make_capture_proxy(
-        self._state, actor.priority, actor.name, actor.perceives, actor.state_path)
-
-      -- Check pre: conditions against real state (not the proxy)
-      local pre_ctx = eval.new_ctx(self._state, fns, behavior)
-      local pre_ok  = true
-      for _, pre_expr in ipairs(fn_def.pre or {}) do
-        if not eval.eval_expr(pre_expr, pre_ctx) then
-          pre_ok = false; break
+      -- §H1 branch: goal-directed actor — plan with BFS, then dispatch
+      -- the chosen action through a capture proxy so it commits via the
+      -- regular conflict-resolution path.
+      if actor.goal and actor.actions and #actor.actions > 0 then
+        local game = self._game  -- set by engine:register_actors_schedules
+        local plan = actor_search.find_plan(self._state, game, actor)
+        if not plan then
+          if self._no_progress_hook then
+            pcall(self._no_progress_hook, actor.name)
+          end
+          goto continue
         end
+
+        local fn_def = fns and fns[plan.name]
+        if not fn_def then goto continue end
+
+        local proxy, captures = make_capture_proxy(
+          self._state, actor.priority, actor.name, actor.perceives, actor.state_path)
+
+        local ctx = eval.new_ctx(proxy, fns, plan.name, game)
+        ctx.actors = self
+        local ok, _err = pcall(eval.call_fn, plan.name, plan.arg_nodes, ctx)
+        if not ok then captures = {} end
+
+        for _, c in ipairs(captures) do
+          all_captures[#all_captures + 1] = c
+        end
+        goto continue
       end
 
-      if pre_ok then
-        local ctx    = eval.new_ctx(proxy, fns, behavior)
-        ctx.actors   = self   -- allow send! within behavior bodies
-        local ok, _err = pcall(eval.eval_stmts, fn_def.body, ctx)
-        if not ok then
-          captures = {}   -- discard writes from a failed behavior
-        end
-      end
+      do
+        local behavior = actor.behavior
+        local fn_def   = behavior and fns and fns[behavior]
+        if not fn_def then goto continue end
 
-      for _, c in ipairs(captures) do
-        all_captures[#all_captures + 1] = c
+        local proxy, captures = make_capture_proxy(
+          self._state, actor.priority, actor.name, actor.perceives, actor.state_path)
+
+        -- Check pre: conditions against real state (not the proxy)
+        local pre_ctx = eval.new_ctx(self._state, fns, behavior)
+        local pre_ok  = true
+        for _, pre_expr in ipairs(fn_def.pre or {}) do
+          if not eval.eval_expr(pre_expr, pre_ctx) then
+            pre_ok = false; break
+          end
+        end
+
+        if pre_ok then
+          local ctx    = eval.new_ctx(proxy, fns, behavior)
+          ctx.actors   = self   -- allow send! within behavior bodies
+          local ok, _err = pcall(eval.eval_stmts, fn_def.body, ctx)
+          if not ok then
+            captures = {}   -- discard writes from a failed behavior
+          end
+        end
+
+        for _, c in ipairs(captures) do
+          all_captures[#all_captures + 1] = c
+        end
       end
 
       ::continue::
@@ -259,6 +299,20 @@ function M.new(state, log)
     -- Stable sort by priority descending so highest-priority set wins below
     table.sort(all_captures, function(a, b) return a.priority > b.priority end)
     self._deferred = all_captures
+  end
+
+  --- Subscribe to the "actor has no plan toward its goal" signal.
+  --- The engine wires this to surface a one-line narration fallback.
+  ---@param fn function(actor_name)
+  function registry:on_no_progress(fn)
+    self._no_progress_hook = fn
+  end
+
+  --- Inject the compiled game table so goal-directed actors can resolve fns
+  --- and schema types during BFS planning.  Called by the engine during
+  --- `register_actors_schedules`.
+  function registry:set_game(game)
+    self._game = game
   end
 
   -- ── Deferred mutation application ─────────────────────────

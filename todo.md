@@ -4,14 +4,14 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
-## Current Status (2026-05-22)
+## Current Status (2026-05-23)
 
 The core language and runtime are feature-complete against the V1.0 specification.
 All eight implementation phases, language review passes 1 and 2, the full audit
-backlog, the full §E series, §F1/F2, §G2, §H2, and the I-series demos (26–32) are
-complete — details in [completed.md](completed.md).
+backlog, the full §E series, §F1/F2, §G2, §H1, §H2, and the I-series demos
+(26–32) are complete — details in [completed.md](completed.md).
 
-**~3047 successes / 0 failures / 2 pending (known limitations).**
+**~3085 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless
 touching http/debug code.)
 
@@ -19,7 +19,10 @@ Language Review Pass 3 (2026-05-20) is now closed on the runtime/parser side: al
 5 bugs (J-B1..B5) and 8 of the 10 authoring inelegances (J-I1, I2, I3, I4, I5,
 I6, I7, I9) shipped between 2026-05-21 and 2026-05-22. The remaining 2
 inelegances (§J-I8, I10) stay open below as design-first backlog. K1 (demo33,
-J-I2 showcase) also shipped 2026-05-22.
+J-I2 showcase) shipped 2026-05-22; §H1 (goal-directed actors) closed with
+demo34_silent_stair on 2026-05-23 — the demo work also surfaced and fixed an
+npc-speed gap in `runtime/search.lua` / `runtime/verify.lua` (now route through
+the new `eng:post_action_chain()`).
 
 ---
 
@@ -233,37 +236,10 @@ sprites + audio.
 
 ## H. Smaller Language / Runtime Polish
 
-(H4 — inventory/dialog/quest stubs — folded into §E; all complete, see completed.md.)
-
-### H1. Goal-directed actors
-
-**Goal:** Today's actors are purely reactive (perceives → behavior body). Let them
-declare a `goal: cond` and use the existing `runtime/search.lua` BFS internally to
-pick the action that moves toward the goal. Makes "intelligent" NPCs without
-hand-written heuristics.
-
-**Design sketch:**
-```
-actor scout:
-  state:     npcs/scout
-  perceives: [...]
-  goal:      contains? scout/inventory `intel
-  actions:   [move-to, search-room, return-base]
-  priority:  10
-```
-
-The runtime, instead of calling a `behavior:` fn, runs a depth-bounded search in the
-perception-filtered state space using the declared `actions:` as transitions; picks
-the action that minimises distance to the goal.
-
-**Files:** `runtime/actors.lua` extension; new `actor_decl` field `goal:` / `actions:`
-in AST/parser; codegen; `tests/runtime/actors_goal_spec.lua`.
-
-**Edge cases:** Bound search depth (default 3). Cache plans across ticks when state
-hasn't changed.
-
-**Acceptance:** A demo NPC successfully navigates a 6-room maze toward a goal item
-without any imperative behavior code.
+(H1 — goal-directed actors — shipped 2026-05-23 including the demo34
+showcase and the npc-speed mirror-fix in search/verify. H4 — inventory/
+dialog/quest stubs — folded into §E. See completed.md for the full
+H1 + demo34 write-up.)
 
 ### H3. Strategy synthesis (on top of `optimal-path`)
 

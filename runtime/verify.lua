@@ -234,8 +234,9 @@ local function bfs_states(game_table, max_depth)
             return eng2:do_choice(scene_name, ch.index)
           end)
           if ok then
-            -- Also run post-action phases (actors, scheduler)
-            pcall(function() eng2:post_action() end)
+            -- Also run post-action phases (actors, scheduler) including any
+            -- npc-speed extras so reachability mirrors the live step loop.
+            pcall(function() eng2:post_action_chain() end)
 
             local new_cache = clone_cache(eng2._state)
             local new_stack = {}

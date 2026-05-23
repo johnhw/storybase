@@ -2915,11 +2915,16 @@ end
 -- ── Actor declaration ────────────────────────────────────────────────────────
 
 --- actor name:
----   state:     path
----   perceives: [path, ...]
----   inbox:     TypeExpr
----   behavior:  fn-name
----   priority:  N
+---   state:            path
+---   perceives:        [path, ...]
+---   inbox:            TypeExpr
+---   behavior:         fn-name
+---   priority:         N
+---   -- §H1 goal-directed actor:
+---   goal:             expr
+---   actions:          [fn-name, ...]
+---   search-depth:     N
+---   search-budget-ms: N
 local function parse_actor_decl(p, doc)
   local tpos = p:cur().pos
   p:adv()  -- consume KEYWORD("actor")
@@ -2938,9 +2943,11 @@ local function parse_actor_decl(p, doc)
   p:match("NEWLINE")
 
   local state_path, perceives, inbox_type, behavior, priority = nil, nil, nil, nil, 0
+  local goal, actions, search_depth, search_budget_ms = nil, nil, nil, nil
 
   if not p:at("INDENT") then
-    return ast.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, tpos)
+    return ast.actor_decl(name, state_path, perceives, inbox_type, behavior, priority,
+                          doc, tpos, goal, actions, search_depth, search_budget_ms)
   end
   p:adv()  -- consume INDENT
 
@@ -2989,13 +2996,43 @@ local function parse_actor_decl(p, doc)
         if p:at("INTEGER") then
           priority = p:adv().value
         end
+      elseif bt.value == "goal" then
+        p:adv()
+        goal = parse_expr(p)
+      elseif bt.value == "actions" then
+        p:adv()
+        actions = {}
+        if p:at("OP", "[") then
+          p:adv()
+          while not p:at("OP", "]") and not p:at("EOF") and not p:at("NEWLINE") do
+            if p:at("IDENT") then
+              table.insert(actions, p:adv().value)
+            else
+              p:adv()  -- skip junk token
+            end
+            p:match("OP", ",")
+            p:skip_newlines()
+          end
+          p:expect("OP", "]", "expected ']' to close actions list")
+        end
+      elseif bt.value == "search-depth" then
+        p:adv()
+        if p:at("INTEGER") then
+          search_depth = p:adv().value
+        end
+      elseif bt.value == "search-budget-ms" then
+        p:adv()
+        if p:at("INTEGER") then
+          search_budget_ms = p:adv().value
+        end
       end
     end
     p:skip_to_eol()
   end
 
   if p:at("DEDENT") then p:adv() end
-  return ast.actor_decl(name, state_path, perceives, inbox_type, behavior, priority, doc, tpos)
+  return ast.actor_decl(name, state_path, perceives, inbox_type, behavior, priority,
+                        doc, tpos, goal, actions, search_depth, search_budget_ms)
 end
 
 -- ── Schedule declaration ─────────────────────────────────────────────────────
