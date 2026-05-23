@@ -497,6 +497,52 @@ describe("engine.max-counterfactual-depth declaration", function()
 end)
 
 -- ============================================================
+-- verify.* + search.max-nodes (L7b) — runtime tunables exposed for
+-- bigger games / deeper analysis. Declared directly by their consuming
+-- modules (runtime/verify.lua, runtime/search.lua); require those
+-- modules to ensure declarations exist.
+-- ============================================================
+
+describe("verify.* + search.max-nodes declarations", function()
+  require("runtime.verify")
+  require("runtime.search")
+  local keys = {
+    "verify.bfs-depth", "verify.ctl-depth", "verify.ctl-budget",
+    "search.max-nodes",
+  }
+  before_each(function()
+    for _, k in ipairs(keys) do
+      if config.spec(k) then config.set(k, nil) end
+    end
+    config.bind_cli(nil)
+  end)
+  after_each(function()
+    for _, k in ipairs(keys) do
+      if config.spec(k) then config.set(k, nil) end
+    end
+    config.bind_cli(nil)
+  end)
+
+  it("declares all four keys with historic defaults", function()
+    assert.equal(5,    config.get("verify.bfs-depth"))
+    assert.equal(5,    config.get("verify.ctl-depth"))
+    assert.equal(30,   config.get("verify.ctl-budget"))
+    assert.equal(5000, config.get("search.max-nodes"))
+  end)
+
+  it("set_cli overrides each key", function()
+    config.set_cli("verify.bfs-depth",  "12")
+    config.set_cli("verify.ctl-depth",  "8")
+    config.set_cli("verify.ctl-budget", "120")
+    config.set_cli("search.max-nodes",  "25000")
+    assert.equal(12,    config.get("verify.bfs-depth"))
+    assert.equal(8,     config.get("verify.ctl-depth"))
+    assert.equal(120,   config.get("verify.ctl-budget"))
+    assert.equal(25000, config.get("search.max-nodes"))
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 

@@ -10,7 +10,19 @@
 --   make_iterator(gt, cache, stack, cond_fn, depth, budget)
 --     → coroutine iterator yielding (cache, path) pairs
 
-local M = {}
+local config = require("runtime.config")
+local M      = {}
+
+-- Config keys consumed by this module. Declared here (idempotent) so
+-- search.lua can be exercised in isolation; default 5000 matches the
+-- historic literal that lived at the three verify_* call sites.
+if not config.spec("search.max-nodes") then
+  config.declare("search.max-nodes", {
+    type    = "int",
+    default = 5000,
+    doc     = "Maximum nodes the CTL verify BFS will explore before truncating.",
+  })
+end
 
 -- Module-level fallback PCG used only when the BFS random-injection queue is
 -- exhausted (a rare defensive path). Seeded once per process so BFS results
@@ -1623,7 +1635,7 @@ function M.verify_eventually(game_table, initial_cache, initial_stack,
   budget = budget or 30
 
   local graph = M.expand_graph(game_table, initial_cache, initial_stack, {
-    depth = depth, budget = budget, max_nodes = 5000,
+    depth = depth, budget = budget, max_nodes = config.get("search.max-nodes"),
   })
   if #graph.nodes == 0 then
     return { pass = false, states_checked = 0,
@@ -1667,7 +1679,7 @@ function M.verify_always_eventually(game_table, initial_cache, initial_stack,
   budget = budget or 30
 
   local graph = M.expand_graph(game_table, initial_cache, initial_stack, {
-    depth = depth, budget = budget, max_nodes = 5000,
+    depth = depth, budget = budget, max_nodes = config.get("search.max-nodes"),
   })
   if #graph.nodes == 0 then
     return { pass = true, states_checked = 0 }
@@ -1705,7 +1717,7 @@ function M.verify_until(game_table, initial_cache, initial_stack,
   budget = budget or 30
 
   local graph = M.expand_graph(game_table, initial_cache, initial_stack, {
-    depth = depth, budget = budget, max_nodes = 5000,
+    depth = depth, budget = budget, max_nodes = config.get("search.max-nodes"),
   })
   if #graph.nodes == 0 then
     return { pass = true, states_checked = 0 }

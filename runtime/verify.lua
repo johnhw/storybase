@@ -12,13 +12,42 @@
 --
 -- BFS (used by verify-always, after+requires, from-any-state):
 --   Explores (cache_snapshot, scene_stack) pairs from the entry scene up to
---   DEFAULT_BFS_DEPTH steps. Uses a content hash for cycle detection.
+--   `verify.bfs-depth` steps (default 5; overridable via config).
+--   Uses a content hash for cycle detection.
 --   Fan-out = number of visible choices at each scene.
 
-local eval = require("runtime.eval")
-local M    = {}
+local eval   = require("runtime.eval")
+local config = require("runtime.config")
+local M      = {}
 
-local DEFAULT_BFS_DEPTH         = 5
+-- Config keys consumed by this module. Declared directly here
+-- (idempotent) rather than via runtime/engine.lua so verify.lua can be
+-- exercised in isolation (some specs require it directly without
+-- loading engine).
+do
+  if not config.spec("verify.bfs-depth") then
+    config.declare("verify.bfs-depth", {
+      type    = "int",
+      default = 5,
+      doc     = "BFS depth for `verify-always` invariants.",
+    })
+  end
+  if not config.spec("verify.ctl-depth") then
+    config.declare("verify.ctl-depth", {
+      type    = "int",
+      default = 5,
+      doc     = "Search depth for verify-eventually / verify-always-eventually / verify-until.",
+    })
+  end
+  if not config.spec("verify.ctl-budget") then
+    config.declare("verify.ctl-budget", {
+      type    = "int",
+      default = 30,
+      doc     = "Time budget (seconds) for CTL verify operators.",
+    })
+  end
+end
+
 local DEFAULT_SHRINK_BUDGET_SECS = 5.0
 
 -- ============================================================
@@ -464,7 +493,7 @@ local function run_always_check(verify_entry, game_table)
   local log_mod   = require("runtime.log")
   local state_mod = require("runtime.state")
 
-  local snapshots = bfs_states(game_table, DEFAULT_BFS_DEPTH)
+  local snapshots = bfs_states(game_table, config.get("verify.bfs-depth"))
   if #snapshots == 0 then
     return { pass = true, states_checked = 0 }
   end
@@ -567,7 +596,7 @@ local function run_after_check(verify_entry, game_table)
   end
 
   -- With requires: run from every BFS-reachable state where requires holds.
-  local snapshots = bfs_states(game_table, DEFAULT_BFS_DEPTH)
+  local snapshots = bfs_states(game_table, config.get("verify.bfs-depth"))
   local checked   = 0
 
   for i, snap_item in ipairs(snapshots) do
@@ -643,7 +672,7 @@ local function run_can_reach_check(verify_entry, game_table)
     and game_table.schema.engine_config["entry-scene"]
 
   -- Collect all BFS-reachable snapshots
-  local snapshots = bfs_states(game_table, DEFAULT_BFS_DEPTH)
+  local snapshots = bfs_states(game_table, config.get("verify.bfs-depth"))
 
   -- For each snapshot, optionally filter by when: condition
   for i, snap_item in ipairs(snapshots) do
@@ -730,8 +759,9 @@ end
 -- same as the existing checks (`pass`, `fail_msg`, `counterexample`,
 -- `counterexample_path`, `states_checked`, `truncated`).
 
-local DEFAULT_CTL_DEPTH  = 5
-local DEFAULT_CTL_BUDGET = 30  -- seconds
+-- DEFAULT_CTL_DEPTH and DEFAULT_CTL_BUDGET are now declared at module
+-- top as verify.ctl-depth and verify.ctl-budget; read each per-call via
+-- config.get so CLI/env/file overrides take effect.
 
 --- Build the initial cache + scene stack for CTL-style checks.
 local function ctl_initial(game_table)
@@ -773,7 +803,7 @@ local function run_eventually_check(verify_entry, game_table)
   local cache, stack = ctl_initial(game_table)
   local cond_fn = make_condition_fn(game_table, "verify-eventually", expr)
   return search_mod.verify_eventually(
-    game_table, cache, stack, cond_fn, DEFAULT_CTL_DEPTH, DEFAULT_CTL_BUDGET)
+    game_table, cache, stack, cond_fn, config.get("verify.ctl-depth"), config.get("verify.ctl-budget"))
 end
 
 local function run_always_eventually_check(verify_entry, game_table)
@@ -787,7 +817,7 @@ local function run_always_eventually_check(verify_entry, game_table)
   local cache, stack = ctl_initial(game_table)
   local cond_fn = make_condition_fn(game_table, "verify-always-eventually", expr)
   return search_mod.verify_always_eventually(
-    game_table, cache, stack, cond_fn, DEFAULT_CTL_DEPTH, DEFAULT_CTL_BUDGET)
+    game_table, cache, stack, cond_fn, config.get("verify.ctl-depth"), config.get("verify.ctl-budget"))
 end
 
 local function run_until_check(verify_entry, game_table)
@@ -805,7 +835,7 @@ local function run_until_check(verify_entry, game_table)
   local p_fn = make_condition_fn(game_table, "verify-until-p", p_expr)
   local q_fn = make_condition_fn(game_table, "verify-until-q", q_expr)
   return search_mod.verify_until(
-    game_table, cache, stack, p_fn, q_fn, DEFAULT_CTL_DEPTH, DEFAULT_CTL_BUDGET)
+    game_table, cache, stack, p_fn, q_fn, config.get("verify.ctl-depth"), config.get("verify.ctl-budget"))
 end
 
 -- ============================================================

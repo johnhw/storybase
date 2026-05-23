@@ -29,8 +29,8 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system: L1–L5 + L6a–f done; L7 follow-on
-  (runtime tunables surfaced) in progress — L7a done, L7b next up.
+- §L — Unified configuration system shipped (L1–L5 + L6a–f + L7a + L7b).
+  19 registry keys total; see §L summary below.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -575,13 +575,35 @@ load-bearing for users with bigger games / deeper verify analysis.
   `max-counterfactual-depth: 1` in source continues to pass.
 - Full suite: 3211 successes / 0 failures.
 
+#### L7b. verify + search tunables [done 2026-05-23]
+
+- `runtime/verify.lua` declares (at module top):
+  - `verify.bfs-depth`   (int, default 5)  — depth for verify-always
+  - `verify.ctl-depth`   (int, default 5)  — depth for CTL operators
+  - `verify.ctl-budget`  (int, default 30) — seconds for CTL operators
+- `runtime/search.lua` declares:
+  - `search.max-nodes`   (int, default 5000) — BFS node cap in CTL graph
+- Read sites in verify.lua's `bfs_states` callers (3) and the three
+  `verify_*` functions in search.lua now go through `config.get`.
+  `DEFAULT_BFS_DEPTH`, `DEFAULT_CTL_DEPTH`, `DEFAULT_CTL_BUDGET` deleted.
+- `cli/main.lua` pcall-requires `runtime.verify` and `runtime.search`
+  at startup so the keys exist when `--config` / env / file layers are
+  populated. Without this, `--config verify.bfs-depth=8 ...` reports
+  "unknown key" because the inspector loads happen too late.
+- 2 new test groups in tests/runtime/engine_spec.lua (defaults +
+  set_cli overrides for all four keys).
+- Full suite: 3213 successes / 0 failures.
+
 ### §L summary (closed 2026-05-23)
 
-All 14 registry keys, in alphabetical order:
+All 19 registry keys, in alphabetical order:
 `cli.ui`, `coverage.budget`, `coverage.depth`, `engine.debug-port`,
-`engine.entry-scene`, `engine.http-port`, `engine.npc-speed`,
+`engine.entry-scene`, `engine.http-port`,
+`engine.max-counterfactual-depth`, `engine.npc-speed`,
 `engine.scene-stack-max`, `fuzz.failures-dir`, `fuzz.max-failures`,
-`fuzz.max-steps`, `fuzz.runs`, `network.bind`, `serve-api.port`.
+`fuzz.max-steps`, `fuzz.runs`, `network.bind`, `search.max-nodes`,
+`serve-api.port`, `verify.bfs-depth`, `verify.ctl-budget`,
+`verify.ctl-depth`.
 
 Each is settable via (precedence high→low):
 - `config.set` (runtime), `--config key=value` or typed flag (cli),

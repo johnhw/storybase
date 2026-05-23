@@ -564,6 +564,9 @@ eng:_render_ending(ending)    → narration list  -- §F2
 ### `runtime/search.lua` (1140 lines)
 BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 
+- Declares `search.max-nodes` (int, default 5000) at module top —
+  consumed by the three `verify_*` functions when calling `expand_graph`.
+
 - `M.can_reach(game_table, cache, stack, condition_fn, depth, budget?)` → `(bool|nil, timed_out_bool)` — returns `nil` (not `false`) on budget timeout so callers can distinguish "not reachable" from "unknown"
 - `M.find_path(game_table, cache, stack, condition_fn, depth, budget?)` → `[{scene, label, index}, ...]` | nil
 - `M.probability(game_table, cache, stack, condition_fn, depth, threshold)` → float 0..1
@@ -597,6 +600,13 @@ Stripped from production builds (`game_table.tests = {}` when `opts.production`)
 
 ### `runtime/verify.lua` (700+ lines)
 Verify block runner (offline model-checker).
+
+- Declares three config keys at module top:
+  `verify.bfs-depth` (int, default 5) for verify-always BFS;
+  `verify.ctl-depth` (int, default 5) and `verify.ctl-budget`
+  (int seconds, default 30) for CTL operators (verify-eventually,
+  verify-always-eventually, verify-until). Read via `config.get`
+  at each call site.
 
 - `M.run_all(game_table)` → `[{label, pass, fail_msg?, skipped?, reason?, states_checked?, counterexample?, counterexample_n?, counterexample_path?, counterexample_path_original_len?, counterexample_shrink_budget_exceeded?, truncated?}]`
 - `M.shrink_path(game_table, path, condition_expr, budget_secs?)` → `(minimised_path, budget_exceeded_bool)` — greedy 1-minimal delta-debugger; exported for external use (e.g., fuzz test counterexamples)

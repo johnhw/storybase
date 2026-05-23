@@ -874,10 +874,14 @@ function M.main(argv)
   end
 
   -- Load ~/.storybaserc, ./.storybaserc, and STORYBASE_* env vars into the
-  -- config registry. Require the engine module first so its keys are
-  -- declared before file parsing rejects them. Parse errors are logged to
-  -- stderr but never abort startup; CLI flags can still override anything.
+  -- config registry. Require every module that declares config keys first
+  -- so file/env/--config parsing sees them — engine + verify + search +
+  -- eval (transitive via engine) own all 19 declared keys. Parse errors
+  -- are logged to stderr but never abort startup; CLI flags can still
+  -- override anything.
   pcall(require, "runtime.engine")
+  pcall(require, "runtime.verify")
+  pcall(require, "runtime.search")
   local config = require("runtime.config")
   local cfg_errors = config.load_startup()
   for _, e in ipairs(cfg_errors) do
