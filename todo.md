@@ -29,9 +29,8 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1–L5 + L6a..d
-  done; next up is L6e (fuzz.*), L6f (coverage.*). One commit per
-  logical group.
+- §L — Unified configuration system (see plan below). L1–L5 + L6a..e
+  done; next up is L6f (coverage.*). One commit per logical group.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -520,9 +519,24 @@ config key so it can be set via game file, `--config`, env, or
 - 2 new tests in `tests/runtime/engine_spec.lua` (default 8080,
   string→int coercion).
 
-#### L6e–L6f. Remaining sweep (next up)
+#### L6e. fuzz defaults [done 2026-05-23]
 
-- fuzz defaults (runs/steps/failures-dir/max-failures).
+- Declared four keys in `runtime/engine.lua`'s declare helper:
+  - `fuzz.runs`          (int, default 1000, cli `--runs`)
+  - `fuzz.max-steps`     (int, default 50,   cli `--steps`)
+  - `fuzz.failures-dir`  (string, default "failures", cli `--failures-dir`)
+  - `fuzz.max-failures`  (int, default 10,   cli `--max-failures`)
+- `cli/fuzz_cmd.lua` requires `runtime.engine` at the top of `M.run`
+  (so the declarations land when fuzz_cmd is exercised in isolation —
+  e.g. via tests/cli/fuzz_spec.lua, which doesn't go through cli/main.lua).
+- Each flag now routes through `set_cli` then `config.get`; only `--seed`
+  retains its `os.time()` fallback because it's intentionally
+  non-deterministic per-run.
+- 2 new test groups in tests/runtime/engine_spec.lua (defaults match the
+  historic values; set_cli overrides each key).
+
+#### L6f. Remaining sweep (next up)
+
 - coverage defaults (depth/budget).
 
 ---

@@ -104,12 +104,22 @@ function M.run(args)
     end
   end
 
-  -- 3. Parse options
-  local runs         = tonumber(flags.runs)           or 1000
-  local max_steps    = tonumber(flags.steps)          or 50
-  local base_seed    = tonumber(flags.seed)           or os.time()
-  local fail_dir     = flags["failures-dir"]          or "failures"
-  local max_failures = tonumber(flags["max-failures"]) or 10
+  -- 3. Parse options. Defaults resolve through runtime.config so they can
+  -- be set via env (STORYBASE_FUZZ_*) or `~/.storybaserc` in addition to
+  -- the listed CLI flags. Require runtime.engine first so its module-load
+  -- declares the fuzz.* keys (needed when fuzz_cmd is exercised in isolation,
+  -- e.g. by tests/cli/fuzz_spec.lua which doesn't go through cli/main.lua).
+  require("runtime.engine")
+  local config = require("runtime.config")
+  if flags.runs            then config.set_cli("fuzz.runs",          flags.runs)            end
+  if flags.steps           then config.set_cli("fuzz.max-steps",     flags.steps)           end
+  if flags["failures-dir"] then config.set_cli("fuzz.failures-dir",  flags["failures-dir"]) end
+  if flags["max-failures"] then config.set_cli("fuzz.max-failures",  flags["max-failures"]) end
+  local runs         = config.get("fuzz.runs")
+  local max_steps    = config.get("fuzz.max-steps")
+  local base_seed    = tonumber(flags.seed) or os.time()
+  local fail_dir     = config.get("fuzz.failures-dir")
+  local max_failures = config.get("fuzz.max-failures")
   local fmt          = flags.format
 
   -- 4. Run fuzz iterations

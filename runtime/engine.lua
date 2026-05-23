@@ -85,6 +85,38 @@ local function declare_engine_config()
       doc     = "Listen port for `storybase serve-api`.",
     })
   end
+  if not config.spec("fuzz.runs") then
+    config.declare("fuzz.runs", {
+      type    = "int",
+      default = 1000,
+      cli     = "--runs",
+      doc     = "Number of random-walk fuzz iterations.",
+    })
+  end
+  if not config.spec("fuzz.max-steps") then
+    config.declare("fuzz.max-steps", {
+      type    = "int",
+      default = 50,
+      cli     = "--steps",
+      doc     = "Maximum steps per fuzz iteration.",
+    })
+  end
+  if not config.spec("fuzz.failures-dir") then
+    config.declare("fuzz.failures-dir", {
+      type    = "string",
+      default = "failures",
+      cli     = "--failures-dir",
+      doc     = "Directory where fuzz-found failing traces are written.",
+    })
+  end
+  if not config.spec("fuzz.max-failures") then
+    config.declare("fuzz.max-failures", {
+      type    = "int",
+      default = 10,
+      cli     = "--max-failures",
+      doc     = "Stop saving fuzz failure traces after this many.",
+    })
+  end
 end
 
 -- Run declarations at require time so `config.load_env` / `load_file` at

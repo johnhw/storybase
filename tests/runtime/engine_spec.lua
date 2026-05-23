@@ -364,6 +364,47 @@ describe("serve-api.port declaration", function()
 end)
 
 -- ============================================================
+-- fuzz.* defaults (L6e) — declared in engine.lua but consumed only by
+-- cli/fuzz_cmd.lua.
+-- ============================================================
+
+describe("fuzz.* declarations", function()
+  local fuzz_keys = {
+    "fuzz.runs", "fuzz.max-steps", "fuzz.failures-dir", "fuzz.max-failures",
+  }
+  before_each(function()
+    for _, k in ipairs(fuzz_keys) do
+      if config.spec(k) then config.set(k, nil) end
+    end
+    config.bind_cli(nil)
+  end)
+  after_each(function()
+    for _, k in ipairs(fuzz_keys) do
+      if config.spec(k) then config.set(k, nil) end
+    end
+    config.bind_cli(nil)
+  end)
+
+  it("declares all four keys with the historic defaults", function()
+    assert.equal(1000,       config.get("fuzz.runs"))
+    assert.equal(50,         config.get("fuzz.max-steps"))
+    assert.equal("failures", config.get("fuzz.failures-dir"))
+    assert.equal(10,         config.get("fuzz.max-failures"))
+  end)
+
+  it("set_cli overrides default for each key", function()
+    config.set_cli("fuzz.runs",          "5")
+    config.set_cli("fuzz.max-steps",     "7")
+    config.set_cli("fuzz.failures-dir",  "/tmp/fuzz-fails")
+    config.set_cli("fuzz.max-failures",  "3")
+    assert.equal(5,                 config.get("fuzz.runs"))
+    assert.equal(7,                 config.get("fuzz.max-steps"))
+    assert.equal("/tmp/fuzz-fails", config.get("fuzz.failures-dir"))
+    assert.equal(3,                 config.get("fuzz.max-failures"))
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 
