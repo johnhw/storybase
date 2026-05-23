@@ -28,6 +28,9 @@ the new `eng:post_action_chain()`).
 
 ## What to work on next
 
+**Active work:**
+- §L — Unified configuration system (see plan below). Step 1: land `runtime/config.lua` + tests in isolation.
+
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
 - §J-I10 — multi-way `hook` switches collapsing into per-case declarations.
@@ -305,6 +308,82 @@ blocks. A per-room declarative `on-enter` (or per-flag declarative `gained-when:
 would express the same data with less indirection.
 
 **Possible direction:** allow `state world/location: Room; hook after move-to to `study: add! ...`. Pattern-match on the new value in the hook header.
+
+---
+
+## L. Configuration system (2026-05-23)
+
+Unify the three overlapping config surfaces (in-source `engine-config:` block,
+CLI flags, scattered magic constants) behind a single registry-backed module
+with a precedence chain. Keys are namespaced (dotted, lowercase, hyphens kept),
+declared once with type + default + doc, and resolved on read.
+
+**Precedence (highest first):** `runtime > cli > env > file > game > default`
+- `runtime` — `config.set()` programmatic override
+- `cli`     — populated from parsed CLI args
+- `env`     — `STORYBASE_*` env vars (auto-derived from key name)
+- `file`    — `~/.storybaserc` / `./.storybaserc` (simple `key = value` lines, `#` comments)
+- `game`    — the compiled `engine-config:` block of the loaded `.sb` file
+- `default` — built-in defaults from the registry
+
+Decisions locked in (2026-05-23):
+- Game's `engine-config:` block sits below CLI/env, above the user file. The
+  author's intent overrides cross-game user defaults, but invocation-time
+  CLI/env can still override.
+- File format is simple `key = value` lines (no TOML dep).
+- Roll out as pilot-first: land the module, migrate one key
+  (`engine.scene-stack-max`), prove the round-trip, then sweep.
+
+### L1. Module + tests (Step 1) [active]
+
+- `runtime/config.lua` with API: `declare`, `get` (returns `value, layer`),
+  `set`, `load_env`, `load_file`, `bind_game`, `bind_cli`, `dump`, `keys`,
+  `spec`, `_reset` (test-only).
+- Unknown-key reads/writes error.
+- Type coercion for `int`, `float`, `bool`, `string`, `enum`.
+- `tests/runtime/config_spec.lua` covering precedence, coercion, env-var name
+  derivation, file parsing (comments, quoted values, malformed, unknown keys),
+  `bind_game` from a stub game_table, `bind_cli` from a flag table, `dump`.
+
+### L2. Pilot migration: `engine.scene-stack-max`
+
+- `declare("engine.scene-stack-max", { type="int", default=64, ... })` next
+  to its read site in `runtime/engine.lua`.
+- Replace `engine_config["scene-stack-max"]` read (engine.lua:105–106) with
+  `config.get("engine.scene-stack-max")`.
+- Wire `config.bind_game(game_table)` into `engine.new()` so the in-source
+  block still flows through.
+- Add a regression test confirming an engine-config override in a .sb file
+  takes effect, and that `config.set` in test code overrides it.
+
+### L3. Sweep remaining `engine_config` reads
+
+- `engine.entry-scene` (engine.lua:577)
+- `engine.npc-speed` (engine.lua:747, 873)
+- Any new reads found by grepping `engine_config\b` / `engine-config`.
+
+### L4. Env + file loading
+
+- `STORYBASE_*` env var lookup at startup (caller decides when).
+- `~/.storybaserc` then `./.storybaserc` (later wins).
+- Errors surfaced as a return value, not raised; CLI decides whether to
+  warn or abort.
+
+### L5. CLI wiring
+
+- `cli/main.lua` arg parser populates a `{key=value}` table and calls
+  `config.bind_cli`. Existing `opts` table becomes a thin shim or goes
+  away entirely.
+- `print_usage()` generated from the registry's `cli` and `doc` fields.
+- New `storybase config` subcommand: `config dump` (all keys with resolved
+  value + winning layer), `config get <key>`, `config doc <key>`.
+
+### L6. Sweep remaining magic numbers
+
+- Debug ports (7373/7374), default bind address (127.0.0.1), `--steps`,
+  `--ui` driver default, any other CLI-side magic numbers in
+  `cli/main.lua` and `cli/drivers/`.
+- One commit per logical group; do not try to do this in one pass.
 
 ---
 

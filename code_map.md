@@ -308,6 +308,32 @@ game_table = {
 
 ## runtime/
 
+### `runtime/config.lua` (~270 lines)
+Registry-backed configuration with a precedence chain. Every tunable knob
+is `declare`'d once (type + default + doc); reads of undeclared keys error.
+
+**Precedence (highest first):** `runtime > cli > env > file > game > default`
+- `runtime` — `config.set(key, v)` programmatic override
+- `cli`     — populated by `config.bind_cli({...})` from parsed args
+- `env`     — `STORYBASE_*` env vars, populated by `config.load_env()`
+  (auto-derived name: `engine.scene-stack-max` → `STORYBASE_ENGINE_SCENE_STACK_MAX`)
+- `file`    — simple `key = value` lines, populated by `config.load_file(path)`
+- `game`    — compiled `engine-config:` block, populated by `config.bind_game(game_table)`
+  (block keys are namespaced under `engine.*`)
+- `default` — built-in defaults from the registry
+
+**API:**
+- `declare(key, spec)` — spec = `{type, default, doc, enum?, env?, cli?, coerce?}`
+- `get(key)` → `(value, layer)` — `layer` names the winning source
+- `set(key, value)` — runtime override; pass nil to clear
+- `load_env(getenv?)`, `load_file(path)` → `(ok, errors)`
+- `bind_game(game_table)`, `bind_cli(args)`
+- `dump()` → `{[key] = {value, layer, doc}}`
+- `keys()`, `spec(key)`, `_reset()` (test-only)
+
+Type coercion: `int`, `float`, `bool` (true/yes/on/1 vs false/no/off/0),
+`string`, `enum`. Custom `coerce = fn(raw) -> value, err` overrides built-ins.
+
 ### `runtime/state.lua` (722 lines)
 Path-keyed flat store backed by the transaction log.
 
