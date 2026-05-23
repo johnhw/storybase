@@ -42,6 +42,21 @@ local function declare_engine_config()
       doc     = "Extra autonomous turns run per player action (NPC pacing).",
     })
   end
+  if not config.spec("engine.debug-port") then
+    config.declare("engine.debug-port", {
+      type    = "int",
+      default = 7373,
+      cli     = "--debug-port",
+      doc     = "TCP port for the --debug / --serve debug server.",
+    })
+  end
+  if not config.spec("engine.http-port") then
+    config.declare("engine.http-port", {
+      type = "int",
+      cli  = "--http-port",
+      doc  = "HTTP UI port for --debug / --serve (defaults to debug-port + 1).",
+    })
+  end
 end
 
 -- Run declarations at require time so `config.load_env` / `load_file` at

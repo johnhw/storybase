@@ -189,6 +189,73 @@ describe("engine: scene-stack-max via config module", function()
 end)
 
 -- ============================================================
+-- Engine-config network keys: engine.debug-port + engine.http-port (L6a)
+-- These keys are declared by engine.lua but consumed only by the CLI
+-- (`cli/main.lua` for --debug / --serve / --http-port). Spec just verifies
+-- the declarations + the layered resolution that cli/main.lua relies on.
+-- ============================================================
+
+describe("engine: debug-port + http-port declarations", function()
+  before_each(function()
+    if config.spec("engine.debug-port") then config.set("engine.debug-port", nil) end
+    if config.spec("engine.http-port")  then config.set("engine.http-port",  nil) end
+    config.bind_cli(nil)
+    config.bind_game(nil)
+  end)
+  after_each(function()
+    if config.spec("engine.debug-port") then config.set("engine.debug-port", nil) end
+    if config.spec("engine.http-port")  then config.set("engine.http-port",  nil) end
+    config.bind_cli(nil)
+    config.bind_game(nil)
+  end)
+
+  it("declares engine.debug-port with default 7373", function()
+    assert.is_truthy(config.spec("engine.debug-port"))
+    local v, layer = config.get("engine.debug-port")
+    assert.equal(7373, v)
+    assert.equal("default", layer)
+  end)
+
+  it("declares engine.http-port with no default (unset until layered)", function()
+    assert.is_truthy(config.spec("engine.http-port"))
+    local v, layer = config.get("engine.http-port")
+    assert.is_nil(v)
+    assert.equal("unset", layer)
+  end)
+
+  it("game layer (engine-config block) overrides default debug-port", function()
+    local game = {
+      schema = {
+        engine_config = { ["debug-port"] = 9999 },
+        states = {}, types = {}, relations = {},
+      },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      actors = {}, schedules = {}, generates = {},
+    }
+    config.bind_game(game)
+    local v, layer = config.get("engine.debug-port")
+    assert.equal(9999, v)
+    assert.equal("game", layer)
+  end)
+
+  it("set_cli (CLI flag path) wins over game layer", function()
+    local game = {
+      schema = {
+        engine_config = { ["debug-port"] = 9999, ["http-port"] = 9000 },
+        states = {}, types = {}, relations = {},
+      },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      actors = {}, schedules = {}, generates = {},
+    }
+    config.bind_game(game)
+    config.set_cli("engine.http-port", 17000)
+    assert.equal(17000, config.get("engine.http-port"))
+    -- debug-port unchanged
+    assert.equal(9999, config.get("engine.debug-port"))
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 

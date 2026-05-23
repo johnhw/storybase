@@ -301,16 +301,17 @@ local function cmd_run(args)
   -- --serve also starts HTTP UI and switches to browser-driven game loop
   local is_serve = flags["serve"] == true
   local debug_port = nil
+  local http_port  = nil
   if flags["debug"] or is_serve then
-    -- Prefer port from engine-config, fall back to default 7373
-    local ec = game_table and game_table.schema and game_table.schema.engine_config
-    debug_port = (ec and tonumber(ec["debug-port"])) or 7373
-  end
-
-  -- HTTP UI port (debug_port + 1 by default, or explicit --http-port N)
-  local http_port = nil
-  if flags["debug"] or is_serve then
-    http_port = tonumber(flags["http-port"]) or (debug_port + 1)
+    local config = require("runtime.config")
+    -- Push the game's engine-config block into the registry so the game
+    -- layer participates in resolution alongside cli/env/file/default.
+    config.bind_game(game_table)
+    if flags["http-port"] then
+      config.set_cli("engine.http-port", flags["http-port"])
+    end
+    debug_port = config.get("engine.debug-port")
+    http_port  = config.get("engine.http-port") or (debug_port + 1)
   end
 
   -- --cli <path>: single-step scripting mode (read one choice, write JSON, exit)

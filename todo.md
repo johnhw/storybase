@@ -29,7 +29,9 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1–L5 done; next up is L6 (sweep remaining magic numbers in cli/main.lua + cli/drivers/).
+- §L — Unified configuration system (see plan below). L1–L5 + L6a done;
+  next up is L6b (network.bind), L6c (cli.ui), L6d (serve-api.port),
+  L6e (fuzz.*), L6f (coverage.*). One commit per logical group.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -437,10 +439,39 @@ Decisions locked in (2026-05-23):
 
 ### L6. Sweep remaining magic numbers
 
-- Debug ports (7373/7374), default bind address (127.0.0.1), `--steps`,
-  `--ui` driver default, any other CLI-side magic numbers in
-  `cli/main.lua` and `cli/drivers/`.
-- One commit per logical group; do not try to do this in one pass.
+Convert each remaining CLI-side magic constant into a registry-declared
+config key so it can be set via game file, `--config`, env, or
+`~/.storybaserc`. Land as small commits, one per logical group.
+
+#### L6a. Debug ports [done 2026-05-23]
+
+- `runtime/config.lua` gained `M.set_cli(key, value)` — additive
+  single-key write to the cli layer (unlike `bind_cli` which clears the
+  layer first). Lets typed flag handlers stack on top of an earlier
+  bulk `bind_cli(...)` call from `extract_cli_overrides` without
+  stomping siblings.
+- `runtime/engine.lua` declarations: `engine.debug-port` (int, default
+  7373, cli `--debug-port`) and `engine.http-port` (int, no default,
+  cli `--http-port`). Both auto-bind from the `.sb` `engine-config:`
+  block via `bind_game`.
+- `cli/main.lua` no longer reads `game_table.schema.engine_config`
+  directly for debug-port; it calls `config.bind_game(game_table)` and
+  then `config.get("engine.debug-port")`. The `--http-port N` flag is
+  routed through `config.set_cli("engine.http-port", N)`. The
+  computed-fallback (`debug_port + 1`) remains in `cli/main.lua` for
+  the unset case — `config.get` returns nil, the CLI computes the
+  default.
+- Tests: `tests/runtime/config_spec.lua` — 4 specs for `set_cli`
+  (additive write, nil-clear, coercion, unknown key); `tests/runtime/engine_spec.lua` — 4 specs covering the declarations (default debug-port,
+  unset http-port, game-layer override, cli > game precedence).
+
+#### L6b–L6f. Remaining sweep (next up)
+
+- `--bind` (network.bind, used by `--debug` / `--serve` and serve-api).
+- `--ui` (cli.ui, enum: plain|ansi).
+- serve-api port (8080).
+- fuzz defaults (runs/steps/failures-dir/max-failures).
+- coverage defaults (depth/budget).
 
 ---
 

@@ -332,6 +332,9 @@ is `declare`'d once (type + default + doc); reads of undeclared keys error.
   env vars. Missing files silently skipped. Called once at CLI startup.
 - `bind_game(game_table)`, `bind_cli(args)` — both clear their layer on
   call, so `bind_cli(nil)` / `bind_game(nil)` are valid clears.
+- `set_cli(key, value)` — additive single-key cli-layer write that does
+  NOT clear other cli-layer entries (used by typed flag handlers like
+  `--http-port` so they can stack on top of `--config key=value`).
 - `dump()` → `{[key] = {value, layer, doc}}`
 - `format_help()` → string — one line per registered key
   (`  key   (type, default=…)  — doc`), used by `cli/main.lua` for help.
@@ -479,10 +482,15 @@ Game loop coordinator.
   - Declares engine-side config keys via an idempotent
     `declare_engine_config()` helper with `runtime/config.lua`:
     `engine.scene-stack-max` (int, default 16), `engine.entry-scene`
-    (string, no default), `engine.npc-speed` (int, default 0). Calls
+    (string, no default), `engine.npc-speed` (int, default 0),
+    `engine.debug-port` (int, default 7373, cli `--debug-port`),
+    `engine.http-port` (int, no default, cli `--http-port`). Calls
     `config.bind_game(game_table)` and resolves values through
     `config.get`. `opts.max_stack` is a per-instance escape hatch that
     beats the resolved scene-stack-max without mutating global state.
+    (debug-port + http-port are declared here because they live in the
+    .sb `engine-config:` block, even though only `cli/main.lua` reads
+    them — the engine itself does not.)
 - `M.run(game_table, opts)` — blocking REPL loop
 
 **eng methods:**

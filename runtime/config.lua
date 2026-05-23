@@ -162,6 +162,19 @@ function M.set(key, value)
   end
 end
 
+--- Additive single-key write to the cli layer. Unlike `bind_cli` (which
+--- clears the layer first), `set_cli` only touches one key — so typed flag
+--- handlers can pile on without stomping the bulk override table that
+--- `bind_cli` already installed. Pass nil to clear just this key.
+function M.set_cli(key, value)
+  if not REGISTRY[key] then error("unknown config key: " .. key, 2) end
+  if value == nil then
+    LAYERS.cli[key] = nil
+  else
+    LAYERS.cli[key] = coerce(key, value)
+  end
+end
+
 local function env_var_name(key, spec)
   if spec.env then return spec.env end
   return "STORYBASE_" .. key:upper():gsub("[%.%-]", "_")

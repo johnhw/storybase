@@ -87,6 +87,41 @@ describe("runtime.config", function()
 
   end)
 
+  -- ── set_cli (additive cli-layer write) ────────────────────────
+
+  describe("set_cli", function()
+
+    it("places a single key in the cli layer without clearing siblings", function()
+      config.declare("a.first",  { type = "int", default = 0 })
+      config.declare("a.second", { type = "int", default = 0 })
+      config.bind_cli({ ["a.first"] = 1 })
+      config.set_cli("a.second", 2)
+      assert.are.equal(1, config.get("a.first"))
+      assert.are.equal(2, config.get("a.second"))
+      local _, layer = config.get("a.first")
+      assert.are.equal("cli", layer)
+    end)
+
+    it("clears just the one key when value is nil", function()
+      config.declare("a.k", { type = "int", default = 9 })
+      config.set_cli("a.k", 7)
+      assert.are.equal(7, config.get("a.k"))
+      config.set_cli("a.k", nil)
+      assert.are.equal(9, config.get("a.k"))
+    end)
+
+    it("coerces values like set/bind_cli", function()
+      config.declare("a.k", { type = "int", default = 0 })
+      config.set_cli("a.k", "11")
+      assert.are.equal(11, config.get("a.k"))
+    end)
+
+    it("errors on unknown key", function()
+      assert.has_error(function() config.set_cli("no.such.key", 1) end)
+    end)
+
+  end)
+
   -- ── Precedence ─────────────────────────────────────────────────
 
   describe("precedence", function()
