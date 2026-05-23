@@ -405,6 +405,39 @@ describe("fuzz.* declarations", function()
 end)
 
 -- ============================================================
+-- coverage.* defaults (L6f) — declared in engine.lua, consumed by
+-- cli/coverage_cmd.lua.
+-- ============================================================
+
+describe("coverage.* declarations", function()
+  local cov_keys = { "coverage.depth", "coverage.budget" }
+  before_each(function()
+    for _, k in ipairs(cov_keys) do
+      if config.spec(k) then config.set(k, nil) end
+    end
+    config.bind_cli(nil)
+  end)
+  after_each(function()
+    for _, k in ipairs(cov_keys) do
+      if config.spec(k) then config.set(k, nil) end
+    end
+    config.bind_cli(nil)
+  end)
+
+  it("declares depth + budget with the historic defaults", function()
+    assert.equal(8,  config.get("coverage.depth"))
+    assert.equal(30, config.get("coverage.budget"))
+  end)
+
+  it("set_cli overrides each key", function()
+    config.set_cli("coverage.depth",  "12")
+    config.set_cli("coverage.budget", "60")
+    assert.equal(12, config.get("coverage.depth"))
+    assert.equal(60, config.get("coverage.budget"))
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 

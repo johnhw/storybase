@@ -102,10 +102,17 @@ function M.run(args)
   local initial_cache = init_eng._state._cache
   local initial_stack = { entry }
 
-  -- 5. Run BFS via expand_graph
+  -- 5. Run BFS via expand_graph. Depth + budget defaults resolve through
+  -- runtime.config (env STORYBASE_COVERAGE_*, ~/.storybaserc, etc.).
+  -- Require runtime.engine first so the declarations land when this
+  -- subcommand is exercised in isolation (e.g. tests/cli/coverage_spec.lua).
+  require("runtime.engine")
   local search = require("runtime.search")
-  local depth  = tonumber(flags.depth)  or 8
-  local budget = tonumber(flags.budget) or 30
+  local config = require("runtime.config")
+  if flags.depth  then config.set_cli("coverage.depth",  flags.depth)  end
+  if flags.budget then config.set_cli("coverage.budget", flags.budget) end
+  local depth  = config.get("coverage.depth")
+  local budget = config.get("coverage.budget")
 
   local result = search.expand_graph(game_table, initial_cache, initial_stack, {
     depth     = depth,

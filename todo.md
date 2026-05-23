@@ -29,8 +29,9 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1–L5 + L6a..e
-  done; next up is L6f (coverage.*). One commit per logical group.
+- §L — Unified configuration system shipped (L1–L5 + L6a–f). All
+  CLI-side magic numbers have been replaced with registry-declared
+  keys (see completed.md for the §L summary).
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -535,9 +536,33 @@ config key so it can be set via game file, `--config`, env, or
 - 2 new test groups in tests/runtime/engine_spec.lua (defaults match the
   historic values; set_cli overrides each key).
 
-#### L6f. Remaining sweep (next up)
+#### L6f. coverage defaults [done 2026-05-23]
 
-- coverage defaults (depth/budget).
+- Declared `coverage.depth` (int, default 8, cli `--depth`) and
+  `coverage.budget` (int, default 30, cli `--budget`) in
+  `runtime/engine.lua`'s declare helper.
+- `cli/coverage_cmd.lua` requires `runtime.engine` at the start of its
+  BFS section so the declarations land when coverage_cmd is exercised
+  in isolation (mirror of L6e). Each flag → `set_cli` then `config.get`.
+- 2 new test groups in tests/runtime/engine_spec.lua (defaults +
+  set_cli overrides for depth/budget).
+- Full suite: 3208 successes / 0 failures.
+
+### §L summary (closed 2026-05-23)
+
+All 14 registry keys, in alphabetical order:
+`cli.ui`, `coverage.budget`, `coverage.depth`, `engine.debug-port`,
+`engine.entry-scene`, `engine.http-port`, `engine.npc-speed`,
+`engine.scene-stack-max`, `fuzz.failures-dir`, `fuzz.max-failures`,
+`fuzz.max-steps`, `fuzz.runs`, `network.bind`, `serve-api.port`.
+
+Each is settable via (precedence high→low):
+- `config.set` (runtime), `--config key=value` or typed flag (cli),
+- `STORYBASE_*` env var (env), `~/.storybaserc` / `./.storybaserc`
+  (file), `.sb` `engine-config:` block (game; engine.* only),
+- spec default.
+
+Inspect with `storybase config dump`, `config get <key>`, `config doc <key>`.
 
 ---
 

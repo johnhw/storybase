@@ -490,7 +490,8 @@ Game loop coordinator.
     `serve-api.port` (int, default 8080, cli `--port`),
     `fuzz.runs` (1000, `--runs`), `fuzz.max-steps` (50, `--steps`),
     `fuzz.failures-dir` ("failures", `--failures-dir`),
-    `fuzz.max-failures` (10, `--max-failures`).
+    `fuzz.max-failures` (10, `--max-failures`),
+    `coverage.depth` (8, `--depth`), `coverage.budget` (30s, `--budget`).
     Calls `config.bind_game(game_table)` and resolves values through
     `config.get`. `opts.max_stack` is a per-instance escape hatch that
     beats the resolved scene-stack-max without mutating global state.

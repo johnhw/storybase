@@ -117,6 +117,22 @@ local function declare_engine_config()
       doc     = "Stop saving fuzz failure traces after this many.",
     })
   end
+  if not config.spec("coverage.depth") then
+    config.declare("coverage.depth", {
+      type    = "int",
+      default = 8,
+      cli     = "--depth",
+      doc     = "BFS depth limit for `storybase coverage`.",
+    })
+  end
+  if not config.spec("coverage.budget") then
+    config.declare("coverage.budget", {
+      type    = "int",
+      default = 30,
+      cli     = "--budget",
+      doc     = "Time budget (seconds) for `storybase coverage`.",
+    })
+  end
 end
 
 -- Run declarations at require time so `config.load_env` / `load_file` at
