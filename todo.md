@@ -29,9 +29,9 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1–L5 + L6a + L6b
-  done; next up is L6c (cli.ui), L6d (serve-api.port), L6e (fuzz.*),
-  L6f (coverage.*). One commit per logical group.
+- §L — Unified configuration system (see plan below). L1–L5 + L6a..c
+  done; next up is L6d (serve-api.port), L6e (fuzz.*), L6f (coverage.*).
+  One commit per logical group.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -488,9 +488,29 @@ config key so it can be set via game file, `--config`, env, or
   "0.0.0.0"; `config doc network.bind` shows the full spec.
 - Full suite: 3199 successes / 0 failures.
 
-#### L6c–L6f. Remaining sweep (next up)
+#### L6c. UI driver default [done 2026-05-23]
 
-- `--ui` (cli.ui, enum: plain|ansi).
+- Declared `cli.ui` (enum, default "plain", values {plain, ansi}, cli
+  `--ui`) in `runtime/engine.lua`'s declare helper.
+- `cli/main.lua` cmd_run: replaced the hardcoded
+  `ALLOWED_UI_DRIVERS = { plain, ansi }` table + `flags["ui"] or "plain"`
+  with a registry-driven check. The enum spec also prevents package.path
+  traversal (`--ui ../../foo`) — same defense, declarative.
+- Kept the historic "unknown UI driver '...' (available: plain, ansi)"
+  stderr message for backcompat (the drivers_spec asserts on that
+  wording). The validation walks the registry's `enum` list so the
+  message stays in sync if more drivers are added.
+- Also consolidated `cmd_run`'s three local `require("runtime.config")`
+  calls into one at the function top.
+- 3 new tests in tests/runtime/engine_spec.lua covering the
+  declaration (default, enum acceptance, rejection of out-of-enum +
+  package-traversal strings).
+- Smoke: `config doc cli.ui` shows the enum list; `--ui foo` keeps
+  emitting the human-readable rejection.
+- Full suite: 3202 successes / 0 failures.
+
+#### L6d–L6f. Remaining sweep (next up)
+
 - serve-api port (8080).
 - fuzz defaults (runs/steps/failures-dir/max-failures).
 - coverage defaults (depth/budget).

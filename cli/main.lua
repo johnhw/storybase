@@ -247,6 +247,8 @@ local function cmd_run(args)
     return 1
   end
 
+  local config = require("runtime.config")
+
   local ok_c, compiler = pcall(require, "compiler.compiler")
   if not ok_c then
     io.stderr:write("error: could not load compiler: " .. tostring(compiler) .. "\n")
@@ -303,7 +305,6 @@ local function cmd_run(args)
   local debug_port = nil
   local http_port  = nil
   if flags["debug"] or is_serve then
-    local config = require("runtime.config")
     -- Push the game's engine-config block into the registry so the game
     -- layer participates in resolution alongside cli/env/file/default.
     config.bind_game(game_table)
@@ -329,16 +330,23 @@ local function cmd_run(args)
     return cli_cmd.run(game_table, cli_path, cli_opts) or 0
   end
 
-  -- --ui <name>: select UI driver (default: plain)
-  -- Whitelist driver names to prevent arbitrary module loading via package.path
-  -- traversal (e.g. `--ui ../../foo`). Extend this set as new drivers land.
-  local ALLOWED_UI_DRIVERS = { plain = true, ansi = true }
-  local ui_name = flags["ui"] or "plain"
-  if not ALLOWED_UI_DRIVERS[ui_name] then
-    io.stderr:write("error: unknown UI driver '" .. tostring(ui_name)
-                    .. "' (available: plain, ansi)\n")
-    return 1
+  -- --ui <name>: select UI driver (default from cli.ui registry key).
+  -- The `cli.ui` enum spec (declared in runtime/engine.lua) restricts
+  -- values to {"plain", "ansi"}, also preventing package.path traversal
+  -- (e.g. `--ui ../../foo`). We validate via the registry's enum list
+  -- so the error message matches the historic "unknown UI driver" UX.
+  if flags["ui"] then
+    local spec = config.spec("cli.ui")
+    local allowed = {}
+    for _, v in ipairs(spec.enum) do allowed[v] = true end
+    if not allowed[flags["ui"]] then
+      io.stderr:write("error: unknown UI driver '" .. tostring(flags["ui"])
+                      .. "' (available: " .. table.concat(spec.enum, ", ") .. ")\n")
+      return 1
+    end
+    config.set_cli("cli.ui", flags["ui"])
   end
+  local ui_name = config.get("cli.ui")
   local ok_drv, drv_mod = pcall(require, "cli.drivers." .. ui_name)
   if not ok_drv then
     io.stderr:write("error: failed to load UI driver '" .. ui_name
@@ -347,7 +355,6 @@ local function cmd_run(args)
   end
   local driver = drv_mod.new({ io_out = io.stdout, io_in = io_in })
 
-  local config = require("runtime.config")
   if flags["bind"] then config.set_cli("network.bind", flags["bind"]) end
 
   local opts = {

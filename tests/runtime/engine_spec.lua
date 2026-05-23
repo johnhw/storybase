@@ -302,6 +302,40 @@ describe("network.bind declaration", function()
 end)
 
 -- ============================================================
+-- cli.ui: enum-typed UI driver default (L6c)
+-- ============================================================
+
+describe("cli.ui declaration", function()
+  before_each(function()
+    if config.spec("cli.ui") then config.set("cli.ui", nil) end
+    config.bind_cli(nil)
+  end)
+  after_each(function()
+    if config.spec("cli.ui") then config.set("cli.ui", nil) end
+    config.bind_cli(nil)
+  end)
+
+  it("declares cli.ui with default plain", function()
+    assert.is_truthy(config.spec("cli.ui"))
+    local v, layer = config.get("cli.ui")
+    assert.equal("plain", v)
+    assert.equal("default", layer)
+  end)
+
+  it("accepts the documented enum values", function()
+    config.set_cli("cli.ui", "ansi")
+    assert.equal("ansi", config.get("cli.ui"))
+    config.set_cli("cli.ui", "plain")
+    assert.equal("plain", config.get("cli.ui"))
+  end)
+
+  it("rejects values outside the enum (defends against package.path traversal)", function()
+    assert.has_error(function() config.set_cli("cli.ui", "../../evil") end)
+    assert.has_error(function() config.set_cli("cli.ui", "fancy") end)
+  end)
+end)
+
+-- ============================================================
 -- Config-resolved entry-scene and npc-speed (L3 sweep)
 -- ============================================================
 

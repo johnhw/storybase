@@ -68,6 +68,15 @@ local function declare_engine_config()
       doc     = "Bind address for --debug / --serve / serve-api sockets.",
     })
   end
+  if not config.spec("cli.ui") then
+    config.declare("cli.ui", {
+      type    = "enum",
+      enum    = { "plain", "ansi" },
+      default = "plain",
+      cli     = "--ui",
+      doc     = "UI driver for interactive `run`: plain text or ANSI colour.",
+    })
+  end
 end
 
 -- Run declarations at require time so `config.load_env` / `load_file` at
