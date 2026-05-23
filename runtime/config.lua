@@ -299,6 +299,30 @@ function M.dump()
   return out
 end
 
+--- Format declared keys as a help block. Returns a string with one line
+--- per key:  `  <key>  (<type>, default=<v>) — <doc>`. Used to generate the
+--- "Config keys" section of `storybase --help`.
+function M.format_help()
+  local lines = {}
+  for _, key in ipairs(M.keys()) do
+    local spec = REGISTRY[key]
+    local typ = spec.type or "?"
+    local def = LAYERS.default[key]
+    local parts = { typ }
+    if def ~= nil then parts[#parts + 1] = "default=" .. tostring(def) end
+    if spec.enum then
+      parts[#parts + 1] = "one of: " .. table.concat(spec.enum, "|")
+    end
+    local header = ("  %-36s (%s)"):format(key, table.concat(parts, ", "))
+    if spec.doc and spec.doc ~= "" then
+      lines[#lines + 1] = header .. " — " .. spec.doc
+    else
+      lines[#lines + 1] = header
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
 --- Return the spec for `key`, or nil if undeclared.
 function M.spec(key)
   return REGISTRY[key]

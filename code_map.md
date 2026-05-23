@@ -330,8 +330,11 @@ is `declare`'d once (type + default + doc); reads of undeclared keys error.
 - `load_startup({home, cwd, getenv})` → `(errors, sources)` — loads
   `<home>/.storybaserc`, then `<cwd>/.storybaserc` (later wins), then
   env vars. Missing files silently skipped. Called once at CLI startup.
-- `bind_game(game_table)`, `bind_cli(args)`
+- `bind_game(game_table)`, `bind_cli(args)` — both clear their layer on
+  call, so `bind_cli(nil)` / `bind_game(nil)` are valid clears.
 - `dump()` → `{[key] = {value, layer, doc}}`
+- `format_help()` → string — one line per registered key
+  (`  key   (type, default=…)  — doc`), used by `cli/main.lua` for help.
 - `keys()`, `spec(key)`, `_reset()` (test-only)
 
 Type coercion: `int`, `float`, `bool` (true/yes/on/1 vs false/no/off/0),
@@ -783,8 +786,15 @@ equality are dropped from running state, so a fresh divergence will be re-report
 
 ### `cli/main.lua` (642 lines)
 - `M.main(argv)` — top-level dispatcher
-- Subcommands: `check`, `compile`, `run`, `format`, `repl`, `verify`, `migrate`, `extract-symbols`, `compact`, `help`
+- Subcommands: `check`, `compile`, `run`, `format`, `repl`, `verify`, `migrate`, `extract-symbols`, `compact`, `config`, `help`
 - Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` / `--serve` / `--ui <name>` for `run`; `--production` for `compile`/`run`
+- Global `--config <key>=<value>` (or `--config=<key>=<value>`): repeatable;
+  `extract_cli_overrides` strips them out of `argv` before dispatch and
+  routes them through `runtime.config.bind_cli`. Malformed pairs, unknown
+  keys, and coercion failures go to stderr but never abort.
+- Startup sequence (in `M.main`): `require("runtime.engine")` (declares
+  engine keys) → `config.load_startup()` (loads `~/.storybaserc`,
+  `./.storybaserc`, env vars) → `extract_cli_overrides` → dispatch.
 - `BOOL_FLAGS` set prevents boolean flags from eating the following positional arg
 - `--auto` / `--steps N`: non-interactive run mode; fake `io_in` always returns "1"; `--steps N` limits turns
 - `--debug`: starts debug TCP server (port 7373) + HTTP UI server (port 7374); game runs via stdin; browser panels read-only
@@ -802,6 +812,18 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 ### `cli/check_cmd.lua` (135 lines)
 - `M.run(args)` — run lexer → parser → checker (no codegen); print errors/warnings with source context
 - Faster feedback than `compile`; exits 0 on success (warnings allowed), 1 on errors
+
+### `cli/config_cmd.lua` (~155 lines)
+- `M.run(args)` — implements `storybase config <subcommand>` (see L5)
+- Subcommands: `dump [file.sb]` (column table of key/layer/value over the
+  full registry; optional file path → `config.bind_game` so the game
+  layer is reflected), `get <key> [file.sb]` (machine-friendly single
+  value, blank line if unset), `doc <key>` (full spec block — type,
+  default, auto-derived env var, declared CLI flag, doc, current
+  resolved value with winning layer).
+- Bare invocation / `help` prints usage. Unknown subcommand → rc=1.
+- Honours the global `--config key=value` flags (applied by
+  `cli/main.lua` before dispatch).
 
 ### `cli/format_cmd.lua` (1427 lines)
 - `M.run(args)` — parse AST and emit canonical indented output
@@ -993,6 +1015,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/test_cmd_spec.lua` | `storybase test` subcommand: usage errors, pass/fail exit codes, no-tests, compile errors (7 tests) |
 | `tests/compiler/compiler_spec.lua` | Pipeline orchestrator: stop-on-error, parse_and_check, compile_file file errors, opts.production, import resolver error paths (16 tests) |
 | `tests/cli/check_cmd_spec.lua` | `storybase check` subcommand unit tests: clean / missing / syntax / semantic / multi-error paths (6 tests) |
+| `tests/cli/config_cmd_spec.lua` | `storybase config` subcommand (dump/get/doc) plus the global `--config key=value` plumbing routed through `cli.main`: dump headers + runtime/game layers, get value/unset/unknown/missing-arg, doc full render + unknown key, bare usage + unknown subcommand, --config cli-layer win + single-token form + malformed/unknown/coercion-failure reporting + trailing --config (18 tests) |
 | `tests/cli/repl_cmd_spec.lua` | `storybase repl` subcommand unit tests via mocked stdio: meta-commands, fn invocation, save/load round-trip (16 tests) |
 | `tests/cli/migrate_cmd_spec.lua` | `storybase migrate` subcommand unit tests: usage, compile fail, no-migrations, version match, success, --out, corrupt save, missing save (11 tests) |
 | `tests/cli/verify_cmd_spec.lua` | `storybase verify` subcommand unit tests: usage, compile fail, no verify blocks, PASS, FAIL, summary (7 tests) |

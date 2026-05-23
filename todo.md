@@ -29,7 +29,7 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
-- §L — Unified configuration system (see plan below). L1–L4 done; next up is L5 (CLI wiring: arg parser → `config.bind_cli`, `storybase config` subcommand).
+- §L — Unified configuration system (see plan below). L1–L5 done; next up is L6 (sweep remaining magic numbers in cli/main.lua + cli/drivers/).
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
@@ -399,14 +399,41 @@ Decisions locked in (2026-05-23):
   later-wins file merge, env > files, missing files, parse-error collection,
   and nil-home (cwd-only) paths.
 
-### L5. CLI wiring
+### L5. CLI wiring [done 2026-05-23]
 
-- `cli/main.lua` arg parser populates a `{key=value}` table and calls
-  `config.bind_cli`. Existing `opts` table becomes a thin shim or goes
-  away entirely.
-- `print_usage()` generated from the registry's `cli` and `doc` fields.
-- New `storybase config` subcommand: `config dump` (all keys with resolved
-  value + winning layer), `config get <key>`, `config doc <key>`.
+- `cli/main.lua` `M.main` now strips any number of `--config key=value`
+  (or `--config=key=value`) flags out of `argv` before dispatch via a
+  new `extract_cli_overrides(argv)` helper. Unknown keys / coercion
+  failures / malformed pairs are surfaced to stderr but never abort the
+  command — the bind_cli call uses a pre-filtered table so one bad
+  override doesn't drop the others.
+- New `cli/config_cmd.lua` implements the `config` subcommand:
+  - `config dump [file.sb]` — column table of `key | layer | value` over
+    every registered key. Optional file path → `bind_game` so the game
+    layer is reflected.
+  - `config get <key> [file.sb]` — prints just the resolved value
+    (script-friendly; blank line if unset).
+  - `config doc <key>` — type, default, env var (auto-derived), CLI
+    flag (when declared), doc string, and the currently-resolved value
+    with its winning layer.
+  - `config help` / `config --help` / no-subcommand → usage block.
+- `runtime/config.lua` gained `M.format_help()` that emits one line per
+  key for the global `--help` text (kept tight: `key  (type, default=…)  — doc`).
+- `print_usage()` and the `help <cmd>` text mention `--config` and the
+  new subcommand.
+- Existing typed flags (`--debug`, `--ui`, `--http-port`, `--bind`,
+  `--steps`, etc.) are still parsed by the per-command `parse_args` and
+  packed into the `opts` table. That's L6 territory — converting each to
+  a registry-declared key with a `cli` field. L5 only adds the generic
+  `--config key=value` route plus the inspector subcommand.
+- Tests: `tests/cli/config_cmd_spec.lua` (18 tests) covers dump (header
+  row, runtime > default, game-layer file binding), get (known key,
+  runtime override, unset key, unknown key, missing arg), doc (full
+  render, unknown key), the bare `config` usage block + unknown
+  subcommand path, and the global `--config` flag through `cli.main`
+  (cli-layer win, single-token form, unknown key reported but command
+  still runs, coercion failure reported, malformed values reported,
+  trailing `--config` with no value).
 
 ### L6. Sweep remaining magic numbers
 

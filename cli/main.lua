@@ -57,7 +57,12 @@ Commands:
   docs     <file>             Generate static HTML/Markdown reference for a game
   serve-api <file>            Stateless HTTP API (client-held save log)
   lsp                         Start the LSP server (stdio JSON-RPC)
+  config   <dump|get|doc>     Inspect the configuration registry
   help                        Show this help text
+
+Global options:
+  --config <key>=<value>      Override a registered config key (repeatable).
+                              See `storybase config dump` for the full list.
 
 Options (compile / run):
   --production                Emit a production build (strips debug-only content)
@@ -513,6 +518,17 @@ local function cmd_lsp(_args)
   return 0
 end
 
+-- ── Command: config ──────────────────────────────────────────
+
+local function cmd_config(args)
+  local ok, config_cmd = pcall(require, "cli.config_cmd")
+  if not ok then
+    io.stderr:write("error: could not load config command: " .. tostring(config_cmd) .. "\n")
+    return 1
+  end
+  return config_cmd.run(args) or 0
+end
+
 -- ── Dispatch table ────────────────────────────────────────────
 
 local COMMAND_HELP = {
@@ -723,6 +739,30 @@ storybase lsp
     - Go-to-definition (jump to declaration)
     - Completion (names, state paths, types, scenes, functions)
 ]],
+  ["config"] = [[
+storybase config <subcommand> [args]
+
+  Inspect the configuration registry (runtime > cli > env > file > game > default).
+
+  Subcommands:
+    dump [file.sb]          List every declared key with its resolved value
+                            and the winning layer.  If <file.sb> is given,
+                            its `engine-config:` block is bound first so the
+                            game layer is reflected in the dump.
+    get  <key> [file.sb]    Print just the value for <key>.
+    doc  <key>              Show the spec for <key> (type, default, env var,
+                            CLI flag, doc, current resolved value).
+
+  Use `--config <key>=<value>` (repeatable) to apply CLI overrides; they win
+  over env/file/game/default layers.
+
+  Examples:
+    storybase config dump
+    storybase config dump demos/demo01_wanderer.sb
+    storybase config get engine.scene-stack-max
+    storybase config doc engine.npc-speed
+    storybase --config engine.npc-speed=2 run demos/demo01_wanderer.sb
+]],
   ["help"] = [[
 storybase help [<command>]
 
@@ -763,10 +803,55 @@ local COMMANDS = {
   ["docs"]            = cmd_docs,
   ["serve-api"]       = cmd_serve_api,
   ["lsp"]             = cmd_lsp,
+  ["config"]          = cmd_config,
   ["help"]            = cmd_help,
 }
 
 -- ── Main entry point ──────────────────────────────────────────
+
+--- Walk `argv` and strip out repeatable `--config key=value` flags. Returns
+--- (filtered_argv, cli_overrides) where filtered_argv is `argv` with those
+--- flags removed and cli_overrides is a {[key]=raw_string} table suitable
+--- for `config.bind_cli`. Malformed `--config` values go to stderr and are
+--- skipped so the rest of the invocation still runs.
+---
+--- Supported forms:
+---   --config key=value          (one token after --config)
+---   --config=key=value          (single token)
+--- Repeated keys: last one wins.
+local function extract_cli_overrides(argv)
+  local filtered = {}
+  local overrides = {}
+  local i = 1
+  local function record(pair, source)
+    local k, v = pair:match("^([%w%._%-]+)=(.*)$")
+    if not k then
+      io.stderr:write("storybase: malformed --config (" .. source .. "): " .. pair .. "\n")
+      return
+    end
+    overrides[k] = v
+  end
+  while i <= #argv do
+    local a = argv[i]
+    if a == "--config" then
+      local nxt = argv[i + 1]
+      if nxt and nxt:sub(1, 2) ~= "--" then
+        record(nxt, "--config " .. nxt)
+        i = i + 2
+      else
+        io.stderr:write("storybase: --config needs an argument like key=value\n")
+        i = i + 1
+      end
+    elseif a:sub(1, 9) == "--config=" then
+      record(a:sub(10), a)
+      i = i + 1
+    else
+      filtered[#filtered + 1] = a
+      i = i + 1
+    end
+  end
+  return filtered, overrides
+end
 
 --- Run the CLI with the given argument vector.
 ---@param argv table  Argument list (e.g. the global `arg` table)
@@ -788,18 +873,37 @@ function M.main(argv)
     io.stderr:write("storybase config: " .. e .. "\n")
   end
 
-  local cmd     = argv[1]
-  local handler = COMMANDS[cmd]
+  -- Pull out any global `--config key=value` overrides before dispatch so
+  -- subcommands don't have to know about them. Filter out unknown / invalid
+  -- entries first (reporting them) so one bad pair doesn't drop the rest.
+  local argv_clean, cli_overrides = extract_cli_overrides(argv)
+  local valid_overrides = {}
+  for k, v in pairs(cli_overrides) do
+    if not config.spec(k) then
+      io.stderr:write("storybase config: unknown key '" .. k .. "'\n")
+    else
+      valid_overrides[k] = v
+    end
+  end
+  local ok_bind, bind_err = pcall(config.bind_cli, valid_overrides)
+  if not ok_bind then
+    io.stderr:write("storybase config: " .. tostring(bind_err) .. "\n")
+  end
+
+  local cmd     = argv_clean[1]
+  local handler = cmd and COMMANDS[cmd] or nil
 
   if not handler then
-    io.stderr:write(string.format("storybase: unknown command '%s'\n", cmd))
+    if cmd then
+      io.stderr:write(string.format("storybase: unknown command '%s'\n", cmd))
+    end
     print_usage()
     return 1
   end
 
   -- Shift args (remove command name, pass the rest)
   local sub_args = {}
-  for i = 2, #argv do sub_args[i - 1] = argv[i] end
+  for i = 2, #argv_clean do sub_args[i - 1] = argv_clean[i] end
 
   local ok, result = pcall(handler, sub_args)
   if not ok then
