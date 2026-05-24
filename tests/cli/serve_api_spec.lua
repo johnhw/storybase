@@ -120,6 +120,61 @@ describe("serve-api: handle_step kernel", function()
   end)
 end)
 
+-- M2 regression: serve-api's handle_step previously read
+-- engine_config["npc-speed"] directly, bypassing the §L config registry.
+-- A `--config engine.npc-speed=N` override silently failed to apply.
+
+describe("serve-api: npc-speed respects --config override (M2)", function()
+  local config = require("runtime.config")
+  require("runtime.engine")  -- ensure engine keys are declared
+
+  local npc_src = table.concat({
+    "module serve_npc_test",
+    "  version: 1.0",
+    "engine-config:",
+    "  entry-scene: room",
+    "state world/ticks: Int(0, 100) = 0",
+    "fn tick-once:",
+    "  inc! world/ticks 1",
+    "actor ticker:",
+    "  behavior: tick-once",
+    "  priority: 10",
+    "scene room:",
+    "  Tick {world/ticks}.",
+    "  * Wait",
+    "    -> room",
+  }, "\n")
+
+  local NPC_GT
+  do
+    local gt, diags = compiler.compile(npc_src, "serve_npc_test.sb")
+    if not (diags and diags:has_errors()) then NPC_GT = gt end
+  end
+
+  before_each(function() config.set_cli("engine.npc-speed", nil) end)
+  after_each(function()  config.set_cli("engine.npc-speed", nil) end)
+
+  it("applies 2 extra autonomous turns per choice when set to 2", function()
+    if not NPC_GT then pending("could not compile serve_npc_test") end
+    config.set_cli("engine.npc-speed", 2)
+    local r0 = serve_api._handle_step(NPC_GT, { reset = true })
+    -- One player choice: 1 post_action + 2 extras = 3 ticks.
+    local r1 = serve_api._handle_step(NPC_GT,
+                 { save_log = r0.save_log, choice_index = 1 })
+    assert.is_nil(r1.error)
+    assert.equals(3, r1.state["world/ticks"])
+  end)
+
+  it("default 0 npc-speed runs only the single post_action turn", function()
+    if not NPC_GT then pending("could not compile serve_npc_test") end
+    local r0 = serve_api._handle_step(NPC_GT, { reset = true })
+    local r1 = serve_api._handle_step(NPC_GT,
+                 { save_log = r0.save_log, choice_index = 1 })
+    assert.is_nil(r1.error)
+    assert.equals(1, r1.state["world/ticks"])
+  end)
+end)
+
 -- ── HTTP end-to-end tests ──────────────────────────────────────
 
 -- Unique base port that shifts each run, so back-to-back invocations do not

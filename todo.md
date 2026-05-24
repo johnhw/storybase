@@ -655,7 +655,7 @@ file's convention). Add a test in `tests/runtime/actors_goal_spec.lua` that
 wires a stub debug server and asserts the event lands when the thief is
 blocked.
 
-### M2. `npc-speed` bypasses runtime.config in `--cli` and `serve-api` [bug]
+### M2. `npc-speed` bypasses runtime.config in `--cli` and `serve-api` [done 2026-05-24]
 
 **Files:** `cli/cli_cmd.lua:470-472`, `cli/serve_api_cmd.lua:343-345`.
 

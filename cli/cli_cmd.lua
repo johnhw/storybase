@@ -464,12 +464,10 @@ function M.run(game_table, save_path, opts)
       return 1
     end
     local signal = signal_or_err
-    eng:post_action()
-
-    -- NPC speed
-    local cfg = game_table.schema and game_table.schema.engine_config
-    local npc_speed = tonumber(cfg and cfg["npc-speed"]) or 0
-    for _ = 1, npc_speed do eng:post_action() end
+    -- Run the full post-action chain (post_action + npc-speed extras).
+    -- eng:post_action_chain() resolves engine.npc-speed through
+    -- runtime.config so --config / env / .storybaserc overrides apply.
+    eng:post_action_chain()
 
     -- Follow scene navigation from the choice
     if signal then

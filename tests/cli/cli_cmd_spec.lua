@@ -662,3 +662,69 @@ describe("CLI cmd: precondition failure returns error JSON", function()
     assert.is_not_nil(r1.message)
   end)
 end)
+
+-- ── M2 regression: npc-speed flows through runtime.config ────────
+-- Prior to the fix, cli_cmd.lua read engine_config["npc-speed"] directly,
+-- bypassing the §L config registry. `--config engine.npc-speed=N` (and
+-- env / .storybaserc overrides) silently failed to apply.
+
+local npc_src = table.concat({
+  "module npc_speed_test",
+  "  version: 1.0",
+  "engine-config:",
+  "  entry-scene: room",
+  "state world/ticks: Int(0, 100) = 0",
+  "fn tick-once:",
+  "  inc! world/ticks 1",
+  "actor ticker:",
+  "  behavior: tick-once",
+  "  priority: 10",
+  "scene room:",
+  "  Tick {world/ticks}.",
+  "  * Wait",
+  "    -> room",
+}, "\n")
+
+local npc_game
+do
+  local gt, diags = compiler.compile(npc_src, "npc_speed_test.sb")
+  if not diags:has_errors() then npc_game = gt end
+end
+
+describe("CLI cmd: npc-speed respects --config override (M2)", function()
+  local path
+  local config = require("runtime.config")
+  -- Ensure the engine's keys are declared before we poke at cli-layer.
+  require("runtime.engine")
+
+  before_each(function()
+    path = tmp_save()
+    config.set_cli("engine.npc-speed", nil)  -- clean slate
+  end)
+
+  after_each(function()
+    cleanup(path)
+    config.set_cli("engine.npc-speed", nil)  -- don't leak into other specs
+  end)
+
+  it("runs 1 extra autonomous turn per player choice when set to 1", function()
+    if not npc_game then pending("could not compile npc_speed_test game") end
+    config.set_cli("engine.npc-speed", 1)
+    -- Initial render: ticks = 0 (init doesn't tick).
+    step(npc_game, path, "", { reset = true })
+    -- One player choice → post_action (1 tick) + 1 npc-speed extra (1 tick).
+    step(npc_game, path, "1")
+    local r2 = step(npc_game, path, "")  -- inspect state
+    -- Pull world/ticks from the response state.
+    assert.equal(2, r2.state["world/ticks"])
+  end)
+
+  it("runs 3 extra autonomous turns when set to 3", function()
+    if not npc_game then pending("could not compile npc_speed_test game") end
+    config.set_cli("engine.npc-speed", 3)
+    step(npc_game, path, "", { reset = true })
+    step(npc_game, path, "1")
+    local r2 = step(npc_game, path, "")
+    assert.equal(4, r2.state["world/ticks"])  -- 1 + 3 extras
+  end)
+end)
