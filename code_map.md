@@ -21,7 +21,7 @@ Entry points: `compiler/compiler.lua` — `M.compile(source, file)` / `M.compile
 
 ## compiler/
 
-### `compiler/ast.lua` (1007 lines)
+### `compiler/ast.lua` (1162 lines)
 AST node constructors and constants. Import as `local ast = require("compiler.ast")`.
 
 **Constants:**
@@ -82,7 +82,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/lexer.lua` (530 lines)
+### `compiler/lexer.lua` (637 lines)
 - `M.tokenize(source, filename)` → `{tokens=[], errors=[]}`
 - Handles INDENT/DEDENT pre-pass, all token types, NAMED_ARG (`foo:`), COMPUTED_GOTO, PATH tokens (`a/b/c`)
 - Token shape: `{type=STRING, value=ANY, line=N, col=N}`
@@ -93,7 +93,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/parser.lua` (3479 lines)
+### `compiler/parser.lua` (4348 lines)
 - `M.parse(tokens, filename)` → `(ast_root, diags[])`
 - Recursive descent; parser state `p` carries cursor + error accumulator
 - Key parse functions (all local): `parse_decl`, `parse_expr`, `parse_primary`, `parse_stmt`, `parse_type_expr`, `parse_scene_body`
@@ -117,7 +117,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/checker.lua` (2922 lines)
+### `compiler/checker.lua` (3555 lines)
 - `M.check(ast_root, filename)` → `(typed_ast, diags[])`
 - Attaches `ast_root.symtab = {types={}, states={}, relations={}}` for codegen
 - Four passes (all local):
@@ -129,7 +129,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/codegen.lua` (910 lines)
+### `compiler/codegen.lua` (1299 lines)
 - `M.emit(typed_ast, opts?)` → `(game_table, diags[])`
 - `opts.production = true` → strips verifies and watches from game_table; sets `game_table.production = true`
 - Produces the **game_table** structure (see below)
@@ -147,7 +147,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/types.lua` (~170 lines)
+### `compiler/types.lua` (143 lines)
 - `M.DISCRETE` / `M.SUPERFICIAL` — type category constants
 - `M.is_discrete(ty)` / `M.is_superficial(ty)` — classify a type descriptor
 - `M.state_space_size(ty)` → number — cardinality of a type (exact integer
@@ -160,7 +160,7 @@ EMIT_MUT         -- engine/emit event [args]
 
 ---
 
-### `compiler/compiler.lua` (~700 lines)
+### `compiler/compiler.lua` (1501 lines)
 - `M.compile(source, filename, opts?)` → `(game_table, diags)`
 - `M.compile_file(filepath, opts?)` → `(game_table, diags)`
 - `M.parse_and_check(source, filename)` → `(typed_ast, diags)` — stops before codegen; returns AST with `.decls`
@@ -279,6 +279,7 @@ game_table = {
     type_count       = number,
     path_count       = number,
     scene_count      = number,
+    scene_names      = { [n] = string },     -- declaration order; index by 1..scene_count
     relation_count   = number,
     state_space_size = number|"unbounded",   -- exact int when ≤ 2^53; else "unbounded"
     state_space_log2 = number,               -- log2 of cardinality, always finite-float
@@ -287,16 +288,21 @@ game_table = {
     relations        = { [name] = {edges=...} },
     engine_config    = { ["entry-scene"]=str, ["scene-stack-max"]=n, ... },
     time_model       = { axes={...}, default_axis=str },
+    speakers         = { [name] = {display, color, doc} },     -- §dialog (talk/say)
   },
   fns        = { [name] = {params, body, pre, post, tags, pure} },
   scenes     = { [name] = {name, choices=[{text, guard, body}]} },
   actors     = { [name] = {name, priority, perceives, state_path, behaviors} },
   schedules  = { [name] = {name, trigger, body} },
+  relations  = { [name] = {name, data={[src]={[dst]=true}}} },  -- runtime-shape (mirror of schema.relations)
   verifies   = [ {label, clauses=[{kind, condition, body}]} ],  -- empty in production builds
   watches    = [ {label, path_or_cond, kind} ],                 -- empty in production builds
   tests      = [ {label, setup=[stmts], run=[stmts], expect=[exprs]} ],  -- empty in production builds
   migrations = [ {from_version, body} ],
   bounded    = { [name] = {reads, body} },
+  grids      = { [name] = {width, height, cell_type, default} },  -- §tile_grid (defgrid)
+  tags       = { [name] = {kind, name, tags={...}} },             -- §18 user-defined tags on decls
+  hooks      = { [event] = [ {fn, doc, ...} ] },                  -- §hook on engine events
   generates  = [ {name, seed_path, body, doc} ],            -- §F1
   endings    = [ {name, when_expr, body, doc} ],            -- §F2
   quests     = [ {name, description, steps=[{name}], doc} ],-- §E1
@@ -308,7 +314,7 @@ game_table = {
 
 ## runtime/
 
-### `runtime/config.lua` (~330 lines)
+### `runtime/config.lua` (360 lines)
 Registry-backed configuration with a precedence chain. Every tunable knob
 is `declare`'d once (type + default + doc); reads of undeclared keys error.
 
@@ -343,7 +349,7 @@ is `declare`'d once (type + default + doc); reads of undeclared keys error.
 Type coercion: `int`, `float`, `bool` (true/yes/on/1 vs false/no/off/0),
 `string`, `enum`. Custom `coerce = fn(raw) -> value, err` overrides built-ins.
 
-### `runtime/state.lua` (722 lines)
+### `runtime/state.lua` (732 lines)
 Path-keyed flat store backed by the transaction log.
 
 - `M.new(schema, log)` → store
@@ -381,7 +387,7 @@ store:init_defaults()            -- apply schema defaults to cache
 
 ---
 
-### `runtime/eval.lua` (2696 lines)
+### `runtime/eval.lua` (2861 lines)
 Expression and statement evaluator. All evaluation goes through here.
 
 - Declares `engine.max-counterfactual-depth` (int, default 10) at module
@@ -419,28 +425,45 @@ ctx = {
 }
 ```
 
-**Built-in functions (BUILTINS table, line ~524):**
+**Built-in functions (BUILTINS table, line ~910):**
 ```
 path-list        → list of live family keys
+path-exists?     → bool (uses eval_path on PATH_EXPR args, not eval_expr)
 range            n | lo hi | lo hi step → List(Int) (Python-style, exclusive hi; capped at 10000)
 query-at         path [time: value] → value at given time bound (or current if omitted)
 query-history    path → [{time, old, new}, ...] (all recorded changes)
 query-changes    path [last-n: N] → [{time, old, new}, ...] (most recent N changes)
-min, max
+-- Collection / generic:
+size, count, list-size, ulist-size, map-size   → length (all aliases of size_impl)
+list-get         list index → T | nil  (negative index counts from end)
+empty?, contains?, not-in?
 count-where      → count items matching predicate
 any?, all?
-random-int
-tostring
-path-exists?     → bool (uses eval_path on PATH_EXPR args, not eval_expr)
+union, intersect, difference   (set ops, return List)
+min, max
+-- Numeric / string:
+abs, clamp, floor, ceil, mod, int-div
+str, int-to-str, str-to-int, tostring
+-- Random (branch over outcomes in BFS):
+random-int, random-bool, random-enum, random-choice, random-weighted
+-- Debug output (suppressed when ctx.game.production):
+print            <vals...>            → nil (writes to stderr or _print_sink)
+log              level <vals...>      → nil (prefixed with [LEVEL] file:line (fn))
+-- Future-state search:
 can-reach?       → bool  (BFS, optional depth: N, budget: secs)
 find-path        → [{scene, label, index}, ...]  (BFS path, optional depth: N, budget: secs)
 verify-always    → bool  (BFS negation check)
 probability      → float  (weighted BFS, optional depth:/threshold:)
 optimal-path     → [{scene, label, index}, ...]  (Dijkstra, optional by:/depth:)
 find-counterexample → frozen GameState | nil
+-- Relation builtins:
+adjacent?        relation source            → Set (one-hop neighbours)
+reachable?       relation source target [max-hops: N] → Bool
+shortest-path    relation source target     → List | nil
+reachable-set    relation source [max-hops: N] → Set
+inverse-adjacent? relation target           → Set (reverse adjacency)
 -- UMap builtins (all paths must contain "/"):
 map-get          path key → value | nil
-map-size         path → Int
 map-keys         path → List
 map-values       path → List
 map-contains-key? path key → Bool
@@ -448,7 +471,6 @@ map-set          path key value → new UMap  (pure)
 map-delete       path key → new UMap  (pure)
 map-merge        path-a path-b → new UMap  (pure)
 -- UList builtins (all paths must contain "/"):
-ulist-size       path → Int
 ulist-get        path index → T | nil
 ulist-first      path → T | nil
 ulist-last       path → T | nil
@@ -481,7 +503,7 @@ occupied-by      grid-name family-name x y → key | nil
 
 ---
 
-### `runtime/engine.lua` (800 lines)
+### `runtime/engine.lua` (1136 lines)
 Game loop coordinator.
 
 - `M.new(game_table, opts)` → eng  (opts: `io_out`, `io_in`, `seed`, `debug_server`, `driver`, `max_stack`)
@@ -561,7 +583,7 @@ eng:_render_ending(ending)    → narration list  -- §F2
 
 ---
 
-### `runtime/search.lua` (1140 lines)
+### `runtime/search.lua` (1781 lines)
 BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 
 - Declares `search.max-nodes` (int, default 5000) at module top —
@@ -584,7 +606,7 @@ BFS / Dijkstra over `(cache_snapshot, scene_stack)` pairs.
 
 ---
 
-### `runtime/tests.lua` (72 lines)
+### `runtime/tests.lua` (90 lines)
 Test block runner (lighter sibling of verify.lua).
 
 - `M.run_all(game_table)` → `[{label, pass, fail_msg?}]`
@@ -598,7 +620,7 @@ Stripped from production builds (`game_table.tests = {}` when `opts.production`)
 
 ---
 
-### `runtime/verify.lua` (700+ lines)
+### `runtime/verify.lua` (915 lines)
 Verify block runner (offline model-checker).
 
 - Declares three config keys at module top:
@@ -631,7 +653,7 @@ Verify block runner (offline model-checker).
 
 ---
 
-### `runtime/actors.lua` (364 lines)
+### `runtime/actors.lua` (422 lines)
 Actor registry and behavior runner.
 
 - `M.new(state, log)` → registry
@@ -656,7 +678,7 @@ registry:on_no_progress(fn)       -- §H1: subscribe to "actor has no plan" sign
 
 ---
 
-### `runtime/actor_search.lua` (~280 lines, §H1)
+### `runtime/actor_search.lua` (479 lines, §H1)
 Goal-directed actor planner. Bounded BFS over `(cache_snapshot, action, args) → cache'` transitions.
 
 - `M.find_plan(real_state, game, actor)` → `{name, arg_nodes}` | nil — main entry called from `runtime/actors.lua:run_behaviors`
@@ -695,7 +717,7 @@ log:serialise()                      → string
 
 ---
 
-### `runtime/debug.lua` (1577 lines)
+### `runtime/debug.lua` (1736 lines)
 Debug server: watches, NDJSON TCP transport, HTTP/SSE browser UI, event emission.
 
 - `M.new(engine, opts)` → srv  (opts: `port` default 7777)
@@ -765,7 +787,7 @@ Optional tile grid extension algorithms. Required by eval.lua grid builtins.
 
 ---
 
-### `runtime/query.lua` (386 lines)
+### `runtime/query.lua` (400 lines)
 Relation and family queries. `where:` clauses support both expressions and lambda predicates (lambda is called with the entity key).
 
 - `M.find(ctx, family, clauses)` → `[key, ...]`  (family member filter)
@@ -799,7 +821,7 @@ rng:weighted(weights, list) → value
 
 ---
 
-### `runtime/diff_replay.lua` (~210 lines)
+### `runtime/diff_replay.lua` (241 lines)
 H2: diff-mode hot reload. Re-runs the recorded player inputs against a freshly
 compiled game table and reports per-tick state divergence vs the original
 playthrough. The live engine and its log are untouched; a throwaway engine
@@ -823,7 +845,7 @@ equality are dropped from running state, so a fresh divergence will be re-report
 
 ## cli/
 
-### `cli/main.lua` (642 lines)
+### `cli/main.lua` (939 lines)
 - `M.main(argv)` — top-level dispatcher
 - Subcommands: `check`, `compile`, `run`, `format`, `repl`, `verify`, `migrate`, `extract-symbols`, `compact`, `config`, `help`
 - Flags: `--save` / `--load` / `--seed N` / `--auto` / `--steps N` / `--debug` / `--serve` / `--ui <name>` for `run`; `--production` for `compile`/`run`
@@ -852,7 +874,7 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - `M.run(args)` — run lexer → parser → checker (no codegen); print errors/warnings with source context
 - Faster feedback than `compile`; exits 0 on success (warnings allowed), 1 on errors
 
-### `cli/config_cmd.lua` (~155 lines)
+### `cli/config_cmd.lua` (171 lines)
 - `M.run(args)` — implements `storybase config <subcommand>` (see L5)
 - Subcommands: `dump [file.sb]` (column table of key/layer/value over the
   full registry; optional file path → `config.bind_game` so the game
@@ -864,7 +886,7 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - Honours the global `--config key=value` flags (applied by
   `cli/main.lua` before dispatch).
 
-### `cli/format_cmd.lua` (1427 lines)
+### `cli/format_cmd.lua` (1442 lines)
 - `M.run(args)` — parse AST and emit canonical indented output
 - Flags: `--check` (compare only, exit 1 if differs), `--write` (rewrite in-place with .bak backup)
 - Default: write formatted source to stdout
@@ -874,18 +896,18 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - Meta-commands: `:state <path>`, `:scene`, `:choices`, `:choose N`, `:tick`, `:save`, `:load`, `:help`, `:quit`
 - Evaluates pure expressions and calls transaction functions interactively
 
-### `cli/test_cmd.lua` (58 lines)
+### `cli/test_cmd.lua` (62 lines)
 - `M.run(args)` — compile + `tests_mod.run_all` + pretty-print results
 - Returns 0 if all pass, 1 if any fail or on compile error
 
-### `cli/coverage_cmd.lua`
+### `cli/coverage_cmd.lua` (263 lines)
 - `M.run(args)` — compile + BFS via `runtime/search.lua`'s `expand_graph` + per-scene/fn coverage report
 - Flags: `--depth N` (BFS depth, default 8), `--budget N` (seconds, default 30), `--format json`
 - Sets `game_table._fn_call_hook` before BFS; `runtime/eval.lua`'s `call_fn` fires the hook on every user fn call
 - Outputs: per-scene visit count, per-fn call count, lists of unreachable scenes and uncovered fns, percentage totals
 - Exit 0 on success (even partial coverage), 1 on compile/argument error
 
-### `cli/fuzz_cmd.lua`
+### `cli/fuzz_cmd.lua` (241 lines)
 - `M.run(args)` — compile + random-walk the choice tree + check `verify-always` invariants after every step
 - Flags: `--runs N` (default 1000), `--steps N` (default 50), `--seed N` (base seed, default `os.time()`), `--failures-dir D` (default `failures`), `--max-failures N` (default 10), `--format json`
 - Per run: fresh engine seeded with `base_seed + run_i`, random driver using Park-Miller LCG, step loop up to max_steps
@@ -893,12 +915,12 @@ ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true
 - Collects `verify-always` clauses from all `verify` blocks in `game_table.verifies[*].clauses`
 - Exit 0 if no violations found, 1 if any violation or compile/argument error
 
-### `cli/verify_cmd.lua` (~160 lines)
+### `cli/verify_cmd.lua` (183 lines)
 - `M.run(args)` — compile + per-block cache lookup via `cli/verify_cache.lua` + `verify_mod.run_all` (one-block sub-game-table per uncached entry) + pretty-print
 - Flags: `--no-cache` (skip lookup), `--clear-cache` (delete file first), `--cache-dir DIR` (default `.storybase-cache`)
 - Output marks cached entries with `[cached]` and reports `(N cached)` in the summary line
 
-### `cli/verify_cache.lua` (~250 lines, §C4)
+### `cli/verify_cache.lua` (326 lines, §C4)
 Persistent cache for verify-block results.
 - `M.compute_hash(verify_entry, game_table)` → hex string — FNV-1a 64-bit of (verify-block AST + schema slice + transitively-reached fns + (for BFS verifies) scenes/actors/schedules/bounded)
 - `M.load(cache_dir?)` → `{version, entries}` — tolerates missing/malformed/old-version files
@@ -914,7 +936,7 @@ Persistent cache for verify-block results.
 ### `cli/extract_cmd.lua` (220 lines)
 - `M.run(args)` — walk typed AST (via `parse_and_check_file`), collect SYMBOL_LIT nodes grouped by SET_MUT target path, output candidate `type Name = val | val` declarations
 
-### `cli/docs_cmd.lua` (§B5)
+### `cli/docs_cmd.lua` (1403 lines, §B5)
 - `M.run(args)` — compile via `compiler.parse_and_check_file`, group typed AST decls by kind, and emit a static reference site
 - `M.build_pages(typed_ast, filename, format, out_name?)` → `{pages = {[file] = contents}, groups = {...}}` — pure renderer, exposed for tests
 - HTML mode (default): 14 pages (`index.html` + one per declaration kind) plus `style.css`; sidebar nav with per-kind counts; scene-graph listing on `scenes.html`
@@ -952,7 +974,7 @@ Language Server Protocol server. Communicates over stdio using JSON-RPC 2.0.
 - `M.run(args)` — replay save log into fresh state, write compact save with one entry per path
 - Usage: `storybase compact <game.sb> <save.log> [--out <out.log>]`
 
-### `cli/serve_api_cmd.lua` (§G2)
+### `cli/serve_api_cmd.lua` (745 lines, §G2)
 - `M.run(args)` — CLI entry: compile + start a stateless HTTP API server on `--port` (default 8080)
 - `M.start(game_table, opts)` → server (binds non-blocking listener; reuses `LuaSocket`)
 - `M.poll(server)` → integer count — accept + dispatch any pending connections (used by tests)
@@ -964,7 +986,7 @@ Language Server Protocol server. Communicates over stdio using JSON-RPC 2.0.
 - Internal helpers exported for tests: `M._save_to_table`, `M._restore_from_table`, `M._handle_step`, `M._schema_summary`
 - Distinct from `runtime/debug.lua`'s `--serve` HTTP server (which is stateful, one engine per process, browser UI)
 
-### `cli/cli_cmd.lua` (583 lines)
+### `cli/cli_cmd.lua` (581 lines)
 Single-step scripting mode for `storybase run --cli save.sbd`.
 - `M.run(game_table, save_path, opts)` — main entry point; reads `opts.input` as a choice index (or `q`/`quit`/`exit`), executes one step, writes save, emits JSON to `opts.output`
 - Save format: `save.sbd` Lua chunk (scene stack, log, state snapshot, checkpoint stack) + `save.sbd.snap` for fast replay
@@ -975,7 +997,7 @@ Single-step scripting mode for `storybase run --cli save.sbd`.
 
 ## lib/
 
-### `lib/storybase.lua` (574 lines)
+### `lib/storybase.lua` (601 lines)
 Public Lua API for embedding StoryBase in another Lua program.
 - `M.load(filepath)` → game object (compiles from file)
 - `M.from_source(source, filename?)` → game object (compiles from string)
