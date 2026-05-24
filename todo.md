@@ -29,6 +29,11 @@ the new `eng:post_action_chain()`).
 ## What to work on next
 
 **Active work:**
+- §M — Bug hunt 2026-05-23 — 6 confirmed bugs + 2 latent-fragility items
+  found via code review. See §M below; M1, M2 are clear correctness bugs
+  and good first picks.
+
+**Recently closed:**
 - §L — Unified configuration system shipped (L1–L5 + L6a–f + L7a + L7b).
   19 registry keys total; see §L summary below.
 
@@ -612,6 +617,200 @@ Each is settable via (precedence high→low):
 - spec default.
 
 Inspect with `storybase config dump`, `config get <key>`, `config doc <key>`.
+
+---
+
+## M. Bug hunt (2026-05-23)
+
+A code-review pass across `runtime/`, `cli/`, and `lib/` looking for clear
+defects (not features or polish). Six confirmed bugs and two latent-fragility
+items below. Each is independently fixable; M1–M3 are small isolated edits,
+M6 needs a small refactor.
+
+Each item should land with: a regression test that fails before the fix and
+passes after, and a one-line `completed.md` entry citing the file:line.
+
+### M1. `actor-no-progress` debug event silently never fires [done 2026-05-24]
+
+**File:** `runtime/engine.lua:662-665` (inside the `on_no_progress`
+callback registered by `register_actors_schedules`).
+
+```lua
+if self._debug_server and self._debug_server.emit then
+  pcall(function()
+    self._debug_server:emit("actor-no-progress", { actor = actor_name })
+  end)
+end
+```
+
+The engine stores its debug server in `self._debug` (set by
+`eng:set_debug_server` at line 800; read at lines 311, 329, 341, 358, 990).
+There is no `self._debug_server` field — only the scheduler has one (line
+829). The guard is always false, so the §H1 `actor-no-progress` event never
+reaches the debug server. The companion `self._h1_no_progress` accumulator
+below the guard still fires, which is why the bug went unnoticed.
+
+**Fix:** swap both references to `self._debug` (matches the rest of the
+file's convention). Add a test in `tests/runtime/actors_goal_spec.lua` that
+wires a stub debug server and asserts the event lands when the thief is
+blocked.
+
+### M2. `npc-speed` bypasses runtime.config in `--cli` and `serve-api` [bug]
+
+**Files:** `cli/cli_cmd.lua:470-472`, `cli/serve_api_cmd.lua:343-345`.
+
+```lua
+local cfg = game_table.schema and game_table.schema.engine_config
+local npc_speed = tonumber(cfg and cfg["npc-speed"]) or 0
+for _ = 1, npc_speed do eng:post_action() end
+```
+
+Both spots read the compiled `engine-config:` block directly and skip the
+§L registry. So `storybase --config engine.npc-speed=N run --cli ...` and
+`storybase --config engine.npc-speed=N serve-api ...` silently fail to
+override. The main `eng:step()` loop (`runtime/engine.lua:995`) and
+`eng:post_action_chain()` (line 870) already use `config.get` correctly —
+this is just an L3 sweep gap that the §H1 demo work missed.
+
+**Fix:** in both files, replace the manual block with
+`eng:post_action_chain()` (which already loops `npc-speed` extras via
+`config.get`). Tests: extend `tests/cli/cli_cmd_spec.lua` and
+`tests/cli/serve_api_spec.lua` with a `--config engine.npc-speed=2`
+case that asserts the autonomous turn count.
+
+### M3. `lib/storybase.lua` reports "could not read file" for any compile error [bug]
+
+**File:** `lib/storybase.lua:36-48`.
+
+```lua
+local gt, diags = compiler_mod.compile_file(filepath)
+if not gt then
+  return nil, "could not read file: " .. tostring(filepath)
+end
+if diags:has_errors() then  -- unreachable: gt is always nil on errors
+  ...
+end
+```
+
+`compiler.compile_file` returns `(nil, diags)` for FILE_NOT_FOUND **and**
+for every lex/parse/check/codegen failure (see `compiler/compiler.lua:1383,
+1389, 1393, 1397, 1402, 1409`). So a compile error is reported as "could
+not read file" and the diags-formatting branch below is dead code.
+
+**Fix:** check `diags:has_errors()` first; the file-read fallback should
+only trigger when there are no diagnostics (or specifically when the only
+error is `ast.E.FILE_NOT_FOUND`). Test: `tests/lib/storybase_spec.lua`
+already covers the happy path — add a case that loads a `.sb` with a
+syntax error and asserts the returned message contains the diagnostic
+code, not "could not read file".
+
+### M4. `INTERP_PATH` substitutes the variable name when the value is boolean `false` [bug]
+
+**File:** `runtime/eval.lua:200-216` (inside `eval_path` for
+`K.INTERP_PATH`).
+
+```lua
+parts[#parts + 1] = tostring(val ~= nil and val or seg.interp)
+```
+
+The classic `a and b or c` idiom collapses to `seg.interp` (the bare
+variable name) when `val` is `false`. Numeric `0` and `""` work because
+they're truthy in Lua; only `false` is broken. Anyone interpolating a
+`Bool` path into a path-segment expression gets the var name spliced in.
+
+**Fix:** `parts[#parts+1] = (val ~= nil) and tostring(val) or seg.interp`.
+Test: extend `tests/runtime/eval_spec.lua` with an `interp_path` whose
+value resolves to `false` and assert the rendered path contains "false".
+
+### M5. Division crashes on nil operands, unlike `+ - *` [bug]
+
+**File:** `runtime/eval.lua:578-580`.
+
+```lua
+elseif op == "+"  then return (l or 0) + (r or 0)
+elseif op == "-"  then return (l or 0) - (r or 0)
+elseif op == "*"  then return (l or 0) * (r or 0)
+elseif op == "/"  then
+  if r == 0 then return 0 end
+  return l / r
+```
+
+If either operand is nil, `l / r` throws "attempt to perform arithmetic on
+a nil value" while the other ops silently coalesce. Also: the `r == 0`
+branch only catches the integer-zero case; `r == nil` falls through. And
+"divide-by-zero returns 0" is surprising vs. Lua's normal `inf`/`nan` —
+worth a design decision while we're here.
+
+**Fix (minimal):** mirror the other ops: `return (l or 0) / (r or 1)` or
+explicitly nil-check both. Decide whether div-by-zero stays 0 (current
+behavior) or starts erroring. Test: a fn body with `a / nil` and `nil / b`
+that previously crashed should evaluate cleanly.
+
+### M6. `chase_nav` in serve-api drops narration from dispatcher scenes [bug]
+
+**File:** `cli/serve_api_cmd.lua:258-269`.
+
+```lua
+local function chase_nav(eng, narration, choices, nav_signal)
+  while nav_signal do
+    if     nav_signal.type == "goto"  then eng:goto_scene(nav_signal.target)
+    ...
+    narration, choices, nav_signal = eng:render_scene(scene)  -- overwrites
+  end
+  return narration, choices, nil
+end
+```
+
+Each iteration rebinds `narration` to the next scene's output, so
+intermediate dispatcher-scene narration is discarded — even the initial
+narration passed in is overwritten on the first iteration. Compare
+`lib/storybase.lua:155-177 (advance_to_choices)`, which accumulates into
+`combined_narr` and caps the chase at 100 hops. `chase_nav` has neither
+guard, so a `goto`-cycle in user code hangs the HTTP server.
+
+**Fix:** accumulate `narration` items across iterations (extend the
+inbound list rather than rebinding), and cap the loop (e.g. 100 hops)
+matching `advance_to_choices`. Test:
+`tests/cli/serve_api_spec.lua` — a `.sb` with a dispatcher scene that
+emits narration before its `->` should round-trip that narration through
+`POST /step`.
+
+### M7. `state._type_index[inbox_path] = true` is a non-table sentinel [latent]
+
+**Files:** `runtime/engine.lua:243-246`, `runtime/actors.lua:163-167`.
+
+Both spots write `store._type_index[inbox_path] = true`. `lookup_type`
+returns this `true` value to callers. Most call sites guard
+`if td and td.tag == "int"` (which short-circuits safely on `true`), but
+`state:add` / `state:push` do `local max_cap = td and td.max` — that
+indexes a boolean and would crash with "attempt to index a boolean".
+Today no code calls `add!`/`push!` on an inbox path, but the design is
+fragile: a future change that does (e.g. inbox-aware `push!`) crashes.
+
+**Fix:** either store a proper minimal descriptor (e.g.
+`{tag = "list"}` or `{tag = "inbox"}` ignored by `lookup_type`'s callers)
+or keep a dedicated `store._inbox_paths` set and skip type lookup for
+those paths. The first option is less invasive.
+
+### M8. `union` / `intersect` / `difference` dedup via `tostring(v)` [latent]
+
+**File:** `runtime/eval.lua:1187-1228`.
+
+```lua
+for _, v in ipairs(a) do
+  if not seen[tostring(v)] then seen[tostring(v)] = true; result[...] = v end
+end
+```
+
+`tostring(5) == tostring("5")`, so cross-type values collide. Sets are
+statically typed today so this can't fire, but the implementation does
+nothing to enforce that — any future change that lets heterogeneous
+values reach these builtins silently drops "duplicates".
+
+**Fix:** namespace the dedup key by type, e.g.
+`seen[type(v) .. ":" .. tostring(v)]`. No author-visible behavior change
+for the typed-set case. Test: a unit test with deliberately mixed-type
+values to lock the new behavior.
 
 ---
 

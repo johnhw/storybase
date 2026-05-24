@@ -268,6 +268,48 @@ actor thief:
     assert.is_not_nil(eng._h1_no_progress)
     assert.equal("thief", eng._h1_no_progress[1])
   end)
+
+  it("emits actor-no-progress to the debug server (M1 regression)", function()
+    -- M1: the no-progress hook previously referenced self._debug_server,
+    -- a field that does not exist (the engine stores its debug server in
+    -- self._debug). The event silently never reached the debug server.
+    local src = [[
+module h1-island-debug
+type Room = island | mainland
+relation rooms: Room -> Set(Room, 1):
+  `island: {}
+  `mainland: {}
+state thief/at: Room = `island
+fn move-to dest: Room:
+  pre: dest in (adjacent? rooms thief/at)
+  set! thief/at dest
+actor thief:
+  state:    thief/at
+  goal:     thief/at = `mainland
+  actions:  [move-to]
+  priority: 10
+]]
+    local eng = fresh_engine(src)
+    -- Stub debug server: records emitted events. Mirrors the shape of
+    -- runtime.debug's srv (only the fields the engine pokes at).
+    local emitted = {}
+    local stub = {
+      _running = true,
+      emit = function(self, name, payload)
+        emitted[#emitted + 1] = { name = name, payload = payload }
+      end,
+      check_watches = function() end,
+    }
+    eng._debug = stub
+    eng:autonomous_turn()
+    -- Find the actor-no-progress event in the emitted list.
+    local found
+    for _, e in ipairs(emitted) do
+      if e.name == "actor-no-progress" then found = e; break end
+    end
+    assert.is_not_nil(found, "actor-no-progress event was not emitted")
+    assert.equal("thief", found.payload.actor)
+  end)
 end)
 
 -- ============================================================

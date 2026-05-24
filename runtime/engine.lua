@@ -659,9 +659,9 @@ function M.new(game_table, opts)
     -- driver can surface "*{actor} hesitates*" without authoring code.
     if self._actors.on_no_progress then
       self._actors:on_no_progress(function(actor_name)
-        if self._debug_server and self._debug_server.emit then
+        if self._debug and self._debug.emit then
           pcall(function()
-            self._debug_server:emit("actor-no-progress", { actor = actor_name })
+            self._debug:emit("actor-no-progress", { actor = actor_name })
           end)
         end
         self._h1_no_progress = self._h1_no_progress or {}
