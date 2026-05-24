@@ -74,20 +74,22 @@ Nothing in the runtime imports the compiler. All information flows through the g
 The runtime is split into independent modules with defined responsibilities:
 
 ```
-runtime/engine.lua      Game loop coordinator
-runtime/state.lua       Flat path-keyed state store
-runtime/log.lua         Transaction log (ground truth)
-runtime/eval.lua        Expression and statement evaluator
-runtime/actors.lua      Actor registry and behavior runner
-runtime/scheduler.lua   Time-triggered event scheduler
-runtime/search.lua      BFS / Dijkstra over future states
-runtime/verify.lua      Verify block runner (offline model checker)
-runtime/query.lua       Relation and family queries
-runtime/random.lua      Seeded, logged RNG
-runtime/debug.lua       TCP debug server
-runtime/counterfactual.lua  State branching for what-if queries
-runtime/migrate.lua     Schema migration runner
-runtime/tilegrid.lua    2D tile grid algorithms
+runtime/engine.lua       Game loop coordinator
+runtime/state.lua        Flat path-keyed state store
+runtime/log.lua          Transaction log (ground truth)
+runtime/eval.lua         Expression and statement evaluator (incl. counterfactual branches)
+runtime/actors.lua       Actor registry and behavior runner
+runtime/actor_search.lua Goal-directed actor action planner
+runtime/scheduler.lua    Time-triggered event scheduler
+runtime/search.lua       BFS / Dijkstra over future states
+runtime/verify.lua       Verify block runner (offline model checker)
+runtime/query.lua        Relation and family queries
+runtime/random.lua       Seeded, logged RNG
+runtime/debug.lua        TCP debug server
+runtime/diff_replay.lua  State diff/replay support (debug server)
+runtime/config.lua       Registry-backed configuration with precedence chain
+runtime/migrate.lua      Schema migration runner
+runtime/tilegrid.lua     2D tile grid algorithms
 ```
 
 ### State Store and Log (`state.lua`, `log.lua`)

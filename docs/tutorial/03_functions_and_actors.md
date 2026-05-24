@@ -241,7 +241,7 @@ fn guard-behavior:
       stand-down:
         set! npcs/guard/status 'idle
 
-  when npcs/guard/status = 'hostile and player/location = npcs/guard/status:
+  when npcs/guard/status = 'hostile and player/location = 'village:
     dec! npcs/guard/hp 10
 
 fn do-suspicious-thing:

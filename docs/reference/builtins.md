@@ -534,16 +534,16 @@ map-merge store/kv (map-set store/kv "delta" 40)
 
 These functions operate on `relation` declarations.
 
-### `adjacent`
+### `adjacent?`
 
 ```
-adjacent <relation> <source>  →  Set
+adjacent? <relation> <source>  →  Set
 ```
 
 Returns the set of nodes one hop from `source`.
 
 ```
-adjacent exits player/location   # locations reachable in one step
+adjacent? exits player/location   # locations reachable in one step
 ```
 
 ---
@@ -593,16 +593,16 @@ reachable-set exits player/location  max-hops: 3
 
 ---
 
-### `inverse-adjacent`
+### `inverse-adjacent?`
 
 ```
-inverse-adjacent <relation> <target>  →  Set
+inverse-adjacent? <relation> <target>  →  Set
 ```
 
 Returns the set of nodes that have an edge *into* `target` (reverse adjacency).
 
 ```
-inverse-adjacent exits 'forest     # locations from which forest is reachable in one step
+inverse-adjacent? exits 'forest     # locations from which forest is reachable in one step
 ```
 
 ---

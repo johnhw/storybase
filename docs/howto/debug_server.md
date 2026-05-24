@@ -310,7 +310,7 @@ You can test the debug server with `netcat`:
 lua5.4 cli/main.lua run mygame.sb
 
 # Terminal 2: connect and query state
-nc localhost 7777
+nc localhost 7373
 {"cmd":"get-state"}
 ```
 
