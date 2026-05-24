@@ -117,6 +117,33 @@ Return the name of the top-of-stack scene as a string.
 local scene = game:current_scene()   -- e.g. "village"
 ```
 
+`game:scene()` is a short alias for the same call.
+
+---
+
+#### `game:choices()`
+
+Return only the visible choices for the current scene (no narration). Equivalent to the second value from `game:render()`.
+
+```lua
+for _, c in ipairs(game:choices()) do
+  print(c.index, c.label)
+end
+```
+
+---
+
+#### `game:advance_to_choices()`
+
+Render the current scene, then keep following any unconditional `goto` / `enter` / `exit` navigation until the engine settles on a scene with displayable choices (or one with no nav signal). Returns the concatenated narration and the final choice list. Capped at 100 hops to defend against infinite dispatcher loops.
+
+```lua
+local narr, choices = game:advance_to_choices()
+for _, n in ipairs(narr) do print(n.text) end
+```
+
+Useful when the entry scene (or a dispatcher) immediately routes to a different scene — `render()` alone returns the dispatcher's empty narration; `advance_to_choices()` follows the chain.
+
 ---
 
 ### Player Input
@@ -131,6 +158,19 @@ local ok = game:choose(1)
 ```
 
 **Returns:** `true` on success, `false` if index is out of range.
+
+---
+
+#### `game:pick(substr)`
+
+Dispatch the first visible choice whose label contains `substr` (case-insensitive). A convenience wrapper around `game:choices()` + `game:choose()` for tests and scripts that want to drive a game by readable text rather than fixed indices.
+
+```lua
+game:pick("leave")            -- matches "Leave the village"
+game:pick("Buy bread")
+```
+
+**Returns:** `true` if a matching choice was found and dispatched, `false` otherwise.
 
 ---
 

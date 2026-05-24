@@ -140,6 +140,77 @@ No `--production` flag — verify blocks are only meaningful in development mode
 
 ---
 
+### `test`
+
+Compile the file and run all `test` blocks. Each block runs from a fresh state initialised to schema defaults: it applies `setup` mutations, executes `run` function calls, then evaluates `expect` boolean expressions and fails on the first false result.
+
+```
+storybase test <file.sb>
+```
+
+**Output:**
+
+```
+Testing mygame.sb (3 block(s))...
+  PASS  "fresh game starts with full HP"
+  FAIL  "talking to merchant decreases gold"
+        expected: player/gold = 90, got 100
+
+1 passed, 2 failed
+```
+
+Tests are stripped from production builds (`game_table.tests = {}` when `--production`), so this command is intended for the development loop only.
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | All test blocks passed (or no test blocks present) |
+| 1 | One or more failed, or compile error |
+
+---
+
+### `fuzz`
+
+Random-walk the choice tree of a game and check every `verify-always` invariant after each step. On violation, the engine log is saved so the failing path can be replayed with `storybase run <file> --load <failure.sbd>`.
+
+```
+storybase fuzz [--runs N] [--steps N] [--seed N]
+               [--failures-dir D] [--max-failures N]
+               [--format json] <file.sb>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--runs N` | `1000` | Number of random-walk runs. |
+| `--steps N` | `50` | Max steps per run. |
+| `--seed N` | `os.time()` | Base random seed; run `i` uses `seed + i`. |
+| `--failures-dir D` | `failures` | Directory for saved failure logs. |
+| `--max-failures N` | `10` | Stop saving logs after N failures (the run keeps going). |
+| `--format json` | — | Emit a JSON summary instead of human-readable text. |
+
+**Exit codes:** `0` if no invariants violated, `1` if any violation found or on error.
+
+---
+
+### `coverage`
+
+Walk the BFS frontier of a game and report which scenes and functions are reachable within the given search depth. Useful as a smoke check that no scene is orphaned and that every fn is exercised by some reachable path.
+
+```
+storybase coverage [--depth N] [--budget N] [--format json] <file.sb>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--depth N` | `8` | BFS depth limit. |
+| `--budget N` | `30` | Time budget in seconds. |
+| `--format json` | — | Emit a JSON object instead of human-readable text. |
+
+**Exit codes:** `0` on success (even if coverage is incomplete because of the budget), `1` on error.
+
+---
+
 ### `migrate`
 
 Apply any outstanding schema migration blocks to a save log file, producing an updated save.
@@ -348,6 +419,34 @@ Supported LSP capabilities:
 - **Hover** — doc string, kind, and parameter list for the symbol under the cursor.
 - **Go to definition** — jump to the declaration of a type, function, scene, actor, etc.
 - **Completion** — names, state paths, types, and scenes filtered by prefix; trigger characters `/` and `-`.
+
+---
+
+### `config`
+
+Inspect the configuration registry. Values are resolved through the precedence chain `runtime > cli > env > file > game > default`; the command reports both the resolved value and the winning layer.
+
+```
+storybase config <subcommand> [args]
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `dump [file.sb]` | List every declared key with its resolved value and winning layer. If `file.sb` is given, its `engine-config:` block is bound first so the `game` layer is reflected. |
+| `get <key> [file.sb]` | Print just the value for `<key>`. |
+| `doc <key>` | Show the full spec for `<key>` — type, default, env var, CLI flag, doc, and current resolved value. |
+
+CLI overrides use the global `--config <key>=<value>` flag (repeatable, accepted by any subcommand). They land in the `cli` layer and win over `env` / `file` / `game` / `default`.
+
+**Examples:**
+
+```
+storybase config dump
+storybase config dump demos/demo01_wanderer.sb
+storybase config get engine.scene-stack-max
+storybase config doc engine.npc-speed
+storybase --config engine.npc-speed=2 run demos/demo01_wanderer.sb
+```
 
 ---
 

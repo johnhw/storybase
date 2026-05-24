@@ -214,6 +214,231 @@ random-int 0 10         # damage modifier
 
 ---
 
+### `random-bool`
+
+```
+random-bool          →  Bool
+random-bool <p>      →  Bool
+```
+
+Returns `true` with probability `p` (default `0.5`). In exhaustive search, branches over `{false, true}` regardless of `p`.
+
+```
+random-bool             # fair coin
+random-bool 0.25        # 25% chance of true
+```
+
+---
+
+### `random-enum`
+
+```
+random-enum <EnumType>  →  variant
+```
+
+Returns a uniformly random variant of the named enum type. The argument is the enum's bare type name (no quotes). Branches over all variants under search.
+
+```
+random-enum Weather     # any variant of `enum Weather`
+```
+
+---
+
+### `random-choice`
+
+```
+random-choice <list>  →  T | nil
+```
+
+Returns a uniformly random element of a `List`, `UList`, or `Set`. Returns nil for an empty collection. Branches over all elements under search.
+
+```
+random-choice ['fire 'ice 'wind]
+random-choice player/known-spells
+```
+
+---
+
+### `random-weighted`
+
+```
+random-weighted <weights> <values>  →  T | nil
+```
+
+Returns one element of `values`, chosen with probability proportional to the corresponding entry in `weights`. Both lists must be the same length. Under exhaustive search, weights are ignored (uniform branching).
+
+```
+random-weighted [1 2 5] ['common 'uncommon 'rare]
+```
+
+---
+
+### `range`
+
+```
+range <hi>                 →  List(Int)
+range <lo> <hi>            →  List(Int)
+range <lo> <hi> <step>     →  List(Int)
+```
+
+Returns a list of integers from `lo` (inclusive, default 0) to `hi` (exclusive), advancing by `step` (default 1). Direction follows the sign of `step`; `step` must not be zero. Capped at 10,000 elements to match the engine's loop safety limit.
+
+```
+range 5                    # [0 1 2 3 4]
+range 1 4                  # [1 2 3]
+range 0 10 2               # [0 2 4 6 8]
+range 5 0 (0 - 1)          # [5 4 3 2 1]
+```
+
+---
+
+### `list-get` / `list-size`
+
+```
+list-get  <list> <index>  →  T | nil
+list-size <list>          →  Int
+```
+
+`list-get` returns the element at 1-based `index` (negative indices count from the end: `-1` = last); returns nil for out-of-bounds. `list-size` is an alias for `size` / `count` on a `List`.
+
+```
+list-get  player/waypoints 1
+list-get  player/waypoints (0 - 1)   # last element
+list-size player/waypoints
+```
+
+---
+
+## Math
+
+Math helpers operate on `Int` and `Float` values. All are pure.
+
+### `abs`
+
+```
+abs <n>  →  Int | Float
+```
+
+Absolute value.
+
+```
+abs (player/hp - enemy/hp)
+```
+
+---
+
+### `clamp`
+
+```
+clamp <v> <lo> <hi>  →  Int | Float
+```
+
+Returns `v` clamped to `[lo, hi]`.
+
+```
+clamp player/hp 0 100
+```
+
+---
+
+### `floor` / `ceil`
+
+```
+floor <n>  →  Int
+ceil  <n>  →  Int
+```
+
+Round toward `-∞` / `+∞`. Useful for converting `Float` to `Int`.
+
+```
+floor (player/xp / 100)
+ceil  (damage * 1.5)
+```
+
+---
+
+### `int-div` / `mod`
+
+```
+int-div <a> <b>  →  Int
+mod     <a> <b>  →  Int
+```
+
+Floor-division quotient and remainder. Sign convention matches the divisor (i.e. `mod (-7) 3 = 2`, not `-1`).
+
+```
+int-div total-seconds 60      # whole minutes
+mod     total-seconds 60      # leftover seconds
+```
+
+---
+
+## String / Numeric Conversion
+
+### `str`
+
+```
+str <a> <b> ...  →  String
+```
+
+Concatenate any number of values into a `String`. `nil` arguments render as the empty string; booleans render as `"false"` / `"true"`.
+
+```
+str "HP: " player/hp " / " player/max-hp
+```
+
+---
+
+### `int-to-str` / `str-to-int`
+
+```
+int-to-str <n>  →  String
+str-to-int <s>  →  Int | nil
+```
+
+Convert between integers and their decimal string form. `str-to-int` returns `nil` if the string is not a valid integer (treat as `Option(Int)`).
+
+```
+int-to-str player/gold        # "42"
+str-to-int "100"              # 100
+str-to-int "abc"              # nil
+```
+
+---
+
+## Debug Output
+
+Both builtins are suppressed automatically in production builds (`opts.production`), so they're safe to leave in shipped source.
+
+### `print`
+
+```
+print <a> <b> ...  →  nil
+```
+
+Write space-separated arguments to stderr, followed by a newline. Intended for ad-hoc development logging.
+
+```
+print "guard hp:" npcs/guard/hp
+```
+
+---
+
+### `log`
+
+```
+log <level> <a> <b> ...  →  nil
+```
+
+Like `print`, but prepends `[LEVEL] file:line (fn-name):` so log lines are attributable. `level` is any string (conventionally `'debug` / `'info` / `'warn` / `'error`).
+
+```
+log 'info "spawned npc" npc/key
+log 'warn "low health" player/hp
+```
+
+---
+
 ## UList Builtins
 
 `UList(T)` is an unbounded ordered list. It is stored as a Lua sequence table and is **superficial** (not included in state-space analysis). All pure builtins below return a *new* list without mutating state.

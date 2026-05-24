@@ -128,18 +128,28 @@ lua5.4 cli/main.lua run demos/demo07_oracle.sb     # import, bounded, counterfac
 lua5.4 cli/main.lua <command> [options] <file>
 
 Commands:
-  check   <file>               Fast syntax + type check (no codegen)
-  compile <file>               Compile; report errors and warnings
-  run     <file>               Compile and run interactively
-  format  <file>               Format source (--check / --write flags)
-  repl    <file>               Interactive expression REPL
-  verify  <file>               Run all verify blocks
-  bundle  <file>               Bundle into a self-contained Lua file
-  lsp                          Start LSP server (for editor integration)
-  migrate <save.log>           Apply schema migrations to a save file
-  extract-symbols <file>       Suggest type declarations from symbol usage
-  compact <game.sb> <save.log> Compact a save log into a snapshot
-  help [<command>]             Show help
+  check    <file>               Fast syntax + type check (no codegen)
+  compile  <file>               Compile; report errors and warnings
+  run      <file>               Compile and run interactively
+  format   <file>               Format source (--check / --write flags)
+  repl     <file>               Interactive expression REPL
+  verify   <file>               Run all verify blocks (cached)
+  test     <file>               Run all test blocks
+  fuzz     <file>               Random-walk verify-always invariants
+  coverage <file>               Report reachable scenes / fns via BFS
+  bundle   <file>               Bundle into a self-contained Lua file
+  docs     <file>               Generate static HTML/Markdown reference
+  serve-api <file>              Stateless HTTP API (clients carry save log)
+  lsp                           Start LSP server (for editor integration)
+  migrate  <save.log>           Apply schema migrations to a save file
+  extract-symbols <file>        Suggest type declarations from symbol usage
+  compact  <game.sb> <save.log> Compact a save log into a snapshot
+  config   <subcmd>             Inspect the configuration registry
+  help [<command>]              Show help
+
+Global options (any command):
+  --config key=value           Override a config key (cli layer; repeatable)
+  --quiet                      Suppress compiler warnings (errors still shown)
 
 Options (run):
   --production                 Strip debug-only content (verify, watch, pre:/post:)
@@ -148,8 +158,10 @@ Options (run):
   --load <path>                Load game log before start
   --auto                       Non-interactive: always pick choice 1
   --steps N                    Limit to N turns  (requires --auto)
-  --debug                      TCP debug server (port 7373) + browser UI (port 7374)
-  --serve                      Browser-driven mode: open http://localhost:7374
+  --ui plain|ansi              Terminal UI driver
+  --cli <save.sbd> [--reset]   Single-step scripted mode (one choice per call)
+  --debug         [--debug-port N]   TCP debug server + browser UI on N+1
+  --serve         [--http-port N] [--bind addr]   Browser-driven mode
 ```
 
 ---
