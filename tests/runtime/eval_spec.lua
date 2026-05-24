@@ -239,6 +239,34 @@ describe("eval_expr: binary operators", function()
     assert.equal(12, eval.eval_expr(binop("*", int_lit(3), int_lit(4)), ctx()))
   end)
 
+  it("/ division", function()
+    assert.equal(2.5, eval.eval_expr(binop("/", int_lit(5), int_lit(2)), ctx()))
+  end)
+
+  -- M5 regression: `/` previously crashed when either operand was nil
+  -- (e.g. a state path read of a missing path), unlike +/-/* which
+  -- coalesced to 0.  Division now mirrors the other arithmetic ops:
+  -- both nil operands and a zero divisor return 0 cleanly.
+  it("/ with a nil left operand coalesces to 0 (M5 regression)", function()
+    local c = ctx({})  -- missing/x is nil
+    local node = binop("/", path("missing", "x"), int_lit(2))
+    local ok, result = pcall(eval.eval_expr, node, c)
+    assert.is_true(ok, "division on nil left operand crashed: " .. tostring(result))
+    assert.equal(0, result)
+  end)
+
+  it("/ with a nil right operand returns 0 (M5 regression)", function()
+    local c = ctx({})
+    local node = binop("/", int_lit(10), path("missing", "x"))
+    local ok, result = pcall(eval.eval_expr, node, c)
+    assert.is_true(ok, "division on nil right operand crashed: " .. tostring(result))
+    assert.equal(0, result)
+  end)
+
+  it("/ by zero returns 0 (pre-existing behavior)", function()
+    assert.equal(0, eval.eval_expr(binop("/", int_lit(10), int_lit(0)), ctx()))
+  end)
+
   it("and: true and true", function()
     assert.is_true(eval.eval_expr(binop("and", bool_lit(true), bool_lit(true)), ctx()))
   end)

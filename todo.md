@@ -722,7 +722,7 @@ they're truthy in Lua; only `false` is broken. Anyone interpolating a
 Test: extend `tests/runtime/eval_spec.lua` with an `interp_path` whose
 value resolves to `false` and assert the rendered path contains "false".
 
-### M5. Division crashes on nil operands, unlike `+ - *` [bug]
+### M5. Division crashes on nil operands, unlike `+ - *` [done 2026-05-24]
 
 **File:** `runtime/eval.lua:578-580`.
 

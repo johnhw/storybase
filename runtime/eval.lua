@@ -583,8 +583,14 @@ eval_expr = function(node, ctx)
     elseif op == "-"  then return (l or 0) - (r or 0)
     elseif op == "*"  then return (l or 0) * (r or 0)
     elseif op == "/"  then
-      if r == 0 then return 0 end
-      return l / r
+      -- Mirror +/-/*: coalesce nil → 0 on the dividend. The divisor
+      -- needs its own guard because 0 (and nil-coalesced 0) must not
+      -- crash; return 0 instead, matching the pre-existing div-by-zero
+      -- behavior so callers that relied on it still pass.
+      local lv = l or 0
+      local rv = r or 0
+      if rv == 0 then return 0 end
+      return lv / rv
     elseif op == "and" then return l and r
     elseif op == "or"  then return l or r
     elseif op == "in"  then
