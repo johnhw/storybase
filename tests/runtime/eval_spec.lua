@@ -143,6 +143,34 @@ describe("eval_expr: path read", function()
     assert.equal(80, eval.eval_expr(node, c))
   end)
 
+  -- M4 regression: an INTERP_PATH segment whose resolved value is boolean
+  -- `false` previously substituted the variable NAME (not "false") due to
+  -- the `val ~= nil and val or seg.interp` idiom collapsing to seg.interp
+  -- when val is false. Other falsy-ish values (0, "") were fine because
+  -- they are truthy in Lua.
+  it("interp_path substitutes literal 'false' when the path value is false", function()
+    -- {flag} in a path-position expression where flag holds false.
+    local c = ctx({ ["flag"] = false })
+    c.vars["flag"] = false
+    local node = interp_path({ interp = "flag" })
+    assert.equal("false", eval.eval_path(node, c))
+  end)
+
+  it("interp_path substitutes the var name when the value is nil", function()
+    local c = ctx({})
+    local node = interp_path({ interp = "missing" })
+    assert.equal("missing", eval.eval_path(node, c))
+  end)
+
+  it("interp_path substitutes literal '0' when value is integer 0", function()
+    -- Sanity: numeric zero is truthy in Lua and was always handled
+    -- correctly. Locks in that the M4 fix didn't regress this case.
+    local c = ctx({})
+    c.vars["n"] = 0
+    local node = interp_path({ interp = "n" })
+    assert.equal("0", eval.eval_path(node, c))
+  end)
+
   it("single-segment path falls back to fn call when state value is nil", function()
     -- After decl-macro substitution, an expression like `cast-$name-once?`
     -- becomes a single-segment path_expr {"cast-fireball-once?"} — but the

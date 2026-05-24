@@ -704,7 +704,7 @@ already covers the happy path — add a case that loads a `.sb` with a
 syntax error and asserts the returned message contains the diagnostic
 code, not "could not read file".
 
-### M4. `INTERP_PATH` substitutes the variable name when the value is boolean `false` [bug]
+### M4. `INTERP_PATH` substitutes the variable name when the value is boolean `false` [done 2026-05-24]
 
 **File:** `runtime/eval.lua:200-216` (inside `eval_path` for
 `K.INTERP_PATH`).

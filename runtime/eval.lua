@@ -208,7 +208,14 @@ local function eval_path(node, ctx)
         else
           val = ctx.vars[seg.interp]
         end
-        parts[#parts + 1] = tostring(val ~= nil and val or seg.interp)
+        -- Explicit nil check: the `a and b or c` idiom collapses to `c`
+        -- when `b` is `false`, which would substitute the variable name
+        -- instead of the literal "false" for boolean values.
+        if val ~= nil then
+          parts[#parts + 1] = tostring(val)
+        else
+          parts[#parts + 1] = seg.interp
+        end
       else
         parts[#parts + 1] = tostring(seg)
       end
