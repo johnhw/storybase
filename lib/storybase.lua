@@ -34,17 +34,21 @@ end
 ---@return table?, string?
 function M.load(filepath)
   local gt, diags = compiler_mod.compile_file(filepath)
-  if not gt then
-    return nil, "could not read file: " .. tostring(filepath)
-  end
 
-  if diags:has_errors() then
+  -- compile_file returns (nil, diags) for both FILE_NOT_FOUND and any
+  -- lex/parse/check/codegen error. Surface the diagnostics first so a
+  -- compile error doesn't masquerade as "could not read file".
+  if diags and diags:has_errors() then
     local msgs = {}
     for _, d in ipairs(diags.errors) do
       msgs[#msgs+1] = string.format("%s:%d [%s] %s",
         d.file or filepath, d.line or 0, d.code, d.message)
     end
     return nil, table.concat(msgs, "\n")
+  end
+
+  if not gt then
+    return nil, "could not read file: " .. tostring(filepath)
   end
 
   return M._make_game(gt)

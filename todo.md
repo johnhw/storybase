@@ -678,7 +678,7 @@ this is just an L3 sweep gap that the §H1 demo work missed.
 `tests/cli/serve_api_spec.lua` with a `--config engine.npc-speed=2`
 case that asserts the autonomous turn count.
 
-### M3. `lib/storybase.lua` reports "could not read file" for any compile error [bug]
+### M3. `lib/storybase.lua` reports "could not read file" for any compile error [done 2026-05-24]
 
 **File:** `lib/storybase.lua:36-48`.
 

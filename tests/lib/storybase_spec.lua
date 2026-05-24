@@ -331,6 +331,32 @@ describe("sb.load", function()
     game:init()
     assert.is_not_nil(game:current_scene())
   end)
+
+  -- M3 regression: sb.load previously reported "could not read file" for
+  -- every compile failure (including syntax errors on a file that DID
+  -- read successfully) because compile_file returns (nil, diags) for
+  -- both FILE_NOT_FOUND and compile errors. The diagnostic formatting
+  -- branch below `if not gt` was dead code.
+  it("reports compile errors via diagnostic codes, not 'could not read file'", function()
+    -- Write a syntactically broken .sb file to a temp path.
+    local tmp = os.tmpname() .. ".sb"
+    local f = assert(io.open(tmp, "w"))
+    f:write("module broken\nstate ??? not valid syntax\n")
+    f:close()
+
+    local game, err = sb.load(tmp)
+    os.remove(tmp)
+
+    assert.is_nil(game)
+    assert.is_not_nil(err)
+    -- The error must surface as a diagnostic-formatted line (file:line [CODE] msg)
+    -- with a real error code, NOT the "could not read file" fallback.
+    assert.is_false(err:find("could not read file", 1, true) ~= nil,
+      "compile error was reported as a read error: " .. err)
+    -- Should contain a bracketed diagnostic code from the lexer/parser.
+    assert.truthy(err:find("%[[%u_]+%]"),
+      "expected a [CODE] diagnostic in error, got: " .. err)
+  end)
 end)
 
 -- ── game:counterfactual ───────────────────────────────────────────────────────
