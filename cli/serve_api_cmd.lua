@@ -254,18 +254,36 @@ local function strip_empty_narration(narration)
 end
 
 -- Follow chained scene_goto/scene_enter/scene_exit signals returned by
--- render_scene, then re-render. Returns the final narration and choices.
+-- render_scene, then re-render.  Accumulates narration items from every
+-- intermediate dispatcher scene so a goto-chain doesn't silently drop
+-- the dispatcher's own narration.  Capped at MAX_NAV_HOPS to prevent
+-- a goto-cycle in user code from hanging the server.
+local MAX_NAV_HOPS = 100
 local function chase_nav(eng, narration, choices, nav_signal)
+  -- Start with the inbound narration items so the first scene's
+  -- narration survives even if it carried a nav_signal.
+  local combined = {}
+  for _, item in ipairs(narration or {}) do combined[#combined + 1] = item end
+
+  local hops = 0
   while nav_signal do
+    hops = hops + 1
+    if hops > MAX_NAV_HOPS then
+      -- Treat as a stable scene: stop following the chain and return what
+      -- we have. Better than hanging the HTTP server on a goto-cycle.
+      return combined, choices, nil
+    end
     if     nav_signal.type == "goto"  then eng:goto_scene(nav_signal.target)
     elseif nav_signal.type == "enter" then eng:enter_scene(nav_signal.target)
     elseif nav_signal.type == "exit"  then eng:exit_scene()
     end
     local scene = eng:current_scene()
-    if not scene then return narration, choices, nil end
-    narration, choices, nav_signal = eng:render_scene(scene)
+    if not scene then return combined, choices, nil end
+    local next_narr
+    next_narr, choices, nav_signal = eng:render_scene(scene)
+    for _, item in ipairs(next_narr or {}) do combined[#combined + 1] = item end
   end
-  return narration, choices, nil
+  return combined, choices, nil
 end
 
 -- ── Step kernel ───────────────────────────────────────────────

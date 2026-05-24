@@ -746,7 +746,7 @@ explicitly nil-check both. Decide whether div-by-zero stays 0 (current
 behavior) or starts erroring. Test: a fn body with `a / nil` and `nil / b`
 that previously crashed should evaluate cleanly.
 
-### M6. `chase_nav` in serve-api drops narration from dispatcher scenes [bug]
+### M6. `chase_nav` in serve-api drops narration from dispatcher scenes [done 2026-05-24]
 
 **File:** `cli/serve_api_cmd.lua:258-269`.
 

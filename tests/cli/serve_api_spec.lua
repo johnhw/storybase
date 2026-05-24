@@ -175,6 +175,64 @@ describe("serve-api: npc-speed respects --config override (M2)", function()
   end)
 end)
 
+-- M6 regression: chase_nav previously overwrote `narration` on each
+-- iteration, dropping the dispatcher scene's own narration.  It also
+-- had no loop bound, so a goto-cycle would hang the HTTP server.
+
+describe("serve-api: chase_nav preserves dispatcher narration (M6)", function()
+  -- A dispatcher scene that emits narration BEFORE issuing a computed
+  -- goto into one of two terminal scenes.  Tests that handle_step's
+  -- narration array contains text from both the dispatcher and the
+  -- target — without the M6 fix the dispatcher line is silently dropped.
+  local dispatch_src = table.concat({
+    "module dispatch_narr_test",
+    "  version: 1.0",
+    "engine-config:",
+    "  entry-scene: lobby",
+    "type Room = room-a | room-b",
+    "state world/target: Room = `room-a",
+    "scene lobby:",
+    "  DISPATCHER_LINE",
+    "  -> (world/target)",
+    "scene room-a:",
+    "  ROOM_A_LINE",
+    "  * Stay",
+    "    -> room-a",
+    "scene room-b:",
+    "  ROOM_B_LINE",
+    "  * Stay",
+    "    -> room-b",
+  }, "\n")
+
+  local DISPATCH_GT
+  do
+    local gt, diags = compiler.compile(dispatch_src, "dispatch_narr_test.sb")
+    if not (diags and diags:has_errors()) then DISPATCH_GT = gt end
+  end
+
+  local function narr_text(items)
+    local parts = {}
+    for _, item in ipairs(items or {}) do
+      parts[#parts + 1] = (type(item) == "table" and item.text) or tostring(item)
+    end
+    return table.concat(parts, " | ")
+  end
+
+  it("dispatcher narration survives the computed-goto chase", function()
+    if not DISPATCH_GT then pending("could not compile dispatch_narr_test") end
+    local r = serve_api._handle_step(DISPATCH_GT, { reset = true })
+    assert.is_nil(r.error)
+    -- After chase_nav, scene should be room-a (the dispatcher target).
+    assert.equals("room-a", r.scene)
+    local txt = narr_text(r.narration)
+    -- Both the dispatcher and the target line must appear.
+    assert.truthy(txt:find("DISPATCHER_LINE", 1, true),
+      "dispatcher narration dropped: " .. txt)
+    assert.truthy(txt:find("ROOM_A_LINE", 1, true),
+      "target-scene narration missing: " .. txt)
+  end)
+end)
+
 -- ── HTTP end-to-end tests ──────────────────────────────────────
 
 -- Unique base port that shifts each run, so back-to-back invocations do not
