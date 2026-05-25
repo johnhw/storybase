@@ -240,9 +240,13 @@ function M.new(game_table, opts)
   -- Register actor inbox paths so SF-3 doesn't warn on engine-internal writes.
   -- deliver_messages writes to inbox_path for any actor with pending messages,
   -- regardless of whether inbox_type is declared.
+  --
+  -- The sentinel is a minimal table descriptor (not `true`) so that callers
+  -- doing `td and td.max` on the result of `lookup_type` see nil for `.max`
+  -- rather than crashing on "attempt to index a boolean" (M7 fix).
   for _, actor_def in pairs(game_table.actors or {}) do
     local inbox_path = (actor_def.state_path or actor_def.name) .. "/inbox"
-    store._type_index[inbox_path] = true
+    store._type_index[inbox_path] = { tag = "inbox" }
   end
   local rng    = random_mod.new(opts.seed, log)
   local actors = actors_mod.new(store, log)

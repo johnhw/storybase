@@ -5,6 +5,458 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## §M latent-fragility fixes M7 + M8 ✅ (2026-05-25)
+
+Closed the two latent-fragility items left open by the 2026-05-24 M1–M6
+landing. Neither was user-visible — they were design fragilities flagged
+during the §M code review — but both are now locked in with regression tests.
+
+### M7. Inbox `_type_index` sentinel is now a table descriptor
+
+**Files:** `runtime/engine.lua:240-250`, `runtime/actors.lua:162-170`.
+
+Both spots used to write `store._type_index[inbox_path] = true`. `state:add`
+and `state:push` then did `local max_cap = td and td.max` on the
+`lookup_type` result, which would crash with "attempt to index a boolean
+value" the first time anyone called `add!` / `push!` on an inbox path. (No
+authored code triggers this today — inbox paths are only written by the
+engine's `deliver_messages` path — but a future change that exposed
+inbox-aware mutation would have hit it.)
+
+**Fix:** replace the boolean sentinel with `{ tag = "inbox" }`. The marker
+table satisfies the `td and td.max` short-circuit (`td.max` is nil → no
+overflow check), and the existing `td and td.tag == "int"` guards in `inc`
+/ `dec` are unaffected (`"inbox" ~= "int"`). No change to SF-3 warning
+suppression (still a non-nil entry in `_type_index`). One short comment
+added at each write site explains the sentinel choice.
+
+**Tests:** `tests/runtime/actors_spec.lua` (new "M7" describe, 3 tests):
+- `actors registry stores a table descriptor for inbox paths` — registers
+  an actor and asserts `_type_index["alice/inbox"]` is a table with
+  `tag = "inbox"` (previously `true`).
+- `engine.new stores a table descriptor for actor inbox paths` — builds
+  a minimal game table with one actor, calls `engine.new`, asserts the
+  store's `_type_index[inbox_path]` has the same shape.
+- `state:add and state:push on an inbox path do not crash` — the
+  regression test for the actual crash; both calls return cleanly with
+  the fix and previously raised "attempt to index a boolean value".
+
+### M8. `union` / `intersect` / `difference` dedup is type-namespaced
+
+**File:** `runtime/eval.lua:1206-1248`. The dedup key used `tostring(v)`
+alone, so `5` and `"5"` collided and one would be silently dropped from
+union output or wrongly considered equal in intersect / difference. Sets
+are statically typed today so this can't fire from authored code, but the
+implementation did nothing to enforce that.
+
+**Fix:** extracted a module-local `set_key(v) = type(v) .. ":" .. tostring(v)`
+helper just above `BUILTINS` and routed all six dedup-key sites (2 per
+function across union / intersect / difference) through it. Same behavior
+for the typed-set case (the only path authors hit today); cross-type
+values now stay distinct.
+
+**Tests:** `tests/runtime/eval_spec.lua` (new "M8: set ops dedup is
+type-namespaced" describe, 4 tests). Injects mixed-type lists via
+`c.vars` (bypassing the type checker on purpose) and asserts:
+- `union` keeps integer `5` and string `"5"` as distinct elements (prior
+  bug: produced a 1-element result).
+- `intersect` of `{5,6}` and `{"5",6}` returns just `{6}` (prior bug:
+  matched `5` against `"5"` and returned both).
+- `difference` of `{5,6}` minus `{"5"}` keeps the integer `5` (prior bug:
+  dropped it as a cross-type "duplicate").
+- Same-type dedup still works (`union ["a","b"] ["b","c"] → 3 elements`)
+  as a regression guard against the helper itself.
+
+**Test status:** Full suite 3216 successes / 0 failures / 2 pending. (The
+18 `debug_http_spec.lua` failures are the documented HTTP/debug transients
+— unchanged by this work.) `actors_spec` + `eval_spec` standalone: 333/0.
+
+---
+
+## §M bug-hunt fixes M1–M6 ✅ (2026-05-24)
+
+A 2026-05-23 code-review pass across `runtime/`, `cli/`, and `lib/` surfaced
+six confirmed defects plus two latent-fragility items. M1–M6 all landed
+2026-05-24; M7 + M8 stay in todo.md as latent-only (not user-visible today).
+
+### M1. `actor-no-progress` debug event silently never fires
+
+**File:** `runtime/engine.lua:662-665` (inside `on_no_progress` registered by
+`register_actors_schedules`). The guard read `self._debug_server`, but the
+engine stores its debug server in `self._debug` (set by `eng:set_debug_server`;
+read everywhere else in the file). The guard was always false, so the §H1
+`actor-no-progress` event never reached the debug server. The
+`self._h1_no_progress` accumulator below the guard still fired, which is why
+the bug went unnoticed.
+
+**Fix:** swap both references to `self._debug`. Regression test added in
+`tests/runtime/actors_goal_spec.lua` wires a stub debug server and asserts
+the event lands when the thief is blocked.
+
+### M2. `npc-speed` bypasses runtime.config in `--cli` and `serve-api`
+
+**Files:** `cli/cli_cmd.lua:470-472`, `cli/serve_api_cmd.lua:343-345`. Both
+spots read the compiled `engine-config:` block directly and skipped the §L
+registry, so `--config engine.npc-speed=N` was silently ignored in those two
+modes. The main `eng:step()` loop and `eng:post_action_chain()` already used
+`config.get` correctly — this was an L3 sweep gap the §H1 demo work missed.
+
+**Fix:** replaced the manual block with `eng:post_action_chain()` in both
+files (the helper already loops `npc-speed` extras via `config.get`). Tests
+in `tests/cli/cli_cmd_spec.lua` and `tests/cli/serve_api_spec.lua` assert
+that `--config engine.npc-speed=2` produces the expected autonomous turn
+count.
+
+### M3. `lib/storybase.lua` reports "could not read file" for any compile error
+
+**File:** `lib/storybase.lua:36-48`. `compiler.compile_file` returns
+`(nil, diags)` for FILE_NOT_FOUND **and** for every lex/parse/check/codegen
+failure, but the old code returned "could not read file" whenever `gt` was
+nil — so every compile error was reported as a missing-file error, and the
+diags-formatting branch below was dead code.
+
+**Fix:** check `diags:has_errors()` first; the file-read fallback now only
+triggers when there are no diagnostics. Test added in
+`tests/lib/storybase_spec.lua` loads a `.sb` with a syntax error and asserts
+the returned message contains the diagnostic code, not "could not read file".
+
+### M4. `INTERP_PATH` substitutes the variable name when the value is boolean `false`
+
+**File:** `runtime/eval.lua:200-216` (inside `eval_path` for
+`K.INTERP_PATH`). The classic `(val ~= nil and val or seg.interp)` idiom
+collapsed to `seg.interp` (the bare variable name) when `val` was `false`.
+Numeric `0` and `""` worked because they're truthy in Lua; only `false` was
+broken.
+
+**Fix:** `parts[#parts+1] = (val ~= nil) and tostring(val) or seg.interp`.
+Test in `tests/runtime/eval_spec.lua` resolves an `interp_path` to `false`
+and asserts the rendered path contains "false".
+
+### M5. Division crashes on nil operands, unlike `+ - *`
+
+**File:** `runtime/eval.lua:578-580`. `+`, `-`, `*` coalesced nil operands
+to 0; `/` did not, and threw "attempt to perform arithmetic on a nil value".
+
+**Fix:** mirror the other ops — coalesce nil to 0. Existing divide-by-zero
+behavior (returns 0 rather than `inf`/`nan`) preserved. Committed as
+b1227ea ("M5: coalesce nil operands to 0 in division").
+
+### M6. `chase_nav` in serve-api drops narration from dispatcher scenes
+
+**File:** `cli/serve_api_cmd.lua:258-269`. Each loop iteration rebound
+`narration` to the next scene's output, so intermediate dispatcher-scene
+narration (and even the inbound seed narration) was discarded. And there
+was no hop cap, so a `goto`-cycle in user code hung the HTTP server.
+
+**Fix:** accumulate narration items across iterations and cap the loop at
+100 hops, matching `lib/storybase.lua advance_to_choices`. Committed as
+8fa3dc0 ("M6: chase_nav accumulates dispatcher narration and caps hops").
+
+---
+
+## §L — Unified configuration system ✅ (2026-05-23)
+
+Unified the three overlapping config surfaces (in-source `engine-config:`
+block, CLI flags, scattered magic constants) behind a single registry-backed
+module with a precedence chain. Keys are namespaced (dotted, lowercase,
+hyphens kept), declared once with type + default + doc, and resolved on read.
+
+**Precedence (highest first):** `runtime > cli > env > file > game > default`
+- `runtime` — `config.set()` programmatic override
+- `cli`     — populated from parsed CLI args
+- `env`     — `STORYBASE_*` env vars (auto-derived from key name)
+- `file`    — `~/.storybaserc` / `./.storybaserc` (simple `key = value` lines, `#` comments)
+- `game`    — the compiled `engine-config:` block of the loaded `.sb` file
+- `default` — built-in defaults from the registry
+
+Design decisions locked in:
+- Game's `engine-config:` block sits below CLI/env, above the user file. The
+  author's intent overrides cross-game user defaults, but invocation-time
+  CLI/env can still override.
+- File format is simple `key = value` lines (no TOML dep).
+- Pilot-first rollout: land the module, migrate one key
+  (`engine.scene-stack-max`), prove the round-trip, then sweep.
+
+### L1. Module + tests
+
+- `runtime/config.lua` with API: `declare`, `get` (returns `value, layer`),
+  `set`, `load_env`, `load_file`, `bind_game`, `bind_cli`, `dump`, `keys`,
+  `spec`, `_reset` (test-only).
+- Unknown-key reads/writes error.
+- Type coercion for `int`, `float`, `bool`, `string`, `enum`.
+- `tests/runtime/config_spec.lua` covering precedence, coercion, env-var name
+  derivation, file parsing (comments, quoted values, malformed, unknown keys),
+  `bind_game` from a stub game_table, `bind_cli` from a flag table, `dump`.
+
+### L2. Pilot migration: `engine.scene-stack-max`
+
+- Declared with `type="int", default=16` (matching prior `DEFAULT_MAX_STACK`)
+  via an idempotent `declare_engine_config()` helper at the top of
+  `runtime/engine.lua` — idempotency lets the declaration survive
+  `config._reset()` between specs.
+- `engine.new()` now calls `config.bind_game(game_table)` and reads via
+  `config.get("engine.scene-stack-max")`. `opts.max_stack` is retained as a
+  per-instance escape hatch (used by `diff_replay`) and wins without mutating
+  global config state.
+- Behavior change vs. pre-L2: when both the game's `engine-config:` block and
+  a runtime override (CLI/env/file/set) are present, the runtime override now
+  wins (previously the in-source block always won). This matches the locked-in
+  precedence design.
+- Regression tests added in `tests/runtime/engine_spec.lua` ("scene-stack-max
+  via config module"): default layer, game layer, runtime override beating
+  game, and `opts.max_stack` escape hatch.
+
+### L3. Sweep remaining `engine_config` reads
+
+- `engine.entry-scene` declared (string, no default) and consumed in
+  `eng:init()`.
+- `engine.npc-speed` declared (int, default 0) and consumed in
+  `eng:post_action_chain()` and the `eng:step()` post-action NPC loop.
+- All three engine-side `engine_config` reads now flow through
+  `config.get`; the runtime layer wins over the in-source block.
+- Six new regression tests in `tests/runtime/engine_spec.lua`
+  (entry-scene default/game/runtime, npc-speed default/game/runtime).
+- Out of scope for L3 (kept as future cleanup): `cli/*` and
+  `runtime/eval.lua` still read `game_table.schema.engine_config`
+  directly for `entry-scene` and `max-counterfactual-depth`. These are
+  read-only consumers of the compiled block; converting them to
+  `config.get` is mechanically straightforward but spans 5 files and
+  should land as its own commit. (Closed by M2 + L7a.)
+
+### L4. Env + file loading
+
+- `runtime/config.lua` gained `M.load_startup({ home, cwd, getenv })` which
+  loads `<home>/.storybaserc` then `<cwd>/.storybaserc` (later wins), then
+  `STORYBASE_*` env vars. Missing files are silently skipped; parse errors
+  accumulate in the returned list, never raise.
+- `runtime/engine.lua` now calls `declare_engine_config()` at module-require
+  time (in addition to the idempotent inside-`new` call) so the file/env
+  layers can resolve engine keys without an engine being constructed.
+- `cli/main.lua` `M.main` eagerly requires `runtime.engine`, calls
+  `config.load_startup()`, and writes any errors to stderr (one line per
+  error, prefixed `storybase config:`). Startup never aborts on bad config.
+- Smoke-tested: a `~/.storybaserc` with `engine.scene-stack-max = 99` flows
+  through to engine.new; an unknown key surfaces to stderr but the command
+  still runs.
+- Six new tests in `tests/runtime/config_spec.lua` covering home-only,
+  later-wins file merge, env > files, missing files, parse-error collection,
+  and nil-home (cwd-only) paths.
+
+### L5. CLI wiring
+
+- `cli/main.lua` `M.main` now strips any number of `--config key=value`
+  (or `--config=key=value`) flags out of `argv` before dispatch via a
+  new `extract_cli_overrides(argv)` helper. Unknown keys / coercion
+  failures / malformed pairs are surfaced to stderr but never abort the
+  command — the bind_cli call uses a pre-filtered table so one bad
+  override doesn't drop the others.
+- New `cli/config_cmd.lua` implements the `config` subcommand:
+  - `config dump [file.sb]` — column table of `key | layer | value` over
+    every registered key. Optional file path → `bind_game` so the game
+    layer is reflected.
+  - `config get <key> [file.sb]` — prints just the resolved value
+    (script-friendly; blank line if unset).
+  - `config doc <key>` — type, default, env var (auto-derived), CLI
+    flag (when declared), doc string, and the currently-resolved value
+    with its winning layer.
+  - `config help` / `config --help` / no-subcommand → usage block.
+- `runtime/config.lua` gained `M.format_help()` that emits one line per
+  key for the global `--help` text (kept tight: `key  (type, default=…)  — doc`).
+- `print_usage()` and the `help <cmd>` text mention `--config` and the
+  new subcommand.
+- Existing typed flags (`--debug`, `--ui`, `--http-port`, `--bind`,
+  `--steps`, etc.) are still parsed by the per-command `parse_args` and
+  packed into the `opts` table. That's L6 territory — converting each to
+  a registry-declared key with a `cli` field. L5 only adds the generic
+  `--config key=value` route plus the inspector subcommand.
+- Tests: `tests/cli/config_cmd_spec.lua` (18 tests) covers dump (header
+  row, runtime > default, game-layer file binding), get (known key,
+  runtime override, unset key, unknown key, missing arg), doc (full
+  render, unknown key), the bare `config` usage block + unknown
+  subcommand path, and the global `--config` flag through `cli.main`
+  (cli-layer win, single-token form, unknown key reported but command
+  still runs, coercion failure reported, malformed values reported,
+  trailing `--config` with no value).
+
+### L6. Sweep remaining magic numbers
+
+Each remaining CLI-side magic constant converted into a registry-declared
+config key so it can be set via game file, `--config`, env, or
+`~/.storybaserc`. Landed as small commits, one per logical group.
+
+#### L6a. Debug ports
+
+- `runtime/config.lua` gained `M.set_cli(key, value)` — additive
+  single-key write to the cli layer (unlike `bind_cli` which clears the
+  layer first). Lets typed flag handlers stack on top of an earlier
+  bulk `bind_cli(...)` call from `extract_cli_overrides` without
+  stomping siblings.
+- `runtime/engine.lua` declarations: `engine.debug-port` (int, default
+  7373, cli `--debug-port`) and `engine.http-port` (int, no default,
+  cli `--http-port`). Both auto-bind from the `.sb` `engine-config:`
+  block via `bind_game`.
+- `cli/main.lua` no longer reads `game_table.schema.engine_config`
+  directly for debug-port; it calls `config.bind_game(game_table)` and
+  then `config.get("engine.debug-port")`. The `--http-port N` flag is
+  routed through `config.set_cli("engine.http-port", N)`. The
+  computed-fallback (`debug_port + 1`) remains in `cli/main.lua` for
+  the unset case — `config.get` returns nil, the CLI computes the
+  default.
+- Tests: `tests/runtime/config_spec.lua` — 4 specs for `set_cli`
+  (additive write, nil-clear, coercion, unknown key); `tests/runtime/engine_spec.lua` — 4 specs covering the declarations (default debug-port,
+  unset http-port, game-layer override, cli > game precedence).
+
+#### L6b. Bind address
+
+- Declared `network.bind` (string, default "127.0.0.1", cli `--bind`)
+  in `runtime/engine.lua`'s declare helper (alongside engine.* keys, with
+  a clear note: network.* keys are CLI-only, NOT auto-bound from the .sb
+  `engine-config:` block). Lives in engine.lua because that module is
+  universally loaded by both the CLI and serve-api.
+- Migrated all four consumers:
+  - `cli/main.lua` (--debug / --serve flow): --bind → set_cli;
+    opts.bind = config.get("network.bind").
+  - `cli/serve_api_cmd.lua`: --bind → set_cli; opts.bind from
+    config.get; usage_page now includes the bind in the "Listen:" line
+    instead of hard-coding "127.0.0.1".
+  - `runtime/engine.lua:M.run`: opts.bind fallback now goes to
+    config.get("network.bind").
+  - `runtime/debug.lua:M.new`: opts.bind fallback now goes to
+    config.get("network.bind").
+- 3 new tests in tests/runtime/engine_spec.lua covering the declaration
+  (default, set_cli override, NOT auto-bound from .sb engine-config).
+- Smoke: `--config network.bind=0.0.0.0 config get network.bind` →
+  "0.0.0.0"; `config doc network.bind` shows the full spec.
+- Full suite: 3199 successes / 0 failures.
+
+#### L6c. UI driver default
+
+- Declared `cli.ui` (enum, default "plain", values {plain, ansi}, cli
+  `--ui`) in `runtime/engine.lua`'s declare helper.
+- `cli/main.lua` cmd_run: replaced the hardcoded
+  `ALLOWED_UI_DRIVERS = { plain, ansi }` table + `flags["ui"] or "plain"`
+  with a registry-driven check. The enum spec also prevents package.path
+  traversal (`--ui ../../foo`) — same defense, declarative.
+- Kept the historic "unknown UI driver '...' (available: plain, ansi)"
+  stderr message for backcompat (the drivers_spec asserts on that
+  wording). The validation walks the registry's `enum` list so the
+  message stays in sync if more drivers are added.
+- Also consolidated `cmd_run`'s three local `require("runtime.config")`
+  calls into one at the function top.
+- 3 new tests in tests/runtime/engine_spec.lua covering the
+  declaration (default, enum acceptance, rejection of out-of-enum +
+  package-traversal strings).
+- Smoke: `config doc cli.ui` shows the enum list; `--ui foo` keeps
+  emitting the human-readable rejection.
+- Full suite: 3202 successes / 0 failures.
+
+#### L6d. serve-api port
+
+- Declared `serve-api.port` (int, default 8080, cli `--port`) in
+  `runtime/engine.lua`'s declare helper.
+- `cli/serve_api_cmd.lua`:
+  - `M.start`: `port = tonumber(opts.port) or config.get("serve-api.port")`.
+  - `M.run`: `--port` flag → `config.set_cli("serve-api.port", ...)`;
+    opts.port from `config.get`. Mirror of the L6b --bind treatment.
+- 2 new tests in `tests/runtime/engine_spec.lua` (default 8080,
+  string→int coercion).
+
+#### L6e. fuzz defaults
+
+- Declared four keys in `runtime/engine.lua`'s declare helper:
+  - `fuzz.runs`          (int, default 1000, cli `--runs`)
+  - `fuzz.max-steps`     (int, default 50,   cli `--steps`)
+  - `fuzz.failures-dir`  (string, default "failures", cli `--failures-dir`)
+  - `fuzz.max-failures`  (int, default 10,   cli `--max-failures`)
+- `cli/fuzz_cmd.lua` requires `runtime.engine` at the top of `M.run`
+  (so the declarations land when fuzz_cmd is exercised in isolation —
+  e.g. via tests/cli/fuzz_spec.lua, which doesn't go through cli/main.lua).
+- Each flag now routes through `set_cli` then `config.get`; only `--seed`
+  retains its `os.time()` fallback because it's intentionally
+  non-deterministic per-run.
+- 2 new test groups in tests/runtime/engine_spec.lua (defaults match the
+  historic values; set_cli overrides each key).
+
+#### L6f. coverage defaults
+
+- Declared `coverage.depth` (int, default 8, cli `--depth`) and
+  `coverage.budget` (int, default 30, cli `--budget`) in
+  `runtime/engine.lua`'s declare helper.
+- `cli/coverage_cmd.lua` requires `runtime.engine` at the start of its
+  BFS section so the declarations land when coverage_cmd is exercised
+  in isolation (mirror of L6e). Each flag → `set_cli` then `config.get`.
+- 2 new test groups in tests/runtime/engine_spec.lua (defaults +
+  set_cli overrides for depth/budget).
+- Full suite: 3208 successes / 0 failures.
+
+### L7. Runtime tunables (follow-on sweep)
+
+A short re-scour of the runtime for magic numbers that are useful to
+expose without encouraging bad patterns. The 5 keys below are all
+load-bearing for users with bigger games / deeper verify analysis.
+
+#### L7a. engine.max-counterfactual-depth
+
+- Closes the L3 carve-off: `runtime/eval.lua:398` previously read
+  `engine_config["max-counterfactual-depth"]` directly with a hardcoded
+  `or 10` fallback.
+- Declared `engine.max-counterfactual-depth` (int, default 10) directly
+  in `runtime/eval.lua`'s module top (idempotent) — not in
+  `runtime/engine.lua` — because eval.lua is the actual consumer and is
+  sometimes exercised without engine.lua being loaded
+  (counterfactual_spec bypasses engine.M.new). A top-of-file
+  `require("runtime.engine")` would cause a circular require since
+  engine.lua already requires eval at module top.
+- COUNTERFACTUAL_EXPR branch now calls `config.bind_game(ctx.game)`
+  before the `config.get` so direct callers that skip engine.M.new
+  still get their `engine-config:` block honoured (idempotent for the
+  same game_table; the per-call cost is negligible relative to
+  counterfactual evaluation itself).
+- 3 new tests in tests/runtime/engine_spec.lua (default, game override,
+  set_cli > game). Existing counterfactual_spec test that compiles
+  `max-counterfactual-depth: 1` in source continues to pass.
+- Full suite: 3211 successes / 0 failures.
+
+#### L7b. verify + search tunables
+
+- `runtime/verify.lua` declares (at module top):
+  - `verify.bfs-depth`   (int, default 5)  — depth for verify-always
+  - `verify.ctl-depth`   (int, default 5)  — depth for CTL operators
+  - `verify.ctl-budget`  (int, default 30) — seconds for CTL operators
+- `runtime/search.lua` declares:
+  - `search.max-nodes`   (int, default 5000) — BFS node cap in CTL graph
+- Read sites in verify.lua's `bfs_states` callers (3) and the three
+  `verify_*` functions in search.lua now go through `config.get`.
+  `DEFAULT_BFS_DEPTH`, `DEFAULT_CTL_DEPTH`, `DEFAULT_CTL_BUDGET` deleted.
+- `cli/main.lua` pcall-requires `runtime.verify` and `runtime.search`
+  at startup so the keys exist when `--config` / env / file layers are
+  populated. Without this, `--config verify.bfs-depth=8 ...` reports
+  "unknown key" because the inspector loads happen too late.
+- 2 new test groups in tests/runtime/engine_spec.lua (defaults +
+  set_cli overrides for all four keys).
+- Full suite: 3213 successes / 0 failures.
+
+### §L summary
+
+All 19 registry keys, in alphabetical order:
+`cli.ui`, `coverage.budget`, `coverage.depth`, `engine.debug-port`,
+`engine.entry-scene`, `engine.http-port`,
+`engine.max-counterfactual-depth`, `engine.npc-speed`,
+`engine.scene-stack-max`, `fuzz.failures-dir`, `fuzz.max-failures`,
+`fuzz.max-steps`, `fuzz.runs`, `network.bind`, `search.max-nodes`,
+`serve-api.port`, `verify.bfs-depth`, `verify.ctl-budget`,
+`verify.ctl-depth`.
+
+Each is settable via (precedence high→low):
+- `config.set` (runtime), `--config key=value` or typed flag (cli),
+- `STORYBASE_*` env var (env), `~/.storybaserc` / `./.storybaserc`
+  (file), `.sb` `engine-config:` block (game; engine.* only),
+- spec default.
+
+Inspect with `storybase config dump`, `config get <key>`, `config doc <key>`.
+
+---
+
 ## §H1 — Goal-directed actors + demo34 showcase ✅ (runtime 2026-05-22, demo 2026-05-23)
 
 The runtime, parser, checker, codegen, and 24-test spec landed on 2026-05-22

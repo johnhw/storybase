@@ -161,9 +161,12 @@ function M.new(state, log)
     table.sort(self._actors, function(a, b) return a.priority > b.priority end)
     -- Mark inbox path as declared so SF-3 doesn't warn on engine-internal inbox writes.
     -- deliver_messages writes to inbox_path for any actor with pending messages.
+    -- Sentinel is a minimal table descriptor (not `true`) so callers doing
+    -- `td and td.max` on the lookup_type result don't crash with "attempt to
+    -- index a boolean" (M7 fix).
     if self._state and self._state._type_index then
       local inbox_path = (actor_def.state_path or actor_def.name) .. "/inbox"
-      self._state._type_index[inbox_path] = true
+      self._state._type_index[inbox_path] = { tag = "inbox" }
     end
   end
 

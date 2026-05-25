@@ -906,6 +906,14 @@ local function size_impl(args, ctx)
   return count
 end
 
+-- Type-namespaced dedup key for union/intersect/difference. Plain `tostring`
+-- alone collides cross-type (tostring(5) == tostring("5") == "5"), so we
+-- prefix with the Lua type tag. Sets are statically typed today so the
+-- collision can't fire from authored code, but this keeps the implementation
+-- honest if a future change lets heterogeneous values reach the set builtins
+-- (M8 fix).
+local function set_key(v) return type(v) .. ":" .. tostring(v) end
+
 --- Built-in functions.
 local BUILTINS = {
   ["path-list"] = function(args, ctx)
@@ -1206,10 +1214,12 @@ local BUILTINS = {
     local seen = {}
     local result = {}
     for _, v in ipairs(a) do
-      if not seen[tostring(v)] then seen[tostring(v)] = true; result[#result+1] = v end
+      local k = set_key(v)
+      if not seen[k] then seen[k] = true; result[#result+1] = v end
     end
     for _, v in ipairs(b) do
-      if not seen[tostring(v)] then seen[tostring(v)] = true; result[#result+1] = v end
+      local k = set_key(v)
+      if not seen[k] then seen[k] = true; result[#result+1] = v end
     end
     return result
   end,
@@ -1219,10 +1229,10 @@ local BUILTINS = {
     if type(a) ~= "table" then return {} end
     if type(b) ~= "table" then return {} end
     local b_set = {}
-    for _, v in ipairs(b) do b_set[tostring(v)] = v end
+    for _, v in ipairs(b) do b_set[set_key(v)] = v end
     local result = {}
     for _, v in ipairs(a) do
-      if b_set[tostring(v)] ~= nil then result[#result+1] = v end
+      if b_set[set_key(v)] ~= nil then result[#result+1] = v end
     end
     return result
   end,
@@ -1232,10 +1242,10 @@ local BUILTINS = {
     if type(a) ~= "table" then return {} end
     if type(b) ~= "table" then return a end
     local b_set = {}
-    for _, v in ipairs(b) do b_set[tostring(v)] = true end
+    for _, v in ipairs(b) do b_set[set_key(v)] = true end
     local result = {}
     for _, v in ipairs(a) do
-      if not b_set[tostring(v)] then result[#result+1] = v end
+      if not b_set[set_key(v)] then result[#result+1] = v end
     end
     return result
   end,

@@ -100,6 +100,59 @@ describe("actors — capture proxy", function()
 end)
 
 -- ============================================================
+-- M7: inbox path _type_index entry is a non-boolean descriptor
+-- ============================================================
+-- Before the fix, registry:register and engine.new both wrote
+-- `_type_index[inbox_path] = true`. Callers that did `td and td.max`
+-- on the lookup_type result (notably state:add and state:push) then
+-- crashed with "attempt to index a boolean". The fix replaces the
+-- boolean sentinel with `{ tag = "inbox" }` so the indexed access
+-- short-circuits to nil instead.
+
+describe("M7: inbox _type_index sentinel is a non-boolean", function()
+  it("actors registry stores a table descriptor for inbox paths", function()
+    local store = make_store()
+    local registry = actors_mod.new(store, log_mod.new())
+    registry:register({
+      name = "alice", state_path = "alice", priority = 10,
+      perceives = {}, behavior = nil,
+    })
+    local td = store._type_index["alice/inbox"]
+    assert.is_table(td, "expected a table descriptor; got " .. type(td))
+    assert.equal("inbox", td.tag)
+  end)
+
+  it("engine.new stores a table descriptor for actor inbox paths", function()
+    local game_table = {
+      schema = { engine_config = {}, states = {}, types = {}, relations = {} },
+      fns = {}, scenes = {}, verifies = {}, watches = {},
+      schedules = {}, generates = {},
+      actors = {
+        { name = "bob", state_path = "bob", priority = 5,
+          perceives = {}, behavior = nil },
+      },
+    }
+    local eng = engine_mod.new(game_table)
+    local td = eng._state._type_index["bob/inbox"]
+    assert.is_table(td, "expected a table descriptor; got " .. type(td))
+    assert.equal("inbox", td.tag)
+  end)
+
+  it("state:add and state:push on an inbox path do not crash", function()
+    local store = make_store()
+    local registry = actors_mod.new(store, log_mod.new())
+    registry:register({
+      name = "alice", state_path = "alice", priority = 10,
+      perceives = {}, behavior = nil,
+    })
+    -- Before the M7 fix, td was `true`, td.max raised
+    -- "attempt to index a boolean value".
+    assert.has_no.errors(function() store:add("alice/inbox", "msg1") end)
+    assert.has_no.errors(function() store:push("alice/inbox", "msg2") end)
+  end)
+end)
+
+-- ============================================================
 -- actors.lua — priority conflict resolution
 -- ============================================================
 

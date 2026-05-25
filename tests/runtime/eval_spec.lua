@@ -2910,6 +2910,60 @@ describe("stdlib: collection builtins", function()
     assert.is_true(s["b"] and s["c"])
   end)
 
+  -- M8: union/intersect/difference dedup must be type-namespaced.
+  -- Before the fix the key was tostring(v), so 5 and "5" collided.
+  -- Sets are statically typed today, so the only way to surface mixed types
+  -- is to inject them through let-bound vars (bypassing the type checker).
+  describe("M8: set ops dedup is type-namespaced", function()
+    it("union keeps integer 5 and string '5' as distinct elements", function()
+      local c = ctx({})
+      c.vars["a"] = { 5 }
+      c.vars["b"] = { "5" }
+      local node = fn_call("union",
+        { kind = "fn_call", name = "a", args = {} },
+        { kind = "fn_call", name = "b", args = {} })
+      local result = eval.eval_expr(node, c)
+      assert.equal(2, #result)  -- prior bug: 1 (string "5" dropped as dup)
+      local kinds = {}
+      for _, v in ipairs(result) do kinds[type(v)] = true end
+      assert.is_true(kinds["number"] and kinds["string"])
+    end)
+
+    it("intersect treats integer 5 and string '5' as distinct", function()
+      local c = ctx({})
+      c.vars["a"] = { 5, 6 }
+      c.vars["b"] = { "5", 6 }
+      local node = fn_call("intersect",
+        { kind = "fn_call", name = "a", args = {} },
+        { kind = "fn_call", name = "b", args = {} })
+      local result = eval.eval_expr(node, c)
+      assert.equal(1, #result)  -- prior bug: 2 (cross-type 5/"5" matched)
+      assert.equal(6, result[1])
+    end)
+
+    it("difference does not drop integer 5 when string '5' is in b", function()
+      local c = ctx({})
+      c.vars["a"] = { 5, 6 }
+      c.vars["b"] = { "5" }
+      local node = fn_call("difference",
+        { kind = "fn_call", name = "a", args = {} },
+        { kind = "fn_call", name = "b", args = {} })
+      local result = eval.eval_expr(node, c)
+      assert.equal(2, #result)  -- prior bug: 1 (integer 5 wrongly excluded)
+      local s = {}
+      for _, v in ipairs(result) do s[type(v) .. ":" .. tostring(v)] = true end
+      assert.is_true(s["number:5"])
+      assert.is_true(s["number:6"])
+    end)
+
+    it("union still dedups within the same type (regression)", function()
+      local c = ctx({})
+      local result = eval.eval_expr(
+        fn_call("union", list_lit("a","b"), list_lit("b","c")), c)
+      assert.equal(3, #result)
+    end)
+  end)
+
   it("list-get returns element at index", function()
     local c = ctx({})
     local node = fn_call("list-get", list_lit("x","y","z"), int_lit(2))
