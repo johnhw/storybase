@@ -17,17 +17,22 @@
 -- │                                                                   │
 -- │ Scaffolded (no-op)       : attach(kernel), tick(dt), detach()     │
 -- │                            — drivers expose stubs so they satisfy │
--- │                              the full contract; the kernel that  │
--- │                              calls them is ui_idea.md §M1, not   │
--- │                              yet written.                         │
+-- │                              the full contract; the kernel       │
+-- │                              (ui/kernel.lua, §M1 shipped) is now  │
+-- │                              wired into lib/storybase + the      │
+-- │                              debug server, but no driver yet     │
+-- │                              consumes it. §M3 (screen-model      │
+-- │                              split) flips curses to event-driven.│
 -- └───────────────────────────────────────────────────────────────────┘
 --
 -- The active dispatch path in `runtime/engine.lua` (see eng:step,
--- search for `self._driver`) calls render+prompt directly. When the
--- presentation kernel ships (ui_idea.md §M1), event-driven drivers
--- (curses, browser-sse) will use attach/tick/detach instead and the
--- engine dispatch path will transition. Until then, attach/tick/detach
--- are reserved names so no driver accidentally shadows them.
+-- search for `self._driver`) calls render+prompt directly. The
+-- presentation kernel (`ui/kernel.lua`) shipped at §M1 (2026-05-29)
+-- and is used today by `lib/storybase.lua:on(...)` and the debug
+-- server's SSE broadcast; event-driven drivers (curses-reactive,
+-- browser-sse) will hook in via attach/tick/detach starting at §M3.
+-- Until then, attach/tick/detach are reserved names so no driver
+-- accidentally shadows them.
 --
 -- ── Required methods ────────────────────────────────────────────────
 --

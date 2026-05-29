@@ -45,6 +45,23 @@ wildcard / state-cache invariants / coalesced mutation bursts.
 question §4.2 #1 resolved: `state.lua` fires `_mutation_hook` with
 the clamped value (`_log_entry` runs after the clamp branch).
 
+§M2 (curses hello-world) landed 2026-05-29:
+`cli/drivers/curses/init.lua` is now a functional pull-mode driver
+that paints narration + numbered choices into ncurses and reads digit
+keys for choice dispatch. All `require("curses")` calls are confined
+to `cli/drivers/curses/backend_curses.lua` so the §M3 screen-model
+split has a single seam. The driver is registered in the `cli.ui`
+enum (`runtime/engine.lua`) and selectable via `--ui curses`. Curses
+init is lazy (deferred to first `render`/`prompt`), so M.new is safe
+in any environment. Tests at `tests/ui/curses_driver_spec.lua` (28
+cases) exercise lifecycle, narration accumulation, paint layout
+(scrollback, separator, choices, prompt), input dispatch (digits,
+q/Q/ESC, out-of-range filtering), and the driver round-trip via a
+stub curses module — busted never opens a real terminal. **Total:
+3312/0/2 (+27 new cases over M1; one obsolete "not yet implemented"
+scaffold test was deleted).** Driver is still pull-mode — the
+kernel-driven attach/subscribe path is §M3+ work.
+
 ## Current Status (2026-05-25)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -76,10 +93,14 @@ fragility items) shipped 2026-05-25.
    `ui/kernel.lua` + `ui/format.lua`; library + debug-server adapted.
    §4.2 carry-overs for later: custom-event namespacing, mutation
    coalescing, watch-evaluator move from inline to kernel subscription.
-3. §M2 — curses hello-world. (`cli/drivers/curses/` scaffold already in
-   place; needs to call `kernel:get_scene()` for narration/choices via
-   `attach()` and stop relying on the engine pull-mode `render`/`prompt`.)
-4. §M3 — screen model + buffer backend split.
+3. §M2 — curses hello-world. **[DONE 2026-05-29]** —
+   `cli/drivers/curses/init.lua` + `backend_curses.lua`; selectable
+   via `--ui curses`. Pull-mode (render+prompt); the kernel-driven
+   attach/subscribe path lands at §M3 alongside the screen model.
+4. §M3 — screen model + buffer backend split. Curses driver switches
+   to the kernel's event subscription (`kernel:get_scene()` /
+   `kernel:on("mutation", ...)` / etc.) at this milestone, retiring
+   the pull-mode `render`/`prompt` path for curses.
 5. §M4 — author bindings (parser + schema).
 6. §M5 — first reactive widget: stat-bar.
 7. §M6 — view stack + modal dialog.

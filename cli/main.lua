@@ -76,7 +76,8 @@ Options (run):
   --serve                     Like --debug, but browser drives the game (no stdin)
   --http-port N               Override the HTTP UI port (default: debug-port + 1)
   --bind <addr>               Bind debug/serve sockets to <addr> (default: 127.0.0.1)
-  --ui <name>                 UI driver: plain (default) or ansi (ANSI colour)
+  --ui <name>                 UI driver: plain (default), ansi (ANSI colour),
+                              or curses (ncurses full-screen TUI)
   --cli <save.sbd>            Single-step scripting mode: read one choice from stdin,
                               output JSON to stdout, save full state, then exit
   --reset                     (--cli only) Wipe save file and start fresh
@@ -566,7 +567,8 @@ storybase run [options] <file>
     --quiet        Suppress compiler warnings (errors still shown)
     --auto         Auto-play: always select choice 1 until game ends
     --steps N      Auto-play for at most N turns (implies --auto)
-    --ui <name>    UI driver: plain (default) or ansi (ANSI colour)
+    --ui <name>    UI driver: plain (default), ansi (ANSI colour), or
+                   curses (ncurses full-screen TUI)
 ]],
   ["verify"] = [[
 storybase verify <file> [--no-cache] [--clear-cache] [--cache-dir DIR]

@@ -321,13 +321,17 @@ scene start:
     assert.equal(0, rc, "stderr: " .. err)
   end)
 
-  -- curses is intentionally NOT in the enum yet: the scaffold raises
-  -- on render/prompt (see ui_idea.md §M2). Keep this guard until the
-  -- functional curses driver lands.
-  it("rejects `curses' until the M2 implementation lands", function()
-    local rc, err = run_with({"run", game_path, "--ui", "curses", "--auto", "--steps", "0"})
-    assert.equal(1, rc)
-    assert.is_truthy(err:find("unknown UI driver"), err)
+  -- curses is in the enum as of §M2. The registry-level check (does
+  -- `--ui curses` survive whitelist validation?) is the part exercised
+  -- here. The full paint+input path is covered headlessly by
+  -- tests/ui/curses_driver_spec.lua via a stub curses module; running
+  -- the real ncurses init from inside busted would require a TTY.
+  it("accepts `curses' in the cli.ui whitelist", function()
+    local config = require("runtime.config")
+    local spec = config.spec("cli.ui")
+    local allowed = {}
+    for _, v in ipairs(spec.enum) do allowed[v] = true end
+    assert.is_true(allowed["curses"], "curses should be in the cli.ui enum")
   end)
 end)
 
@@ -378,31 +382,29 @@ describe("plain/ansi lifecycle stubs", function()
   end)
 end)
 
--- ── curses scaffold ───────────────────────────────────────────────────────────
+-- ── curses driver shape ───────────────────────────────────────────────────────
+--
+-- The full curses-rendering behaviour is covered in
+-- tests/ui/curses_driver_spec.lua, which injects a stub curses module
+-- to exercise paint + read_choice headlessly. These cases only assert
+-- the structural contract: M.new() succeeds without touching curses,
+-- the result satisfies the driver interface, and lifecycle stubs are
+-- safe to call.
 
-describe("curses driver scaffold", function()
-  it("M.new returns a contract-conformant driver", function()
-    local d = curses_mod.new()
+describe("curses driver shape", function()
+  it("M.new returns a contract-conformant driver without touching curses", function()
+    -- Inject a sentinel curses table so we can confirm M.new() does
+    -- NOT call any of its functions (lazy init is honoured).
+    local touched = false
+    local sentinel = setmetatable({}, { __index = function() touched = true end })
+    local d = curses_mod.new({ curses = sentinel })
     assert.is_table(d)
     assert.is_true(driver_mod.is_driver(d))
-  end)
-
-  it("render raises a clear not-yet-implemented error", function()
-    local d = curses_mod.new()
-    local ok, err = pcall(function() d:render({}) end)
-    assert.is_false(ok)
-    assert.is_truthy(tostring(err):find("not yet implemented"), tostring(err))
-  end)
-
-  it("prompt raises a clear not-yet-implemented error", function()
-    local d = curses_mod.new()
-    local ok, err = pcall(function() d:prompt({}) end)
-    assert.is_false(ok)
-    assert.is_truthy(tostring(err):find("not yet implemented"), tostring(err))
+    assert.is_false(touched, "M.new must not call into curses")
   end)
 
   it("attach stores the kernel; detach clears it", function()
-    local d = curses_mod.new()
+    local d = curses_mod.new({ curses = {} })
     local fake_kernel = { _name = "k" }
     d:attach(fake_kernel)
     assert.equal(fake_kernel, d._kernel)
@@ -411,9 +413,16 @@ describe("curses driver scaffold", function()
   end)
 
   it("notify and tick are no-op safe", function()
-    local d = curses_mod.new()
+    local d = curses_mod.new({ curses = {} })
     assert.has_no_errors(function() d:notify("scene-change", {}) end)
     assert.has_no_errors(function() d:tick(0.016) end)
+  end)
+
+  it("exposes is_available() that probes lcurses without errors", function()
+    -- In this dev env lcurses IS installed (CLAUDE.md), so this should
+    -- be true. The interesting assertion is that calling it cannot
+    -- throw, regardless of host packaging.
+    assert.has_no_errors(function() curses_mod.is_available() end)
   end)
 end)
 

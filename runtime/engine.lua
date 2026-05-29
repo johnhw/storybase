@@ -75,10 +75,10 @@ local function declare_engine_config()
   if not config.spec("cli.ui") then
     config.declare("cli.ui", {
       type    = "enum",
-      enum    = { "plain", "ansi" },
+      enum    = { "plain", "ansi", "curses" },
       default = "plain",
       cli     = "--ui",
-      doc     = "UI driver for interactive `run`: plain text or ANSI colour.",
+      doc     = "UI driver for interactive `run`: plain text, ANSI colour, or ncurses TUI.",
     })
   end
   if not config.spec("serve-api.port") then

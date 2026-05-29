@@ -1,75 +1,105 @@
 -- cli/drivers/curses/init.lua
--- Curses UI driver for storybase (scaffold).
+-- Curses UI driver for storybase (ui_idea.md §M2 hello-world).
 --
--- Implements the driver protocol declared in `cli/drivers/driver.lua`.
--- This file is the M2 scaffold per ui_idea.md §M2: a structural stub
--- that satisfies the contract so the driver registry, tests, and
--- documentation can wire against it. The functional implementation
--- (screen model, two backends, widgets, view stack, focus, paint diff)
--- is laid out in ui_idea.md §8 and ships across §M2–§M8.
+-- A pull-mode replacement for the plain driver, rendered via lcurses.
+-- Implements the driver protocol declared in `cli/drivers/driver.lua`:
+-- the engine still calls `render(scene_output)` + `prompt(choices)`;
+-- this driver just paints into the terminal via ncurses and reads digit
+-- keys for choices.
 --
--- Current behaviour:
---   - M.new(opts) returns a driver table that satisfies is_driver().
---   - render/prompt raise a clear "not yet implemented" error so
---     accidental wiring fails loudly rather than silently no-op'ing.
---   - attach/tick/detach are no-ops (forward-compatible with the §M1
---     kernel that will drive them).
---   - This driver is intentionally NOT yet registered in the
---     `cli.ui` enum (runtime/engine.lua). It cannot be selected via
---     `--ui curses` until a functional render path exists. The folder
---     is in place so each §8.3 file (screen.lua, backend_curses.lua,
---     backend_buffer.lua, layout.lua, focus.lua, paint.lua,
---     view_stack.lua, widgets/*) lands here without further plumbing.
+-- The screen-model split (§M3) replaces the simple paint here with a
+-- diff-against-previous-frame buffer; the two ncurses/string backends
+-- land at that milestone. For now, all curses calls live in
+-- `backend_curses.lua` so M3 has a single seam.
+--
+-- Activate with: `storybase run game.sb --ui curses`
+--
+-- Tests inject a stub curses module via `opts.curses` so the driver
+-- logic can be exercised headlessly. See tests/ui/curses_driver_spec.lua.
 
 local M = {}
 
-local NOT_IMPLEMENTED = "cli/drivers/curses: not yet implemented; "
-                     .. "see ui_idea.md §M2–§M8 for the milestone plan"
+local backend_curses = require("cli.drivers.curses.backend_curses")
 
---- Create a new curses driver scaffold.
--- @param opts table?  reserved for future use:
---                       backend = "ncurses" | "buffer" (default ncurses)
---                       w, h    = forced dimensions for the buffer backend
--- @return table  driver scaffold (satisfies driver.lua contract)
+--- Probe lcurses availability via the backend.
+---@return boolean
+function M.is_available()
+  return backend_curses.is_available()
+end
+
+--- Create a new curses driver. `M.new()` is lightweight: it does not
+--- call `initscr()` until the first `render`/`prompt`, so creating a
+--- driver and immediately calling `is_driver()` in a test environment
+--- without a TTY is safe.
+---@param opts table?  { curses = <mod>?,    -- injection for tests
+---                      io_out, io_in }     -- accepted for symmetry
+---@return table driver
 function M.new(opts)
   opts = opts or {}
 
+  local backend = backend_curses.new(opts)
+
   local driver = {
-    _opts    = opts,
-    _kernel  = nil,
-    _backend = nil,  -- placeholder for screen-model backend (§8.2)
+    _opts        = opts,
+    _kernel      = nil,
+    _backend     = backend,
+    _initialised = false,
   }
 
-  function driver:render(_scene_output)
-    error(NOT_IMPLEMENTED, 2)
+  --- Lazily call backend:init on first paint. Errors with a clear
+  --- message if lcurses cannot be loaded, so callers can fall back to
+  --- `--ui plain` rather than seeing an opaque module-load failure.
+  local function ensure_init(self)
+    if self._initialised then return end
+    local ok, reason = self._backend:init()
+    if not ok then
+      error("cli/drivers/curses: " .. tostring(reason)
+            .. " — install lcurses or use --ui plain", 2)
+    end
+    self._initialised = true
   end
 
-  function driver:prompt(_choices)
-    error(NOT_IMPLEMENTED, 2)
+  function driver:render(scene_output)
+    ensure_init(self)
+    scene_output = scene_output or {}
+    self._backend:append_narration(scene_output.narration)
+    -- Paint without an active choice prompt; the engine will follow up
+    -- with `prompt()` if it wants input. This pre-paint guarantees the
+    -- player sees the latest scene even when the game ends mid-turn
+    -- (engine calls render with empty choices for ending narration).
+    self._backend:paint(scene_output.choices, false)
+  end
+
+  function driver:prompt(choices)
+    ensure_init(self)
+    self._backend:paint(choices, true)
+    return self._backend:read_choice(#(choices or {}))
   end
 
   function driver:notify(_event, _data)
-    -- The kernel (§M1) will be the source of live events. Until then,
-    -- pull-mode hosts may call notify; the scaffold tolerates it.
+    -- Pull-mode driver: live events arrive via the kernel only once the
+    -- §M3 screen-model split rewires the dispatch path. Until then this
+    -- is a no-op so callers can fire events without consequence.
   end
 
   function driver:attach(kernel)
+    -- The kernel exists (§M1); §M3 will wire subscriptions for the
+    -- reactive widgets. For M2 we just store the handle so the kernel
+    -- can be reached when the driver is asked to do something richer
+    -- than render+prompt.
     self._kernel = kernel
-    -- §M1 wiring: subscribe to kernel events, request initial full
-    -- paint via kernel:get_state_all() / kernel:get_scene().
   end
 
   function driver:tick(_dt)
-    -- §8.4 frame loop: read pending key, advance animations, flush
-    -- dirty regions. No-op until the screen model lands (§M3).
+    -- §8.4 frame loop ticks live at §M3 once the screen model lands.
   end
 
   function driver:detach()
     self._kernel = nil
     if self._backend and self._backend.close then
-      self._backend:close()
+      pcall(function() self._backend:close() end)
     end
-    self._backend = nil
+    self._initialised = false
   end
 
   return driver
