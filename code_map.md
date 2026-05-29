@@ -1112,8 +1112,9 @@ Standalone Lua scripts demonstrating the StoryBase embedding API. Run from the r
 | `examples/bounded_interop_game.sb` | Merchant/courier game: `UList(String)` ledger, `bounded` reputation handler, entity family with `max:`, `advance-season`, `hire-courier`, `complete-contract` |
 | `examples/bounded_lua_interop.lua` | Comprehensive embedding API walkthrough: `sb.load`, `game:init`, `game:register_bounded`, `game:on("mutation")`, `game:call`, `game:get`, `game:find`, `game:eval`, `game:counterfactual`, `game:save`/`game:load`, `game:docs`; all UList and UMap builtins exercised |
 | `examples/demo31_host.lua` | §I6 embedded-host walkthrough. Pairs with `demos/demo31_embedded_host.sb`. Subscribes via `game:on(<emit-event>, …)` to all six `engine/emit` kinds the game declares (`door-opened`, `signal-sent`, `ship-spotted`, `ship-saved`, `storm-began`, `night-ended`), drives the scene loop with `game:render` + `game:pick`, mixes in direct `game:call` mutations and a `game:tick` to fire the scheduler, and round-trips state through `game:save` + fresh `sb.load` + `game:load`. Acceptance: every emit kind lands in a handler at least once before the script exits; speaker attribution (display + color) prints for both declared speakers. |
+| `examples/curses_smoketest.lua` | Standalone lcurses capability test. Not linked to engine or any UI driver. Initialises curses (cbreak, noecho, hidden cursor), opens four sub-windows (title / instructions / scrolling key log / status bar), enables color pairs when available, runs a ~20fps non-blocking frame loop via `stdscr:timeout(50)`, decodes keys via `keyname()`, and reports each press in the scrolling log + status line. `q` or ESC quits; terminal is restored under any exit path via `xpcall` + `endwin`. Pre-flight for the ui_idea.md §M2 curses driver work. |
 
-Run: `lua5.4 examples/bounded_lua_interop.lua` or `lua5.4 examples/demo31_host.lua`
+Run: `lua5.4 examples/bounded_lua_interop.lua` or `lua5.4 examples/demo31_host.lua` or `lua5.4 examples/curses_smoketest.lua` (interactive)
 
 ---
 
