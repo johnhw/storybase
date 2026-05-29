@@ -82,6 +82,16 @@ Options (run):
                               output JSON to stdout, save full state, then exit
   --reset                     (--cli only) Wipe save file and start fresh
 
+Options (--ui curses headless testing/automation):
+  --ui-backend <name>         Driver backend override: "ncurses" (default) or
+                              "buffer" (in-memory grid, no TTY). Ignored by other UIs.
+  --ui-keys <string>          Pre-script the buffer backend's key queue: each
+                              character is one keypress. e.g. --ui-keys "12q".
+  --ui-rows N                 Buffer-backend rows (default 24). Ignored by ncurses.
+  --ui-cols N                 Buffer-backend cols (default 80). Ignored by ncurses.
+  --ui-snapshot <path>        After the run exits, write the final buffer-backend
+                              snapshot to <path>. Only meaningful with --ui-backend buffer.
+
 ]])
 end
 
@@ -354,7 +364,20 @@ local function cmd_run(args)
                     .. "': " .. tostring(drv_mod) .. "\n")
     return 1
   end
-  local driver = drv_mod.new({ io_out = io.stdout, io_in = io_in })
+  -- Build driver opts. Drivers that don't recognise a field (plain/ansi
+  -- vs. backend/keys/rows/cols) just ignore it, so a single shared opts
+  -- table is safe.
+  local driver_opts = { io_out = io.stdout, io_in = io_in }
+  if flags["ui-backend"] then driver_opts.backend = flags["ui-backend"] end
+  if flags["ui-rows"] then driver_opts.rows = tonumber(flags["ui-rows"]) end
+  if flags["ui-cols"] then driver_opts.cols = tonumber(flags["ui-cols"]) end
+  if flags["ui-keys"] then
+    local s = flags["ui-keys"]
+    local ks = {}
+    for i = 1, #s do ks[i] = s:byte(i) end
+    driver_opts.keys = ks
+  end
+  local driver = drv_mod.new(driver_opts)
 
   if flags["bind"] then config.set_cli("network.bind", flags["bind"]) end
 
@@ -371,7 +394,28 @@ local function cmd_run(args)
     driver      = driver,
   }
 
-  return engine.run(game_table, opts) or 0
+  local rc = engine.run(game_table, opts) or 0
+
+  -- --ui-snapshot <path>: dump the final buffer-backend grid to disk so
+  -- CLI integration tests can assert on the rendered output. Silently
+  -- skipped when the driver has no buffer backend handle (plain/ansi or
+  -- the ncurses backend).
+  if flags["ui-snapshot"] and driver._backend_handle then
+    local backend = driver:_backend_handle()
+    if backend and backend.snapshot then
+      local f, ferr = io.open(flags["ui-snapshot"], "w")
+      if not f then
+        io.stderr:write("error: --ui-snapshot: cannot open '"
+                        .. tostring(flags["ui-snapshot"]) .. "': "
+                        .. tostring(ferr) .. "\n")
+        return rc ~= 0 and rc or 1
+      end
+      f:write(backend:snapshot())
+      f:close()
+    end
+  end
+
+  return rc
 end
 
 -- ── Command: verify ───────────────────────────────────────────
@@ -569,6 +613,13 @@ storybase run [options] <file>
     --steps N      Auto-play for at most N turns (implies --auto)
     --ui <name>    UI driver: plain (default), ansi (ANSI colour), or
                    curses (ncurses full-screen TUI)
+
+  Headless testing/automation for --ui curses (see `storybase help` for full list):
+    --ui-backend <name>      "ncurses" (default) or "buffer" (in-memory grid)
+    --ui-keys <string>       Scripted keys for the buffer backend
+    --ui-rows N              Buffer-backend rows (default 24)
+    --ui-cols N              Buffer-backend cols (default 80)
+    --ui-snapshot <path>     Dump final buffer-backend grid to <path>
 ]],
   ["verify"] = [[
 storybase verify <file> [--no-cache] [--clear-cache] [--cache-dir DIR]

@@ -6,6 +6,23 @@ Completed work has been moved to [completed.md](completed.md).
 
 ## Current Status (2026-05-29)
 
+Curses test-harness step landed 2026-05-29 (between §M3 and §M5):
+`cli/main.lua` gained `--ui-backend <name>` / `--ui-keys <string>` /
+`--ui-rows N` / `--ui-cols N` / `--ui-snapshot <path>` flags so the
+buffer-backed curses driver can be driven end-to-end through the real
+CLI entry point. The ncurses stub `fake_curses` was extracted from
+`tests/ui/curses_driver_spec.lua` to `tests/ui/helpers/fake_curses.lua`
+so §M5+ widget specs can share it. Four new CLI integration cases in
+`tests/cli/drivers_spec.lua` cover scripted-key playthrough, exhaustion
+quit, and pass-through ignore on plain. The five remaining deferred
+harness ideas (session DSL, buffer frame history, kernel↔driver fixture,
+`paint.diff` property test, resize integration test) are recorded in
+`ui_idea.md` §9.1 — they pay off at §M5 and were intentionally left
+unimplemented until a widget needs them. **+4 tests in
+`tests/cli/drivers_spec.lua` (35 → 39); no test-count change in
+`tests/ui/curses_driver_spec.lua` since the `fake_curses` extraction is
+mechanical. Pre-HTTP-flicker total: 3322 → 3326.**
+
 UI driver folder restructure landed 2026-05-29: each driver now lives
 under `cli/drivers/<name>/init.lua`, with the protocol contract in
 `cli/drivers/driver.lua` and a `curses/` scaffold per ui_idea.md §M2.

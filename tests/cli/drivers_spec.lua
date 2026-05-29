@@ -335,6 +335,119 @@ scene start:
   end)
 end)
 
+-- ── --ui curses + --ui-backend buffer: end-to-end CLI plumbing ───────────────
+--
+-- These exercise the CLI entry point with the headless buffer backend so
+-- a regression in cli/main.lua's --ui-* plumbing fails fast. The full
+-- paint behaviour is still covered in tests/ui/curses_driver_spec.lua.
+
+describe("--ui curses + --ui-backend buffer", function()
+  local cli = require("cli.main")
+
+  -- Two-scene game so a scripted "1" key actually advances state.
+  local src = [[
+module ui-curses-buffer-test
+  version: 1.0
+engine-config:
+  entry-scene: start
+scene start:
+  Welcome here.
+  * Onwards
+    -> later
+scene later:
+  You are at the end.
+  * Stay
+    -> later
+]]
+
+  local game_path, snap_path
+  before_each(function()
+    game_path = os.tmpname() .. ".sb"
+    snap_path = os.tmpname() .. ".snap.txt"
+    local f = assert(io.open(game_path, "w")); f:write(src); f:close()
+  end)
+  after_each(function()
+    if game_path then os.remove(game_path) end
+    if snap_path then os.remove(snap_path) end
+  end)
+
+  -- Run cli.main with captured stderr; returns exit_code, err_str.
+  local function run_with(argv)
+    local err_parts = {}
+    local old_err = io.stderr
+    io.stderr = setmetatable({}, {
+      __index = {
+        write = function(_, ...)
+          for _, s in ipairs({...}) do err_parts[#err_parts + 1] = tostring(s) end
+        end,
+        flush = function() end,
+      }
+    })
+    local ok, rc = pcall(cli.main, argv)
+    io.stderr = old_err
+    if not ok then error(rc, 2) end
+    return rc or 0, table.concat(err_parts)
+  end
+
+  local function read_file(path)
+    local f = assert(io.open(path, "r"))
+    local s = f:read("*a"); f:close()
+    return s
+  end
+
+  it("plays through with scripted keys and writes a final snapshot", function()
+    -- "1" → advance to `next` scene; "q" → quit. Snapshot the final frame.
+    local rc, err = run_with({
+      "run", game_path,
+      "--ui", "curses", "--ui-backend", "buffer",
+      "--ui-rows", "10", "--ui-cols", "40",
+      "--ui-keys", "1q",
+      "--ui-snapshot", snap_path,
+    })
+    assert.equal(0, rc, "stderr: " .. err)
+    local snap = read_file(snap_path)
+    assert.is_truthy(snap:find("You are at the end"),
+      "final scene narration should appear in snapshot:\n" .. snap)
+    assert.is_truthy(snap:find("Choice %(1%-1, q to quit%):"),
+      "prompt should appear in snapshot:\n" .. snap)
+  end)
+
+  it("quits cleanly when --ui-keys exhausts before the game ends", function()
+    -- No keys at all: first read_key returns nil, driver returns nil from
+    -- prompt, engine treats that as a quit. Exit 0.
+    local rc, err = run_with({
+      "run", game_path,
+      "--ui", "curses", "--ui-backend", "buffer",
+      "--ui-snapshot", snap_path,
+    })
+    assert.equal(0, rc, "stderr: " .. err)
+    local snap = read_file(snap_path)
+    assert.is_truthy(snap:find("Welcome here"), snap)
+  end)
+
+  it("plain driver ignores --ui-backend/--ui-keys without error", function()
+    local rc, err = run_with({
+      "run", game_path,
+      "--ui", "plain", "--auto", "--steps", "0",
+      "--ui-backend", "buffer", "--ui-keys", "1",
+    })
+    assert.equal(0, rc, "stderr: " .. err)
+  end)
+
+  it("--ui-snapshot is a silent no-op on plain (no buffer handle)", function()
+    -- The driver has no _backend_handle, so no file is created. The
+    -- run still succeeds.
+    local rc, err = run_with({
+      "run", game_path,
+      "--ui", "plain", "--auto", "--steps", "0",
+      "--ui-snapshot", snap_path,
+    })
+    assert.equal(0, rc, "stderr: " .. err)
+    local f = io.open(snap_path, "r")
+    assert.is_nil(f, "snapshot path should not exist when driver has no buffer handle")
+  end)
+end)
+
 -- ── driver protocol contract ──────────────────────────────────────────────────
 
 describe("driver.is_driver", function()

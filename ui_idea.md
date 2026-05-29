@@ -382,6 +382,67 @@ and are diffed cell-by-cell. Updating a snapshot is one command.
 Acceptance criterion: every curses widget has at least one
 buffer-backend test. The CI matrix never invokes ncurses.
 
+### 9.1 Deferred test-harness improvements
+
+The §M3 baseline (buffer backend + `snapshot()` + `script_keys()` +
+golden files + the ncurses stub in driver tests + the lazy-init
+contract) covers the static cases — render one frame, prompt for one
+key, snapshot once. As widgets, kernel-driven events, and resize
+land at §M5+, four classes of test stop being expressible against the
+current surface. Each item below is scoped so it can ship just in time
+for the milestone that first needs it.
+
+1. **Session DSL (`tests/ui/helpers/driver_session.lua`).** Every spec
+   today re-glues `script_keys → render → prompt → snapshot`. A small
+   helper:
+   ```lua
+   local s = session.new({ rows = 10, cols = 40 })
+   s:render(scene_out); s:choose("2")
+   assert.equal(golden, s:snapshot())
+   ```
+   pays off the moment two specs share a flow. Lift on first reuse —
+   probably during §M5's stat-bar tests.
+
+2. **Frame history on `backend_buffer`.** §M5's acceptance criterion is
+   literally "a mutation on the bound path repaints *only* the
+   stat-bar window" — a *before/after* assertion. Today `snapshot()`
+   only sees the latest frame; you cannot say "frame N-1 had `7/10`,
+   frame N has `6/10`, dirty rects between them were just the bar
+   window." Add an opt-in `frame_history = true` flag on
+   `backend_buffer.new`; each `flush()` then pushes a snapshot and a
+   rects record onto `_history`, surfaced via
+   `backend:snapshot_history()` / `backend:dirty_history()`. Keep it
+   opt-in so the default test path stays cheap.
+
+3. **Kernel↔driver integration fixture.** `tests/ui/kernel_spec.lua`
+   covers the kernel; `tests/ui/curses_driver_spec.lua` covers the
+   driver in isolation. Their seam (the `attach(kernel)` reactive
+   path) has no test. Build a small fixture under
+   `tests/ui/integration/` that boots a real kernel, attaches a
+   buffer-backed curses driver, emits a scripted event sequence, and
+   asserts the resulting snapshot + dirty-rect log. §M5 widgets need
+   this anyway; writing the harness first gives them a target.
+
+4. **`paint.diff` property test.** ~15 lines of busted: pick random
+   `prev` and `cur` grids of bounded size, assert that applying
+   `paint_mod.diff(scr)` rects onto `prev` reproduces `cur`. Catches
+   off-by-one bugs in run boundaries — the failure mode that gets more
+   likely as M5+ widgets start hammering the diff with non-rectangular
+   updates. Cheap and worth landing before the diff gets exercised by
+   more callers.
+
+5. **Resize integration test.** `screen:invalidate()` is covered in
+   isolation (`tests/ui/curses_screen_spec.lua` ~line 172) but the
+   integration path is not: "render at 24×80, simulate resize to
+   30×100, re-init the screen, next frame is a full repaint to the
+   backend." Worth adding before M5 because resize is the easiest way
+   to silently regress dirty-rect logic.
+
+Ordering: (1) and (2) are M5 prerequisites. (3) is the M5 acceptance
+harness. (4) and (5) are insurance and can wait until either bites.
+All five are headless and stay inside the `tests/ui/` boundary; none
+of them justify invoking real ncurses in CI.
+
 ---
 
 ## 10. Milestone sequence
