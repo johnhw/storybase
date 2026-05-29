@@ -13,6 +13,18 @@ plain/ansi gained no-op `attach`/`tick`/`detach` lifecycle stubs so
 they structurally conform to the full spec; the kernel (§M1) that will
 drive them is still to be written. See "UI driver track" below.
 
+§M0 (event-surface audit) landed 2026-05-29:
+`docs/explanation/ui_event_audit.md` inventories every emit/subscribe
+site across `runtime/debug.lua`, `engine.lua`, `eval.lua`,
+`actors.lua`, `state.lua`, `scheduler.lua`, and `lib/storybase.lua`;
+diffs the inventory against `ui_idea.md` §3.1 (removes `say` /
+`narration`, adds `breakpoint-hit` / `reload`, flags payload-key
+renames `fn-call.name`, `message-sent.actor`, `schedule-fired.name`,
+marks `choice-made` as kernel-synthesised); and adopts the
+single-owner kernel ownership model with a concrete migration sketch
+for §M1. Open questions parked: clamp-vs-mutation ordering inside
+`state.lua`, custom-event namespacing, mutation coalescing.
+
 ## Current Status (2026-05-25)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -37,20 +49,19 @@ fragility items) shipped 2026-05-25.
 
 ## What to work on next
 
-**UI driver track (ui_idea.md):**
-- §M0 — audit and unify event surfaces in `runtime/debug.lua`,
-  `runtime/engine.lua`, `runtime/actors.lua`, `runtime/state.lua`,
-  `lib/storybase.lua`. Confirm/extend the §3.1 event list. Prerequisite
-  for the kernel.
-- §M1 — `ui/kernel.lua`: subscription registry, state cache, display
-  formatter, adapter shims. Once this lands the existing
-  `attach`/`tick`/`detach` stubs in plain/ansi/curses become real
-  hook-points.
-- §M2 — curses hello-world: replace the not-yet-implemented errors in
-  `cli/drivers/curses/init.lua` with a working ncurses render of
-  narration + numbered choices. Add `curses` to the `cli.ui` enum and
-  flip the guard test in `tests/cli/drivers_spec.lua`.
-- §M3+ — screen model, buffer backend, widgets per ui_idea.md §M3–§M9.
+**UI driver track (see ui_idea.md §10 for full details):**
+1. §M0 — audit and unify event surfaces. **[DONE 2026-05-29]** —
+   see `docs/explanation/ui_event_audit.md`.
+2. §M1 — presentation kernel (`ui/kernel.lua`). Driven by the migration
+   sketch in `ui_event_audit.md` §4.1.
+3. §M2 — curses hello-world.
+4. §M3 — screen model + buffer backend split.
+5. §M4 — author bindings (parser + schema).
+6. §M5 — first reactive widget: stat-bar.
+7. §M6 — view stack + modal dialog.
+8. §M7 — menu + input widgets.
+9. §M8 — inventory and remaining standard widgets.
+10. §M9 — demo + author docs.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).

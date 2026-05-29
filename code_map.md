@@ -865,7 +865,7 @@ equality are dropped from running state, so a fresh divergence will be re-report
 - Per-subcommand help: `storybase help <subcommand>` shows detailed usage
 
 ### `cli/drivers/` — UI driver registry
-Each driver lives in its own subfolder loaded as `cli.drivers.<name>`. Contract lives in `driver.lua`; spec in `ui_idea.md` §3 / §8.
+Each driver lives in its own subfolder loaded as `cli.drivers.<name>`. Contract lives in `driver.lua`; spec in `ui_idea.md` §3 / §8. Event-surface audit (§M0 prerequisite for the §M1 kernel) is in `docs/explanation/ui_event_audit.md`.
 
 ### `cli/drivers/driver.lua`
 Driver protocol contract. Documents the required methods (`render`, `prompt`, `notify`, `attach`, `tick`, `detach`) and which are operational today (`render`/`prompt`/`notify` — engine pull-mode) vs scaffolded for the §M1 kernel (`attach`/`tick`/`detach`). Exports `M.REQUIRED_METHODS` and `M.is_driver(d) -> ok, missing?` for duck-typing checks.
