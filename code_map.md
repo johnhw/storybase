@@ -860,15 +860,24 @@ equality are dropped from running state, so a fresh divergence will be re-report
 - `--auto` / `--steps N`: non-interactive run mode; fake `io_in` always returns "1"; `--steps N` limits turns
 - `--debug`: starts debug TCP server (port 7373) + HTTP UI server (port 7374); game runs via stdin; browser panels read-only
 - `--serve`: starts HTTP UI server only (port 7374); no stdin loop; browser drives game via `do-choice`; `_serve_mode=true`
-- `--ui <name>`: load `cli/drivers/<name>.lua` and pass as `driver` in engine opts (default: `plain`)
+- `--ui <name>`: resolve `cli.drivers.<name>` (loads `cli/drivers/<name>/init.lua`) and pass the instance as `driver` in engine opts (default: `plain`). Enum-validated against `cli.ui` to block path traversal.
 - `print_diags(diags, source_map?)` prints errors with source-context lines + caret indicator
 - Per-subcommand help: `storybase help <subcommand>` shows detailed usage
 
-### `cli/drivers/plain.lua`
-Plain-text UI driver (default). Renders narration as `"Speaker: text"` or bare text; numbered choice prompt; reads from stdin. Implements `{render, prompt, notify}`.
+### `cli/drivers/` — UI driver registry
+Each driver lives in its own subfolder loaded as `cli.drivers.<name>`. Contract lives in `driver.lua`; spec in `ui_idea.md` §3 / §8.
 
-### `cli/drivers/ansi.lua`
-ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true-color (`\27[38;2;R;G;Bm`) to speaker labels using their `color:` hex field; bold choice indices; dim prompt text.
+### `cli/drivers/driver.lua`
+Driver protocol contract. Documents the required methods (`render`, `prompt`, `notify`, `attach`, `tick`, `detach`) and which are operational today (`render`/`prompt`/`notify` — engine pull-mode) vs scaffolded for the §M1 kernel (`attach`/`tick`/`detach`). Exports `M.REQUIRED_METHODS` and `M.is_driver(d) -> ok, missing?` for duck-typing checks.
+
+### `cli/drivers/plain/init.lua`
+Plain-text UI driver (default). Renders narration as `"Speaker: text"` or bare text; numbered choice prompt; reads from stdin. Implements the full contract; lifecycle methods are no-op stubs.
+
+### `cli/drivers/ansi/init.lua`
+ANSI-color UI driver (`--ui ansi`). Same interface as `plain`; applies ANSI true-color (`\27[38;2;R;G;Bm`) to speaker labels using their `color:` hex field; bold choice indices; dim prompt text. Lifecycle methods are no-op stubs.
+
+### `cli/drivers/curses/init.lua`
+Curses driver scaffold (ui_idea.md §M2). Structurally conforms to `driver.lua` so it satisfies `is_driver()`; `render`/`prompt` raise "not yet implemented" so accidental wiring fails loudly. Intentionally NOT in the `cli.ui` enum yet — guarded by a test. Future files per ui_idea.md §8.3 (`screen.lua`, `backend_curses.lua`, `backend_buffer.lua`, `layout.lua`, `focus.lua`, `paint.lua`, `view_stack.lua`, `widgets/*`) land here.
 
 ### `cli/check_cmd.lua` (135 lines)
 - `M.run(args)` — run lexer → parser → checker (no codegen); print errors/warnings with source context
@@ -1059,7 +1068,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/cli/lsp_spec.lua` | LSP server unit tests: build_syms (types/states/fns/actors/docs), word_at (word extraction, paths, hyphens), make_lsp_diags (severity, positions), integration with real parse+check (43 tests) |
 | `tests/cli/cli_cmd_spec.lua` | `--cli` single-step mode: fresh start, state persistence, reset, quit, error handling, game completion, checkpoint+undo (demo08), state fields, subprocess integration (35 tests) |
 | `tests/cli/serve_api_spec.lua` | §G2 `storybase serve-api`: handle_step kernel (fresh start, choice advance, JSON round-trip determinism, invalid choice, malformed body), HTTP lifecycle (start/stop), GET / and /schema, OPTIONS preflight, POST /step and /reset end-to-end (22 tests) |
-| `tests/cli/drivers_spec.lua` | UI drivers: plain render/prompt/notify, ansi color escapes, --ui driver injection via engine.new (18 tests) |
+| `tests/cli/drivers_spec.lua` | UI drivers: plain render/prompt/notify, ansi color escapes, --ui driver injection via engine.new, driver.is_driver contract, plain/ansi/curses lifecycle stubs, curses scaffold error path, --ui curses guard (36 tests) |
 | `tests/runtime/scheduler_spec.lua` | Scheduler unit tests: every:/at:/offset: triggers, cancel, deregister, multi-axis at:/every:, cancel-during-tick, end-to-end pipeline (22 tests) |
 | `tests/runtime/generate_spec.lua` | §F1 generate at runtime: body runs during eng:init, seed_path reseeds RNG, declaration-order execution, spawn! populates families, save/load determinism via state.replay (6 tests) |
 | `tests/runtime/ending_spec.lua` | §F2 ending at runtime: check_ending nil/first-match, _render_ending narration, eng:step termination (post-action + pre-prompt), auto-verify pass/fail round-trip via verify.run_all (9 tests) |

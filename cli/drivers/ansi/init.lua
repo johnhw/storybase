@@ -1,9 +1,11 @@
--- cli/drivers/ansi.lua
+-- cli/drivers/ansi/init.lua
 -- ANSI-color UI driver for storybase.
 --
+-- Implements the driver protocol declared in `cli/drivers/driver.lua`.
 -- Uses ANSI true-color (24-bit) escape codes for speaker labels when a
 -- `color:` is declared on the speaker.  Falls back to bold for undeclared
 -- speakers.  Choice indices are printed in bold; narration is plain.
+-- Operates in pull-mode like `plain`; lifecycle methods are no-op stubs.
 --
 -- Activate with:  storybase run game.sb --ui ansi
 
@@ -72,6 +74,13 @@ function M.new(opts)
 
   function driver:notify(_event, _data)
   end
+
+  -- Lifecycle stubs (see cli/drivers/driver.lua and ui_idea.md §3.4).
+  -- ANSI driver is synchronous-pull; no kernel subscription, no
+  -- animation frames, no surface to release.
+  function driver:attach(_kernel) end
+  function driver:tick(_dt) end
+  function driver:detach() end
 
   return driver
 end

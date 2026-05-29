@@ -1,10 +1,10 @@
--- cli/drivers/plain.lua
+-- cli/drivers/plain/init.lua
 -- Plain-text UI driver for storybase.
 --
--- Interface (all drivers must implement):
---   driver:render(scene_output)  -- scene_output = {narration, choices}
---   driver:prompt(choices)       -- returns integer index, or nil to quit
---   driver:notify(event, data)   -- optional live events; no-op here
+-- Implements the driver protocol declared in `cli/drivers/driver.lua`.
+-- Operates in pull-mode (render+prompt). Lifecycle methods
+-- (attach/tick/detach) are no-op stubs reserved for the future
+-- kernel-driven dispatch path (ui_idea.md §M1).
 
 local M = {}
 
@@ -53,6 +53,13 @@ function M.new(opts)
 
   function driver:notify(_event, _data)
   end
+
+  -- Lifecycle stubs (see cli/drivers/driver.lua and ui_idea.md §3.4).
+  -- Plain driver is synchronous-pull; no kernel subscription, no
+  -- animation frames, no surface to release.
+  function driver:attach(_kernel) end
+  function driver:tick(_dt) end
+  function driver:detach() end
 
   return driver
 end

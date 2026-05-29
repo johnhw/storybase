@@ -4,6 +4,15 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
+## Current Status (2026-05-29)
+
+UI driver folder restructure landed 2026-05-29: each driver now lives
+under `cli/drivers/<name>/init.lua`, with the protocol contract in
+`cli/drivers/driver.lua` and a `curses/` scaffold per ui_idea.md §M2.
+plain/ansi gained no-op `attach`/`tick`/`detach` lifecycle stubs so
+they structurally conform to the full spec; the kernel (§M1) that will
+drive them is still to be written. See "UI driver track" below.
+
 ## Current Status (2026-05-25)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -27,6 +36,21 @@ fragility items) shipped 2026-05-25.
 ---
 
 ## What to work on next
+
+**UI driver track (ui_idea.md):**
+- §M0 — audit and unify event surfaces in `runtime/debug.lua`,
+  `runtime/engine.lua`, `runtime/actors.lua`, `runtime/state.lua`,
+  `lib/storybase.lua`. Confirm/extend the §3.1 event list. Prerequisite
+  for the kernel.
+- §M1 — `ui/kernel.lua`: subscription registry, state cache, display
+  formatter, adapter shims. Once this lands the existing
+  `attach`/`tick`/`detach` stubs in plain/ansi/curses become real
+  hook-points.
+- §M2 — curses hello-world: replace the not-yet-implemented errors in
+  `cli/drivers/curses/init.lua` with a working ncurses render of
+  narration + numbered choices. Add `curses` to the `cli.ui` enum and
+  flip the guard test in `tests/cli/drivers_spec.lua`.
+- §M3+ — screen model, buffer backend, widgets per ui_idea.md §M3–§M9.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).

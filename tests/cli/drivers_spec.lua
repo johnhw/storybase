@@ -1,8 +1,10 @@
 -- tests/cli/drivers_spec.lua
--- Unit tests for cli/drivers/plain.lua and cli/drivers/ansi.lua.
+-- Unit tests for cli/drivers/{plain,ansi,curses,driver}.
 
-local plain_mod = require("cli.drivers.plain")
-local ansi_mod  = require("cli.drivers.ansi")
+local plain_mod  = require("cli.drivers.plain")
+local ansi_mod   = require("cli.drivers.ansi")
+local curses_mod = require("cli.drivers.curses")
+local driver_mod = require("cli.drivers.driver")
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -318,4 +320,100 @@ scene start:
     local rc, err = run_with({"run", game_path, "--ui", "ansi", "--auto", "--steps", "0"})
     assert.equal(0, rc, "stderr: " .. err)
   end)
+
+  -- curses is intentionally NOT in the enum yet: the scaffold raises
+  -- on render/prompt (see ui_idea.md §M2). Keep this guard until the
+  -- functional curses driver lands.
+  it("rejects `curses' until the M2 implementation lands", function()
+    local rc, err = run_with({"run", game_path, "--ui", "curses", "--auto", "--steps", "0"})
+    assert.equal(1, rc)
+    assert.is_truthy(err:find("unknown UI driver"), err)
+  end)
 end)
+
+-- ── driver protocol contract ──────────────────────────────────────────────────
+
+describe("driver.is_driver", function()
+  it("rejects non-tables", function()
+    local ok, why = driver_mod.is_driver(nil); assert.is_false(ok); assert.is_string(why)
+    ok, why = driver_mod.is_driver("plain");   assert.is_false(ok); assert.is_string(why)
+  end)
+
+  it("reports the first missing method by name", function()
+    local incomplete = { render = function() end, prompt = function() end }
+    local ok, missing = driver_mod.is_driver(incomplete)
+    assert.is_false(ok)
+    assert.equal("notify", missing)
+  end)
+
+  it("accepts plain driver instances", function()
+    local d = plain_mod.new()
+    assert.is_true(driver_mod.is_driver(d))
+  end)
+
+  it("accepts ansi driver instances", function()
+    local d = ansi_mod.new()
+    assert.is_true(driver_mod.is_driver(d))
+  end)
+
+  it("accepts the curses scaffold (structural conformance)", function()
+    local d = curses_mod.new()
+    assert.is_true(driver_mod.is_driver(d))
+  end)
+end)
+
+describe("plain/ansi lifecycle stubs", function()
+  it("plain driver attach/tick/detach are callable no-ops", function()
+    local d = plain_mod.new()
+    assert.has_no_errors(function() d:attach({}) end)
+    assert.has_no_errors(function() d:tick(0.016) end)
+    assert.has_no_errors(function() d:detach() end)
+  end)
+
+  it("ansi driver attach/tick/detach are callable no-ops", function()
+    local d = ansi_mod.new()
+    assert.has_no_errors(function() d:attach({}) end)
+    assert.has_no_errors(function() d:tick(0.016) end)
+    assert.has_no_errors(function() d:detach() end)
+  end)
+end)
+
+-- ── curses scaffold ───────────────────────────────────────────────────────────
+
+describe("curses driver scaffold", function()
+  it("M.new returns a contract-conformant driver", function()
+    local d = curses_mod.new()
+    assert.is_table(d)
+    assert.is_true(driver_mod.is_driver(d))
+  end)
+
+  it("render raises a clear not-yet-implemented error", function()
+    local d = curses_mod.new()
+    local ok, err = pcall(function() d:render({}) end)
+    assert.is_false(ok)
+    assert.is_truthy(tostring(err):find("not yet implemented"), tostring(err))
+  end)
+
+  it("prompt raises a clear not-yet-implemented error", function()
+    local d = curses_mod.new()
+    local ok, err = pcall(function() d:prompt({}) end)
+    assert.is_false(ok)
+    assert.is_truthy(tostring(err):find("not yet implemented"), tostring(err))
+  end)
+
+  it("attach stores the kernel; detach clears it", function()
+    local d = curses_mod.new()
+    local fake_kernel = { _name = "k" }
+    d:attach(fake_kernel)
+    assert.equal(fake_kernel, d._kernel)
+    d:detach()
+    assert.is_nil(d._kernel)
+  end)
+
+  it("notify and tick are no-op safe", function()
+    local d = curses_mod.new()
+    assert.has_no_errors(function() d:notify("scene-change", {}) end)
+    assert.has_no_errors(function() d:tick(0.016) end)
+  end)
+end)
+
