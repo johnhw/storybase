@@ -276,6 +276,39 @@ state npcs/{npc}: Npc  max: 20
 
 `max: N` bounds the number of simultaneously live instances. `{npc}` is auto-typed as `SymbolOf(npcs)`.
 
+**UI binding (optional):**
+
+A `state` declaration may carry a trailing `ui:` block declaring how a UI driver should present this path. The engine itself ignores the block — it is consumed by the [UI driver layer](../../ui_idea.md).
+
+```
+state player/hp: Int(0, 100) = 100
+  ui:
+    kind:        stat-bar
+    label:       "Health"
+    color-good:  "#4ade80"
+    color-bad:   "#ef4444"
+```
+
+The block is a flat `key: value` map. Values may be strings, integers, floats, bools, or identifiers (treated as bare symbols). The map is emitted into `game_table.schema.states[*].ui` for drivers to consume. The same block is permitted on scalar, family, and record state decls.
+
+In production builds (`opts.production = true`), `ui` blocks and `ui-panel` decls (below) are stripped from the emitted game table unless the author opts in via `engine-config: ui-runtime: true`.
+
+### `ui-panel`
+
+A top-level decl describing a composition of widgets bound to state paths and fns. Emitted into `game_table.ui_panels`. Drivers interpret the panel layout into their native surface; the engine ignores it.
+
+```
+ui-panel status:
+  layout:   vstack
+  position: top
+  children:
+    - stat-bar player/hp
+    - stat-bar player/mana
+    - text "Gold: {player/gold}"
+```
+
+Top-level keys (`layout`, `position`, etc.) accept the same value vocabulary as `ui:` blocks. The `children:` key takes an indented list of widget references, one per line. Each child line has the form `<kind> [<arg>]`, optionally prefixed by `-` (the leading dash is purely cosmetic). The `<arg>` may be a path (e.g. `player/hp`), a string, an integer, or an identifier. See `ui_idea.md` §5.3 for the widget-kind vocabulary.
+
 ### `relation`
 
 ```

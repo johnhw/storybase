@@ -6,6 +6,25 @@ Completed work has been moved to [completed.md](completed.md).
 
 ## Current Status (2026-05-29)
 
+§M4 (author UI bindings: parser + schema) landed 2026-05-29:
+The compiler now accepts a trailing `ui:` block on `state` decls (scalar +
+family + record) and a top-level `ui-panel <name>:` decl. AST additions:
+`ast.K.UI_PANEL_DECL` plus `ast.ui_panel_decl(...)`; state nodes gain an
+optional `.ui = {fields = {...}}` field set during parsing. Codegen
+flattens `node.ui` into `game_table.schema.states[*].ui` as a flat
+`key → value` map, and collects `UI_PANEL_DECL` nodes into
+`game_table.ui_panels` via the new `emit_ui_panels`. Production strip:
+when `opts.production = true`, both `state.ui` and `ui_panels` are
+dropped unless the author opts in via `engine-config: ui-runtime: true`.
+Tests at `tests/compiler/ui_bindings_spec.lua` (20 cases) cover parse,
+codegen flatten, scalar + family attachment, panel children with and
+without the leading `-` bullet, multiple panels, doc-string carry-over,
+production strip, ui-runtime opt-in, ui-runtime: false strip,
+non-interference with existing scalar / inline-record state-decl
+semantics, and `game_table.ui_panels = {}` baseline. **Total:
+3362/0/2.** Driver consumption of the new schema lands at §M5
+(stat-bar widget); §M4 is compiler-only.
+
 Curses test-harness step landed 2026-05-29 (between §M3 and §M5):
 `cli/main.lua` gained `--ui-backend <name>` / `--ui-keys <string>` /
 `--ui-rows N` / `--ui-cols N` / `--ui-snapshot <path>` flags so the
@@ -146,7 +165,12 @@ fragility items) shipped 2026-05-25.
    subscribe/notify path was deferred to §M5 (the first reactive
    widget); pull-mode `render`/`prompt` remains the dispatch path for
    the curses driver until then.
-5. §M4 — author bindings (parser + schema).
+5. §M4 — author bindings (parser + schema). **[DONE 2026-05-29]** —
+   `ui:` trailing block on state decls + `ui-panel` top-level decl;
+   emitted into `game_table.schema.states[*].ui` and
+   `game_table.ui_panels`. Stripped under `--production` unless
+   `engine-config: ui-runtime: true`. See
+   `tests/compiler/ui_bindings_spec.lua`.
 6. §M5 — first reactive widget: stat-bar.
 7. §M6 — view stack + modal dialog.
 8. §M7 — menu + input widgets.

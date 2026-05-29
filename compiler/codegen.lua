@@ -514,6 +514,54 @@ local function collect_type_record_fields(type_name, decls_by_name, visited)
   return fields
 end
 
+-- ── UI binding helpers (§M4) ──────────────────────────────────────────────
+-- Parser stores ui descriptors as {kind=str, value=raw}; codegen flattens
+-- them to bare values for ergonomic driver consumption.
+
+local function flatten_ui_descriptor(d)
+  if d == nil then return nil end
+  return d.value
+end
+
+local function flatten_ui_block(ui_node)
+  if ui_node == nil then return nil end
+  local out = {}
+  for _, f in ipairs(ui_node.fields or {}) do
+    out[f.name] = flatten_ui_descriptor(f.value)
+  end
+  return out
+end
+
+--- Emit game_table.ui_panels from all UI_PANEL_DECL nodes (§M4 / §5.2).
+local function emit_ui_panels(decls)
+  local panels = {}
+  local k = ast.K
+  for _, node in ipairs(decls) do
+    if node.kind == k.UI_PANEL_DECL then
+      local panel = { name = node.name, doc = node.doc }
+      for _, f in ipairs(node.fields or {}) do
+        panel[f.name] = flatten_ui_descriptor(f.value)
+      end
+      local children = {}
+      for _, c in ipairs(node.children or {}) do
+        table.insert(children, {
+          kind = c.kind,
+          arg  = flatten_ui_descriptor(c.arg),
+        })
+      end
+      panel.children = children
+      table.insert(panels, panel)
+    end
+  end
+  return panels
+end
+
+--- True when ui bindings should be retained in production output.
+--- Driven by `engine-config: ui-runtime: true`.
+local function ui_runtime_enabled(eng_cfg)
+  return eng_cfg and eng_cfg["ui-runtime"] == true
+end
+
 --- Emit schema.states list from all state declarations.
 --- When a STATE_SCALAR references a named record type, expand it to kind="record"
 --- so that init_defaults creates individual sub-paths (player/name, etc.).
@@ -568,6 +616,7 @@ local function emit_states(decls)
           path   = path_str,
           fields = out_fields,
           doc    = node.doc,
+          ui     = flatten_ui_block(node.ui),
         })
       else
         -- Scalar (non-record named type, or inline type)
@@ -577,6 +626,7 @@ local function emit_states(decls)
           type_desc = emit_type_desc(node.type_expr),
           default   = emit_default(node.default),
           doc       = node.doc,
+          ui        = flatten_ui_block(node.ui),
         })
       end
 
@@ -602,6 +652,7 @@ local function emit_states(decls)
         path   = path_str,
         fields = fields,
         doc    = node.doc,
+        ui     = flatten_ui_block(node.ui),
       })
 
     elseif node.kind == k.STATE_FAMILY then
@@ -612,6 +663,7 @@ local function emit_states(decls)
         type_desc = emit_type_desc(node.type_expr),
         max       = node.max,
         doc       = node.doc,
+        ui        = flatten_ui_block(node.ui),
       })
     end
   end
@@ -1201,6 +1253,14 @@ function M.emit(typed_ast, opts)
   local states    = emit_states(decls)
   local relations, relations_map = emit_relations(decls)
   local eng_cfg   = emit_engine_config(decls)
+
+  -- §M4 production strip: drop ui bindings (state.ui + ui_panels) unless the
+  -- author explicitly opted in via `engine-config: ui-runtime: true`.
+  local strip_ui = opts.production and not ui_runtime_enabled(eng_cfg)
+  if strip_ui then
+    for _, s in ipairs(states) do s.ui = nil end
+  end
+  local ui_panels = strip_ui and {} or emit_ui_panels(decls)
   local time_mdl  = emit_time_model(decls)
   local schema_v  = emit_schema_version(decls)
   local ss_size   = compute_total_state_space(decls, symtab)
@@ -1266,6 +1326,7 @@ function M.emit(typed_ast, opts)
     tests      = opts.production and {} or emit_tests(decls),
     migrations = emit_migrations(decls),
     bounded    = emit_bounded(decls),
+    ui_panels  = ui_panels,
     grids      = emit_grids(decls),
     tags       = emit_tags(decls),
     hooks      = emit_hooks(decls),

@@ -48,7 +48,8 @@ STATE_SCALAR, STATE_RECORD, STATE_FAMILY
 RELATION_DECL, FN_DECL, ACTOR_DECL, SCHEDULE_DECL
 BOUNDED_DECL, VERIFY_DECL, WATCH_DECL, WATCH_WHEN_DECL
 SCENE_DECL, MACRO_DECL, DECL_MACRO_DECL, MACRO_CALL_DECL, MIGRATION_DECL, DEFGRID_DECL
-TEST_DECL, GENERATE_DECL, ENDING_DECL
+TEST_DECL, GENERATE_DECL, ENDING_DECL, QUEST_DECL
+UI_PANEL_DECL    -- §M4: ui-panel <name>: layout/position/children
 ```
 
 **Type expression kinds:**
@@ -133,7 +134,12 @@ EMIT_MUT         -- engine/emit event [args]
 - `M.emit(typed_ast, opts?)` → `(game_table, diags[])`
 - `opts.production = true` → strips verifies and watches from game_table; sets `game_table.production = true`
 - Produces the **game_table** structure (see below)
-- Local emitters: `emit_types`, `emit_states`, `emit_relations`, `emit_engine_config`, `emit_time_model`, `emit_fns`, `emit_scenes`, `emit_actors`, `emit_schedules`, `emit_verifies`, `emit_watches`, `emit_bounded`, `emit_migrations`, `emit_quests` (§E1)
+- Local emitters: `emit_types`, `emit_states`, `emit_relations`, `emit_engine_config`, `emit_time_model`, `emit_fns`, `emit_scenes`, `emit_actors`, `emit_schedules`, `emit_verifies`, `emit_watches`, `emit_bounded`, `emit_migrations`, `emit_quests` (§E1), `emit_ui_panels` (§M4)
+- §M4 ui bindings: `emit_states` copies `node.ui` into each emitted state
+  entry as a flat `key → value` map via `flatten_ui_block`; `emit_ui_panels`
+  collects `UI_PANEL_DECL` nodes into `game_table.ui_panels`. In production
+  builds (`opts.production = true`), both `state.ui` and `ui_panels` are
+  stripped unless the author opts in with `engine-config: ui-runtime: true`.
 - §E1 auto-verify: `emit_quest_verifies` synthesises one
   `verify-eventually (quest-<name>-complete?)` clause per `QUEST_DECL`,
   appended to `game_table.verifies` (skipped in production builds).
@@ -1071,6 +1077,7 @@ Public Lua API for embedding StoryBase in another Lua program.
 | `tests/compiler/parser_spec.lua` | Parser (includes INDEX_EXPR tests) |
 | `tests/compiler/checker_spec.lua` | Checker passes 1-6 (schema, types, purity, perceives, boundary, write-sets) |
 | `tests/compiler/codegen_spec.lua` | Game table emission; production build mode |
+| `tests/compiler/ui_bindings_spec.lua` | §M4 ui bindings — `ui:` block on state decls (scalar + family), `ui-panel` decl, codegen flatten, production strip + `ui-runtime: true` retain (20 tests) |
 | `tests/compiler/import_spec.lua` | Import resolver (basic, FILE_NOT_FOUND, IMPORT_CYCLE, transitive) |
 | `tests/compiler/defgrid_spec.lua` | defgrid parser, checker, codegen, engine integration (26 tests) |
 | `tests/lib/storybase_spec.lua` | Public Lua interop API; find(), counterfactual() |

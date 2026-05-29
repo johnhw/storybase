@@ -779,6 +779,151 @@ local function parse_type_decl(p, doc)
   end
 end
 
+-- ── UI-binding helpers (§M4 / ui_idea.md §5.1+§5.2) ────────────────────────
+-- These are shared between the trailing `ui:` block on state decls and the
+-- top-level `ui-panel` decl. Values are stored as plain Lua descriptors
+-- (NOT typed AST literal nodes) so codegen can copy them straight through.
+
+--- Parse one leaf value in a ui block. Accepts literals, identifiers,
+--- symbols, and paths. Returns a descriptor {kind=str, value=raw} or nil.
+local function parse_ui_value(p)
+  local t = p:cur()
+  if t.kind == "STRING" or t.kind == "MULTILINE_STRING" then
+    return { kind = "string", value = p:adv().value }
+  elseif t.kind == "INTEGER" then
+    return { kind = "int", value = p:adv().value }
+  elseif t.kind == "FLOAT" then
+    return { kind = "float", value = p:adv().value }
+  elseif t.kind == "BOOL" then
+    return { kind = "bool", value = p:adv().value }
+  elseif t.kind == "IDENT" then
+    return { kind = "ident", value = p:adv().value }
+  elseif t.kind == "SYMBOL" then
+    return { kind = "symbol", value = p:adv().value }
+  elseif t.kind == "PATH" then
+    return { kind = "path", value = p:adv().value }
+  elseif t.kind == "INTERP_PATH" then
+    return { kind = "interp_path", value = p:adv().value }
+  end
+  return nil
+end
+
+--- Parse the body of a `ui:` block (after the NAMED_ARG("ui") has been
+--- consumed). Returns {fields = {{name, value}, ...}}.
+local function parse_ui_block_body(p)
+  local fields = {}
+  p:parse_block(function(self)
+    self:skip_newlines()
+    if self:at("DEDENT") or self:at("EOF") then return nil end
+    if not self:at("NAMED_ARG") then
+      self:emit_err(ast.E.BAD_DECLARATION, "expected key in ui block")
+      self:skip_to_eol()
+      return nil
+    end
+    local kt = self:adv()
+    local v = parse_ui_value(self)
+    table.insert(fields, { name = kt.value, value = v })
+    self:skip_to_eol()
+    return true
+  end)
+  return { fields = fields }
+end
+
+--- After a state-decl header has been consumed, peek for an optional
+--- trailing `ui:` block at a deeper indentation level. Returns the
+--- parsed ui block table or nil.
+local function parse_trailing_ui_block(p)
+  p:skip_newlines()
+  if not p:at("INDENT") then return nil end
+  -- Peek past the INDENT to see whether the first token is `ui:`.
+  if not (p.tokens[p.pos + 1]
+          and p.tokens[p.pos + 1].kind == "NAMED_ARG"
+          and p.tokens[p.pos + 1].value == "ui") then
+    -- Not ours; leave INDENT in place so the caller / dispatch surfaces
+    -- the error meaningfully.
+    return nil
+  end
+  p:adv()  -- consume INDENT
+  p:skip_newlines()
+  p:adv()  -- consume NAMED_ARG("ui")
+  local ui_block = parse_ui_block_body(p)
+  -- Drain anything else inside the trailing block (none expected today).
+  while not p:at("DEDENT") and not p:at("EOF") do
+    p:skip_newlines()
+    if p:at("DEDENT") or p:at("EOF") then break end
+    p:skip_to_eol()
+  end
+  if p:at("DEDENT") then p:adv() end
+  return ui_block
+end
+
+--- Parse one child of a `ui-panel ... children:` block. Each child line
+--- has the form `<kind> [<arg>]`, optionally prefixed by `-`. Returns a
+--- descriptor {kind=str, arg=descriptor|nil, pos=pos_tbl} or nil.
+local function parse_ui_panel_child(p)
+  -- Optional leading "-" bullet (per ui_idea.md §5.2 example).
+  if p:at("OP", "-") then p:adv() end
+  if not p:at("IDENT") then
+    p:emit_err(ast.E.BAD_DECLARATION, "expected widget kind in ui-panel children")
+    p:skip_to_eol(); return nil
+  end
+  local kt = p:adv()
+  local arg = parse_ui_value(p)
+  p:skip_to_eol()
+  return { kind = kt.value, arg = arg, pos = kt.pos }
+end
+
+--- ui-panel <name>: layout/position/children
+--- Top-level decl declared by an author to compose a UI panel from
+--- widget references. Each child line is `<kind> [<arg>]`, optionally
+--- with a leading `-` bullet.
+local function parse_ui_panel_decl(p, doc)
+  local tpos = p:cur().pos
+  p:adv()  -- consume IDENT("ui-panel")
+
+  local name
+  if p:at("NAMED_ARG") then
+    name = p:adv().value
+  elseif p:at("IDENT") then
+    name = p:adv().value
+    p:expect("OP", ":", "expected ':' after ui-panel name")
+  else
+    p:emit_err(ast.E.BAD_DECLARATION, "expected ui-panel name", p:cur().pos)
+    p:skip_to_eol(); return nil
+  end
+
+  local fields = {}
+  local children = {}
+  p:skip_newlines()
+  if p:at("INDENT") then
+    p:adv()  -- consume INDENT
+    while not p:at("DEDENT") and not p:at("EOF") do
+      p:skip_newlines()
+      if p:at("DEDENT") or p:at("EOF") then break end
+      if not p:at("NAMED_ARG") then
+        p:emit_err(ast.E.BAD_DECLARATION, "expected key in ui-panel body")
+        p:skip_to_eol()
+      else
+        local kt = p:adv()
+        local key = kt.value
+        if key == "children" then
+          children = p:parse_block(function(self)
+            self:skip_newlines()
+            if self:at("DEDENT") or self:at("EOF") then return nil end
+            return parse_ui_panel_child(self)
+          end)
+        else
+          local v = parse_ui_value(p)
+          table.insert(fields, { name = key, value = v })
+          p:skip_to_eol()
+        end
+      end
+    end
+    if p:at("DEDENT") then p:adv() end
+  end
+  return ast.ui_panel_decl(name, fields, children, doc, tpos)
+end
+
 --- state path: Type [= default]      (scalar)
 --- state path:                       (inline record)
 --- state family/{var}: Type max: N   (family)
@@ -896,6 +1041,11 @@ local function parse_state_decl(p, doc)
 
   p:skip_to_eol()
 
+  -- Optional trailing `ui:` block (§M4). Forms a separate indented block
+  -- that is logically attached to this state decl.
+  local ui_block = parse_trailing_ui_block(p)
+
+  local node
   if path_kind == "interp" then
     local segs = split_interp_path(path_val)
     local family = type(segs[1]) == "string" and segs[1] or "?"
@@ -903,10 +1053,12 @@ local function parse_state_decl(p, doc)
     for _, seg in ipairs(segs) do
       if type(seg) == "table" and seg.interp then var = seg.interp; break end
     end
-    return ast.state_family(family, var, texpr, max_val, doc, tpos)
+    node = ast.state_family(family, var, texpr, max_val, doc, tpos)
   else
-    return ast.state_scalar(path_node, texpr, default, doc, tpos)
+    node = ast.state_scalar(path_node, texpr, default, doc, tpos)
   end
+  if ui_block then node.ui = ui_block end
+  return node
 end
 
 --- relation name: FromType -> ToTypeExpr [:  static data block ]
@@ -4276,6 +4428,7 @@ parse_decl = function(p, doc)
     if     t.value == "migration" then return parse_migration_decl(p, doc)
     elseif t.value == "defgrid"   then return parse_defgrid_decl(p, doc)
     elseif t.value == "test"      then return parse_test_decl(p, doc)
+    elseif t.value == "ui-panel"  then return parse_ui_panel_decl(p, doc)
     end
     -- Fall back to a decl-level macro call (§E0 Stage 3); the expansion
     -- pass will error if the name doesn't resolve to a `decl-macro`.

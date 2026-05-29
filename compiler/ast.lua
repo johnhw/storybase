@@ -253,6 +253,7 @@ M.K.TEST_DECL           = "test_decl"  -- test "label": setup/run/expect
 M.K.GENERATE_DECL       = "generate_decl"  -- generate name [seed: path]: body  (§F1)
 M.K.ENDING_DECL         = "ending_decl"    -- ending name when: cond: body      (§F2)
 M.K.QUEST_DECL          = "quest_decl"     -- quest name: prereq/step/reward    (§E1)
+M.K.UI_PANEL_DECL       = "ui_panel_decl"  -- ui-panel name: layout/position/children (§M4)
 
 -- ── Type expressions ──────────────────────────────────────────
 M.K.TYPE_BOOL           = "type_bool"
@@ -727,6 +728,24 @@ function M.quest_decl(name, description, prereq, steps, reward, doc, pos)
     steps       = steps or {},
     reward      = reward,
     doc         = doc,
+  }, pos)
+end
+
+--- ui_panel_decl: an author-declared UI composition (§M4 / ui_idea.md §5.2).
+---   name      string   Panel identifier (e.g. "status").
+---   fields    table    List of {name, value} pairs for top-level keys
+---                      (layout, position, etc.). value is a plain Lua
+---                      descriptor table: {kind=string|ident|path|...,
+---                      value=raw}.
+---   children  table    List of widget reference tables shaped
+---                      {kind=str, arg=descriptor|nil, pos=pos_tbl}.
+---   doc       string?  Optional documentation string.
+function M.ui_panel_decl(name, fields, children, doc, pos)
+  return M.node(M.K.UI_PANEL_DECL, {
+    name     = name,
+    fields   = fields or {},
+    children = children or {},
+    doc      = doc,
   }, pos)
 end
 
