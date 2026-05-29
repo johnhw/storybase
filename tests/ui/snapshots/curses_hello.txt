@@ -1,0 +1,10 @@
+The cave is dark.
+Ghost: Boo!
+
+
+
+----------------------------------------
+1. Run away
+2. Stay put
+3. Investigate
+Choice (1-3, q to quit):

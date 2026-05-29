@@ -20,9 +20,14 @@
 -- │                              the full contract; the kernel       │
 -- │                              (ui/kernel.lua, §M1 shipped) is now  │
 -- │                              wired into lib/storybase + the      │
--- │                              debug server, but no driver yet     │
--- │                              consumes it. §M3 (screen-model      │
--- │                              split) flips curses to event-driven.│
+-- │                              debug server. §M3 (screen-model     │
+-- │                              split) shipped: curses now composes │
+-- │                              into a retained 2D grid + dirty-    │
+-- │                              rect flush over swappable backends, │
+-- │                              but still consumes events via the   │
+-- │                              pull-mode render/prompt path. §M5   │
+-- │                              (first reactive widget) flips       │
+-- │                              curses to event-driven.             │
 -- └───────────────────────────────────────────────────────────────────┘
 --
 -- The active dispatch path in `runtime/engine.lua` (see eng:step,

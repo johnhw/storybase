@@ -62,6 +62,30 @@ stub curses module — busted never opens a real terminal. **Total:
 scaffold test was deleted).** Driver is still pull-mode — the
 kernel-driven attach/subscribe path is §M3+ work.
 
+§M3 (screen model + buffer backend split) landed 2026-05-29:
+The curses driver now composes frames into a retained 2D cell grid
+(`cli/drivers/curses/screen.lua`) and flushes only dirty cells via
+`cli/drivers/curses/paint.lua` to a swappable backend. Two backends
+ship with the M3 interface (`init(w,h)` / `size()` / `flush(screen,
+dirty_rects)` / `read_key()` / `close()`): `backend_curses.lua`
+(ncurses; still the only file that `require("curses")`) and
+`backend_buffer.lua` (in-memory grid; provides `snapshot()` and
+`script_keys()` for headless tests + no-tty fallback). Driver picks
+backend via `opts.backend = "ncurses"|"buffer"` (default ncurses).
+Pull-mode (render+prompt) preserved end-to-end; the kernel-driven
+attach/subscribe path is deferred to §M5 when the first reactive
+widget (stat-bar) lands. Tests at `tests/ui/curses_driver_spec.lua`
+(31 cases, rewritten for the M3 interface) cover lifecycle + driver
+round-trip on both backends; `tests/ui/curses_screen_spec.lua` (23
+cases) covers screen/paint/buffer units + dirty-rect diff invariants
++ golden snapshots under `tests/ui/snapshots/curses_*.txt`. **Total:
+3318/0/2 (+6 over M2 net of rewritten + new specs; +54 new test
+points across the screen model and buffer backend work, with 28 old
+M2 backend-paint tests retired in favor of the M3 driver-level tests
+that exercise the same paths through a real screen model).**
+20 transient `debug_http_spec.lua` failures unrelated/ignorable per
+CLAUDE.md — HTTP/debug subsystems were not touched.
+
 ## Current Status (2026-05-25)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -97,10 +121,14 @@ fragility items) shipped 2026-05-25.
    `cli/drivers/curses/init.lua` + `backend_curses.lua`; selectable
    via `--ui curses`. Pull-mode (render+prompt); the kernel-driven
    attach/subscribe path lands at §M3 alongside the screen model.
-4. §M3 — screen model + buffer backend split. Curses driver switches
-   to the kernel's event subscription (`kernel:get_scene()` /
-   `kernel:on("mutation", ...)` / etc.) at this milestone, retiring
-   the pull-mode `render`/`prompt` path for curses.
+4. §M3 — screen model + buffer backend split. **[DONE 2026-05-29]** —
+   `cli/drivers/curses/screen.lua` + `paint.lua` + `backend_buffer.lua`;
+   `backend_curses.lua` and `init.lua` re-architected on top.
+   `--ui curses` plus `opts.backend = "buffer"` for headless tests.
+   Golden snapshot tests under `tests/ui/snapshots/`. The kernel-driven
+   subscribe/notify path was deferred to §M5 (the first reactive
+   widget); pull-mode `render`/`prompt` remains the dispatch path for
+   the curses driver until then.
 5. §M4 — author bindings (parser + schema).
 6. §M5 — first reactive widget: stat-bar.
 7. §M6 — view stack + modal dialog.

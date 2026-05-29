@@ -1,96 +1,52 @@
 -- cli/drivers/curses/backend_curses.lua
 --
--- Curses backend for the M2 hello-world driver. This is the **only** file
--- in the project that calls `require("curses")` directly; the rest of the
--- curses driver works in terms of this backend's API so the screen-model
--- split landing in §M3 has a single seam to redirect.
+-- ncurses backend for the curses driver (ui_idea.md §8.2). This is the
+-- **only** file in the project that calls `require("curses")` — every
+-- other curses-driver module talks to this backend via the M3 interface.
 --
--- Public surface:
+-- M3 backend interface:
 --
---   M.is_available()                       -> bool
---   M.new({ curses = <mod>? }) -> backend
---   backend:init()                         -> ok, reason?
---   backend:close()
---   backend:append_narration(items)        -- accumulate scrollback
---   backend:paint(choices, choices_active) -- repaint the full screen
---   backend:read_choice(num_choices)       -> idx | nil
+--   M.is_available()                  -> bool
+--   M.new(opts)                       -> backend
+--   backend:init(rows?, cols?)        -> ok, reason?         -- starts ncurses
+--   backend:size()                    -> rows, cols          -- terminal size
+--   backend:flush(screen, dirty_rects) -- paint dirty cells, refresh
+--   backend:read_key()                -> int | nil           -- one getch
+--   backend:close()                                          -- endwin
 --
--- The `curses` field on opts is an injection seam for tests; in normal
--- use the backend resolves it via `require("curses")` on init.
+-- The `rows, cols` arguments to `init` are advisory; ncurses always
+-- reports the real terminal size via `stdscr:getmaxyx()`. The driver
+-- still passes them so the buffer backend (which is fixed-size) sees
+-- the same interface.
 --
--- Layout (whatever the terminal reports; reflowed on each paint):
---
---   ┌──────────────────────────────────────────────────────────┐
---   │ narration scrollback (most-recent tail fits the region)  │
---   │                                                          │
---   ├──────────────────────────────────────────────────────────┤
---   │ 1. First choice                                          │
---   │ 2. Second choice                                         │
---   │ ...                                                      │
---   │ Choice (1-N, q to quit):                                 │
---   └──────────────────────────────────────────────────────────┘
+-- Tests inject a stub `curses` module via `opts.curses`. See
+-- `tests/ui/curses_driver_spec.lua` and `tests/ui/curses_screen_spec.lua`.
 
 local M = {}
 
---- Probe lcurses availability without binding to it.
---- Used by callers (driver init, smoke tests) that want to fall back to
---- the plain driver when ncurses packaging is missing.
+--- Probe lcurses availability without binding to it. Falls back path
+--- for callers that want to detect the missing-package case before the
+--- driver tries `init` (e.g. CLI argument validation).
 ---@return boolean
 function M.is_available()
   local ok = pcall(require, "curses")
   return ok
 end
 
---- Convert the engine's structured narration list into plain text lines,
---- one per physical line. `say` items become "Speaker: text"; narration
---- items pass through. Multi-line text is split on `\n`.
----@param items table?  narration list from engine.render_scene
----@return string[]
-local function narration_to_lines(items)
-  local out = {}
-  for _, item in ipairs(items or {}) do
-    local text
-    if item.kind == "say" then
-      local label = item.display or item.speaker or "?"
-      text = label .. ": " .. tostring(item.text or "")
-    elseif item.text and item.text ~= "" then
-      text = tostring(item.text)
-    end
-    if text then
-      for line in (text .. "\n"):gmatch("([^\n]*)\n") do
-        out[#out + 1] = line
-      end
-    end
-  end
-  return out
-end
-
---- Truncate a string to at most `n` characters. Pure helper.
----@param s string
----@param n integer
----@return string
-local function clip(s, n)
-  if n <= 0 then return "" end
-  if #s <= n then return s end
-  return s:sub(1, n)
-end
-
---- Construct a new backend instance.
+--- Construct a new backend instance. Does not touch ncurses; that
+--- happens on `init`. Tests can inject a stub via `opts.curses`.
 ---@param opts table?  { curses = <module>? }
 ---@return table backend
 function M.new(opts)
   opts = opts or {}
 
   local backend = {
-    _curses       = opts.curses,   -- nil → resolved lazily on init()
-    _stdscr       = nil,
-    _active       = false,
-    _narr_lines   = {},
+    _curses = opts.curses,  -- resolved lazily if nil
+    _stdscr = nil,
+    _active = false,
   }
 
-  -- ── Lifecycle ──────────────────────────────────────────────
-
-  --- Resolve the curses module (cached). Returns the module or nil.
+  --- Resolve and cache the curses module. Returns nil if not loadable.
   local function resolve_curses()
     if backend._curses then return backend._curses end
     local ok, mod = pcall(require, "curses")
@@ -99,11 +55,14 @@ function M.new(opts)
     return mod
   end
 
-  --- Initialise the terminal. Idempotent.
-  --- Returns (false, reason) if lcurses cannot be loaded.
+  --- Initialise ncurses. The `_rows`/`_cols` arguments are accepted for
+  --- interface symmetry with backend_buffer; ncurses reads the real
+  --- terminal size via `stdscr:getmaxyx()`.
+  ---@param _rows integer?
+  ---@param _cols integer?
   ---@return boolean ok
   ---@return string? reason
-  function backend:init()
+  function backend:init(_rows, _cols)
     if self._active then return true end
     local curses = resolve_curses()
     if not curses then
@@ -120,7 +79,49 @@ function M.new(opts)
     return true
   end
 
-  --- Restore the terminal. Idempotent.
+  --- Report the terminal size as `(rows, cols)`. Returns (0, 0) when
+  --- not yet initialised so callers can drive their own fallback.
+  ---@return integer rows
+  ---@return integer cols
+  function backend:size()
+    if not self._active or not self._stdscr then return 0, 0 end
+    return self._stdscr:getmaxyx()
+  end
+
+  --- Flush a list of dirty rects from a screen to ncurses. Each rect
+  --- is a {y, x, cells} record; cells are emitted via `mvaddstr` as a
+  --- contiguous span. Calls `refresh()` once after all spans paint.
+  ---@param _scr  table         screen (unused beyond the rect list)
+  ---@param rects table[]
+  function backend:flush(_scr, rects)
+    if not self._active or not self._stdscr then return end
+    if not rects or #rects == 0 then
+      -- No-op idle frame; still call refresh so cursor positioning
+      -- stays correct.
+      self._stdscr:refresh()
+      return
+    end
+    for i = 1, #rects do
+      local r = rects[i]
+      local s = {}
+      for j = 1, #r.cells do s[j] = r.cells[j].ch or " " end
+      pcall(function() self._stdscr:mvaddstr(r.y, r.x, table.concat(s)) end)
+    end
+    self._stdscr:refresh()
+  end
+
+  --- One blocking `getch`. Returns the integer key code, or nil on EOF
+  --- / window closure. The driver translates this into choice digits,
+  --- quit keys, navigation, etc.
+  ---@return integer? key
+  function backend:read_key()
+    if not self._active or not self._stdscr then return nil end
+    local key = self._stdscr:getch()
+    if not key or key == -1 then return nil end
+    return key
+  end
+
+  --- Restore the terminal. Idempotent — safe to call multiple times.
   function backend:close()
     if not self._active then return end
     local curses = self._curses
@@ -132,97 +133,6 @@ function M.new(opts)
       end
     end
     self._active = false
-  end
-
-  -- ── State accumulation ─────────────────────────────────────
-
-  --- Append the latest narration into the rolling history. The history
-  --- is what the next `paint` will show in the top region.
-  ---@param items table?  scene_output.narration
-  function backend:append_narration(items)
-    for _, l in ipairs(narration_to_lines(items)) do
-      self._narr_lines[#self._narr_lines + 1] = l
-    end
-  end
-
-  -- ── Painting ───────────────────────────────────────────────
-
-  --- Repaint the full screen: scrollback narration, separator, choices,
-  --- and the prompt status line at the bottom.
-  ---@param choices       table?    list of {index, label}
-  ---@param choices_active boolean  true to show the "Choice (1-N)" prompt
-  function backend:paint(choices, choices_active)
-    if not self._active then return end
-    local stdscr = self._stdscr
-    local rows, cols = stdscr:getmaxyx()
-    choices = choices or {}
-
-    -- Region heights: prompt(1) + separator(1) + choices(N) + narration(rest)
-    local prompt_h    = 1
-    local separator_h = 1
-    local choices_h   = #choices
-    local narr_h      = rows - prompt_h - separator_h - choices_h
-    if narr_h < 1 then narr_h = 1 end
-
-    stdscr:clear()
-
-    -- Narration: bottom-aligned tail (most-recent fits).
-    local first = math.max(1, #self._narr_lines - narr_h + 1)
-    local row = 0
-    for i = first, #self._narr_lines do
-      stdscr:mvaddstr(row, 0, clip(self._narr_lines[i], cols - 1))
-      row = row + 1
-      if row >= narr_h then break end
-    end
-
-    -- Separator (drawn only if it fits).
-    local sep_y = narr_h
-    if sep_y < rows - prompt_h then
-      stdscr:mvaddstr(sep_y, 0, string.rep("-", math.max(1, cols - 1)))
-    end
-
-    -- Choices.
-    local cy = sep_y + separator_h
-    for i, c in ipairs(choices) do
-      if cy >= rows - prompt_h then break end
-      stdscr:mvaddstr(cy, 0, clip(i .. ". " .. tostring(c.label or ""), cols - 1))
-      cy = cy + 1
-    end
-
-    -- Prompt status line at the very bottom.
-    local prompt
-    if choices_active and #choices > 0 then
-      prompt = "Choice (1-" .. #choices .. ", q to quit): "
-    else
-      prompt = "(press q or ESC to quit)"
-    end
-    stdscr:mvaddstr(rows - 1, 0, clip(prompt, cols - 1))
-
-    stdscr:refresh()
-  end
-
-  -- ── Input ──────────────────────────────────────────────────
-
-  local KEY_ESC = 27
-
-  --- Block on getch and translate to a 1-based choice index. Returns
-  --- nil for q/Q/ESC (quit). Ignores other keys.
-  ---@param num_choices integer
-  ---@return integer? idx
-  function backend:read_choice(num_choices)
-    if not self._active then return nil end
-    while true do
-      local key = self._stdscr:getch()
-      if not key or key == -1 then return nil end
-      if key == KEY_ESC then return nil end
-      if key == string.byte("q") or key == string.byte("Q") then
-        return nil
-      end
-      if key >= string.byte("1") and key <= string.byte("9") then
-        local d = key - string.byte("0")
-        if d >= 1 and d <= num_choices then return d end
-      end
-    end
   end
 
   return backend

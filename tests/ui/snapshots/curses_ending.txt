@@ -1,0 +1,10 @@
+The end has come.
+You have died.
+
+
+
+
+
+
+----------------------------------------
+(press q or ESC to quit)
