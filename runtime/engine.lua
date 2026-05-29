@@ -312,11 +312,16 @@ function M.new(game_table, opts)
     else
       self._scene_stack[#self._scene_stack] = name
     end
+    local tick = self._state and self._state._time and self._state._time.tick or 0
+    local payload = { from = from, to = name, stack = self._scene_stack, tick = tick }
     if self._debug then
-      local tick = self._state and self._state._time and self._state._time.tick or 0
-      self._debug:emit("scene-change", { from = from, to = name,
-                                         stack = self._scene_stack, tick = tick })
+      self._debug:emit("scene-change", payload)
       self._debug:check_watches()
+    elseif self._kernel then
+      -- Library mode (no debug server): emit directly. With a debug
+      -- server attached, srv:emit already forwards to the kernel —
+      -- avoid a double-emit.
+      self._kernel:emit("scene-change", payload)
     end
   end
 
@@ -329,10 +334,13 @@ function M.new(game_table, opts)
       if sink then sink(msg) else io.stderr:write(msg) end
     end
     self:push_scene(name)
+    local tick = self._state and self._state._time and self._state._time.tick or 0
+    local payload = { to = name, stack = self._scene_stack, tick = tick }
     if self._debug then
-      local tick = self._state and self._state._time and self._state._time.tick or 0
-      self._debug:emit("scene-change", { to = name, stack = self._scene_stack, tick = tick })
+      self._debug:emit("scene-change", payload)
       self._debug:check_watches()
+    elseif self._kernel then
+      self._kernel:emit("scene-change", payload)
     end
   end
 
@@ -340,11 +348,14 @@ function M.new(game_table, opts)
   function eng:exit_scene()
     local from = self._scene_stack[#self._scene_stack]
     self:pop_scene()
+    local tick = self._state and self._state._time and self._state._time.tick or 0
+    local payload = { from = from, to = self:current_scene(),
+                      stack = self._scene_stack, tick = tick }
     if self._debug then
-      local tick = self._state and self._state._time and self._state._time.tick or 0
-      self._debug:emit("scene-change", { from = from, to = self:current_scene(),
-                                         stack = self._scene_stack, tick = tick })
+      self._debug:emit("scene-change", payload)
       self._debug:check_watches()
+    elseif self._kernel then
+      self._kernel:emit("scene-change", payload)
     end
   end
 
@@ -798,10 +809,33 @@ function M.new(game_table, opts)
     end
   end
 
+  --- Attach a presentation kernel (`ui/kernel.lua`). Installs the
+  --- kernel's fan-out shims into every single-slot hook so mutations,
+  --- clamps, spawns, despawns, custom emits, and actor-no-progress
+  --- signals reach the kernel — and from there reach any subscriber
+  --- (driver, library listener, debug forwarder).
+  ---
+  --- May be called before or after `set_debug_server`. When both are
+  --- attached, debug-server `:emit` forwards to the kernel via
+  --- `srv:set_kernel(k)`; the kernel covers everything else through
+  --- its own hook shims. Idempotent.
+  --- See `ui_idea.md` §M1 and `docs/explanation/ui_event_audit.md` §4.1.
+  ---@param kernel table  kernel instance from `ui.kernel.new()`
+  function eng:set_kernel(kernel)
+    self._kernel = kernel
+    kernel:attach(self)
+    if self._debug and self._debug.set_kernel then
+      self._debug:set_kernel(kernel)
+    end
+  end
+
   --- Attach a debug server to the engine, wiring mutation and scene hooks.
   ---@param srv table  debug server instance (from runtime.debug)
   function eng:set_debug_server(srv)
     self._debug = srv
+    if self._kernel and srv.set_kernel then
+      srv:set_kernel(self._kernel)
+    end
     -- Wire mutation events through state store
     self._state._mutation_hook = function(path, old, new_val, fn_name)
       local seq  = self._log:seq()

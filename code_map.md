@@ -865,7 +865,7 @@ equality are dropped from running state, so a fresh divergence will be re-report
 - Per-subcommand help: `storybase help <subcommand>` shows detailed usage
 
 ### `cli/drivers/` — UI driver registry
-Each driver lives in its own subfolder loaded as `cli.drivers.<name>`. Contract lives in `driver.lua`; spec in `ui_idea.md` §3 / §8. Event-surface audit (§M0 prerequisite for the §M1 kernel) is in `docs/explanation/ui_event_audit.md`.
+Each driver lives in its own subfolder loaded as `cli.drivers.<name>`. Contract lives in `driver.lua`; spec in `ui_idea.md` §3 / §8. Event-surface audit (§M0 prerequisite for the §M1 kernel) is in `docs/explanation/ui_event_audit.md`. The kernel itself is in `ui/kernel.lua` (see below).
 
 ### `cli/drivers/driver.lua`
 Driver protocol contract. Documents the required methods (`render`, `prompt`, `notify`, `attach`, `tick`, `detach`) and which are operational today (`render`/`prompt`/`notify` — engine pull-mode) vs scaffolded for the §M1 kernel (`attach`/`tick`/`detach`). Exports `M.REQUIRED_METHODS` and `M.is_driver(d) -> ok, missing?` for duck-typing checks.
@@ -1004,6 +1004,27 @@ Single-step scripting mode for `storybase run --cli save.sbd`.
 
 ---
 
+## ui/
+
+Presentation layer that sits between the runtime and UI drivers. Owns the multi-subscriber event registry, the per-path state cache, and the schema-driven display formatter. Drivers consume `ui/kernel.lua`; the library and debug server are adapters on top of it. Spec: `ui_idea.md` §3–4; audit + migration sketch: `docs/explanation/ui_event_audit.md`.
+
+### `ui/kernel.lua` (~330 lines)
+Presentation kernel (ui_idea.md §M1). Single owner of in-process event dispatch.
+- `M.new(engine?)` → kernel; bind later via `k:attach(engine)`.
+- Subscription: `k:on(event, fn) -> unsubscribe`, `k:off(event, fn)`, `k:emit(event, payload)`. Wildcard event `"*"` receives every event as `fn(event_name, payload)`. Listener errors are `pcall`-isolated.
+- State cache: `mutation` events mirror `payload.new` into `k._cache[payload.path]` *before* listeners fire, so handlers reading `k:get_state(path)` see the post-mutation value. Cache is seeded from `engine._state._cache` on `attach`.
+- Queries: `k:get_state(path)`, `k:get_state_all()`, `k:get_scene()`, `k:get_schema()`, `k:get_tick()`, `k:get_bindings()`.
+- Commands: `k:do_choice(idx)` (validates, dispatches, applies nav signal, follows unconditional gotos, runs post_action, synthesises `choice-made`); `k:autonomous_turn()`; `k:call_fn(name, ...)` (routes via host-registered `_call_fn`).
+- `k:attach(engine)` installs fan-out shims into every single-slot hook (`state._mutation_hook`, `_clamp_hook`, `_spawn_hook`, `_despawn_hook`, `game._emit_hook`, `actors:on_no_progress`). Each shim chains to any prior hook so legacy consumers (e.g. existing `set_debug_server` wiring) keep firing during transition.
+
+### `ui/format.lua` (~165 lines)
+Display formatter. Schema-driven; produces strings only (driver-agnostic).
+- `M.value(value, td?, schema?, opts?)` → dispatches on `td.tag` (int / float / bool / string / symbol / enum / set / list / record). Resolves `named` / `alias` chains against the schema's `types` list. Falls back to type-of-value heuristics when no descriptor is supplied.
+- `M.path(schema, path, value, opts?)` → looks up the path in `schema.states`, then calls `M.value`.
+- Helpers: `M.bool(b, opts)` (yes/no, overridable via `opts.bool_labels`), `M.int(n, td)` ("cur/max" when bounded), `M.float(x)` (`%g`).
+
+---
+
 ## lib/
 
 ### `lib/storybase.lua` (601 lines)
@@ -1022,7 +1043,7 @@ Public Lua API for embedding StoryBase in another Lua program.
   - `game:tick()` — one autonomous turn (post_action only)
   - `game:save(filepath)` → ok, err; write save file
   - `game:load(filepath)` → ok, err; restore from save file
-  - `game:on(event, handler)` — subscribe to "choice", "mutation", "scene-change", or any custom `engine/emit` event name
+  - `game:on(event, handler)` — subscribe to "choice", "choice-made", "mutation", "scene-change", "clamp-event", "spawn-event", "despawn-event", "actor-no-progress", or any custom `engine/emit` event name. Routed through the presentation kernel (§M1) which owns `_listeners`, `_emit_hook`, and `_mutation_hook` since 2026-05-29.
   - `game:register_bounded(name, fn)` — register bounded computation handler
   - `game:docs(name?)` — return doc string(s) from compiled game table; no arg returns all docs as a table, name arg returns the doc for that entity
 

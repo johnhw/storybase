@@ -15,6 +15,7 @@ local M = {}
 local compiler_mod = require("compiler.compiler")
 local engine_mod   = require("runtime.engine")
 local eval_mod     = require("runtime.eval")
+local kernel_mod   = require("ui.kernel")
 
 -- ============================================================
 -- Internal helpers
@@ -86,7 +87,8 @@ function M._make_game(game_table)
     _gt        = game_table,
     _eng       = nil,   -- engine, created on init()
     _handlers  = {},    -- bounded computation handlers
-    _listeners = {},    -- event listeners: event_name → list of fns
+    _kernel    = nil,   -- presentation kernel, created on init() — owns
+                        -- the multi-subscriber event registry (ui_idea.md §M1).
   }
 
   -- ── Lifecycle ─────────────────────────────────────────────
@@ -99,15 +101,13 @@ function M._make_game(game_table)
     if next(self._handlers) then
       self._eng._game._bounded_handlers = self._handlers
     end
-    -- Wire engine/emit events to game listeners
-    self._eng._game._emit_hook = function(event_name, payload, tick)
-      self:_emit(event_name, { event = event_name, payload = payload, tick = tick })
-    end
     self._eng:init()
-    -- Wire mutation events to game listeners (after init so _state exists)
-    self._eng._state._mutation_hook = function(path, old, new_val, fn_name)
-      self:_emit("mutation", { path = path, old = old, new = new_val, fn = fn_name })
-    end
+    -- Install the presentation kernel as the single owner of in-process
+    -- event dispatch (ui_idea.md §M1). The kernel installs its own
+    -- fan-out shims into _mutation_hook / _emit_hook / etc., so the
+    -- library no longer wires those slots directly.
+    self._kernel = kernel_mod.new()
+    self._eng:set_kernel(self._kernel)
     return self
   end
 
@@ -268,8 +268,14 @@ function M._make_game(game_table)
     -- Post-action lifecycle
     pcall(function() self._eng:post_action() end)
 
-    -- Fire listeners
-    self:_emit("choice", { index = index, scene = scene_name })
+    -- Fire listeners. We emit "choice" (legacy library event) and the
+    -- spec-canonical "choice-made" event (ui_idea.md §3.1). The
+    -- "choice-made" payload includes the chosen label so drivers can
+    -- echo the player's selection without re-rendering the scene.
+    local chosen_label = choices[index] and choices[index].label or nil
+    self:_emit("choice",      { index = index, scene = scene_name })
+    self:_emit("choice-made", { index = index, scene = scene_name,
+                                 label = chosen_label })
     return true
   end
 
@@ -482,22 +488,23 @@ function M._make_game(game_table)
   -- ── Event subscriptions ───────────────────────────────────
 
   --- Subscribe to a named event.
-  --- Built-in events: "choice", "mutation", "scene-change"
+  --- Built-in events: "choice", "choice-made", "mutation", "scene-change",
+  --- "clamp-event", "spawn-event", "despawn-event", "fn-call",
+  --- "message-sent", "schedule-fired", "actor-no-progress", plus any
+  --- author-declared `engine/emit` event name. See `ui_idea.md` §3.1
+  --- and the audit in `docs/explanation/ui_event_audit.md` §3 for
+  --- payload shapes.
   ---@param event_name string
   ---@param handler    function  Called with an event-specific payload table
   function self:on(event_name, handler)
-    if not self._listeners[event_name] then
-      self._listeners[event_name] = {}
-    end
-    local lst = self._listeners[event_name]
-    lst[#lst+1] = handler
+    assert(self._kernel, "call game:init() first")
+    self._kernel:on(event_name, handler)
   end
 
-  --- Internal: fire all listeners for an event.
+  --- Internal: fire all listeners for an event via the presentation kernel.
   function self:_emit(event_name, payload)
-    for _, h in ipairs(self._listeners[event_name] or {}) do
-      pcall(h, payload)
-    end
+    if not self._kernel then return end
+    self._kernel:emit(event_name, payload)
   end
 
   -- ── Doc string access ─────────────────────────────────────

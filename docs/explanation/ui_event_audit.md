@@ -5,6 +5,14 @@ service of `ui_idea.md` §M0. The output of this document is the source of
 truth for `ui_idea.md` §3.1 and the contract `ui/kernel.lua` (§M1) must
 implement.
 
+> **Status update (2026-05-29).** §M1 has shipped: `ui/kernel.lua` is
+> the multi-subscriber bus + state cache + queries/commands surface;
+> `ui/format.lua` is the display formatter; `lib/storybase.lua` and
+> `runtime/debug.lua` are adapted to forward through the kernel; the
+> previously dead `game:on("scene-change", ...)` subscription now
+> fires; `choice-made` is synthesised after a successful choice. See
+> §4.1 below — the migration sketch the implementation followed.
+
 Scope: `runtime/debug.lua`, `runtime/engine.lua`, `runtime/eval.lua`,
 `runtime/actors.lua`, `runtime/state.lua`, `runtime/scheduler.lua`,
 `lib/storybase.lua`. Touched but not in scope:
@@ -225,9 +233,13 @@ Concrete plan once `ui/kernel.lua` exists:
   `path → value` cache (§4 of `ui_idea.md`). Edge: paths that fail
   clamping write the clamped value via `mutation`, so the cache stays
   consistent — confirm `state.lua` fires `_mutation_hook` with the
-  clamped value, not the attempted value. (Spot check: `state.lua:371`
-  fires *before* the clamp branch at line 439; need to read more to be
-  sure.)
+  clamped value, not the attempted value.
+  **Resolved 2026-05-29 during M1 implementation.** In `inc!`/`dec!`
+  (state.lua:425–443), the sequence is: compute clamp → fire
+  `_clamp_hook(path, attempted, clamped)` → write `_cache[path] =
+  clamped` → call `_log_entry`, which fires `_mutation_hook(path,
+  old, clamped)`. The mutation hook always observes the clamped
+  value; the kernel cache therefore stays consistent.
 - **Ordering guarantee.** §3.1 promises `mutation` precedes any
   `scene-change` triggered by the same player action. The current
   engine order is: do_choice → eval mutations (fire hooks) → run

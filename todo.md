@@ -25,6 +25,26 @@ single-owner kernel ownership model with a concrete migration sketch
 for §M1. Open questions parked: clamp-vs-mutation ordering inside
 `state.lua`, custom-event namespacing, mutation coalescing.
 
+§M1 (presentation kernel) landed 2026-05-29:
+`ui/kernel.lua` is the multi-subscriber event bus + state cache +
+queries/commands surface. `ui/format.lua` is the schema-driven
+display formatter (Int(0,10)=7 → "7/10", bool → yes/no, enum → label,
+named/alias chains resolved against schema). `lib/storybase.lua` now
+creates a kernel during `init()` and routes `game:on()`/`_emit`
+through it; the previously dead `game:on("scene-change", ...)`
+subscription now fires (audit §3 fix). `runtime/debug.lua:srv:emit`
+forwards every event to the registered kernel before the `_running`
+transport gate, so in-process subscribers see events even before
+`srv:start()`. The kernel synthesises `choice-made` after a
+successful choice (alongside the legacy library "choice" event,
+preserved for backward compat). Tests at `tests/ui/kernel_spec.lua`
+(28 cases) + `tests/ui/format_spec.lua` (16 cases) cover the M1
+acceptance bullets: subscribe / unsubscribe / pcall isolation /
+wildcard / state-cache invariants / coalesced mutation bursts.
+**3285/0/2 (was 3247/0/2 before M1; +38 new cases).** Audit open
+question §4.2 #1 resolved: `state.lua` fires `_mutation_hook` with
+the clamped value (`_log_entry` runs after the clamp branch).
+
 ## Current Status (2026-05-25)
 
 The core language and runtime are feature-complete against the V1.0 specification.
@@ -52,9 +72,13 @@ fragility items) shipped 2026-05-25.
 **UI driver track (see ui_idea.md §10 for full details):**
 1. §M0 — audit and unify event surfaces. **[DONE 2026-05-29]** —
    see `docs/explanation/ui_event_audit.md`.
-2. §M1 — presentation kernel (`ui/kernel.lua`). Driven by the migration
-   sketch in `ui_event_audit.md` §4.1.
-3. §M2 — curses hello-world.
+2. §M1 — presentation kernel (`ui/kernel.lua`). **[DONE 2026-05-29]** —
+   `ui/kernel.lua` + `ui/format.lua`; library + debug-server adapted.
+   §4.2 carry-overs for later: custom-event namespacing, mutation
+   coalescing, watch-evaluator move from inline to kernel subscription.
+3. §M2 — curses hello-world. (`cli/drivers/curses/` scaffold already in
+   place; needs to call `kernel:get_scene()` for narration/choices via
+   `attach()` and stop relying on the engine pull-mode `render`/`prompt`.)
 4. §M3 — screen model + buffer backend split.
 5. §M4 — author bindings (parser + schema).
 6. §M5 — first reactive widget: stat-bar.

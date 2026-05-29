@@ -551,9 +551,20 @@ function M.new(engine, opts)
   end
 
   --- Emit an event to all registered handlers and connected TCP clients.
+  --- Also forwards to a registered presentation kernel (see
+  --- `ui/kernel.lua` and `ui_idea.md` §M1). The kernel-forward fires
+  --- regardless of `_running`, so subscribers receive events even
+  --- before the transport is started — the gate only suppresses
+  --- transport-level broadcast.
   ---@param event_name string
   ---@param payload    table
   function srv:emit(event_name, payload)
+    -- Forward to presentation kernel (M1) before the running gate so
+    -- in-process subscribers see every event, including those that
+    -- fire during engine init before srv:start() runs.
+    if self._kernel then
+      pcall(function() self._kernel:emit(event_name, payload) end)
+    end
     if not self._running then return end
     local hs = self._handlers[event_name] or {}
     for _, fn in ipairs(hs) do
@@ -569,6 +580,13 @@ function M.new(engine, opts)
       self:_sse_push(event_name, payload)
     end
   end
+
+  --- Register a presentation kernel (see `ui/kernel.lua`) to receive
+  --- a forwarded copy of every event this server emits. The kernel is
+  --- the new owner of in-process event dispatch (ui_idea.md §M1); the
+  --- debug server retains ownership of TCP/SSE transport only.
+  ---@param kernel table  kernel instance from `ui.kernel.new()`
+  function srv:set_kernel(kernel) self._kernel = kernel end
 
   -- ── Watch evaluation ───────────────────────────────────────
 
