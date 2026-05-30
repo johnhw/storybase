@@ -1,5 +1,5 @@
 -- cli/drivers/curses/init.lua
--- Curses UI driver for StoryBase (ui_idea.md §M3 + §M5).
+-- Curses UI driver for StoryBase (ui_idea.md §M3 + §M5 + §M6).
 --
 -- The driver paints into a retained 2D cell grid (`screen.lua`) and
 -- flushes only dirty regions (`paint.lua`) to a backend. Two backends
@@ -33,6 +33,9 @@ local paint_mod       = require("cli.drivers.curses.paint")
 local backend_curses  = require("cli.drivers.curses.backend_curses")
 local backend_buffer  = require("cli.drivers.curses.backend_buffer")
 local statbar_mod     = require("cli.drivers.curses.widgets.statbar")
+local dialog_mod      = require("cli.drivers.curses.widgets.dialog")
+local view_stack_mod  = require("cli.drivers.curses.view_stack")
+local focus_mod       = require("cli.drivers.curses.focus")
 
 -- Default geometry when the ncurses backend can't report a size yet (the
 -- buffer backend always uses these). Real ncurses ignores them and uses
@@ -186,6 +189,9 @@ function M.new(opts)
     _last_choices = nil,
     _last_active  = false,
     _unsubs      = {},  -- kernel unsubscribe handles
+    _view_stack  = view_stack_mod.new(),  -- §M6 driver-local view stack
+    _focus       = focus_mod.new(),       -- §M6 focus / key dispatch stack
+    _quit_pending = false,                -- set by quit-confirm dialog
   }
 
   --- Lazily call backend:init on first paint. Errors with a clear
@@ -294,6 +300,17 @@ function M.new(opts)
       prompt = "(press q or ESC to quit)"
     end
     self._screen:write(prompt_win, 0, 0, prompt)
+
+    -- §M6: paint any active overlays on top of the base frame.
+    -- Each view allocates its own window via `screen:add_window` and
+    -- writes into it; later writes overwrite earlier cells in the
+    -- shared grid, so the dialog naturally appears over the game.
+    if self._view_stack and not self._view_stack:empty() then
+      local ctx = { kernel = self._kernel, driver = self }
+      self._view_stack:each_for_paint(function(view)
+        view:paint(self._screen, ctx)
+      end)
+    end
   end
 
   --- Compose and flush a single frame. Only dirty cells reach the backend.
@@ -385,6 +402,11 @@ function M.new(opts)
     self._unsubs = {}
     self._widgets = {}
     self._by_path = {}
+    -- §M6: tear down any leftover overlays. A clean shutdown is rare
+    -- but matters under pcall/abort paths so the next attach starts blank.
+    if self._view_stack then self._view_stack:clear(self) end
+    if self._focus then self._focus:clear(self) end
+    self._quit_pending = false
     self._kernel = nil
     if self._backend and self._backend.close then
       pcall(function() self._backend:close() end)
@@ -398,24 +420,72 @@ function M.new(opts)
   local KEY_ESC = 27
 
   --- Block on the backend's `read_key` and translate keypresses to a
-  --- 1-based choice index. Returns nil for q/Q/ESC (quit). Ignores
-  --- out-of-range digits and unrecognised keys.
+  --- 1-based choice index. Returns nil only when the player confirms
+  --- the quit dialog (or the backend's key source is exhausted).
+  ---
+  --- §M6 dispatch order:
+  ---   1. The top focus handler (a modal dialog, if any) gets first dibs.
+  ---      If it consumes the key, we recompose (the modal may have
+  ---      popped itself) and re-loop — except when its action set
+  ---      `_quit_pending`, which exits the loop with nil.
+  ---   2. ESC / q / Q open the quit-confirm dialog (curses-only — the
+  ---      plain driver still treats these as immediate quit).
+  ---   3. Digits 1..#choices return their 1-based index.
+  ---   4. Everything else is ignored — loop continues.
   ---@param num_choices integer
   ---@return integer? idx
   function driver:_read_choice(num_choices)
     if not self._initialised then return nil end
+    self._quit_pending = false
     while true do
       local key = self._backend:read_key()
       if not key then return nil end
-      if key == KEY_ESC then return nil end
-      if key == string.byte("q") or key == string.byte("Q") then
-        return nil
-      end
-      if key >= string.byte("1") and key <= string.byte("9") then
+
+      if self._focus and self._focus:dispatch(key, self) then
+        -- The dialog likely popped itself; recompose so the next pass
+        -- shows (or no longer shows) the modal frame.
+        compose(self, self._last_choices, self._last_active)
+        flush_frame(self)
+        if self._quit_pending then return nil end
+      elseif key == KEY_ESC
+         or key == string.byte("q") or key == string.byte("Q") then
+        self:_open_quit_dialog()
+      elseif key >= string.byte("1") and key <= string.byte("9") then
         local d = key - string.byte("0")
         if d >= 1 and d <= num_choices then return d end
       end
     end
+  end
+
+  --- Push a "Really quit?" modal onto the view + focus stacks and
+  --- recompose so the user sees it on the next backend read. The
+  --- dialog's Yes action sets `_quit_pending`; either Yes, No, or
+  --- ESC pops the modal off both stacks via the shared close fn.
+  function driver:_open_quit_dialog()
+    local self_ref = self
+    local function close()
+      if not self_ref._view_stack:empty() then
+        self_ref._view_stack:pop(self_ref)
+      end
+      if not self_ref._focus:empty() then
+        self_ref._focus:pop(self_ref)
+      end
+    end
+    local d = dialog_mod.new({
+      title = "Quit?",
+      body  = "Really quit?",
+      buttons = {
+        { key = "y", label = "Yes",
+          action = function() self_ref._quit_pending = true end },
+        { key = "n", label = "No" },
+      },
+      on_select = function() close() end,
+      on_cancel = function() close() end,
+    })
+    self._view_stack:push(d, self)
+    self._focus:push(d, self)
+    compose(self, self._last_choices, self._last_active)
+    flush_frame(self)
   end
 
   -- ── Driver-private hooks for tests ────────────────────────────
@@ -424,6 +494,10 @@ function M.new(opts)
   --- and snapshot grids. Not part of the driver protocol.
   function driver:_screen_handle() return self._screen end
   function driver:_backend_handle() return self._backend end
+
+  --- §M6 test seams: let specs drive view-stack assertions directly.
+  function driver:_view_stack_handle() return self._view_stack end
+  function driver:_focus_handle() return self._focus end
 
   return driver
 end

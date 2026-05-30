@@ -6,6 +6,31 @@ Completed work has been moved to [completed.md](completed.md).
 
 ## Current Status (2026-05-30)
 
+§M6 (view stack + modal dialog) landed 2026-05-30:
+`cli/drivers/curses/view_stack.lua` and `cli/drivers/curses/focus.lua`
+are the two driver-local stacks. The view stack stores overlays
+(views with `paint(self, screen, ctx)` + optional `on_open`/`on_close`)
+and is iterated bottom-to-top during compose so modals draw on top
+of the base game frame. The focus stack is independent and routes
+keys to its top handler (no fallthrough). The §M6 acceptance widget
+is `cli/drivers/curses/widgets/dialog.lua` — a centred bordered box
+with title + body + button row that acts as both a view and a focus
+handler. The curses driver's input loop now dispatches keys through
+focus first; q/Q/ESC open a "Really quit?" dialog instead of
+returning nil immediately. Yes sets `_quit_pending` and prompt
+returns nil; No/ESC simply pop the modal off both stacks and the
+prompt loop continues, so a follow-up digit resolves normally. The
+plain driver keeps its previous q-as-immediate-quit behaviour
+(modals are curses-only per the spec). View/focus stacks are
+distinct from the engine's scene stack: opening the modal does not
+fire `scene-change` and is not persisted to saves. Tests:
+`view_stack_spec.lua` (10), `focus_spec.lua` (13),
+`dialog_widget_spec.lua` (18), `integration/quit_dialog_spec.lua`
+(10), plus 2 reworked cases in `curses_driver_spec.lua`. **Total:
+3410 → 3463 (+53 new tests). 0 failures, 2 pending.**
+
+## Current Status (2026-05-30)
+
 §M5 (first reactive widget: stat-bar) landed 2026-05-30:
 `cli/drivers/curses/widgets/statbar.lua` is the first author-bindable
 reactive widget. The curses driver's `attach(kernel)` scans
@@ -209,7 +234,15 @@ fragility items) shipped 2026-05-25.
    the driver. Test harness §9.1 items 1–3 shipped alongside;
    items 4 (paint.diff property test) and 5 (resize integration
    test) deferred until they bite.
-7. §M6 — view stack + modal dialog.
+7. §M6 — view stack + modal dialog. **[DONE 2026-05-30]** —
+   `cli/drivers/curses/view_stack.lua` + `cli/drivers/curses/focus.lua`
+   give the driver two driver-local stacks (separate from the
+   engine's scene stack per ui_idea.md §7).
+   `cli/drivers/curses/widgets/dialog.lua` is a modal widget that
+   acts as both a view and a focus handler. The curses input loop
+   routes keys through focus first; q/Q/ESC now open a quit-confirm
+   dialog (Yes confirms quit, No/ESC cancels). Plain driver keeps
+   the previous immediate-quit behaviour per spec.
 8. §M7 — menu + input widgets.
 9. §M8 — inventory and remaining standard widgets.
 10. §M9 — demo + author docs.

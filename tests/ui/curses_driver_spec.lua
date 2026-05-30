@@ -185,19 +185,43 @@ describe("curses driver: round-trip (buffer backend)", function()
     assert.is_truthy(s:find("Choice %(1%-3"), s)
   end)
 
-  it("returns nil from prompt on q (quit)", function()
+  it("q + Yes confirms quit (returns nil from prompt)", function()
+    -- §M6: pressing q opens the quit-confirm dialog; the player must
+    -- press y to actually quit. The dialog popping itself is invisible
+    -- to the caller — prompt simply returns nil once the Yes action
+    -- sets _quit_pending.
     local d = driver_mod.new({
       backend = "buffer", rows = 10, cols = 40,
-      keys    = { string.byte("q") },
+      keys    = { string.byte("q"), string.byte("y") },
     })
     d:render({ narration = {}, choices = choices })
     assert.is_nil(d:prompt(choices))
   end)
 
-  it("returns nil from prompt on ESC", function()
+  it("ESC + Yes confirms quit", function()
     local d = driver_mod.new({
       backend = "buffer", rows = 10, cols = 40,
-      keys    = { 27 },
+      keys    = { 27, string.byte("y") },
+    })
+    d:render({ narration = {}, choices = choices })
+    assert.is_nil(d:prompt(choices))
+  end)
+
+  it("q + No cancels: next digit resolves the prompt normally", function()
+    local d = driver_mod.new({
+      backend = "buffer", rows = 10, cols = 40,
+      keys    = { string.byte("q"), string.byte("n"), string.byte("2") },
+    })
+    d:render({ narration = {}, choices = choices })
+    assert.equal(2, d:prompt(choices))
+  end)
+
+  it("EOF on the backend returns nil even without a dialog", function()
+    -- Empty key queue → read_key returns nil → prompt returns nil.
+    -- Mirrors the real-world "terminal closed" case.
+    local d = driver_mod.new({
+      backend = "buffer", rows = 10, cols = 40,
+      keys    = {},
     })
     d:render({ narration = {}, choices = choices })
     assert.is_nil(d:prompt(choices))
