@@ -6,6 +6,43 @@ Completed work has been moved to [completed.md](completed.md).
 
 ## Current Status (2026-05-30)
 
+§M7 (menu + input widgets) landed 2026-05-30:
+`cli/drivers/curses/keys.lua` centralises the integer key-code
+constants (ASCII control bytes + standard ncurses `KEY_*` values
+since lcurses doesn't expose them as table fields) and provides
+`is_enter` / `is_backspace` / `is_printable` predicates so widgets
+share one source of truth for "Enter is one of CR / LF / KEY_ENTER",
+"Backspace is one of BS / DEL / KEY_BACKSPACE", etc.
+`cli/drivers/curses/widgets/menu.lua` is a navigable menu widget
+acting as both a view and a focus handler. Items are tagged
+`kind = "item" | "divider" | "header"`; cursor navigation skips
+non-selectable kinds. Arrow keys are the default with wrap; Home/End
+jump to extremes; Enter activates; ESC cancels. Per-item hotkeys are
+optional and trigger jump-and-activate when matched. Decoration is
+built in: ASCII border (toggle-able), optional title on top border,
+divider items render as a row of a customisable glyph (`-` default),
+highlighted cursor row uses customisable attrs (`reverse` default),
+header items use customisable attrs (`bold` default). Per-action key
+bindings are overridable (accept ints or int arrays) so e.g. vim
+`j`/`k` can be wired alongside the arrows. Submenu support is the
+author's job — an item action can push another menu onto the
+driver's stacks; the widget stays unaware of stack semantics.
+`cli/drivers/curses/widgets/input.lua` is a single-line free-text
+input that fulfils the §M7 acceptance bullet: on submit it can fire
+`driver._kernel:call_fn(fn_name, text)` before invoking the
+caller-supplied `on_submit`. Standard editing (printable insert,
+backspace/forward-delete, left/right/Home/End), max_len cap, ESC
+cancel, customisable bindings. Cursor renders as an in-band glyph
+with reverse-video attrs (the buffer backend has no hardware cursor).
+Tests: `menu_widget_spec.lua` (35), `input_widget_spec.lua` (32),
+`integration/menu_input_spec.lua` (11). **Total: 3463 → 3541 (+78
+new tests). 0 failures, 2 pending.** Per the spec the menu/input
+widgets are not wired to a default driver keystroke — they're widgets
+that authors and future UI panels can push; the integration spec
+exercises both stacks end-to-end.
+
+## Current Status (2026-05-30)
+
 §M6 (view stack + modal dialog) landed 2026-05-30:
 `cli/drivers/curses/view_stack.lua` and `cli/drivers/curses/focus.lua`
 are the two driver-local stacks. The view stack stores overlays
@@ -243,7 +280,18 @@ fragility items) shipped 2026-05-25.
    routes keys through focus first; q/Q/ESC now open a quit-confirm
    dialog (Yes confirms quit, No/ESC cancels). Plain driver keeps
    the previous immediate-quit behaviour per spec.
-8. §M7 — menu + input widgets.
+8. §M7 — menu + input widgets. **[DONE 2026-05-30]** —
+   `cli/drivers/curses/keys.lua` centralises integer key codes.
+   `cli/drivers/curses/widgets/menu.lua` is a navigable menu
+   (arrows + Enter default, optional per-item hotkeys, items can be
+   `"item" | "divider" | "header"`, customisable border / highlight /
+   divider glyph / key bindings; submenu support is author-driven via
+   action callbacks pushing onto the driver's stacks).
+   `cli/drivers/curses/widgets/input.lua` is a single-line text
+   input; on submit it fires `kernel:call_fn(fn_name, text)` per the
+   §6 input-vocabulary acceptance bullet. Per spec the widgets are
+   not auto-wired to a default driver keystroke — the integration
+   spec exercises both stacks end-to-end.
 9. §M8 — inventory and remaining standard widgets.
 10. §M9 — demo + author docs.
 
