@@ -5,6 +5,81 @@ Active tasks are in [todo.md](todo.md).
 
 ---
 
+## §M9 — UI demo + author docs ✅ (2026-05-30)
+
+Closes out the UI driver track (`ui_idea.md` §M0–§M9). M9 has no
+runtime or compiler changes — it's the consolidation milestone that
+proves the §M4–§M8 binding/widget surface holds together under a real
+demo and ships the author + driver-implementor documentation.
+
+**Demo:** `demos/demo35_healers_ward_ui.sb` (no modification of
+demo13; new file forked from it per the user request). The healer's
+ward gameplay is unchanged; the demo adds `ui:` blocks on every
+HUD-worthy state and a `ui-panel ward-hud` that composes them with a
+`text` widget. Coverage:
+
+- `stat-bar` — `world/herbs`, `world/bandages` (bounded `Int` →
+  `cur/max` + bar)
+- `stat` — `world/day`
+- `choice` — `world/triage-focus` (`TriageFocus` enum; curses-only
+  radio group). The state is also read in scene logic, so the UI and
+  game logic share the same enum.
+- `toggle` — `world/auto-rest` (Bool, wired to `fn: set-auto-rest` so
+  space/Enter on the curses widget round-trips through the engine and
+  back to the displayed toggle state)
+- `inventory` — `world/journal` (`UList(String)`, `max-rows: 5`,
+  fed by a small `record-event` fn called from every gameplay action).
+  Renamed from `log` after that clashed with the runtime's builtin
+  `log` math function — captured under "Common pitfalls" in the
+  author doc.
+- `text` — `"Tending: {world/selected-patient} (day {world/day})"`
+  (one-level interpolation; the limitation is documented).
+
+The demo sets `engine-config: ui-runtime: true` so the bindings
+survive `--production` bundling.
+
+Validation:
+- `lua5.4 cli/main.lua run demos/demo35_healers_ward_ui.sb --ui plain
+  --auto --steps 6` produces a header strip with every flat-renderable
+  widget; the journal grows as `apply-bandage` / `apply-herbs` /
+  `discharge` push to it.
+- `lua5.4 cli/main.lua run demos/demo35_healers_ward_ui.sb --ui
+  curses --ui-backend buffer --ui-rows 30 --ui-cols 80 --ui-keys
+  "1131q" --ui-snapshot /tmp/demo35.txt` lights up the full HUD strip
+  (stat-bar / stat / choice / toggle / inventory / text) and proves
+  the quit-confirm dialog (§M6) renders over the live game frame.
+  Each scripted mutation lands as a per-widget repaint via the
+  `mutation` subscription installed at `driver:attach`.
+- Full busted suite: 3644 successes / 0 failures / 0 errors / 2
+  pending (unchanged from §M8).
+- CLI integration suite includes demo35 in every per-demo iteration
+  (compile / verify / run / format / bundle round-trips) and is green.
+
+**Docs:**
+- `docs/howto/ui_bindings.md` — author-facing tutorial. The
+  shortest-possible-HUD example, when to use `ui:` vs `ui-panel`,
+  full widget vocabulary table + per-widget keys, a worked
+  walk-through of demo35, the `ui-runtime: true` production-strip
+  story, and a "Common pitfalls" section (the `log` clash, the
+  one-level `text` template parser, `inventory` requiring a scalar
+  Set/List/UList path rather than a family, panel vs state-decl
+  ordering, choice not flattening in plain output).
+- `docs/reference/driver_protocol.md` — driver-implementor reference.
+  Lifecycle (`render` / `prompt` / `notify` / `attach` / `tick` /
+  `detach`), every event in §3.1 with its payload + when it fires,
+  every query in §3.2, every command in §3.3, the curses driver's
+  internal anatomy as a reference implementation (screen model,
+  backend interface, widget contract, view stack vs scene stack),
+  and a "implementing a new driver" checklist.
+
+Both docs link back into `ui_idea.md`, `docs/explanation/ui_event_audit.md`,
+and the existing kernel / widget / driver specs.
+
+`code_map.md`'s demo table gains the demo35 row; no new modules
+needed entries.
+
+---
+
 ## §M latent-fragility fixes M7 + M8 ✅ (2026-05-25)
 
 Closed the two latent-fragility items left open by the 2026-05-24 M1–M6

@@ -6,6 +6,52 @@ Completed work has been moved to [completed.md](completed.md).
 
 ## Current Status (2026-05-30)
 
+§M9 (demo + author docs) landed 2026-05-30:
+Closes out the UI driver track (`ui_idea.md` §M0–§M9). No runtime or
+compiler changes — the milestone proves the §M4–§M8 binding/widget
+surface holds together end-to-end and ships the author + driver-
+implementor documentation.
+
+* **Demo:** `demos/demo35_healers_ward_ui.sb` — a new file forked
+  from demo13 (gameplay unchanged). Exercises every widget kind
+  shipped in §M5–§M8: `stat-bar` (`world/herbs`, `world/bandages`),
+  `stat` (`world/day`), `choice` (`world/triage-focus` TriageFocus
+  enum; curses-only), `toggle` (`world/auto-rest` Bool wired to
+  `fn: set-auto-rest`), `inventory` (`world/journal` `UList(String)`
+  with `max-rows: 5`), and `text` (`"Tending: {world/selected-patient}
+  (day {world/day})"`). Composed in a `ui-panel ward-hud`. Sets
+  `engine-config: ui-runtime: true` so the bindings survive
+  `--production` bundling. Validated end-to-end under both `--ui
+  plain --auto --steps 6` and `--ui curses --ui-backend buffer
+  --ui-keys "1131q"` (curses snapshot stacks the full HUD strip at
+  the top of the screen and proves the §M6 quit-confirm dialog
+  renders over the live game frame). The `record-event` helper fn
+  is named that way deliberately — `log` clashes with the runtime's
+  builtin `log` math function and the user fn was being shadowed
+  silently. Pitfall captured in the author doc.
+* **`docs/howto/ui_bindings.md`** — author-facing tutorial. Shortest-
+  possible-HUD example, when to use `ui:` vs `ui-panel`, full widget
+  vocabulary table + per-widget keys, worked walk-through of
+  demo35, `ui-runtime: true` production-strip story, "Common
+  pitfalls" section (the `log` clash, one-level `text` template
+  parser, `inventory` requiring a scalar Set/List/UList path rather
+  than a family, panel vs state-decl ordering, choice not
+  flattening in plain output).
+* **`docs/reference/driver_protocol.md`** — driver-implementor
+  reference. Lifecycle, every event in §3.1 with payload, every
+  query in §3.2, every command in §3.3, the curses driver's
+  internal anatomy as a reference implementation, and an
+  "implementing a new driver" checklist.
+
+Tests unchanged (no new code paths): full suite 3644/0/0/2; CLI
+integration suite green with demo35 added to every per-demo
+iteration. The UI driver track is complete on the v1 trajectory
+described in `ui_idea.md` §10; the "Later (not v1)" items there
+(color theming, mouse, localisation hook, animation primitives,
+non-curses validation driver) are now the open extensions.
+
+## Current Status (2026-05-30)
+
 §M8 (inventory + remaining standard widgets) landed 2026-05-30:
 Closes out the widget vocabulary in ui_idea.md §5.3. Five new widgets
 live under `cli/drivers/curses/widgets/`:
@@ -356,7 +402,15 @@ fragility items) shipped 2026-05-25.
    schema + ui_panels and stacks them in a variable-height top strip
    keyed off `widget._desired_h`. Plain driver gained one-line
    flatteners for stat / toggle / text / inventory.
-10. §M9 — demo + author docs.
+10. §M9 — demo + author docs. **[DONE 2026-05-30]** —
+    `demos/demo35_healers_ward_ui.sb` (forked from demo13; gameplay
+    unchanged; adds `ui:` blocks + `ui-panel ward-hud` exercising
+    every §M5–§M8 widget kind). `docs/howto/ui_bindings.md` for
+    authors and `docs/reference/driver_protocol.md` for driver
+    implementors. UI driver track is now complete on the v1
+    trajectory in `ui_idea.md` §10; "Later (not v1)" items there
+    (color theming, mouse, localisation hook, animation primitives,
+    non-curses validation driver) become the open extensions.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**
 - §J-I8 — cross-reference to §A1 (`set!` on a `let`-binding).
