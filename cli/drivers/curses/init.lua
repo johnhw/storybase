@@ -1,5 +1,5 @@
 -- cli/drivers/curses/init.lua
--- Curses UI driver for StoryBase (ui_idea.md §M3: screen model + dual backends).
+-- Curses UI driver for StoryBase (ui_idea.md §M3 + §M5).
 --
 -- The driver paints into a retained 2D cell grid (`screen.lua`) and
 -- flushes only dirty regions (`paint.lua`) to a backend. Two backends
@@ -10,10 +10,16 @@
 --   * backend_buffer : an in-memory grid for headless tests and as a
 --                      no-tty fallback when lcurses is unavailable.
 --
--- Pull-mode (engine calls `driver:render(scene_output)` + `prompt(choices)`)
--- remains the dispatch path for §M3 to keep parity with §M2. §M4 wires
--- in author bindings; §M5 flips the dispatch to kernel-driven event
--- subscription for reactive widgets.
+-- Dispatch:
+--   * Pull-mode (`render(scene_output)` + `prompt(choices)`) is still
+--     the dispatch path for narration and choice input — the engine
+--     calls these directly from `eng:step`.
+--   * Reactive widgets (§M5) sit alongside: `attach(kernel)` scans the
+--     compiled-game schema, instantiates a widget per `ui:` binding,
+--     and subscribes the driver to `mutation` so a single state change
+--     re-composes the frame and emits a dirty rect for *just* the
+--     widget window. The rest of the screen re-paints identically and
+--     is therefore diff'd as clean.
 --
 -- Activate with: `storybase run game.sb --ui curses`.
 --
@@ -26,6 +32,7 @@ local screen_mod      = require("cli.drivers.curses.screen")
 local paint_mod       = require("cli.drivers.curses.paint")
 local backend_curses  = require("cli.drivers.curses.backend_curses")
 local backend_buffer  = require("cli.drivers.curses.backend_buffer")
+local statbar_mod     = require("cli.drivers.curses.widgets.statbar")
 
 -- Default geometry when the ncurses backend can't report a size yet (the
 -- buffer backend always uses these). Real ncurses ignores them and uses
@@ -38,6 +45,75 @@ local DEFAULT_COLS = 80
 ---@return boolean
 function M.is_available()
   return backend_curses.is_available()
+end
+
+--- Walk the compiled schema and ui_panels and instantiate widget
+--- instances for every author-declared `ui:` binding the driver knows
+--- how to render. Today only `stat-bar` is implemented; unknown kinds
+--- are silently skipped so future widget kinds don't error out.
+---
+--- Populates `self._widgets` (insertion order = display order) and
+--- `self._by_path[path]` (array, for routing mutation events).
+---@param self    table
+---@param schema  table  compiled schema (`{states=..., types=...}`)
+---@param panels  table  list of `game_table.ui_panels`
+local function collect_widgets(self, schema, panels)
+  local function add_statbar(spec)
+    -- spec : { path = state_path, ui_fields = {kind=..., label=..., ...},
+    --         type_desc = {tag="int", min, max} }
+    if not spec.path then return end
+    if self._by_path[spec.path] then
+      -- A state can be referenced from both its own `ui:` block and a
+      -- `ui-panel` child. Render it once, source-of-truth being the
+      -- first encountered (state-decl precedes panel walk below).
+      return
+    end
+    local ui = spec.ui_fields or {}
+    local w = statbar_mod.new({
+      path       = spec.path,
+      label      = ui.label,
+      type_desc  = spec.type_desc,
+      color_good = ui["color-good"],
+      color_bad  = ui["color-bad"],
+    })
+    self._widgets[#self._widgets + 1] = w
+    self._by_path[spec.path] = { w }
+  end
+
+  -- Build a quick path → state-descriptor lookup for the panel pass.
+  local state_by_path = {}
+  for _, s in ipairs((schema and schema.states) or {}) do
+    if s.kind == "scalar" and s.path then state_by_path[s.path] = s end
+  end
+
+  -- Pass 1: scalar `ui:` blocks attached directly to state decls.
+  for _, s in ipairs((schema and schema.states) or {}) do
+    if s.kind == "scalar" and s.ui and s.ui.kind == "stat-bar" then
+      add_statbar({
+        path      = s.path,
+        ui_fields = s.ui,
+        type_desc = s.type_desc,
+      })
+    end
+  end
+
+  -- Pass 2: ui-panel children. A `stat-bar player/hp` child inherits the
+  -- state's own type_desc + ui fields (if any), with the panel acting as
+  -- a layout-only reference.
+  for _, p in ipairs(panels or {}) do
+    for _, child in ipairs(p.children or {}) do
+      if child.kind == "stat-bar" and child.arg then
+        local s = state_by_path[child.arg]
+        if s then
+          add_statbar({
+            path      = child.arg,
+            ui_fields = s.ui,
+            type_desc = s.type_desc,
+          })
+        end
+      end
+    end
+  end
 end
 
 --- Convert engine narration items into plain text lines. `say` items
@@ -86,9 +162,10 @@ function M.new(opts)
   local backend
   if kind == "buffer" then
     backend = backend_buffer.new({
-      rows = opts.rows or DEFAULT_ROWS,
-      cols = opts.cols or DEFAULT_COLS,
-      keys = opts.keys,
+      rows          = opts.rows or DEFAULT_ROWS,
+      cols          = opts.cols or DEFAULT_COLS,
+      keys          = opts.keys,
+      frame_history = opts.frame_history,
     })
   elseif kind == "ncurses" then
     backend = backend_curses.new({ curses = opts.curses })
@@ -104,6 +181,11 @@ function M.new(opts)
     _initialised = false,
     _screen      = nil,
     _narr_lines  = {},  -- scrollback history (engine-side text lines)
+    _widgets     = {},  -- ordered list of widget instances
+    _by_path     = {},  -- state path → array of widgets bound to it
+    _last_choices = nil,
+    _last_active  = false,
+    _unsubs      = {},  -- kernel unsubscribe handles
   }
 
   --- Lazily call backend:init on first paint. Errors with a clear
@@ -126,9 +208,16 @@ function M.new(opts)
     self._initialised = true
   end
 
-  --- Compose the screen for one frame: narration tail, separator,
-  --- choices, and the prompt status line. Returns nothing — paints
-  --- into the screen's `_cells` grid. The caller then flushes.
+  --- Compose the screen for one frame: optional stat-bar strip,
+  --- narration tail, separator, choices, and the prompt status line.
+  --- Returns nothing — paints into the screen's `_cells` grid. The
+  --- caller then flushes.
+  ---
+  --- When the driver is attached to a kernel and has stat-bar widgets,
+  --- each widget paints into a one-row window at the top of the screen
+  --- (z-ordered above narration). Widget windows are at stable y/x
+  --- positions so `paint.diff` produces an empty rect list for an
+  --- unchanged value.
   ---@param self table
   ---@param choices table?
   ---@param choices_active boolean
@@ -142,12 +231,24 @@ function M.new(opts)
     local prompt_h    = 1
     local separator_h = 1
     local choices_h   = #choices
-    local narr_h      = rows - prompt_h - separator_h - choices_h
+    local stat_h      = #self._widgets
+    local narr_h      = rows - prompt_h - separator_h - choices_h - stat_h
     if narr_h < 1 then narr_h = 1 end
 
+    -- Stat-bar strip: one row per widget, top of screen.
+    local stat_wins = {}
+    for i = 1, stat_h do
+      stat_wins[i] = self._screen:add_window({
+        x = 0, y = i - 1, w = cols, h = 1,
+      })
+    end
+
     -- Allocate windows so §M5+ widgets can repaint regions individually.
-    local narr_win = self._screen:add_window({ x = 0, y = 0, w = cols, h = narr_h })
-    local sep_y = narr_h
+    local narr_y = stat_h
+    local narr_win = self._screen:add_window({
+      x = 0, y = narr_y, w = cols, h = narr_h,
+    })
+    local sep_y = narr_y + narr_h
     local sep_win = self._screen:add_window({ x = 0, y = sep_y, w = cols, h = 1 })
     local choices_y = sep_y + separator_h
     local choices_win = self._screen:add_window({
@@ -156,6 +257,13 @@ function M.new(opts)
     local prompt_win = self._screen:add_window({
       x = 0, y = rows - 1, w = cols, h = 1,
     })
+
+    -- Stat-bars (only when a kernel is attached so widgets can query state).
+    if self._kernel then
+      for i = 1, stat_h do
+        self._widgets[i]:paint(self._screen, stat_wins[i], self._kernel)
+      end
+    end
 
     -- Narration: bottom-aligned tail.
     local first = math.max(1, #self._narr_lines - narr_h + 1)
@@ -203,6 +311,8 @@ function M.new(opts)
     for _, line in ipairs(narration_to_lines(scene_output.narration)) do
       self._narr_lines[#self._narr_lines + 1] = line
     end
+    self._last_choices = scene_output.choices
+    self._last_active  = false
     -- Paint without an active choice prompt; the engine will follow up
     -- with `prompt()` when it wants input.
     compose(self, scene_output.choices, false)
@@ -211,25 +321,70 @@ function M.new(opts)
 
   function driver:prompt(choices)
     ensure_init(self)
+    self._last_choices = choices
+    self._last_active  = true
     compose(self, choices, true)
     flush_frame(self)
     return self:_read_choice(#(choices or {}))
   end
 
   function driver:notify(_event, _data)
-    -- Pull-mode driver. Live event delivery via the kernel lands at §M5
-    -- when the first reactive widget (stat-bar) starts subscribing.
+    -- Pull-mode driver. Live event delivery lands via `attach(kernel)`
+    -- below; `notify` is retained for forward compatibility with the
+    -- driver-protocol contract (cli/drivers/driver.lua).
+  end
+
+  --- Re-paint the most recent frame using the latest kernel-cached
+  --- state. Called from the mutation subscription so widget windows
+  --- pick up new values without waiting for the next engine-driven
+  --- render. The frame outside the widget strip re-paints identically
+  --- to the prior frame, so `paint.diff` yields rects covering only
+  --- the cells the widgets actually changed.
+  ---@param self table
+  local function recompose_for_mutation(self)
+    if not self._initialised or not self._kernel then return end
+    if #self._widgets == 0 then return end
+    compose(self, self._last_choices, self._last_active)
+    flush_frame(self)
   end
 
   function driver:attach(kernel)
     self._kernel = kernel
+    -- Discover widgets from the schema (states with a `ui:` block) and
+    -- from ui-panels (children referencing state paths). Subscribe to
+    -- the `mutation` event so a state change repaints affected widgets.
+    self._widgets = {}
+    self._by_path = {}
+    if kernel and kernel.get_schema then
+      local schema = kernel:get_schema() or {}
+      collect_widgets(self, schema, kernel.get_bindings and kernel:get_bindings() or {})
+    end
+    -- Subscribe regardless of whether widgets exist today — a future
+    -- live-reload could grow the widget list and the same subscription
+    -- still routes events.
+    if kernel and kernel.on and #self._widgets > 0 then
+      local unsub = kernel:on("mutation", function(payload)
+        if not (payload and payload.path) then return end
+        if not self._by_path[payload.path] then return end
+        recompose_for_mutation(self)
+      end)
+      self._unsubs[#self._unsubs + 1] = unsub
+    end
   end
 
   function driver:tick(_dt)
-    -- §8.4 frame loop ticks live at §M5+ once reactive widgets exist.
+    -- §8.4 frame loop ticks live with M6+ (animations / typewriter).
   end
 
   function driver:detach()
+    -- Drop subscriptions before tearing down the surface so a stray
+    -- in-flight mutation cannot fire into a half-closed screen.
+    for i = 1, #self._unsubs do
+      pcall(self._unsubs[i])
+    end
+    self._unsubs = {}
+    self._widgets = {}
+    self._by_path = {}
     self._kernel = nil
     if self._backend and self._backend.close then
       pcall(function() self._backend:close() end)

@@ -1080,6 +1080,28 @@ function M.run(game_table, opts)
   opts = opts or {}
   local eng = M.new(game_table, opts)
 
+  -- §M5: install a presentation kernel so reactive drivers (curses
+  -- statbar widgets, browser-sse, future widgets) can subscribe to
+  -- mutation/scene-change/custom events even when launched via the CLI
+  -- (the embedded `lib/storybase.lua` path always sets this; engine.run
+  -- previously did not, so the curses driver's `attach` ran against
+  -- nil). Idempotent and side-effect-free if no driver attaches.
+  do
+    local ok_k, kernel_mod = pcall(require, "ui.kernel")
+    if ok_k and not eng._kernel then
+      eng:set_kernel(kernel_mod.new())
+    end
+  end
+
+  -- Driver attach: give the driver the kernel so widgets bound via the
+  -- §M4 schema (`ui:` blocks, `ui-panel` decls) can subscribe to
+  -- mutations. Drivers with no widgets/no kernel needs (plain/ansi)
+  -- treat this as a no-op stub. Wrapped in pcall so a malformed driver
+  -- can't kill the run.
+  if opts.driver and opts.driver.attach and eng._kernel then
+    pcall(function() opts.driver:attach(eng._kernel) end)
+  end
+
   -- Start debug server when --debug or --serve flag was given (debug_port is set)
   if opts.debug_port then
     local ok_d, debug_mod = pcall(require, "runtime.debug")
@@ -1161,6 +1183,14 @@ function M.run(game_table, opts)
     if write_save(opts.save_path, eng._scene_stack, eng._log, eng._state) then
       io.stdout:write("[Saved to " .. opts.save_path .. "]\n")
     end
+  end
+
+  -- §M5: tell the driver to release any kernel subscriptions and
+  -- surface (e.g. endwin() for curses) before we shut down the debug
+  -- server, so a mid-shutdown event can't fire into a half-closed
+  -- screen.
+  if opts.driver and opts.driver.detach then
+    pcall(function() opts.driver:detach() end)
   end
 
   -- Shut down debug server if one was started

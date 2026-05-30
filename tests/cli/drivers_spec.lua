@@ -114,6 +114,113 @@ describe("plain driver: notify", function()
   end)
 end)
 
+-- ── plain driver: §M5 stat-bar fallback ──────────────────────────────────────
+--
+-- The plain driver does not subscribe to mutations; it re-emits the
+-- stat-bar header on every render. This matches its synchronous-pull
+-- cadence and keeps a no-color text driver useful for `--ui plain`
+-- runs of games that declare `ui:` bindings.
+
+describe("plain driver: stat-bar fallback (M5)", function()
+  --- Tiny kernel stub: enough surface for the plain driver's attach
+  --- and render to discover bindings and read state.
+  local function stub_kernel(schema, panels, state)
+    return {
+      _s = state or {},
+      get_schema   = function() return schema end,
+      get_bindings = function() return panels or {} end,
+      get_state    = function(self, p) return self._s[p] end,
+    }
+  end
+
+  local schema = {
+    states = {
+      { kind = "scalar", path = "player/hp",
+        type_desc = { tag = "int", min = 0, max = 10 },
+        ui = { kind = "stat-bar", label = "Health" } },
+      { kind = "scalar", path = "player/mana",
+        type_desc = { tag = "int", min = 0, max = 20 } },
+    },
+  }
+  local panels = {
+    { name = "status", children = {
+        { kind = "stat-bar", arg = "player/mana" },
+      } },
+  }
+
+  it("prints 'Health: 7/10' once per render when attached", function()
+    local out, inp, captured = make_io({})
+    local d = plain_mod.new({ io_out = out, io_in = inp })
+    d:attach(stub_kernel(schema, nil, { ["player/hp"] = 7 }))
+    d:render({ narration = {}, choices = {} })
+    assert.is_truthy(captured():find("Health: 7/10"), captured())
+  end)
+
+  it("includes panel-child stat-bars too", function()
+    local out, inp, captured = make_io({})
+    local d = plain_mod.new({ io_out = out, io_in = inp })
+    d:attach(stub_kernel(schema, panels, {
+      ["player/hp"]   = 5,
+      ["player/mana"] = 18,
+    }))
+    d:render({ narration = {}, choices = {} })
+    local text = captured()
+    assert.is_truthy(text:find("Health: 5/10"))
+    assert.is_truthy(text:find("mana: 18/20"))
+  end)
+
+  it("re-reads the kernel state on every render", function()
+    local out, inp, captured = make_io({})
+    local d = plain_mod.new({ io_out = out, io_in = inp })
+    local k = stub_kernel(schema, nil, { ["player/hp"] = 10 })
+    d:attach(k)
+    d:render({ narration = {}, choices = {} })
+    k._s["player/hp"] = 3
+    d:render({ narration = {}, choices = {} })
+    local text = captured()
+    assert.is_truthy(text:find("Health: 10/10"))
+    assert.is_truthy(text:find("Health: 3/10"))
+  end)
+
+  it("prints nothing extra when no kernel is attached", function()
+    local out, inp, captured = make_io({})
+    local d = plain_mod.new({ io_out = out, io_in = inp })
+    d:render({ narration = { { kind = "narration", text = "X." } }, choices = {} })
+    local text = captured()
+    assert.is_nil(text:find("Health"))
+  end)
+
+  it("prints nothing extra when the schema has no bindings", function()
+    local bare = { states = {
+      { kind = "scalar", path = "player/hp",
+        type_desc = { tag = "int", min = 0, max = 10 } },  -- no ui:
+    } }
+    local out, inp, captured = make_io({})
+    local d = plain_mod.new({ io_out = out, io_in = inp })
+    d:attach(stub_kernel(bare, nil, { ["player/hp"] = 7 }))
+    d:render({ narration = {}, choices = {} })
+    assert.is_nil(captured():find("Health"))
+    assert.is_nil(captured():find("hp:"))
+  end)
+
+  it("renders '-' for an unobserved path", function()
+    local out, inp, captured = make_io({})
+    local d = plain_mod.new({ io_out = out, io_in = inp })
+    d:attach(stub_kernel(schema, nil, {}))  -- no value yet
+    d:render({ narration = {}, choices = {} })
+    assert.is_truthy(captured():find("Health: %-"), captured())
+  end)
+
+  it("detach drops the kernel and the bindings", function()
+    local out, inp, captured = make_io({})
+    local d = plain_mod.new({ io_out = out, io_in = inp })
+    d:attach(stub_kernel(schema, nil, { ["player/hp"] = 7 }))
+    d:detach()
+    d:render({ narration = {}, choices = {} })
+    assert.is_nil(captured():find("Health"))
+  end)
+end)
+
 -- ── ansi driver ───────────────────────────────────────────────────────────────
 
 describe("ansi driver: render", function()
@@ -445,6 +552,137 @@ scene later:
     assert.equal(0, rc, "stderr: " .. err)
     local f = io.open(snap_path, "r")
     assert.is_nil(f, "snapshot path should not exist when driver has no buffer handle")
+  end)
+end)
+
+-- ── §M5 end-to-end: --ui plain + ui: bindings ────────────────────────────────
+
+describe("--ui plain + ui: bindings (M5 end-to-end)", function()
+  local cli = require("cli.main")
+
+  -- One-state game with a stat-bar binding and a single self-looping
+  -- choice. The stat-bar header should appear in the captured stdout
+  -- before the narration on every step.
+  local src = [[
+module ui-statbar-plain-e2e
+  version: 1.0
+engine-config:
+  entry-scene: start
+state player/hp: Int(0, 10) = 7
+  ui:
+    kind: stat-bar
+    label: "Health"
+scene start:
+  You feel okay.
+  * Continue
+    -> start
+]]
+
+  local function tmpfile(contents)
+    local path = os.tmpname() .. ".sb"
+    local f = assert(io.open(path, "w")); f:write(contents); f:close()
+    return path
+  end
+
+  -- cli.main writes to io.stdout; capture it for the assertion.
+  local function run_capture(argv)
+    local out_parts = {}
+    local old_out = io.stdout
+    io.stdout = setmetatable({}, { __index = {
+      write = function(_, ...)
+        for _, s in ipairs({...}) do out_parts[#out_parts + 1] = tostring(s) end
+      end,
+      flush = function() end,
+    }})
+    local ok, rc = pcall(cli.main, argv)
+    io.stdout = old_out
+    if not ok then error(rc, 2) end
+    return rc or 0, table.concat(out_parts)
+  end
+
+  it("emits 'Health: 7/10' from the plain-driver fallback on render",
+  function()
+    local path = tmpfile(src)
+    local rc, out = run_capture({
+      "run", path, "--ui", "plain", "--auto", "--steps", "1",
+    })
+    os.remove(path)
+    assert.equal(0, rc)
+    assert.is_truthy(out:find("Health: 7/10"),
+      "expected stat-bar header in plain output:\n" .. out)
+  end)
+end)
+
+-- ── §M5 end-to-end: --ui curses + ui: bindings ───────────────────────────────
+
+describe("--ui curses + ui: bindings (M5 end-to-end)", function()
+  local cli = require("cli.main")
+
+  local src = [[
+module ui-statbar-curses-e2e
+  version: 1.0
+engine-config:
+  entry-scene: start
+state player/hp: Int(0, 10) = 7
+  ui:
+    kind: stat-bar
+    label: "Health"
+scene start:
+  You feel okay.
+  * Continue
+    -> start
+]]
+
+  local function tmpfile(contents)
+    local path = os.tmpname() .. ".sb"
+    local f = assert(io.open(path, "w")); f:write(contents); f:close()
+    return path
+  end
+
+  local function read_file(path)
+    local f = assert(io.open(path, "r"))
+    local s = f:read("*a"); f:close()
+    return s
+  end
+
+  local function run_with(argv)
+    local err_parts = {}
+    local old_err = io.stderr
+    io.stderr = setmetatable({}, { __index = {
+      write = function(_, ...)
+        for _, s in ipairs({...}) do err_parts[#err_parts + 1] = tostring(s) end
+      end,
+      flush = function() end,
+    }})
+    local ok, rc = pcall(cli.main, argv)
+    io.stderr = old_err
+    if not ok then error(rc, 2) end
+    return rc or 0, table.concat(err_parts)
+  end
+
+  it("paints the stat-bar above narration in the buffer snapshot", function()
+    local path = tmpfile(src)
+    local snap_path = os.tmpname() .. ".snap.txt"
+    local rc, err = run_with({
+      "run", path,
+      "--ui", "curses", "--ui-backend", "buffer",
+      "--ui-rows", "12", "--ui-cols", "60",
+      "--ui-keys", "q",
+      "--ui-snapshot", snap_path,
+    })
+    os.remove(path)
+    assert.equal(0, rc, "stderr: " .. err)
+    local snap = read_file(snap_path)
+    os.remove(snap_path)
+    -- Row 0 should be the stat-bar; narration follows below.
+    local rows = {}
+    for line in (snap .. "\n"):gmatch("([^\n]*)\n") do
+      rows[#rows + 1] = line
+    end
+    assert.is_truthy(rows[1] and rows[1]:find("Health: 7/10"),
+      "first row should be the stat-bar:\n" .. snap)
+    assert.is_truthy(snap:find("You feel okay"),
+      "narration should appear somewhere below the stat-bar:\n" .. snap)
   end)
 end)
 

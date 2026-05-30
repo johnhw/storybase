@@ -21,10 +21,21 @@
 --
 -- Extras specific to the buffer backend (driver-private):
 --
---   backend:snapshot()       -> string             -- newline-joined rows,
+--   backend:snapshot()         -> string           -- newline-joined rows,
 --                                                     trailing spaces trimmed
---   backend:snapshot_rows()  -> string[]           -- per-row strings, raw
+--   backend:snapshot_rows()    -> string[]         -- per-row strings, raw
 --   backend:script_keys(ks)                        -- enqueue keys for read_key
+--   backend:snapshot_history() -> string[]         -- one snapshot per flush
+--                                                     (opt-in; see frame_history)
+--   backend:dirty_history()    -> table[][]        -- per-flush dirty rects
+--   backend:reset_history()                        -- drop history buffers
+--
+-- Opt-in `frame_history`: pass `frame_history = true` to `M.new` (or
+-- via the driver's `opts.frame_history`). When enabled, each `flush()`
+-- pushes a `snapshot()` row-string and a deep copy of the dirty-rect
+-- list onto private history buffers. Used by §M5 widget tests that
+-- need to assert "frame N-1 had X, frame N has Y, dirty rects between
+-- them were just the bar window" (ui_idea.md §9.1 item 2).
 --
 -- Stored cell shape matches `screen.lua`: `{ ch, fg, bg, attrs }`. The
 -- buffer is allocated at init and resized on subsequent init() calls.
@@ -32,20 +43,24 @@
 local M = {}
 
 --- Construct a new buffer backend.
----@param opts table?  { rows?, cols?, keys? }
----     rows / cols : initial buffer size if init() is not called explicitly
----     keys        : initial key queue
+---@param opts table?  { rows?, cols?, keys?, frame_history? }
+---     rows / cols   : initial buffer size if init() is not called explicitly
+---     keys          : initial key queue
+---     frame_history : record per-flush snapshot + dirty rects (opt-in)
 ---@return table backend
 function M.new(opts)
   opts = opts or {}
 
   local backend = {
-    _rows   = opts.rows or 0,
-    _cols   = opts.cols or 0,
-    _grid   = {},
-    _active = false,
-    _keys   = {},
-    _key_idx = 0,
+    _rows           = opts.rows or 0,
+    _cols           = opts.cols or 0,
+    _grid           = {},
+    _active         = false,
+    _keys           = {},
+    _key_idx        = 0,
+    _frame_history  = opts.frame_history and true or false,
+    _hist_snapshots = {},
+    _hist_dirty     = {},
   }
 
   if opts.keys then
@@ -105,6 +120,21 @@ function M.new(opts)
           end
         end
       end
+    end
+    -- Record per-flush snapshot + dirty rects when enabled. Snapshot
+    -- after the rects have been applied so frame N's snapshot reflects
+    -- frame N's contents. Dirty rects are shallow-copied (cell tables
+    -- are immutable per paint.diff's contract).
+    if self._frame_history then
+      self._hist_snapshots[#self._hist_snapshots + 1] = self:snapshot()
+      local rect_copy = {}
+      for i = 1, #rects do
+        local r = rects[i]
+        local cells = {}
+        for j = 1, #r.cells do cells[j] = r.cells[j] end
+        rect_copy[i] = { y = r.y, x = r.x, cells = cells }
+      end
+      self._hist_dirty[#self._hist_dirty + 1] = rect_copy
     end
   end
 
@@ -169,6 +199,41 @@ function M.new(opts)
       end
     end
     return out
+  end
+
+  --- Frame snapshot history (one entry per `flush` call). Empty unless
+  --- `frame_history = true` was passed to `M.new`.
+  ---@return string[]
+  function backend:snapshot_history()
+    local out = {}
+    for i = 1, #self._hist_snapshots do out[i] = self._hist_snapshots[i] end
+    return out
+  end
+
+  --- Per-flush dirty-rect history. Each entry is a deep-copied list of
+  --- `{y, x, cells}` records produced by `paint.diff` for that frame.
+  ---@return table[][]
+  function backend:dirty_history()
+    local out = {}
+    for i = 1, #self._hist_dirty do
+      local src = self._hist_dirty[i]
+      local copy = {}
+      for j = 1, #src do
+        local r = src[j]
+        local cells = {}
+        for k = 1, #r.cells do cells[k] = r.cells[k] end
+        copy[j] = { y = r.y, x = r.x, cells = cells }
+      end
+      out[i] = copy
+    end
+    return out
+  end
+
+  --- Drop both history buffers. Useful to slice a session into
+  --- "before mutation" vs "after mutation" episodes.
+  function backend:reset_history()
+    self._hist_snapshots = {}
+    self._hist_dirty     = {}
   end
 
   return backend

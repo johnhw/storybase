@@ -4,6 +4,35 @@ Completed work has been moved to [completed.md](completed.md).
 
 ---
 
+## Current Status (2026-05-30)
+
+§M5 (first reactive widget: stat-bar) landed 2026-05-30:
+`cli/drivers/curses/widgets/statbar.lua` is the first author-bindable
+reactive widget. The curses driver's `attach(kernel)` scans
+`schema.states[*].ui` and `ui_panels` to instantiate one statbar per
+`stat-bar` binding, allocates one stable-position row at the top of
+the screen per widget, and subscribes to `mutation` events — a
+matching mutation re-runs `compose` + `paint.diff`; narration /
+choices / prompt all paint identically and diff clean, so the dirty
+rect log covers only the widget row. Plain driver gained a
+synchronous fallback: every `render` prefixes a `"Label: cur/max"`
+header line per binding (no subscription; re-read on each pull).
+`engine.run` now installs a kernel and calls `driver:attach(kernel)`
+so the CLI path reaches the reactive code without going through
+`lib/storybase.lua`. Three test-harness prerequisites from §9.1
+shipped alongside: (1) `tests/ui/helpers/driver_session.lua` —
+session DSL; (2) opt-in `frame_history` on `backend_buffer`
+(`snapshot_history` / `dirty_history` / `reset_history`); (3) the
+integration fixture at `tests/ui/integration/statbar_reactive_spec.lua`
+that boots a real kernel + buffer driver and proves the "only the
+widget window repaints" acceptance bullet end-to-end. Plus
+`statbar_widget_spec.lua` (17), `driver_session_spec.lua` (9), 7
+plain-fallback cases + 2 CLI-level e2e cases in `drivers_spec.lua`.
+**Total: 3326 → 3410 (+84 new tests). 0 failures, 2 pending.**
+The two §9.1 insurance items (paint.diff property test, resize
+integration test) remain deferred per the original ordering plan —
+add only when they bite.
+
 ## Current Status (2026-05-29)
 
 §M4 (author UI bindings: parser + schema) landed 2026-05-29:
@@ -130,7 +159,7 @@ backlog, the full §E series, §F1/F2, §G2, §H1, §H2, §L (unified configurat
 19 registry keys), §M (2026-05-23 bug hunt — all eight items closed), and the
 I-series demos (26–32) are complete — details in [completed.md](completed.md).
 
-**~3216+ successes / 0 failures / 2 pending (known limitations).**
+**~3410 successes / 0 failures / 2 pending (known limitations).**
 (HTTP/debug spec failures are transient network timing issues — ignore unless
 touching http/debug code.)
 
@@ -171,7 +200,15 @@ fragility items) shipped 2026-05-25.
    `game_table.ui_panels`. Stripped under `--production` unless
    `engine-config: ui-runtime: true`. See
    `tests/compiler/ui_bindings_spec.lua`.
-6. §M5 — first reactive widget: stat-bar.
+6. §M5 — first reactive widget: stat-bar. **[DONE 2026-05-30]** —
+   `cli/drivers/curses/widgets/statbar.lua` + reactive `attach`
+   path in `cli/drivers/curses/init.lua` (subscribes to `mutation`,
+   recomposes; widget windows at stable y/x so non-widget rows
+   diff clean). Plain-driver fallback emits `"Label: cur/max"`
+   header per binding. `engine.run` installs a kernel and attaches
+   the driver. Test harness §9.1 items 1–3 shipped alongside;
+   items 4 (paint.diff property test) and 5 (resize integration
+   test) deferred until they bite.
 7. §M6 — view stack + modal dialog.
 8. §M7 — menu + input widgets.
 9. §M8 — inventory and remaining standard widgets.
