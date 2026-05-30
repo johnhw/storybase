@@ -6,6 +6,62 @@ Completed work has been moved to [completed.md](completed.md).
 
 ## Current Status (2026-05-30)
 
+§M8 (inventory + remaining standard widgets) landed 2026-05-30:
+Closes out the widget vocabulary in ui_idea.md §5.3. Five new widgets
+live under `cli/drivers/curses/widgets/`:
+* `stat.lua` — generic scalar display (`Label: value`); routes the
+  current value through `ui/format.value` so bounded Int → "cur/max",
+  Bool → "yes/no", enum → symbol, sets/lists → "(a, b, c)", with named
+  / alias chains resolved against the schema.
+* `toggle.lua` — Bool path renders as `[x] Label` / `[ ] Label`. When
+  pushed onto the focus stack, SPACE or Enter flips the value via
+  `kernel:call_fn(fn_name, new)` (preferred) or `on_toggle(self,
+  new, driver)`.
+* `text.lua` — interpolated string with `{path/segment}` placeholders.
+  Templates with no `{...}` render as static text; templates with
+  multiple placeholders subscribe to every path. `{{` / `}}` escape to
+  literal braces. Per-placeholder formatting uses the schema's type
+  descriptor so bounded ints render with their "cur/max" form inline.
+* `inventory.lua` — Set / List / UList path as a scrollable bullet
+  list. Header (optional `label`), bullet glyph configurable, max_h
+  cap, cursor highlight via the reverse attribute, focus on_key
+  supports Up/Down/PgUp/PgDn/Home/End + Enter to activate (fires
+  `fn_name`/`on_select`). Empty-state message is configurable.
+* `choice.lua` — enum path as a vertical radio group (`(*)` / `( )`
+  rows). Enum values can be passed explicitly or resolved from the
+  schema (inline enum, named alias chain followed). Cursor highlight
+  is independent of the selected value; activation routes through
+  `fn_name`/`on_select`.
+Plus a scrollable narration pane (`widgets/narration.lua`) for the
+"always-present scrolling pane" §5.3 kind. Owns its own line buffer
+(append/extend/clear/max_lines), defaults to stick-to-bottom but pins
+once the reader pages up; PgUp/PgDn/Up/Down/Home/End scroll it; opt-in
+ASCII border + title.
+
+Driver wiring:
+* `cli/drivers/curses/init.lua:collect_widgets` now dispatches by
+  `ui.kind` over `{stat-bar, stat, toggle, inventory, choice, text}`.
+  Each widget carries a `_desired_h` integer the compose loop uses to
+  stack widgets top-to-bottom (1 for stat/stat-bar/toggle/text;
+  inventory and choice take their item count + header). The strip is
+  capped so narration always gets at least one row.
+* `cli/drivers/curses/init.lua:compose` was rewritten to allocate
+  variable-height widget windows instead of the M5 fixed-1-row-each
+  strip; widget paint signatures are unchanged.
+* `cli/drivers/plain/init.lua` now flattens `stat-bar`, `stat`,
+  `toggle`, `text`, and `inventory` bindings to one header line each
+  ("Pack: sword, shield, potion"), keeping the synchronous-pull driver
+  output legible without subscribing to mutations.
+
+Tests: `stat_widget_spec.lua` (18), `toggle_widget_spec.lua` (17),
+`text_widget_spec.lua` (16), `inventory_widget_spec.lua` (17),
+`choice_widget_spec.lua` (15), `narration_pane_widget_spec.lua` (14),
+plus `integration/m8_widgets_spec.lua` (10) covering discovery +
+reactive repaint + multi-widget layout end-to-end. **Total: 3541 →
+3644 (+103 new tests). 0 failures, 2 pending.**
+
+## Current Status (2026-05-30)
+
 §M7 (menu + input widgets) landed 2026-05-30:
 `cli/drivers/curses/keys.lua` centralises the integer key-code
 constants (ASCII control bytes + standard ncurses `KEY_*` values
@@ -292,7 +348,14 @@ fragility items) shipped 2026-05-25.
    §6 input-vocabulary acceptance bullet. Per spec the widgets are
    not auto-wired to a default driver keystroke — the integration
    spec exercises both stacks end-to-end.
-9. §M8 — inventory and remaining standard widgets.
+9. §M8 — inventory and remaining standard widgets. **[DONE 2026-05-30]** —
+   five new widget modules (`stat.lua`, `toggle.lua`, `text.lua`,
+   `inventory.lua`, `choice.lua`) plus the scrollable
+   `narration.lua` pane close out the §5.3 widget vocabulary.
+   `cli/drivers/curses/init.lua` discovers all of them from the
+   schema + ui_panels and stacks them in a variable-height top strip
+   keyed off `widget._desired_h`. Plain driver gained one-line
+   flatteners for stat / toggle / text / inventory.
 10. §M9 — demo + author docs.
 
 **Authoring inelegances from review pass 3 (larger, design-first):**

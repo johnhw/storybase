@@ -33,6 +33,11 @@ local paint_mod       = require("cli.drivers.curses.paint")
 local backend_curses  = require("cli.drivers.curses.backend_curses")
 local backend_buffer  = require("cli.drivers.curses.backend_buffer")
 local statbar_mod     = require("cli.drivers.curses.widgets.statbar")
+local stat_mod        = require("cli.drivers.curses.widgets.stat")
+local toggle_mod      = require("cli.drivers.curses.widgets.toggle")
+local text_mod        = require("cli.drivers.curses.widgets.text")
+local inventory_mod   = require("cli.drivers.curses.widgets.inventory")
+local choice_mod      = require("cli.drivers.curses.widgets.choice")
 local dialog_mod      = require("cli.drivers.curses.widgets.dialog")
 local view_stack_mod  = require("cli.drivers.curses.view_stack")
 local focus_mod       = require("cli.drivers.curses.focus")
@@ -52,25 +57,48 @@ end
 
 --- Walk the compiled schema and ui_panels and instantiate widget
 --- instances for every author-declared `ui:` binding the driver knows
---- how to render. Today only `stat-bar` is implemented; unknown kinds
---- are silently skipped so future widget kinds don't error out.
+--- how to render. Supports the §M5 / §M8 widget vocabulary: `stat-bar`,
+--- `stat`, `toggle`, `text`, `inventory`, `choice`. Unknown kinds are
+--- silently skipped so future widget kinds don't error out.
 ---
---- Populates `self._widgets` (insertion order = display order) and
---- `self._by_path[path]` (array, for routing mutation events).
+--- Populates `self._widgets` (insertion order = display order, each
+--- carrying a `_desired_h` integer used by the compose layout) and
+--- `self._by_path[path]` (array, for routing mutation events). A widget
+--- bound to multiple paths (e.g. `text` with several `{...}` placeholders)
+--- registers under every path it depends on.
 ---@param self    table
 ---@param schema  table  compiled schema (`{states=..., types=...}`)
 ---@param panels  table  list of `game_table.ui_panels`
 local function collect_widgets(self, schema, panels)
-  local function add_statbar(spec)
-    -- spec : { path = state_path, ui_fields = {kind=..., label=..., ...},
-    --         type_desc = {tag="int", min, max} }
-    if not spec.path then return end
-    if self._by_path[spec.path] then
-      -- A state can be referenced from both its own `ui:` block and a
-      -- `ui-panel` child. Render it once, source-of-truth being the
-      -- first encountered (state-decl precedes panel walk below).
-      return
+  -- Helper: append `widget` to `self._widgets`, register it against every
+  -- path in `paths`, and stamp a desired height. Each path → first widget
+  -- registered wins; subsequent registrations under the same path append
+  -- to the routing list so a single mutation can repaint multiple widgets.
+  local function register(widget, paths, desired_h)
+    widget._desired_h = desired_h or 1
+    self._widgets[#self._widgets + 1] = widget
+    for _, p in ipairs(paths or {}) do
+      local bucket = self._by_path[p]
+      if not bucket then bucket = {}; self._by_path[p] = bucket end
+      bucket[#bucket + 1] = widget
     end
+  end
+
+  -- A state path → state-descriptor lookup for the panel pass and for
+  -- resolving the `type_desc` of a panel-referenced widget.
+  local state_by_path = {}
+  for _, s in ipairs((schema and schema.states) or {}) do
+    if s.kind == "scalar" and s.path then state_by_path[s.path] = s end
+  end
+
+  -- Has this path already produced a "single-path" widget (stat-bar /
+  -- stat / toggle / inventory / choice)? When yes, a later reference to
+  -- the same path is dropped — state-decl precedes panel walk so the
+  -- author's explicit `ui:` block wins.
+  local seen_path = {}
+
+  local function add_statbar(spec)
+    if not spec.path or seen_path[spec.path] then return end
     local ui = spec.ui_fields or {}
     local w = statbar_mod.new({
       path       = spec.path,
@@ -79,37 +107,125 @@ local function collect_widgets(self, schema, panels)
       color_good = ui["color-good"],
       color_bad  = ui["color-bad"],
     })
-    self._widgets[#self._widgets + 1] = w
-    self._by_path[spec.path] = { w }
+    seen_path[spec.path] = true
+    register(w, { spec.path }, 1)
   end
 
-  -- Build a quick path → state-descriptor lookup for the panel pass.
-  local state_by_path = {}
-  for _, s in ipairs((schema and schema.states) or {}) do
-    if s.kind == "scalar" and s.path then state_by_path[s.path] = s end
+  local function add_stat(spec)
+    if not spec.path or seen_path[spec.path] then return end
+    local ui = spec.ui_fields or {}
+    local w = stat_mod.new({
+      path      = spec.path,
+      label     = ui.label,
+      type_desc = spec.type_desc,
+      schema    = schema,
+    })
+    seen_path[spec.path] = true
+    register(w, { spec.path }, 1)
   end
+
+  local function add_toggle(spec)
+    if not spec.path or seen_path[spec.path] then return end
+    local ui = spec.ui_fields or {}
+    local w = toggle_mod.new({
+      path      = spec.path,
+      label     = ui.label,
+      fn_name   = ui.fn,
+      on_glyph  = ui["on-glyph"],
+      off_glyph = ui["off-glyph"],
+    })
+    seen_path[spec.path] = true
+    register(w, { spec.path }, 1)
+  end
+
+  local function add_text(ui_fields)
+    local template = ui_fields and ui_fields.template
+    if type(template) ~= "string" or template == "" then return end
+    local w = text_mod.new({ template = template, schema = schema })
+    register(w, w:paths(), #w:paths() > 0 and 1 or 1)
+  end
+
+  local function add_inventory(spec)
+    if not spec.path or seen_path[spec.path] then return end
+    local ui = spec.ui_fields or {}
+    local max_h = tonumber(ui["max-rows"]) or 5
+    local w = inventory_mod.new({
+      path       = spec.path,
+      label      = ui.label,
+      schema     = schema,
+      max_h      = max_h,
+      bullet     = ui.bullet,
+      fn_name    = ui.fn,
+      empty_text = ui["empty-text"],
+    })
+    seen_path[spec.path] = true
+    local header_h = (ui.label and ui.label ~= "") and 1 or 0
+    register(w, { spec.path }, max_h + header_h)
+  end
+
+  local function add_choice(spec)
+    if not spec.path or seen_path[spec.path] then return end
+    local ui = spec.ui_fields or {}
+    local w = choice_mod.new({
+      path      = spec.path,
+      label     = ui.label,
+      fn_name   = ui.fn,
+      schema    = schema,
+    })
+    seen_path[spec.path] = true
+    local header_h = (ui.label and ui.label ~= "") and 1 or 0
+    register(w, { spec.path }, #w.values + header_h)
+  end
+
+  -- Dispatch table: ui.kind → constructor. Keeping the table local to
+  -- collect_widgets lets test code monkey-patch widget modules without
+  -- patching this dispatch (the constructors close over module locals).
+  local dispatch_state = {
+    ["stat-bar"]  = add_statbar,
+    ["stat"]      = add_stat,
+    ["toggle"]    = add_toggle,
+    ["inventory"] = add_inventory,
+    ["choice"]    = add_choice,
+    -- `text` is also valid on a state decl: the template defaults to
+    -- "{path}" when the ui block has no explicit `template`.
+    ["text"]      = function(spec)
+                      local ui = spec.ui_fields or {}
+                      local tmpl = ui.template or ("{" .. spec.path .. "}")
+                      add_text({ template = tmpl })
+                    end,
+  }
 
   -- Pass 1: scalar `ui:` blocks attached directly to state decls.
   for _, s in ipairs((schema and schema.states) or {}) do
-    if s.kind == "scalar" and s.ui and s.ui.kind == "stat-bar" then
-      add_statbar({
-        path      = s.path,
-        ui_fields = s.ui,
-        type_desc = s.type_desc,
-      })
+    if s.kind == "scalar" and s.ui and s.ui.kind then
+      local builder = dispatch_state[s.ui.kind]
+      if builder then
+        builder({
+          path      = s.path,
+          ui_fields = s.ui,
+          type_desc = s.type_desc,
+        })
+      end
     end
   end
 
   -- Pass 2: ui-panel children. A `stat-bar player/hp` child inherits the
   -- state's own type_desc + ui fields (if any), with the panel acting as
-  -- a layout-only reference.
+  -- a layout-only reference. `text` panel children pass the panel's `arg`
+  -- through as the template directly (so `- text "Gold: {player/gold}"`
+  -- renders as written).
   for _, p in ipairs(panels or {}) do
     for _, child in ipairs(p.children or {}) do
-      if child.kind == "stat-bar" and child.arg then
-        local s = state_by_path[child.arg]
+      local ck, ca = child.kind, child.arg
+      if ck == "text" then
+        add_text({ template = ca or "" })
+      elseif ck == "stat-bar" or ck == "stat" or ck == "toggle"
+             or ck == "inventory" or ck == "choice" then
+        local s = state_by_path[ca]
         if s then
-          add_statbar({
-            path      = child.arg,
+          local builder = dispatch_state[ck]
+          builder({
+            path      = ca,
             ui_fields = s.ui,
             type_desc = s.type_desc,
           })
@@ -214,16 +330,17 @@ function M.new(opts)
     self._initialised = true
   end
 
-  --- Compose the screen for one frame: optional stat-bar strip,
+  --- Compose the screen for one frame: optional widget strip,
   --- narration tail, separator, choices, and the prompt status line.
   --- Returns nothing — paints into the screen's `_cells` grid. The
   --- caller then flushes.
   ---
-  --- When the driver is attached to a kernel and has stat-bar widgets,
-  --- each widget paints into a one-row window at the top of the screen
-  --- (z-ordered above narration). Widget windows are at stable y/x
-  --- positions so `paint.diff` produces an empty rect list for an
-  --- unchanged value.
+  --- When the driver is attached to a kernel and has reactive widgets,
+  --- each widget paints into a stable-position window at the top of the
+  --- screen (z-ordered above narration). Per-widget heights come from
+  --- `widget._desired_h` (1 for stat-bar / stat / toggle / text; >1 for
+  --- inventory / choice). The whole widget strip is capped so narration
+  --- still gets at least one row.
   ---@param self table
   ---@param choices table?
   ---@param choices_active boolean
@@ -237,20 +354,44 @@ function M.new(opts)
     local prompt_h    = 1
     local separator_h = 1
     local choices_h   = #choices
-    local stat_h      = #self._widgets
-    local narr_h      = rows - prompt_h - separator_h - choices_h - stat_h
+    -- Compute the actual widget strip height: sum of desired heights,
+    -- capped so narration gets at least 1 row. Each widget gets its
+    -- desired height in full, or 0 if there's no room left.
+    local non_widget_h = prompt_h + separator_h + choices_h + 1  -- +1 narr
+    local max_strip_h  = rows - non_widget_h
+    if max_strip_h < 0 then max_strip_h = 0 end
+
+    local widget_heights = {}
+    local strip_h = 0
+    for i, w in ipairs(self._widgets) do
+      local dh = w._desired_h or 1
+      if strip_h + dh > max_strip_h then dh = max_strip_h - strip_h end
+      if dh < 0 then dh = 0 end
+      widget_heights[i] = dh
+      strip_h = strip_h + dh
+    end
+
+    local narr_h = rows - prompt_h - separator_h - choices_h - strip_h
     if narr_h < 1 then narr_h = 1 end
 
-    -- Stat-bar strip: one row per widget, top of screen.
-    local stat_wins = {}
-    for i = 1, stat_h do
-      stat_wins[i] = self._screen:add_window({
-        x = 0, y = i - 1, w = cols, h = 1,
-      })
+    -- Widget strip: stack widgets top-to-bottom, each taking its
+    -- pre-computed height.
+    local widget_wins = {}
+    do
+      local y = 0
+      for i, w in ipairs(self._widgets) do
+        local h = widget_heights[i]
+        if h > 0 then
+          widget_wins[i] = self._screen:add_window({
+            x = 0, y = y, w = cols, h = h,
+          })
+          y = y + h
+        end
+      end
     end
 
     -- Allocate windows so §M5+ widgets can repaint regions individually.
-    local narr_y = stat_h
+    local narr_y = strip_h
     local narr_win = self._screen:add_window({
       x = 0, y = narr_y, w = cols, h = narr_h,
     })
@@ -264,10 +405,11 @@ function M.new(opts)
       x = 0, y = rows - 1, w = cols, h = 1,
     })
 
-    -- Stat-bars (only when a kernel is attached so widgets can query state).
+    -- Reactive widgets (only when a kernel is attached so they can query state).
     if self._kernel then
-      for i = 1, stat_h do
-        self._widgets[i]:paint(self._screen, stat_wins[i], self._kernel)
+      for i, w in ipairs(self._widgets) do
+        local win = widget_wins[i]
+        if win then w:paint(self._screen, win, self._kernel) end
       end
     end
 
